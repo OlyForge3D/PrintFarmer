@@ -1,0 +1,2004 @@
+diff --git a/src/Web/ReactApp/src/features/tasks/__tests__/TasksWidget.test.tsx b/src/Web/ReactApp/src/features/tasks/__tests__/TasksWidget.test.tsx
+new file mode 100644
+index 000000000..8e9f6f172
+--- /dev/null
++++ b/src/Web/ReactApp/src/features/tasks/__tests__/TasksWidget.test.tsx
+@@ -0,0 +1,507 @@
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++import { render, screen, waitFor, within } from '@testing-library/react';
++import userEvent from '@testing-library/user-event';
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
++import { MemoryRouter } from 'react-router';
++import { toast } from 'sonner';
++import { TasksWidget } from '../components/TasksWidget';
++import {
++  ShiftPlanResult,
++  TaskPriority,
++  TaskStatus,
++  TaskType,
++  UserTask,
++  UserTaskAnchorKind,
++  UserTaskSourceKind,
++  tasksApi,
++} from '@/services/tasksApi';
++
++vi.mock('@/services/tasksApi', async () => {
++  const actual = await vi.importActual<typeof import('@/services/tasksApi')>('@/services/tasksApi');
++  return {
++    ...actual,
++    tasksApi: {
++      getPendingTasks: vi.fn(),
++      getShiftPlan: vi.fn(),
++      getPendingCount: vi.fn(),
++      completeTask: vi.fn(),
++      skipTask: vi.fn(),
++      dismissTask: vi.fn(),
++      createTask: vi.fn(),
++      getTask: vi.fn(),
++    },
++  };
++});
++
++vi.mock('sonner', () => ({
++  toast: {
++    success: vi.fn(),
++    error: vi.fn(),
++    info: vi.fn(),
++  },
++}));
++
++const mockNavigate = vi.fn();
++vi.mock('react-router', async () => {
++  const actual = await vi.importActual<typeof import('react-router')>('react-router');
++  return {
++    ...actual,
++    useNavigate: () => mockNavigate,
++  };
++});
++
++function baseTask(overrides: Partial<UserTask> = {}): UserTask {
++  return {
++    id: `task-${Math.random().toString(36).slice(2, 9)}`,
++    taskType: TaskType.FailureClear,
++    entityType: 'Printer',
++    entityId: 'printer-1',
++    title: 'A task',
++    status: TaskStatus.Pending,
++    priority: TaskPriority.Normal,
++    createdAt: '2026-07-13T09:00:00Z',
++    relatedEntityCount: 0,
++    anchorKind: UserTaskAnchorKind.Now,
++    sourceKind: UserTaskSourceKind.FailureIncident,
++    ...overrides,
++  };
++}
++
++function shiftPlanResult(groups: { anchorKind: UserTaskAnchorKind; tasks: UserTask[] }[]): ShiftPlanResult {
++  return {
++    mode: 'shift',
++    plan: {
++      generatedAt: '2026-07-13T12:00:00Z',
++      groups,
++    },
++  };
++}
++
++function renderWidget() {
++  const queryClient = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <MemoryRouter>
++      <QueryClientProvider client={queryClient}>
++        <TasksWidget />
++      </QueryClientProvider>
++    </MemoryRouter>,
++  );
++}
++
++describe('TasksWidget', () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  it('renders empty state when the shift plan has no tasks', async () => {
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(shiftPlanResult([]));
++    renderWidget();
++    await waitFor(() => {
++      expect(screen.getByTestId('tasks-widget-empty')).toBeInTheDocument();
++    });
++  });
++
++  it('renders shift-plan groups Now → Timeline → AnytimeToday preserving server order', async () => {
++    const nowTask = baseTask({
++      id: 'now-1',
++      taskType: TaskType.FailureClear,
++      title: 'Clear paused print',
++      anchorKind: UserTaskAnchorKind.Now,
++    });
++    const timelineTask = baseTask({
++      id: 'timeline-1',
++      taskType: TaskType.FilamentRunout,
++      title: 'Filament runout soon',
++      priority: TaskPriority.High,
++      anchorKind: UserTaskAnchorKind.At,
++      anchorAtUtc: '2026-07-13T13:30:00Z',
++      sourceKind: UserTaskSourceKind.FilamentCoverage,
++    });
++    const anytimeTask = baseTask({
++      id: 'anytime-1',
++      taskType: TaskType.SpoolRestock,
++      title: 'Restock PLA black',
++      anchorKind: UserTaskAnchorKind.AnytimeToday,
++      sourceKind: UserTaskSourceKind.SpoolReorder,
++    });
++
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        { anchorKind: UserTaskAnchorKind.Now, tasks: [nowTask] },
++        { anchorKind: UserTaskAnchorKind.Timeline, tasks: [timelineTask] },
++        { anchorKind: UserTaskAnchorKind.AnytimeToday, tasks: [anytimeTask] },
++      ]),
++    );
++
++    renderWidget();
++
++    await waitFor(() => {
++      expect(screen.getByText('Clear paused print')).toBeInTheDocument();
++    });
++
++    const groups = screen.getAllByTestId('tasks-widget-group');
++    expect(groups.map((g) => g.getAttribute('data-anchor-kind'))).toEqual([
++      UserTaskAnchorKind.Now,
++      UserTaskAnchorKind.Timeline,
++      UserTaskAnchorKind.AnytimeToday,
++    ]);
++    expect(within(groups[0]).getByText('Now')).toBeInTheDocument();
++    expect(within(groups[1]).getByText('On the timeline')).toBeInTheDocument();
++    expect(within(groups[2]).getByText('Anytime today')).toBeInTheDocument();
++
++    // Badge total (3)
++    expect(screen.getByTestId('tasks-widget-badge')).toHaveTextContent('3');
++  });
++
++  it('deep-links each source kind to the correct existing route', async () => {
++    const user = userEvent.setup();
++    const harvest = baseTask({
++      id: 'h',
++      title: 'Harvest ready',
++      taskType: TaskType.HarvestReady,
++      entityId: 'p-h',
++      sourceKind: UserTaskSourceKind.Harvest,
++    });
++    const filament = baseTask({
++      id: 'f',
++      title: 'Filament runout',
++      taskType: TaskType.FilamentRunout,
++      entityId: 'p-f',
++      sourceKind: UserTaskSourceKind.FilamentCoverage,
++    });
++    const maintenance = baseTask({
++      id: 'm',
++      title: 'Maintenance in idle window',
++      taskType: TaskType.MaintenanceInIdleWindow,
++      entityId: 'p-m',
++      sourceKind: UserTaskSourceKind.Maintenance,
++    });
++    const failure = baseTask({
++      id: 'fx',
++      title: 'Clear failure',
++      taskType: TaskType.FailureClear,
++      entityId: 'p-fx',
++      sourceKind: UserTaskSourceKind.FailureIncident,
++    });
++    const spool = baseTask({
++      id: 's',
++      title: 'Restock PLA',
++      taskType: TaskType.SpoolRestock,
++      sourceKind: UserTaskSourceKind.SpoolReorder,
++    });
++
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        {
++          anchorKind: UserTaskAnchorKind.Now,
++          tasks: [harvest, filament, maintenance, failure, spool],
++        },
++      ]),
++    );
++
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Harvest ready')).toBeInTheDocument());
++
++    await user.click(screen.getByText('Harvest ready').closest('[data-testid="tasks-widget-row"]')!);
++    expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-h');
++
++    await user.click(screen.getByText('Filament runout').closest('[data-testid="tasks-widget-row"]')!);
++    expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-f');
++
++    await user.click(screen.getByText('Maintenance in idle window').closest('[data-testid="tasks-widget-row"]')!);
++    expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-m/maintenance');
++
++    await user.click(screen.getByText('Clear failure').closest('[data-testid="tasks-widget-row"]')!);
++    expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-fx');
++
++    await user.click(screen.getByText('Restock PLA').closest('[data-testid="tasks-widget-row"]')!);
++    expect(mockNavigate).toHaveBeenLastCalledWith('/spools');
++  });
++
++  it('activates the deep-link via keyboard (Enter)', async () => {
++    const user = userEvent.setup();
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        {
++          anchorKind: UserTaskAnchorKind.Now,
++          tasks: [
++            baseTask({
++              id: 'kbd',
++              title: 'Keyboard row',
++              taskType: TaskType.HarvestReady,
++              entityId: 'kbd-p',
++            }),
++          ],
++        },
++      ]),
++    );
++
++    renderWidget();
++    const row = await screen.findByRole('button', { name: /^Keyboard row — / });
++    row.focus();
++    await user.keyboard('{Enter}');
++    expect(mockNavigate).toHaveBeenLastCalledWith('/printers/kbd-p');
++  });
++
++  it('renders a safe generic row and does not navigate for unknown task kinds', async () => {
++    const user = userEvent.setup();
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        {
++          anchorKind: UserTaskAnchorKind.Now,
++          tasks: [
++            baseTask({
++              id: 'future',
++              taskType: 'FromTheFuture' as TaskType,
++              title: 'Unknown-kind row',
++            }),
++          ],
++        },
++      ]),
++    );
++
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Unknown-kind row')).toBeInTheDocument());
++    const row = screen.getByText('Unknown-kind row').closest('[data-testid="tasks-widget-row"]')!;
++    expect(row).toHaveAttribute('data-unknown-kind', 'true');
++    expect(screen.getByTestId('tasks-widget-unknown-badge')).toBeInTheDocument();
++    // Row is not a button (not actionable)
++    expect(row.getAttribute('role')).toBe('group');
++    await user.click(row);
++    expect(mockNavigate).not.toHaveBeenCalled();
++  });
++
++  it('preserves the profile-import wizard deep-link with metadata printerModelId', async () => {
++    const user = userEvent.setup();
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        {
++          anchorKind: UserTaskAnchorKind.AnytimeToday,
++          tasks: [
++            baseTask({
++              id: 'pi',
++              title: 'Import profiles',
++              taskType: TaskType.ProfileImport,
++              entityType: 'PrinterModel',
++              entityId: 'legacy-model',
++              anchorKind: UserTaskAnchorKind.AnytimeToday,
++              sourceKind: UserTaskSourceKind.Unspecified,
++              metadataJson: JSON.stringify({ printerModelId: 'metadata-model' }),
++            }),
++          ],
++        },
++      ]),
++    );
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Import profiles')).toBeInTheDocument());
++    await user.click(screen.getByText('Import profiles').closest('[data-testid="tasks-widget-row"]')!);
++    expect(mockNavigate).toHaveBeenLastCalledWith('/profiles/import?modelId=metadata-model&taskId=pi');
++  });
++
++  it('falls back to the flat list when the shift-plan feature is disabled (mode=flat)', async () => {
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue({
++      mode: 'flat',
++      tasks: [
++        baseTask({
++          id: 'legacy',
++          title: 'Legacy profile task',
++          taskType: TaskType.ProfileImport,
++          anchorKind: UserTaskAnchorKind.Unspecified,
++          sourceKind: UserTaskSourceKind.Unspecified,
++        }),
++      ],
++    });
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Legacy profile task')).toBeInTheDocument());
++    // Only a single ungrouped section, no group header
++    const list = screen.getByTestId('tasks-widget-list');
++    expect(list.getAttribute('data-mode')).toBe('flat');
++    expect(within(list).getAllByTestId('tasks-widget-group')).toHaveLength(1);
++    expect(within(list).queryByText('Now')).not.toBeInTheDocument();
++    expect(within(list).queryByText('Anytime today')).not.toBeInTheDocument();
++  });
++
++  it('runs complete / skip / dismiss lifecycle actions and refreshes the query cache', async () => {
++    const user = userEvent.setup();
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        {
++          anchorKind: UserTaskAnchorKind.Now,
++          tasks: [baseTask({ id: 'lifecycle', title: 'Lifecycle target' })],
++        },
++      ]),
++    );
++    vi.mocked(tasksApi.completeTask).mockResolvedValue(undefined);
++    vi.mocked(tasksApi.skipTask).mockResolvedValue(undefined);
++    vi.mocked(tasksApi.dismissTask).mockResolvedValue(undefined);
++
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Lifecycle target')).toBeInTheDocument());
++
++    const row = screen.getByText('Lifecycle target').closest('[data-testid="tasks-widget-row"]')!;
++    const complete = within(row as HTMLElement).getByTestId('tasks-widget-complete');
++    const skip = within(row as HTMLElement).getByTestId('tasks-widget-skip');
++    const dismiss = within(row as HTMLElement).getByTestId('tasks-widget-dismiss');
++
++    await user.click(complete);
++    await user.click(skip);
++    await user.click(dismiss);
++
++    await waitFor(() => {
++      expect(tasksApi.completeTask).toHaveBeenCalledWith('lifecycle');
++      expect(tasksApi.skipTask).toHaveBeenCalledWith('lifecycle');
++      expect(tasksApi.dismissTask).toHaveBeenCalledWith('lifecycle');
++    });
++    // Lifecycle buttons do not navigate.
++    expect(mockNavigate).not.toHaveBeenCalled();
++  });
++
++  it('renders a loading state before data arrives', async () => {
++    let resolve: (value: ShiftPlanResult) => void = () => {};
++    vi.mocked(tasksApi.getShiftPlan).mockReturnValue(
++      new Promise<ShiftPlanResult>((r) => {
++        resolve = r;
++      }),
++    );
++    renderWidget();
++    // Loading state comes from DashboardWidget — heading remains but there is no list yet.
++    expect(screen.getByRole('heading', { name: /Pending Tasks/i })).toBeInTheDocument();
++    expect(screen.queryByTestId('tasks-widget-list')).not.toBeInTheDocument();
++    resolve(shiftPlanResult([]));
++    await waitFor(() => expect(screen.getByTestId('tasks-widget-empty')).toBeInTheDocument());
++  });
++
++  it('renders an error state when the query fails', async () => {
++    vi.mocked(tasksApi.getShiftPlan).mockRejectedValue({ statusCode: 500, message: 'boom' });
++    renderWidget();
++    await waitFor(() => expect(screen.getByText(/Failed to load tasks/i)).toBeInTheDocument());
++  });
++
++  it('gives each row an accessible label combining title, source, and time', async () => {
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        {
++          anchorKind: UserTaskAnchorKind.Timeline,
++          tasks: [
++            baseTask({
++              id: 'aria',
++              title: 'Runout at 1:30',
++              taskType: TaskType.FilamentRunout,
++              entityId: 'p-aria',
++              anchorKind: UserTaskAnchorKind.At,
++              anchorAtUtc: '2026-07-13T13:30:00Z',
++              sourceKind: UserTaskSourceKind.FilamentCoverage,
++            }),
++          ],
++        },
++      ]),
++    );
++    renderWidget();
++    const row = await screen.findByRole('button', { name: /Runout at 1:30 — Filament coverage/ });
++    expect(row).toBeInTheDocument();
++  });
++
++  it('clicking a manual (Custom) task fires a toast fallback and does not navigate', async () => {
++    const user = userEvent.setup();
++    const customTask = baseTask({
++      id: 'custom-1',
++      taskType: TaskType.Custom,
++      title: 'Fix the thing manually',
++      sourceKind: UserTaskSourceKind.Unspecified,
++    });
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([{ anchorKind: UserTaskAnchorKind.Now, tasks: [customTask] }]),
++    );
++
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Fix the thing manually')).toBeInTheDocument());
++
++    const row = screen.getByText('Fix the thing manually').closest('[data-testid="tasks-widget-row"]')!;
++    // Custom tasks are known kinds — they must be rendered as role="button"
++    expect(row.getAttribute('role')).toBe('button');
++
++    await user.click(row);
++
++    expect(mockNavigate).not.toHaveBeenCalled();
++    expect(vi.mocked(toast.info)).toHaveBeenCalledWith('Fix the thing manually');
++  });
++
++  it('keyboard activation on a lifecycle button fires only that mutation (not row navigation)', async () => {
++    const user = userEvent.setup();
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([
++        {
++          anchorKind: UserTaskAnchorKind.Now,
++          tasks: [
++            baseTask({
++              id: 'kbd-btn',
++              title: 'Button key test',
++              taskType: TaskType.HarvestReady,
++              entityId: 'p-kbd',
++              sourceKind: UserTaskSourceKind.Harvest,
++            }),
++          ],
++        },
++      ]),
++    );
++    vi.mocked(tasksApi.completeTask).mockResolvedValue(undefined);
++
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Button key test')).toBeInTheDocument());
++
++    const row = screen.getByText('Button key test').closest('[data-testid="tasks-widget-row"]')!;
++    const completeBtn = within(row as HTMLElement).getByTestId('tasks-widget-complete');
++
++    completeBtn.focus();
++    await user.keyboard('{Enter}');
++
++    expect(tasksApi.completeTask).toHaveBeenCalledWith('kbd-btn');
++    expect(mockNavigate).not.toHaveBeenCalled();
++  });
++
++  it('concurrent lifecycle requests keep independent per-row busy state', async () => {
++    const user = userEvent.setup();
++
++    let resolveComplete: () => void = () => {};
++    let resolveSkip: () => void = () => {};
++    vi.mocked(tasksApi.completeTask).mockImplementation(
++      () => new Promise<void>((r) => { resolveComplete = r; }),
++    );
++    vi.mocked(tasksApi.skipTask).mockImplementation(
++      () => new Promise<void>((r) => { resolveSkip = r; }),
++    );
++
++    const task1 = baseTask({ id: 'row-1', title: 'Row one', taskType: TaskType.HarvestReady, entityId: 'p1' });
++    const task2 = baseTask({ id: 'row-2', title: 'Row two', taskType: TaskType.HarvestReady, entityId: 'p2' });
++    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
++      shiftPlanResult([{ anchorKind: UserTaskAnchorKind.Now, tasks: [task1, task2] }]),
++    );
++
++    renderWidget();
++    await waitFor(() => expect(screen.getByText('Row one')).toBeInTheDocument());
++
++    const row1 = screen.getByText('Row one').closest('[data-testid="tasks-widget-row"]')!;
++    const row2 = screen.getByText('Row two').closest('[data-testid="tasks-widget-row"]')!;
++
++    // Fire Complete on row1 and Skip on row2 before either resolves
++    await user.click(within(row1 as HTMLElement).getByTestId('tasks-widget-complete'));
++    await user.click(within(row2 as HTMLElement).getByTestId('tasks-widget-skip'));
++
++    // Both rows should be busy simultaneously
++    await waitFor(() => {
++      expect(row1).toHaveAttribute('aria-busy', 'true');
++      expect(row2).toHaveAttribute('aria-busy', 'true');
++    });
++
++    // Resolve row1's complete — row2 must still be busy
++    resolveComplete();
++    await waitFor(() => expect(row1).not.toHaveAttribute('aria-busy'));
++    expect(row2).toHaveAttribute('aria-busy', 'true');
++
++    // Resolve row2's skip
++    resolveSkip();
++    await waitFor(() => expect(row2).not.toHaveAttribute('aria-busy'));
++  });
++});
+diff --git a/src/Web/ReactApp/src/features/tasks/__tests__/shiftPlanTaskDetails.test.ts b/src/Web/ReactApp/src/features/tasks/__tests__/shiftPlanTaskDetails.test.ts
+new file mode 100644
+index 000000000..ca75ead21
+--- /dev/null
++++ b/src/Web/ReactApp/src/features/tasks/__tests__/shiftPlanTaskDetails.test.ts
+@@ -0,0 +1,197 @@
++import { describe, expect, it } from 'vitest';
++import {
++  describeTaskSource,
++  formatTaskAnchorHint,
++  getAnchorGroupLabel,
++  getShiftTaskDetails,
++} from '../shiftPlanTaskDetails';
++import {
++  TaskPriority,
++  TaskStatus,
++  TaskType,
++  UserTask,
++  UserTaskAnchorKind,
++  UserTaskSourceKind,
++} from '@/services/tasksApi';
++
++function makeTask(overrides: Partial<UserTask> = {}): UserTask {
++  return {
++    id: 't1',
++    taskType: TaskType.FailureClear,
++    entityType: 'Printer',
++    entityId: 'printer-1',
++    title: 'Cleared',
++    status: TaskStatus.Pending,
++    priority: TaskPriority.Normal,
++    createdAt: '2026-07-13T09:00:00Z',
++    relatedEntityCount: 0,
++    anchorKind: UserTaskAnchorKind.Now,
++    sourceKind: UserTaskSourceKind.FailureIncident,
++    ...overrides,
++  };
++}
++
++describe('getShiftTaskDetails', () => {
++  it('maps FailureClear to the printer detail page', () => {
++    const details = getShiftTaskDetails(makeTask({ taskType: TaskType.FailureClear, entityId: 'p1' }));
++    expect(details.href).toBe('/printers/p1');
++    expect(details.categoryLabel).toBe('Failure');
++    expect(details.isUnknownKind).toBe(false);
++  });
++
++  it('maps HarvestReady to the printer detail page with a Harvest label', () => {
++    const details = getShiftTaskDetails(
++      makeTask({ taskType: TaskType.HarvestReady, entityId: 'p2' }),
++    );
++    expect(details.href).toBe('/printers/p2');
++    expect(details.categoryLabel).toBe('Harvest');
++  });
++
++  it('maps FilamentRunout (filament swap) to the printer detail page', () => {
++    const details = getShiftTaskDetails(
++      makeTask({ taskType: TaskType.FilamentRunout, entityId: 'p3' }),
++    );
++    expect(details.href).toBe('/printers/p3');
++    expect(details.categoryLabel).toBe('Filament');
++  });
++
++  it('maps MaintenanceInIdleWindow to the printer maintenance page', () => {
++    const details = getShiftTaskDetails(
++      makeTask({ taskType: TaskType.MaintenanceInIdleWindow, entityType: 'Printer', entityId: 'p4' }),
++    );
++    expect(details.href).toBe('/printers/p4/maintenance');
++    expect(details.categoryLabel).toBe('Maintenance');
++  });
++
++  it('falls back to the fleet maintenance dashboard when no printer entity id is present', () => {
++    const details = getShiftTaskDetails(
++      makeTask({
++        taskType: TaskType.MaintenanceDue,
++        entityType: 'Fleet',
++        entityId: '',
++      }),
++    );
++    expect(details.href).toBe('/maintenance');
++  });
++
++  it('maps SpoolRestock to the spools page', () => {
++    const details = getShiftTaskDetails(makeTask({ taskType: TaskType.SpoolRestock }));
++    expect(details.href).toBe('/spools');
++    expect(details.categoryLabel).toBe('Restock');
++  });
++
++  it('maps PrintedPartRestock to the catalog page', () => {
++    const details = getShiftTaskDetails(makeTask({ taskType: TaskType.PrintedPartRestock }));
++    expect(details.href).toBe('/catalog');
++    expect(details.categoryLabel).toBe('Restock');
++  });
++
++  it('preserves the legacy profile-import wizard deep-link with metadata printerModelId', () => {
++    const details = getShiftTaskDetails(
++      makeTask({
++        id: 'task-42',
++        taskType: TaskType.ProfileImport,
++        entityId: 'legacy-model',
++        metadataJson: JSON.stringify({ printerModelId: 'metadata-model' }),
++      }),
++    );
++    expect(details.href).toBe('/profiles/import?modelId=metadata-model&taskId=task-42');
++  });
++
++  it('recovers gracefully when metadataJson is malformed', () => {
++    const details = getShiftTaskDetails(
++      makeTask({
++        id: 'task-42',
++        taskType: TaskType.ProfileImport,
++        entityId: 'fallback-model',
++        metadataJson: '{not valid json',
++      }),
++    );
++    expect(details.href).toBe('/profiles/import?modelId=fallback-model&taskId=task-42');
++  });
++
++  it('renders a safe generic row for unknown / future task kinds', () => {
++    const details = getShiftTaskDetails(
++      makeTask({ taskType: 'FutureUnknownKind' as TaskType }),
++    );
++    expect(details.href).toBeNull();
++    expect(details.isUnknownKind).toBe(true);
++    expect(details.categoryLabel).toBe('Task');
++  });
++
++  it('returns null href for manual (Custom) tasks so the widget only toasts', () => {
++    const details = getShiftTaskDetails(makeTask({ taskType: TaskType.Custom }));
++    expect(details.href).toBeNull();
++    expect(details.isUnknownKind).toBe(false);
++  });
++});
++
++describe('getAnchorGroupLabel', () => {
++  it('labels each canonical anchor group', () => {
++    expect(getAnchorGroupLabel(UserTaskAnchorKind.Now)).toBe('Now');
++    expect(getAnchorGroupLabel(UserTaskAnchorKind.Timeline)).toBe('On the timeline');
++    expect(getAnchorGroupLabel(UserTaskAnchorKind.AnytimeToday)).toBe('Anytime today');
++  });
++
++  it('does not crash for Unspecified / unrecognized values', () => {
++    expect(getAnchorGroupLabel(UserTaskAnchorKind.Unspecified)).toBe('Other');
++    expect(getAnchorGroupLabel('futureAnchor' as UserTaskAnchorKind)).toBe('Other');
++  });
++});
++
++describe('formatTaskAnchorHint', () => {
++  it('renders "by <time>" for an At anchor', () => {
++    const hint = formatTaskAnchorHint(
++      makeTask({ anchorKind: UserTaskAnchorKind.At, anchorAtUtc: '2026-07-13T13:30:00Z' }),
++    );
++    expect(hint).not.toBeNull();
++    expect(hint!.startsWith('by ')).toBe(true);
++  });
++
++  it('renders a start–end range for a Window anchor', () => {
++    const hint = formatTaskAnchorHint(
++      makeTask({
++        anchorKind: UserTaskAnchorKind.Window,
++        windowStartUtc: '2026-07-13T13:00:00Z',
++        windowEndUtc: '2026-07-13T14:30:00Z',
++      }),
++    );
++    expect(hint).not.toBeNull();
++    expect(hint).toContain('–');
++  });
++
++  it('returns null for anchors without a time', () => {
++    expect(
++      formatTaskAnchorHint(makeTask({ anchorKind: UserTaskAnchorKind.Now, anchorAtUtc: undefined })),
++    ).toBeNull();
++    expect(
++      formatTaskAnchorHint(
++        makeTask({ anchorKind: UserTaskAnchorKind.AnytimeToday, anchorAtUtc: undefined }),
++      ),
++    ).toBeNull();
++  });
++
++  it('returns null when anchorAtUtc is unparseable', () => {
++    expect(
++      formatTaskAnchorHint(
++        makeTask({ anchorKind: UserTaskAnchorKind.At, anchorAtUtc: 'not-a-date' }),
++      ),
++    ).toBeNull();
++  });
++});
++
++describe('describeTaskSource', () => {
++  it('describes each canonical source kind', () => {
++    expect(describeTaskSource(UserTaskSourceKind.Attention)).toContain('attention');
++    expect(describeTaskSource(UserTaskSourceKind.FailureIncident)).toContain('Failure');
++    expect(describeTaskSource(UserTaskSourceKind.Harvest)).toBe('Harvest');
++    expect(describeTaskSource(UserTaskSourceKind.Maintenance)).toBe('Maintenance');
++    expect(describeTaskSource(UserTaskSourceKind.SpoolReorder)).toContain('Spool');
++    expect(describeTaskSource(UserTaskSourceKind.PrintedPartStock)).toContain('Printed');
++  });
++
++  it('describes Unspecified / undefined as a manual task', () => {
++    expect(describeTaskSource(UserTaskSourceKind.Unspecified)).toBe('Manual task');
++    expect(describeTaskSource(undefined)).toBe('Manual task');
++  });
++});
+diff --git a/src/Web/ReactApp/src/features/tasks/components/TasksWidget.tsx b/src/Web/ReactApp/src/features/tasks/components/TasksWidget.tsx
+index b216ac147..ea98ca01d 100644
+--- a/src/Web/ReactApp/src/features/tasks/components/TasksWidget.tsx
++++ b/src/Web/ReactApp/src/features/tasks/components/TasksWidget.tsx
+@@ -1,30 +1,63 @@
+-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+-import { tasksApi, UserTask, TaskType, TaskPriority, CreateTaskDto } from '@/services/tasksApi';
+-import { AlertCircleIcon, CheckCircleIcon, CloseIcon, LayersIcon, WrenchIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+-import { Button, FormField, Input, Textarea, Select } from '@/common/components/ui';
+-import { DashboardWidget } from '@/common/components/DashboardWidget';
+-import { Modal } from '@/common/components/modals/Modal';
++import { useState } from 'react';
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+ import { useNavigate } from 'react-router';
+ import { toast } from 'sonner';
+-import { useState } from 'react';
++import {
++  tasksApi,
++  CreateTaskDto,
++  ShiftPlanResult,
++  TaskPriority,
++  TaskType,
++  UserTask,
++  UserTaskAnchorKind,
++} from '@/services/tasksApi';
++import {
++  AlertCircleIcon,
++  CheckCircleIcon,
++  CheckIcon,
++  ClockIcon,
++  CloseIcon,
++  LayersIcon,
++  PackageIcon,
++  PlusIcon,
++  WrenchIcon,
++} from '@/common/components/icons/MdiIcons';
++import { Button, FormField, Input, Select, Textarea } from '@/common/components/ui';
++import { DashboardWidget } from '@/common/components/DashboardWidget';
++import { Modal } from '@/common/components/modals/Modal';
++import {
++  describeTaskSource,
++  formatTaskAnchorHint,
++  getAnchorGroupLabel,
++  getShiftTaskDetails,
++} from '../shiftPlanTaskDetails';
+ 
+ /**
+- * Render icon for task type inline to avoid dynamic component creation
++ * Icon for a given task type. Falls back to a generic alert icon for
++ * unknown / future task kinds so the row still renders safely.
+  */
+-function TaskTypeIcon({ taskType, className }: { taskType: TaskType; className?: string }) {
++function TaskTypeIcon({ taskType, className }: { taskType: UserTask['taskType']; className?: string }) {
+   switch (taskType) {
+     case TaskType.ProfileImport:
+       return <LayersIcon className={className} />;
+     case TaskType.MaintenanceDue:
++    case TaskType.MaintenanceInIdleWindow:
++    case TaskType.CalibrationNeeded:
+       return <WrenchIcon className={className} />;
++    case TaskType.HarvestReady:
++      return <PackageIcon className={className} />;
++    case TaskType.FailureClear:
++      return <AlertCircleIcon className={className} />;
++    case TaskType.FilamentRunout:
++      return <ClockIcon className={className} />;
++    case TaskType.SpoolRestock:
++    case TaskType.PrintedPartRestock:
++      return <PackageIcon className={className} />;
+     default:
+       return <AlertCircleIcon className={className} />;
+   }
+ }
+ 
+-/**
+- * Get color classes for task priority
+- */
+ function getPriorityClasses(priority: TaskPriority): string {
+   switch (priority) {
+     case TaskPriority.High:
+@@ -40,59 +73,143 @@ function getPriorityClasses(priority: TaskPriority): string {
+ 
+ interface TaskItemProps {
+   task: UserTask;
+-  onSkip: (taskId: string) => void;
+   onNavigate: (task: UserTask) => void;
++  onComplete: (taskId: string) => void;
++  onSkip: (taskId: string) => void;
++  onDismiss: (taskId: string) => void;
++  pendingActionTaskIds: ReadonlySet<string>;
+ }
+ 
+-function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
++function TaskItem({
++  task,
++  onNavigate,
++  onComplete,
++  onSkip,
++  onDismiss,
++  pendingActionTaskIds,
++}: TaskItemProps) {
++  const details = getShiftTaskDetails(task);
++  const anchorHint = formatTaskAnchorHint(task);
++  const sourceLabel = describeTaskSource(task.sourceKind);
++  const isActionable = !details.isUnknownKind;
++  const isRowBusy = pendingActionTaskIds.has(task.id);
++
++  const rowClasses = [
++    'flex items-start gap-3 p-3 rounded-lg transition-colors group',
++    isActionable ? 'hover:bg-pf-bg-hover cursor-pointer' : 'cursor-default',
++    isRowBusy ? 'opacity-60' : '',
++  ]
++    .filter(Boolean)
++    .join(' ');
++
++  const ariaLabel = `${task.title} — ${sourceLabel}${anchorHint ? `, ${anchorHint}` : ''}`;
++
++  const handleActivate = () => {
++    if (isActionable) onNavigate(task);
++  };
++
+   return (
+-    <div 
+-      className="flex items-start gap-3 p-3 hover:bg-pf-bg-hover rounded-lg transition-colors group cursor-pointer"
+-      onClick={() => onNavigate(task)}
+-      role="button"
+-      tabIndex={0}
+-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate(task); } }}
++    <div
++      className={rowClasses}
++      onClick={handleActivate}
++      role={isActionable ? 'button' : 'group'}
++      tabIndex={isActionable ? 0 : -1}
++      aria-label={ariaLabel}
++      aria-busy={isRowBusy || undefined}
++      onKeyDown={(e) => {
++        if (e.target !== e.currentTarget) return;
++        if (!isActionable) return;
++        if (e.key === 'Enter' || e.key === ' ') {
++          e.preventDefault();
++          handleActivate();
++        }
++      }}
++      data-testid="tasks-widget-row"
++      data-task-id={task.id}
++      data-task-type={typeof task.taskType === 'string' ? task.taskType : ''}
++      data-anchor-kind={task.anchorKind ?? UserTaskAnchorKind.Unspecified}
++      data-unknown-kind={details.isUnknownKind ? 'true' : 'false'}
+     >
+       <div className="shrink-0 mt-0.5">
+         <div className="p-2 rounded-lg bg-pf-warning/10">
+           <TaskTypeIcon taskType={task.taskType} className="h-5 w-5 text-pf-warning" />
+         </div>
+       </div>
+-      
++
+       <div className="flex-1 min-w-0">
+         <div className="flex items-start justify-between gap-2">
+-          <div>
+-            <h4 className="text-sm font-medium text-pf-text-primary truncate">
+-              {task.title}
+-            </h4>
++          <div className="min-w-0">
++            <h4 className="text-sm font-medium text-pf-text-primary truncate">{task.title}</h4>
+             {task.description && (
+-              <p className="text-xs text-pf-text-secondary mt-0.5 line-clamp-2">
+-                {task.description}
+-              </p>
++              <p className="text-xs text-pf-text-secondary mt-0.5 line-clamp-2">{task.description}</p>
+             )}
+-            <div className="flex items-center gap-2 mt-1.5">
++            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+               <span className={`text-xs px-1.5 py-0.5 rounded-sm ${getPriorityClasses(task.priority)}`}>
+                 {task.priority}
+               </span>
++              <span className="text-xs text-pf-text-tertiary">{details.categoryLabel}</span>
++              {anchorHint && (
++                <span className="text-xs text-pf-text-tertiary">{anchorHint}</span>
++              )}
+               {task.relatedEntityCount > 0 && (
+                 <span className="text-xs text-pf-text-tertiary">
+                   {task.relatedEntityCount} printer{task.relatedEntityCount !== 1 ? 's' : ''} waiting
+                 </span>
+               )}
++              {details.isUnknownKind && (
++                <span className="text-xs text-pf-text-tertiary italic" data-testid="tasks-widget-unknown-badge">
++                  Unrecognized task — server info only
++                </span>
++              )}
+             </div>
+           </div>
+-          
+-          {/* Skip button */}
+-          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
++
++          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
++            <Button
++              variant="subtle"
++              size="sm"
++              onClick={(e) => {
++                e.stopPropagation();
++                onComplete(task.id);
++              }}
++              title="Mark complete"
++              aria-label={`Complete ${task.title}`}
++              className="h-7 w-7 p-0"
++              disabled={isRowBusy}
++              data-testid="tasks-widget-complete"
++            >
++              <CheckIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-status-online-text" />
++            </Button>
+             <Button
+               variant="subtle"
+               size="sm"
+-              onClick={(e) => { e.stopPropagation(); onSkip(task.id); }}
++              onClick={(e) => {
++                e.stopPropagation();
++                onSkip(task.id);
++              }}
+               title="Skip task"
++              aria-label={`Skip ${task.title}`}
+               className="h-7 w-7 p-0"
++              disabled={isRowBusy}
++              data-testid="tasks-widget-skip"
+             >
+               <CloseIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-text-secondary" />
+             </Button>
++            <Button
++              variant="subtle"
++              size="sm"
++              onClick={(e) => {
++                e.stopPropagation();
++                onDismiss(task.id);
++              }}
++              title="Dismiss task"
++              aria-label={`Dismiss ${task.title}`}
++              className="h-7 w-7 p-0"
++              disabled={isRowBusy}
++              data-testid="tasks-widget-dismiss"
++            >
++              <AlertCircleIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-text-secondary" />
++            </Button>
+           </div>
+         </div>
+       </div>
+@@ -100,45 +217,124 @@ function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
+   );
+ }
+ 
++interface TaskListGroup {
++  key: string;
++  anchorKind: UserTaskAnchorKind;
++  label: string;
++  tasks: UserTask[];
++}
++
++/**
++ * Build the visual group list. In shift-plan mode the server has already
++ * grouped and ordered tasks deterministically; we preserve that order and
++ * only render a header for each group. In flat mode we render a single
++ * unlabeled group so legacy backends (or the 404 fallback) still work.
++ */
++function buildGroups(result: ShiftPlanResult): TaskListGroup[] {
++  if (result.mode === 'flat') {
++    return result.tasks.length === 0
++      ? []
++      : [
++          {
++            key: 'flat',
++            anchorKind: UserTaskAnchorKind.Unspecified,
++            label: '',
++            tasks: result.tasks,
++          },
++        ];
++  }
++  return result.plan.groups
++    .filter((g) => g.tasks.length > 0)
++    .map((g, idx) => ({
++      key: `${g.anchorKind}-${idx}`,
++      anchorKind: g.anchorKind,
++      label: getAnchorGroupLabel(g.anchorKind),
++      tasks: g.tasks,
++    }));
++}
++
++function countTasks(result: ShiftPlanResult | undefined): number {
++  if (!result) return 0;
++  if (result.mode === 'flat') return result.tasks.length;
++  return result.plan.groups.reduce((sum, g) => sum + g.tasks.length, 0);
++}
++
+ /**
+  * TasksWidget displays pending user tasks on the dashboard.
+- * Provides quick access to profile imports, maintenance, and other actionable items.
++ *
++ * When the shift-plan feature is enabled server-side (issue #713), the widget
++ * consumes `GET /api/tasks?view=shift` and renders the server-provided anchor
++ * groups (Now → Timeline → AnytimeToday). When the feature is disabled (404),
++ * it transparently falls back to the flat `GET /api/tasks` list so existing
++ * profile-import and manual tasks stay visible.
+  */
+ export function TasksWidget() {
+   const queryClient = useQueryClient();
+   const navigate = useNavigate();
++
+   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+   const [newTaskTitle, setNewTaskTitle] = useState('');
+   const [newTaskDescription, setNewTaskDescription] = useState('');
+   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>(TaskPriority.Normal);
+-  
+-  // Fetch pending tasks
+-  const { data: tasks, isLoading, error } = useQuery({
+-    queryKey: ['tasks', 'pending'],
+-    queryFn: () => tasksApi.getPendingTasks(),
++  const [pendingActionTaskIds, setPendingActionTaskIds] = useState<Set<string>>(new Set());
++  const addPending = (id: string) =>
++    setPendingActionTaskIds((prev) => { const s = new Set(prev); s.add(id); return s; });
++  const removePending = (id: string) =>
++    setPendingActionTaskIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
++
++  const { data, isLoading, error } = useQuery({
++    queryKey: ['tasks', 'shift'],
++    queryFn: () => tasksApi.getShiftPlan(),
+     staleTime: 30_000,
+-    refetchInterval: 30000,
++    refetchInterval: 30_000,
++  });
++
++  const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ['tasks'] });
++
++  const withPendingAction =
++    <TArgs extends [string]>(
++      fn: (...args: TArgs) => Promise<unknown>,
++      { successMessage, errorMessage }: { successMessage: string; errorMessage: string },
++    ) =>
++      async (...args: TArgs) => {
++        addPending(args[0]);
++        try {
++          await fn(...args);
++          toast.success(successMessage);
++          invalidateTasks();
++        } catch {
++          toast.error(errorMessage);
++        } finally {
++          removePending(args[0]);
++        }
++      };
++
++  const completeMutation = useMutation({
++    mutationFn: withPendingAction((taskId: string) => tasksApi.completeTask(taskId), {
++      successMessage: 'Task marked complete',
++      errorMessage: 'Failed to complete task',
++    }),
+   });
+ 
+-  // Skip task mutation
+   const skipMutation = useMutation({
+-    mutationFn: (taskId: string) => tasksApi.skipTask(taskId),
+-    onSuccess: () => {
+-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+-      toast.success('Task skipped');
+-    },
+-    onError: () => {
+-      toast.error('Failed to skip task');
+-    },
++    mutationFn: withPendingAction((taskId: string) => tasksApi.skipTask(taskId), {
++      successMessage: 'Task skipped',
++      errorMessage: 'Failed to skip task',
++    }),
++  });
++
++  const dismissMutation = useMutation({
++    mutationFn: withPendingAction((taskId: string) => tasksApi.dismissTask(taskId), {
++      successMessage: 'Task dismissed',
++      errorMessage: 'Failed to dismiss task',
++    }),
+   });
+ 
+-  // Create task mutation
+   const createMutation = useMutation({
+     mutationFn: (dto: CreateTaskDto) => tasksApi.createTask(dto),
+     onSuccess: () => {
+-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
++      invalidateTasks();
+       toast.success('Task created');
+-      // Reset form
+       setNewTaskTitle('');
+       setNewTaskDescription('');
+       setNewTaskPriority(TaskPriority.Normal);
+@@ -161,43 +357,32 @@ export function TasksWidget() {
+     });
+   };
+ 
+-  // Navigate to task action
++  /**
++   * Navigate to a task's deep-link. Unknown / manual tasks fall back to a
++   * toast so operators still see the title.
++   */
+   const handleNavigate = (task: UserTask) => {
+-    switch (task.taskType) {
+-      case TaskType.ProfileImport:
+-        // Navigate to profile import wizard with model context
+-        // The task's metadataJson contains printerModelId for filtering profiles
+-      {
+-        let modelId = task.entityId;
+-        if (task.metadataJson) {
+-          try {
+-            const metadata = JSON.parse(task.metadataJson);
+-            if (metadata.printerModelId) {
+-              modelId = metadata.printerModelId;
+-            }
+-          } catch {
+-            // Use entityId as fallback if JSON parsing fails
+-          }
+-        }
+-        navigate(`/profiles/import?modelId=${modelId}&taskId=${task.id}`);
+-        break;
+-      }
+-      case TaskType.MaintenanceDue:
+-        navigate(`/maintenance?printerId=${task.entityId}`);
+-        break;
+-      default:
+-        // For unknown types, show task details
+-        toast.info(`Task: ${task.title}`);
++    const details = getShiftTaskDetails(task);
++    if (details.href) {
++      navigate(details.href);
++      return;
+     }
++    toast.info(task.title);
+   };
+ 
+-  const taskCount = tasks?.length ?? 0;
+-  const badge = taskCount > 0 ? (
+-    <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white">
+-      {taskCount}
+-    </span>
+-  ) : undefined;
+-  
++  const groups = data ? buildGroups(data) : [];
++  const taskCount = countTasks(data);
++
++  const badge =
++    taskCount > 0 ? (
++      <span
++        className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white"
++        data-testid="tasks-widget-badge"
++      >
++        {taskCount}
++      </span>
++    ) : undefined;
++
+   const headerAction = (
+     <Button
+       variant="subtle"
+@@ -211,7 +396,7 @@ export function TasksWidget() {
+   );
+ 
+   const emptyState = (
+-    <div className="text-center py-6">
++    <div className="text-center py-6" data-testid="tasks-widget-empty">
+       <CheckCircleIcon className="h-8 w-8 text-pf-status-online-text mx-auto mb-2" />
+       <p className="text-sm text-pf-text-secondary">All caught up!</p>
+     </div>
+@@ -233,19 +418,41 @@ export function TasksWidget() {
+         isLoading={isLoading}
+         error={error ? 'Failed to load tasks' : undefined}
+       >
+-        <div className="max-h-80 overflow-y-auto divide-y divide-pf-border -m-3">
+-          {tasks?.map((task) => (
+-            <TaskItem
+-              key={task.id}
+-              task={task}
+-              onSkip={(id) => skipMutation.mutate(id)}
+-              onNavigate={handleNavigate}
+-            />
++        <div
++          className="max-h-96 overflow-y-auto -m-3"
++          data-testid="tasks-widget-list"
++          data-mode={data?.mode ?? 'unknown'}
++        >
++          {groups.map((group) => (
++            <section
++              key={group.key}
++              aria-label={group.label || undefined}
++              data-testid="tasks-widget-group"
++              data-anchor-kind={group.anchorKind}
++            >
++              {group.label && (
++                <header className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary">
++                  {group.label}
++                </header>
++              )}
++              <div className="divide-y divide-pf-border">
++                {group.tasks.map((task) => (
++                  <TaskItem
++                    key={task.id}
++                    task={task}
++                    onNavigate={handleNavigate}
++                    onComplete={(id) => completeMutation.mutate(id)}
++                    onSkip={(id) => skipMutation.mutate(id)}
++                    onDismiss={(id) => dismissMutation.mutate(id)}
++                    pendingActionTaskIds={pendingActionTaskIds}
++                  />
++                ))}
++              </div>
++            </section>
+           ))}
+         </div>
+       </DashboardWidget>
+ 
+-      {/* Create Task Modal */}
+       <Modal
+         isOpen={isCreateModalOpen}
+         onClose={() => setIsCreateModalOpen(false)}
+diff --git a/src/Web/ReactApp/src/features/tasks/shiftPlanTaskDetails.ts b/src/Web/ReactApp/src/features/tasks/shiftPlanTaskDetails.ts
+new file mode 100644
+index 000000000..30d36ccbe
+--- /dev/null
++++ b/src/Web/ReactApp/src/features/tasks/shiftPlanTaskDetails.ts
+@@ -0,0 +1,203 @@
++import {
++  TaskType,
++  UserTask,
++  UserTaskAnchorKind,
++  UserTaskSourceKind,
++  isKnownTaskType,
++} from '@/services/tasksApi';
++
++/**
++ * Metadata derived from a single {@link UserTask} that the widget needs in
++ * order to render the row and act on it. Keeping this concentrated in one
++ * pure module means the widget stays presentation-focused and each mapping
++ * gets a small, deterministic unit test.
++ */
++export interface ShiftTaskDetails {
++  /** Deep-link target for the task's "primary action" (row click). */
++  href: string | null;
++  /** Short one-word category label used as a chip on the row. */
++  categoryLabel: string;
++  /**
++   * True when the taskType is not recognized by this client. Callers should
++   * render a safe generic row (no crash, no navigation) and log/telemetry.
++   */
++  isUnknownKind: boolean;
++}
++
++const LOCATION_PRINTERS_PAGE = '/printers';
++const LOCATION_MAINTENANCE_PAGE = '/maintenance';
++const LOCATION_SPOOLS_PAGE = '/spools';
++const LOCATION_CATALOG_PAGE = '/catalog';
++const LOCATION_PROFILE_IMPORT_PAGE = '/profiles/import';
++
++/**
++ * Determine a safe deep-link target and label for a shift-plan or legacy task.
++ *
++ * The mapping only uses existing routes (see `App.tsx`) — we do not introduce
++ * a new Tasks page. When a task's kind is unrecognized we return
++ * `isUnknownKind: true` so the widget can render a safe generic row instead
++ * of failing or navigating to a broken URL.
++ */
++export function getShiftTaskDetails(task: UserTask): ShiftTaskDetails {
++  const taskType = task.taskType;
++
++  if (!isKnownTaskType(taskType)) {
++    return { href: null, categoryLabel: 'Task', isUnknownKind: true };
++  }
++
++  switch (taskType) {
++    case TaskType.ProfileImport: {
++      // Preserve the legacy profile-import wizard deep-link. The task's
++      // metadataJson may carry a `printerModelId` that scopes the wizard.
++      let modelId = task.entityId;
++      if (task.metadataJson) {
++        try {
++          const metadata = JSON.parse(task.metadataJson) as { printerModelId?: string };
++          if (metadata.printerModelId) {
++            modelId = metadata.printerModelId;
++          }
++        } catch {
++          // Fall through to entityId when metadata isn't valid JSON.
++        }
++      }
++      const params = new URLSearchParams({ modelId, taskId: task.id });
++      return {
++        href: `${LOCATION_PROFILE_IMPORT_PAGE}?${params.toString()}`,
++        categoryLabel: 'Profiles',
++        isUnknownKind: false,
++      };
++    }
++
++    case TaskType.MaintenanceDue:
++    case TaskType.MaintenanceInIdleWindow:
++    case TaskType.CalibrationNeeded: {
++      // Prefer the printer-scoped maintenance page when we have a printer id;
++      // fall back to the fleet-wide maintenance dashboard otherwise.
++      if (task.entityId && task.entityType === 'Printer') {
++        return {
++          href: `${LOCATION_PRINTERS_PAGE}/${task.entityId}/maintenance`,
++          categoryLabel: taskType === TaskType.CalibrationNeeded ? 'Calibration' : 'Maintenance',
++          isUnknownKind: false,
++        };
++      }
++      return {
++        href: LOCATION_MAINTENANCE_PAGE,
++        categoryLabel: taskType === TaskType.CalibrationNeeded ? 'Calibration' : 'Maintenance',
++        isUnknownKind: false,
++      };
++    }
++
++    case TaskType.FailureClear:
++    case TaskType.HarvestReady:
++    case TaskType.FilamentRunout:
++    case TaskType.FirmwareUpdate: {
++      // These are printer-scoped operational tasks — deep-link into the
++      // existing printer detail page so the operator can act on the exact
++      // machine that triggered the task.
++      const label =
++        taskType === TaskType.HarvestReady
++          ? 'Harvest'
++          : taskType === TaskType.FilamentRunout
++            ? 'Filament'
++            : taskType === TaskType.FirmwareUpdate
++              ? 'Firmware'
++              : 'Failure';
++      if (task.entityId) {
++        return {
++          href: `${LOCATION_PRINTERS_PAGE}/${task.entityId}`,
++          categoryLabel: label,
++          isUnknownKind: false,
++        };
++      }
++      return { href: LOCATION_PRINTERS_PAGE, categoryLabel: label, isUnknownKind: false };
++    }
++
++    case TaskType.SpoolRestock:
++      return { href: LOCATION_SPOOLS_PAGE, categoryLabel: 'Restock', isUnknownKind: false };
++
++    case TaskType.PrintedPartRestock:
++      return { href: LOCATION_CATALOG_PAGE, categoryLabel: 'Restock', isUnknownKind: false };
++
++    case TaskType.Custom:
++      // Manual tasks have no canonical destination — the widget keeps them
++      // in place and shows the description on hover.
++      return { href: null, categoryLabel: 'Task', isUnknownKind: false };
++  }
++}
++
++/**
++ * Display label for a shift-plan group header. The server groups timeline
++ * tasks (At + Window) under a single {@link UserTaskAnchorKind.Timeline}
++ * heading; the tasks inside retain their individual anchor kind.
++ */
++export function getAnchorGroupLabel(anchorKind: UserTaskAnchorKind): string {
++  switch (anchorKind) {
++    case UserTaskAnchorKind.Now:
++      return 'Now';
++    case UserTaskAnchorKind.Timeline:
++      return 'On the timeline';
++    case UserTaskAnchorKind.At:
++      return 'Scheduled';
++    case UserTaskAnchorKind.Window:
++      return 'Window';
++    case UserTaskAnchorKind.AnytimeToday:
++      return 'Anytime today';
++    case UserTaskAnchorKind.Unspecified:
++    default:
++      return 'Other';
++  }
++}
++
++/**
++ * Format the anchor time hint (e.g. "9:15 AM" or "9:00–10:30 AM") displayed
++ * inline on a task row. Returns `null` for anchor kinds without a boundary.
++ */
++export function formatTaskAnchorHint(task: UserTask, now: Date = new Date()): string | null {
++  const anchor = task.anchorKind ?? UserTaskAnchorKind.Unspecified;
++  const formatTime = (iso: string) => {
++    const d = new Date(iso);
++    if (Number.isNaN(d.getTime())) return null;
++    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
++  };
++
++  if (anchor === UserTaskAnchorKind.At && task.anchorAtUtc) {
++    const t = formatTime(task.anchorAtUtc);
++    return t ? `by ${t}` : null;
++  }
++  if (anchor === UserTaskAnchorKind.Window && task.windowStartUtc && task.windowEndUtc) {
++    const start = formatTime(task.windowStartUtc);
++    const end = formatTime(task.windowEndUtc);
++    if (start && end) return `${start} – ${end}`;
++    return null;
++  }
++  // Reserved for future "overdue by X" hints; currently returns null.
++  void now;
++  return null;
++}
++
++/**
++ * Short accessible description of the task's source; used for aria-label on
++ * the row so screen-reader users hear provenance without a visual chip.
++ */
++export function describeTaskSource(sourceKind: UserTaskSourceKind | undefined): string {
++  switch (sourceKind) {
++    case UserTaskSourceKind.Attention:
++      return 'Printer attention';
++    case UserTaskSourceKind.FailureIncident:
++      return 'Failure incident';
++    case UserTaskSourceKind.Harvest:
++      return 'Harvest';
++    case UserTaskSourceKind.FilamentCoverage:
++      return 'Filament coverage';
++    case UserTaskSourceKind.Maintenance:
++      return 'Maintenance';
++    case UserTaskSourceKind.SpoolReorder:
++      return 'Spool reorder';
++    case UserTaskSourceKind.PrintedPartStock:
++      return 'Printed-part stock';
++    case UserTaskSourceKind.Unspecified:
++    case undefined:
++    default:
++      return 'Manual task';
++  }
++}
+diff --git a/src/Web/ReactApp/src/services/__tests__/tasksApi.test.ts b/src/Web/ReactApp/src/services/__tests__/tasksApi.test.ts
+index 80e8aba62..09cfb1cc5 100644
+--- a/src/Web/ReactApp/src/services/__tests__/tasksApi.test.ts
++++ b/src/Web/ReactApp/src/services/__tests__/tasksApi.test.ts
+@@ -1,5 +1,15 @@
+ import { describe, it, expect, vi, beforeEach } from 'vitest';
+-import { tasksApi, TaskStatus, TaskType, TaskPriority } from '../tasksApi';
++import {
++  tasksApi,
++  TaskStatus,
++  TaskType,
++  TaskPriority,
++  UserTaskAnchorKind,
++  UserTaskSourceKind,
++  normalizeAnchorKind,
++  normalizeSourceKind,
++  isKnownTaskType,
++} from '../tasksApi';
+ import { apiClient } from '../api';
+ 
+ vi.mock('../api', () => ({
+@@ -48,7 +58,13 @@ describe('tasksApi', () => {
+       const result = await tasksApi.getPendingTasks();
+ 
+       expect(apiClient.get).toHaveBeenCalledWith('/tasks');
+-      expect(result).toEqual(mockTasks);
++      expect(result).toEqual(
++        mockTasks.map((t) => ({
++          ...t,
++          anchorKind: 'unspecified',
++          sourceKind: 'unspecified',
++        })),
++      );
+       expect(result).toHaveLength(2);
+     });
+ 
+@@ -82,7 +98,11 @@ describe('tasksApi', () => {
+       const result = await tasksApi.getTask('task-123');
+ 
+       expect(apiClient.get).toHaveBeenCalledWith('/tasks/task-123');
+-      expect(result).toEqual(mockTask);
++      expect(result).toEqual({
++        ...mockTask,
++        anchorKind: 'unspecified',
++        sourceKind: 'unspecified',
++      });
+     });
+   });
+ 
+@@ -153,6 +173,13 @@ describe('tasksApi', () => {
+       expect(TaskType.MaintenanceDue).toBe('MaintenanceDue');
+       expect(TaskType.FirmwareUpdate).toBe('FirmwareUpdate');
+       expect(TaskType.CalibrationNeeded).toBe('CalibrationNeeded');
++      expect(TaskType.FailureClear).toBe('FailureClear');
++      expect(TaskType.HarvestReady).toBe('HarvestReady');
++      expect(TaskType.FilamentRunout).toBe('FilamentRunout');
++      expect(TaskType.MaintenanceInIdleWindow).toBe('MaintenanceInIdleWindow');
++      expect(TaskType.SpoolRestock).toBe('SpoolRestock');
++      expect(TaskType.PrintedPartRestock).toBe('PrintedPartRestock');
++      expect(TaskType.Custom).toBe('Custom');
+     });
+ 
+     it('should have TaskPriority enum values', () => {
+@@ -160,5 +187,196 @@ describe('tasksApi', () => {
+       expect(TaskPriority.Normal).toBe('Normal');
+       expect(TaskPriority.High).toBe('High');
+     });
++
++    it('should have UserTaskAnchorKind camelCase wire values', () => {
++      expect(UserTaskAnchorKind.Unspecified).toBe('unspecified');
++      expect(UserTaskAnchorKind.Now).toBe('now');
++      expect(UserTaskAnchorKind.At).toBe('at');
++      expect(UserTaskAnchorKind.Window).toBe('window');
++      expect(UserTaskAnchorKind.AnytimeToday).toBe('anytimeToday');
++      expect(UserTaskAnchorKind.Timeline).toBe('timeline');
++    });
++
++    it('should have UserTaskSourceKind camelCase wire values', () => {
++      expect(UserTaskSourceKind.Unspecified).toBe('unspecified');
++      expect(UserTaskSourceKind.Attention).toBe('attention');
++      expect(UserTaskSourceKind.FailureIncident).toBe('failureIncident');
++      expect(UserTaskSourceKind.Harvest).toBe('harvest');
++      expect(UserTaskSourceKind.FilamentCoverage).toBe('filamentCoverage');
++      expect(UserTaskSourceKind.Maintenance).toBe('maintenance');
++      expect(UserTaskSourceKind.SpoolReorder).toBe('spoolReorder');
++      expect(UserTaskSourceKind.PrintedPartStock).toBe('printedPartStock');
++    });
++  });
++
++  describe('normalizeAnchorKind / normalizeSourceKind', () => {
++    it('narrows known values through', () => {
++      expect(normalizeAnchorKind('now')).toBe(UserTaskAnchorKind.Now);
++      expect(normalizeAnchorKind('anytimeToday')).toBe(UserTaskAnchorKind.AnytimeToday);
++      expect(normalizeSourceKind('failureIncident')).toBe(UserTaskSourceKind.FailureIncident);
++    });
++
++    it('collapses unknown / future / wrong-case values to Unspecified', () => {
++      expect(normalizeAnchorKind('NOW')).toBe(UserTaskAnchorKind.Unspecified);
++      expect(normalizeAnchorKind('somethingWild')).toBe(UserTaskAnchorKind.Unspecified);
++      expect(normalizeAnchorKind('')).toBe(UserTaskAnchorKind.Unspecified);
++      expect(normalizeAnchorKind(undefined)).toBe(UserTaskAnchorKind.Unspecified);
++      expect(normalizeAnchorKind(null)).toBe(UserTaskAnchorKind.Unspecified);
++      expect(normalizeAnchorKind(42)).toBe(UserTaskAnchorKind.Unspecified);
++      expect(normalizeSourceKind('newSource')).toBe(UserTaskSourceKind.Unspecified);
++      expect(normalizeSourceKind(undefined)).toBe(UserTaskSourceKind.Unspecified);
++    });
++  });
++
++  describe('isKnownTaskType', () => {
++    it('recognizes every declared TaskType', () => {
++      for (const value of Object.values(TaskType)) {
++        expect(isKnownTaskType(value)).toBe(true);
++      }
++    });
++
++    it('rejects unknown / future strings', () => {
++      expect(isKnownTaskType('SomethingNew')).toBe(false);
++      expect(isKnownTaskType('')).toBe(false);
++      expect(isKnownTaskType(undefined)).toBe(false);
++      expect(isKnownTaskType(null)).toBe(false);
++    });
++  });
++
++  describe('getShiftPlan', () => {
++    it('requests /tasks?view=shift and returns a normalized shift plan', async () => {
++      const raw = {
++        generatedAt: '2026-07-13T12:00:00Z',
++        groups: [
++          {
++            anchorKind: 'now',
++            tasks: [
++              {
++                id: 't-now',
++                taskType: TaskType.FailureClear,
++                entityType: 'Printer',
++                entityId: 'printer-1',
++                title: 'Clear paused print',
++                status: TaskStatus.Pending,
++                priority: TaskPriority.High,
++                createdAt: '2026-07-13T11:59:00Z',
++                relatedEntityCount: 0,
++                anchorKind: 'now',
++                sourceKind: 'failureIncident',
++                sourceId: 'failure:abc',
++              },
++            ],
++          },
++          {
++            anchorKind: 'timeline',
++            tasks: [
++              {
++                id: 't-at',
++                taskType: TaskType.FilamentRunout,
++                entityType: 'Printer',
++                entityId: 'printer-2',
++                title: 'Filament runout soon',
++                status: TaskStatus.Pending,
++                priority: TaskPriority.Normal,
++                createdAt: '2026-07-13T10:00:00Z',
++                relatedEntityCount: 0,
++                anchorKind: 'at',
++                anchorAtUtc: '2026-07-13T13:30:00Z',
++                sourceKind: 'filamentCoverage',
++                sourceId: 'runout:printer-2:toolhead:0',
++              },
++            ],
++          },
++        ],
++      };
++
++      vi.mocked(apiClient.get).mockResolvedValue({ data: raw });
++
++      const result = await tasksApi.getShiftPlan();
++
++      expect(apiClient.get).toHaveBeenCalledWith('/tasks?view=shift');
++      expect(result.mode).toBe('shift');
++      if (result.mode !== 'shift') return;
++      expect(result.plan.groups).toHaveLength(2);
++      expect(result.plan.groups[0].anchorKind).toBe(UserTaskAnchorKind.Now);
++      expect(result.plan.groups[0].tasks[0].sourceKind).toBe(UserTaskSourceKind.FailureIncident);
++      expect(result.plan.groups[1].anchorKind).toBe(UserTaskAnchorKind.Timeline);
++      expect(result.plan.groups[1].tasks[0].anchorKind).toBe(UserTaskAnchorKind.At);
++    });
++
++    it('tolerates unknown anchor/source kinds by collapsing to Unspecified', async () => {
++      vi.mocked(apiClient.get).mockResolvedValue({
++        data: {
++          generatedAt: '2026-07-13T12:00:00Z',
++          groups: [
++            {
++              anchorKind: 'futureGroupKind',
++              tasks: [
++                {
++                  id: 't1',
++                  taskType: 'FutureTaskType',
++                  entityType: 'Printer',
++                  entityId: 'p1',
++                  title: 'From the future',
++                  status: TaskStatus.Pending,
++                  priority: TaskPriority.Normal,
++                  createdAt: '2026-07-13T11:00:00Z',
++                  relatedEntityCount: 0,
++                  anchorKind: 'brandNewAnchor',
++                  sourceKind: 'brandNewSource',
++                  sourceId: 'x',
++                },
++              ],
++            },
++          ],
++        },
++      });
++
++      const result = await tasksApi.getShiftPlan();
++      expect(result.mode).toBe('shift');
++      if (result.mode !== 'shift') return;
++      expect(result.plan.groups[0].anchorKind).toBe(UserTaskAnchorKind.Unspecified);
++      const task = result.plan.groups[0].tasks[0];
++      expect(task.anchorKind).toBe(UserTaskAnchorKind.Unspecified);
++      expect(task.sourceKind).toBe(UserTaskSourceKind.Unspecified);
++      // taskType is passed through so downstream can log/report — the widget
++      // renders it as an "unrecognized task" row.
++      expect(task.taskType).toBe('FutureTaskType');
++    });
++
++    it('falls back to the flat pending list on 404 (shift-plan feature disabled)', async () => {
++      const flat = [
++        {
++          id: 'flat-1',
++          taskType: TaskType.ProfileImport,
++          entityType: 'PrinterModel',
++          entityId: 'model-1',
++          title: 'Import profiles',
++          status: TaskStatus.Pending,
++          priority: TaskPriority.Normal,
++          createdAt: '2026-07-13T09:00:00Z',
++          relatedEntityCount: 1,
++        },
++      ];
++      vi.mocked(apiClient.get)
++        .mockRejectedValueOnce({ statusCode: 404, message: 'not found', details: undefined })
++        .mockResolvedValueOnce({ data: flat });
++
++      const result = await tasksApi.getShiftPlan();
++
++      expect(result.mode).toBe('flat');
++      if (result.mode !== 'flat') return;
++      expect(result.tasks).toHaveLength(1);
++      expect(result.tasks[0].taskType).toBe(TaskType.ProfileImport);
++      expect(vi.mocked(apiClient.get).mock.calls.map((c) => c[0])).toEqual([
++        '/tasks?view=shift',
++        '/tasks',
++      ]);
++    });
++
++    it('propagates non-404 errors instead of masking them', async () => {
++      vi.mocked(apiClient.get).mockRejectedValue({ statusCode: 500, message: 'boom' });
++      await expect(tasksApi.getShiftPlan()).rejects.toMatchObject({ statusCode: 500 });
++    });
+   });
+ });
+diff --git a/src/Web/ReactApp/src/services/tasksApi.ts b/src/Web/ReactApp/src/services/tasksApi.ts
+index da1889b9e..ebe9aa92a 100644
+--- a/src/Web/ReactApp/src/services/tasksApi.ts
++++ b/src/Web/ReactApp/src/services/tasksApi.ts
+@@ -1,7 +1,9 @@
+ import { apiClient } from './api';
++import type { ApiError } from '@/types/api';
+ 
+ /**
+- * Task status enum matching backend UserTaskStatus
++ * Task status enum matching backend UserTaskStatus.
++ * Backend serializes as PascalCase enum names via JsonStringEnumConverter.
+  */
+ export enum TaskStatus {
+   Pending = 'Pending',
+@@ -12,17 +14,41 @@ export enum TaskStatus {
+ }
+ 
+ /**
+- * Task type enum matching backend UserTaskType
++ * Task type enum matching backend UserTaskType.
++ * Backend serializes as PascalCase enum names via JsonStringEnumConverter.
++ *
++ * Values ≤ Custom pre-date the shift-plan compiler (#713). Values ≥ FailureClear
++ * were introduced by the compiler; older backends won't emit them. Unknown
++ * strings from newer backends must be tolerated (see {@link isKnownTaskType}).
+  */
+ export enum TaskType {
+   ProfileImport = 'ProfileImport',
+   MaintenanceDue = 'MaintenanceDue',
+   FirmwareUpdate = 'FirmwareUpdate',
+-  CalibrationNeeded = 'CalibrationNeeded'
++  CalibrationNeeded = 'CalibrationNeeded',
++  Custom = 'Custom',
++  // -- Shift-plan compiler task types (issue #713) --
++  FailureClear = 'FailureClear',
++  HarvestReady = 'HarvestReady',
++  FilamentRunout = 'FilamentRunout',
++  MaintenanceInIdleWindow = 'MaintenanceInIdleWindow',
++  SpoolRestock = 'SpoolRestock',
++  PrintedPartRestock = 'PrintedPartRestock',
+ }
+ 
+ /**
+- * Task priority enum matching backend UserTaskPriority
++ * Set of TaskType values this client understands. Used to render a safe
++ * generic row for future/unknown kinds instead of failing.
++ */
++const KNOWN_TASK_TYPES: ReadonlySet<string> = new Set(Object.values(TaskType));
++
++export function isKnownTaskType(value: string | undefined | null): value is TaskType {
++  return typeof value === 'string' && KNOWN_TASK_TYPES.has(value);
++}
++
++/**
++ * Task priority enum matching backend UserTaskPriority.
++ * Backend serializes as PascalCase enum names via JsonStringEnumConverter.
+  */
+ export enum TaskPriority {
+   Low = 'Low',
+@@ -31,11 +57,66 @@ export enum TaskPriority {
+ }
+ 
+ /**
+- * User task DTO from the API
++ * Time-anchor bucket for a shift-plan task (issue #713).
++ * Backend serializes as **lowercase camelCase strings** via a custom
++ * `UserTaskAnchorKindJsonConverter`. Unknown/future values round-trip to
++ * `Unspecified` per the backend contract.
++ */
++export enum UserTaskAnchorKind {
++  Unspecified = 'unspecified',
++  Now = 'now',
++  At = 'at',
++  Window = 'window',
++  AnytimeToday = 'anytimeToday',
++  /** Group label for the merged At+Window timeline segment in the shift-plan response. */
++  Timeline = 'timeline',
++}
++
++const KNOWN_ANCHOR_KINDS: ReadonlySet<string> = new Set(Object.values(UserTaskAnchorKind));
++
++/** Narrow an untrusted wire value to a known {@link UserTaskAnchorKind}, defaulting to Unspecified. */
++export function normalizeAnchorKind(value: unknown): UserTaskAnchorKind {
++  return typeof value === 'string' && KNOWN_ANCHOR_KINDS.has(value)
++    ? (value as UserTaskAnchorKind)
++    : UserTaskAnchorKind.Unspecified;
++}
++
++/**
++ * Canonical source of a materialized shift-plan task (issue #713).
++ * Backend serializes as **lowercase camelCase strings** via a custom
++ * `UserTaskSourceKindJsonConverter`.
++ */
++export enum UserTaskSourceKind {
++  Unspecified = 'unspecified',
++  Attention = 'attention',
++  FailureIncident = 'failureIncident',
++  Harvest = 'harvest',
++  FilamentCoverage = 'filamentCoverage',
++  Maintenance = 'maintenance',
++  SpoolReorder = 'spoolReorder',
++  PrintedPartStock = 'printedPartStock',
++}
++
++const KNOWN_SOURCE_KINDS: ReadonlySet<string> = new Set(Object.values(UserTaskSourceKind));
++
++/** Narrow an untrusted wire value to a known {@link UserTaskSourceKind}, defaulting to Unspecified. */
++export function normalizeSourceKind(value: unknown): UserTaskSourceKind {
++  return typeof value === 'string' && KNOWN_SOURCE_KINDS.has(value)
++    ? (value as UserTaskSourceKind)
++    : UserTaskSourceKind.Unspecified;
++}
++
++/**
++ * User task DTO from the API. Mirrors backend `UserTaskDto`.
++ *
++ * Shift-plan fields (`anchorKind`, `anchorAtUtc`, `windowStartUtc`,
++ * `windowEndUtc`, `sourceKind`, `sourceId`) are populated for all responses
++ * from #713-and-later backends; legacy tasks materialize with `unspecified`
++ * for both anchor and source kinds, which is safe to render.
+  */
+ export interface UserTask {
+   id: string;
+-  taskType: TaskType;
++  taskType: TaskType | string;
+   entityType: string;
+   entityId: string;
+   title: string;
+@@ -47,17 +128,41 @@ export interface UserTask {
+   completedAt?: string;
+   relatedEntityCount: number;
+   metadataJson?: string;
++  // -- Shift-plan fields (issue #713) --
++  anchorKind?: UserTaskAnchorKind;
++  anchorAtUtc?: string | null;
++  windowStartUtc?: string | null;
++  windowEndUtc?: string | null;
++  sourceKind?: UserTaskSourceKind;
++  sourceId?: string | null;
+ }
+ 
+ /**
+- * Pending tasks count response
++ * A group of tasks sharing the same anchor bucket in the shift-plan view.
++ * The `anchorKind` on the group is one of `now`, `timeline`, or `anytimeToday`
++ * (Timeline groups merged At+Window tasks; each task within retains its own
++ * `anchorKind`).
++ */
++export interface ShiftPlanGroup {
++  anchorKind: UserTaskAnchorKind;
++  tasks: UserTask[];
++}
++
++/** Response payload for `GET /api/tasks?view=shift` (issue #713). */
++export interface ShiftPlan {
++  groups: ShiftPlanGroup[];
++  generatedAt: string;
++}
++
++/**
++ * Pending tasks count response.
+  */
+ export interface TaskCountResponse {
+   count: number;
+ }
+ 
+ /**
+- * DTO for creating a new task
++ * DTO for creating a new task.
+  */
+ export interface CreateTaskDto {
+   title: string;
+@@ -66,27 +171,87 @@ export interface CreateTaskDto {
+ }
+ 
+ /**
+- * Tasks API service for managing user tasks
++ * Result of {@link tasksApi.getShiftPlan}. When the shift-plan feature is
++ * disabled server-side (404), the wrapper falls back to the flat list so
++ * callers can still render pending tasks. `mode` disambiguates the two shapes.
++ */
++export type ShiftPlanResult =
++  | { mode: 'shift'; plan: ShiftPlan }
++  | { mode: 'flat'; tasks: UserTask[] };
++
++/** Type guard for ApiError-like shapes returned by apiClient. */
++function isApiError(error: unknown): error is ApiError {
++  return (
++    typeof error === 'object' &&
++    error !== null &&
++    'statusCode' in error &&
++    typeof (error as { statusCode: unknown }).statusCode === 'number'
++  );
++}
++
++function normalizeTask(raw: UserTask): UserTask {
++  return {
++    ...raw,
++    anchorKind: normalizeAnchorKind(raw.anchorKind),
++    sourceKind: normalizeSourceKind(raw.sourceKind),
++  };
++}
++
++function normalizeGroup(group: ShiftPlanGroup): ShiftPlanGroup {
++  return {
++    anchorKind: normalizeAnchorKind(group.anchorKind),
++    tasks: (group.tasks ?? []).map(normalizeTask),
++  };
++}
++
++/**
++ * Tasks API service for managing user tasks.
+  */
+ export const tasksApi = {
+   /**
+-   * Get all pending tasks
++   * Get all pending tasks (flat list, legacy contract).
+    */
+   async getPendingTasks(): Promise<UserTask[]> {
+     const response = await apiClient.get<UserTask[]>('/tasks');
+-    return response.data;
++    return response.data.map(normalizeTask);
++  },
++
++  /**
++   * Get the shift-plan view (issue #713): anchor-grouped, deterministically
++   * ordered pending tasks. When the server returns 404 (shift-plan feature
++   * disabled), gracefully falls back to the flat pending-tasks list so the
++   * widget can still render.
++   */
++  async getShiftPlan(): Promise<ShiftPlanResult> {
++    try {
++      const response = await apiClient.get<ShiftPlan>('/tasks?view=shift');
++      const plan = response.data;
++      return {
++        mode: 'shift',
++        plan: {
++          generatedAt: plan.generatedAt,
++          groups: (plan.groups ?? []).map(normalizeGroup),
++        },
++      };
++    } catch (error) {
++      if (isApiError(error) && error.statusCode === 404) {
++        const tasks = await this.getPendingTasks();
++        return { mode: 'flat', tasks };
++      }
++      throw error;
++    }
+   },
+ 
+   /**
+-   * Get task by ID
++   * Get task by ID.
+    */
+   async getTask(taskId: string): Promise<UserTask> {
+     const response = await apiClient.get<UserTask>(`/tasks/${taskId}`);
+-    return response.data;
++    return normalizeTask(response.data);
+   },
+ 
+   /**
+-   * Get pending task count
++   * Get pending task count.
+    */
+   async getPendingCount(): Promise<number> {
+     const response = await apiClient.get<TaskCountResponse>('/tasks/count');
+@@ -94,31 +259,31 @@ export const tasksApi = {
+   },
+ 
+   /**
+-   * Complete a task
++   * Complete a task.
+    */
+   async completeTask(taskId: string): Promise<void> {
+     await apiClient.post(`/tasks/${taskId}/complete`);
+   },
+ 
+   /**
+-   * Dismiss a task (hide but can be shown again)
++   * Dismiss a task (hide but can be shown again).
+    */
+   async dismissTask(taskId: string): Promise<void> {
+     await apiClient.post(`/tasks/${taskId}/dismiss`);
+   },
+ 
+   /**
+-   * Skip a task (won't be shown again)
++   * Skip a task (won't be shown again).
+    */
+   async skipTask(taskId: string): Promise<void> {
+     await apiClient.post(`/tasks/${taskId}/skip`);
+   },
+ 
+   /**
+-   * Create a new task
++   * Create a new manual task.
+    */
+   async createTask(dto: CreateTaskDto): Promise<UserTask> {
+     const response = await apiClient.post<UserTask>('/tasks', dto);
+-    return response.data;
++    return normalizeTask(response.data);
+   }
+ };

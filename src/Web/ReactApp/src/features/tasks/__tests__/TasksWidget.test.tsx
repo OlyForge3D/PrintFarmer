@@ -50,6 +50,11 @@ vi.mock('react-router', async () => {
   };
 });
 
+function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function primaryFor(title: string): HTMLElement {
+  return screen.getByRole('button', { name: new RegExp('^' + escapeRegex(title) + ' —') });
+}
+
 function baseTask(overrides: Partial<UserTask> = {}): UserTask {
   return {
     id: `task-${Math.random().toString(36).slice(2, 9)}`,
@@ -204,19 +209,19 @@ describe('TasksWidget', () => {
     renderWidget();
     await waitFor(() => expect(screen.getByText('Harvest ready')).toBeInTheDocument());
 
-    await user.click(screen.getByText('Harvest ready').closest('[data-testid="tasks-widget-row"]')!);
+    await user.click(primaryFor('Harvest ready'));
     expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-h');
 
-    await user.click(screen.getByText('Filament runout').closest('[data-testid="tasks-widget-row"]')!);
+    await user.click(primaryFor('Filament runout'));
     expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-f');
 
-    await user.click(screen.getByText('Maintenance in idle window').closest('[data-testid="tasks-widget-row"]')!);
+    await user.click(primaryFor('Maintenance in idle window'));
     expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-m/maintenance');
 
-    await user.click(screen.getByText('Clear failure').closest('[data-testid="tasks-widget-row"]')!);
+    await user.click(primaryFor('Clear failure'));
     expect(mockNavigate).toHaveBeenLastCalledWith('/printers/p-fx');
 
-    await user.click(screen.getByText('Restock PLA').closest('[data-testid="tasks-widget-row"]')!);
+    await user.click(primaryFor('Restock PLA'));
     expect(mockNavigate).toHaveBeenLastCalledWith('/spools');
   });
 
@@ -246,7 +251,6 @@ describe('TasksWidget', () => {
   });
 
   it('renders a safe generic row and does not navigate for unknown task kinds', async () => {
-    const user = userEvent.setup();
     vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
       shiftPlanResult([
         {
@@ -267,9 +271,9 @@ describe('TasksWidget', () => {
     const row = screen.getByText('Unknown-kind row').closest('[data-testid="tasks-widget-row"]')!;
     expect(row).toHaveAttribute('data-unknown-kind', 'true');
     expect(screen.getByTestId('tasks-widget-unknown-badge')).toBeInTheDocument();
-    // Row is not a button (not actionable)
-    expect(row.getAttribute('role')).toBe('group');
-    await user.click(row);
+    // Unknown-kind rows are not actionable — primary button is disabled
+    const primary = within(row as HTMLElement).getByTestId('tasks-widget-row-primary');
+    expect(primary).toBeDisabled();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -296,7 +300,7 @@ describe('TasksWidget', () => {
     );
     renderWidget();
     await waitFor(() => expect(screen.getByText('Import profiles')).toBeInTheDocument());
-    await user.click(screen.getByText('Import profiles').closest('[data-testid="tasks-widget-row"]')!);
+    await user.click(primaryFor('Import profiles'));
     expect(mockNavigate).toHaveBeenLastCalledWith('/profiles/import?modelId=metadata-model&taskId=pi');
   });
 
@@ -418,11 +422,8 @@ describe('TasksWidget', () => {
     renderWidget();
     await waitFor(() => expect(screen.getByText('Fix the thing manually')).toBeInTheDocument());
 
-    const row = screen.getByText('Fix the thing manually').closest('[data-testid="tasks-widget-row"]')!;
-    // Custom tasks are known kinds — they must be rendered as role="button"
-    expect(row.getAttribute('role')).toBe('button');
-
-    await user.click(row);
+    // Custom tasks are known kinds — primary action is an enabled button
+    await user.click(primaryFor('Fix the thing manually'));
 
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(vi.mocked(toast.info)).toHaveBeenCalledWith('Fix the thing manually');
@@ -491,17 +492,21 @@ describe('TasksWidget', () => {
 
     // Both rows should be busy simultaneously
     await waitFor(() => {
-      expect(row1).toHaveAttribute('aria-busy', 'true');
-      expect(row2).toHaveAttribute('aria-busy', 'true');
+      expect(within(row1 as HTMLElement).getByTestId('tasks-widget-row-primary')).toHaveAttribute('aria-busy', 'true');
+      expect(within(row2 as HTMLElement).getByTestId('tasks-widget-row-primary')).toHaveAttribute('aria-busy', 'true');
     });
 
     // Resolve row1's complete — row2 must still be busy
     resolveComplete();
-    await waitFor(() => expect(row1).not.toHaveAttribute('aria-busy'));
-    expect(row2).toHaveAttribute('aria-busy', 'true');
+    await waitFor(() =>
+      expect(within(row1 as HTMLElement).getByTestId('tasks-widget-row-primary')).not.toHaveAttribute('aria-busy'),
+    );
+    expect(within(row2 as HTMLElement).getByTestId('tasks-widget-row-primary')).toHaveAttribute('aria-busy', 'true');
 
     // Resolve row2's skip
     resolveSkip();
-    await waitFor(() => expect(row2).not.toHaveAttribute('aria-busy'));
+    await waitFor(() =>
+      expect(within(row2 as HTMLElement).getByTestId('tasks-widget-row-primary')).not.toHaveAttribute('aria-busy'),
+    );
   });
 });

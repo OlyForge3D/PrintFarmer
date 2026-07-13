@@ -94,124 +94,124 @@ function TaskItem({
   const isActionable = !details.isUnknownKind;
   const isRowBusy = pendingActionTaskIds.has(task.id);
 
-  const rowClasses = [
+  const ariaLabel = `${task.title} — ${sourceLabel}${anchorHint ? `, ${anchorHint}` : ''}`;
+
+  const handleActivate = () => {
+    onNavigate(task);
+  };
+
+  const outerClasses = [
     'flex items-start gap-3 p-3 rounded-lg transition-colors group',
-    isActionable ? 'hover:bg-pf-bg-hover cursor-pointer' : 'cursor-default',
     isRowBusy ? 'opacity-60' : '',
   ]
     .filter(Boolean)
     .join(' ');
 
-  const ariaLabel = `${task.title} — ${sourceLabel}${anchorHint ? `, ${anchorHint}` : ''}`;
-
-  const handleActivate = () => {
-    if (isActionable) onNavigate(task);
-  };
+  const buttonClasses = [
+    'flex-1 flex items-start gap-3 text-left rounded-lg transition-colors',
+    isActionable ? 'hover:bg-pf-bg-hover cursor-pointer' : '',
+    'disabled:cursor-default disabled:opacity-100',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
-      className={rowClasses}
-      onClick={handleActivate}
-      role={isActionable ? 'button' : 'group'}
-      tabIndex={isActionable ? 0 : -1}
-      aria-label={ariaLabel}
-      aria-busy={isRowBusy || undefined}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (!isActionable) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          handleActivate();
-        }
-      }}
+      className={outerClasses}
       data-testid="tasks-widget-row"
       data-task-id={task.id}
       data-task-type={typeof task.taskType === 'string' ? task.taskType : ''}
       data-anchor-kind={task.anchorKind ?? UserTaskAnchorKind.Unspecified}
       data-unknown-kind={details.isUnknownKind ? 'true' : 'false'}
     >
-      <div className="shrink-0 mt-0.5">
-        <div className="p-2 rounded-lg bg-pf-warning/10">
-          <TaskTypeIcon taskType={task.taskType} className="h-5 w-5 text-pf-warning" />
+      {/* eslint-disable-next-line local/pf-no-raw-html-controls -- native <button> required here; wrapping in <Button> would create nested interactive controls */}
+      <button
+        type="button"
+        className={buttonClasses}
+        onClick={handleActivate}
+        disabled={!isActionable}
+        aria-label={ariaLabel}
+        aria-busy={isRowBusy || undefined}
+        data-testid="tasks-widget-row-primary"
+      >
+        <div className="shrink-0 mt-0.5">
+          <div className="p-2 rounded-lg bg-pf-warning/10">
+            <TaskTypeIcon taskType={task.taskType} className="h-5 w-5 text-pf-warning" />
+          </div>
         </div>
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h4 className="text-sm font-medium text-pf-text-primary truncate">{task.title}</h4>
-            {task.description && (
-              <p className="text-xs text-pf-text-secondary mt-0.5 line-clamp-2">{task.description}</p>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-medium text-pf-text-primary truncate">{task.title}</h4>
+          {task.description && (
+            <p className="text-xs text-pf-text-secondary mt-0.5 line-clamp-2">{task.description}</p>
+          )}
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className={`text-xs px-1.5 py-0.5 rounded-sm ${getPriorityClasses(task.priority)}`}>
+              {task.priority}
+            </span>
+            <span className="text-xs text-pf-text-tertiary">{details.categoryLabel}</span>
+            {anchorHint && (
+              <span className="text-xs text-pf-text-tertiary">{anchorHint}</span>
             )}
-            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-              <span className={`text-xs px-1.5 py-0.5 rounded-sm ${getPriorityClasses(task.priority)}`}>
-                {task.priority}
+            {task.relatedEntityCount > 0 && (
+              <span className="text-xs text-pf-text-tertiary">
+                {task.relatedEntityCount} printer{task.relatedEntityCount !== 1 ? 's' : ''} waiting
               </span>
-              <span className="text-xs text-pf-text-tertiary">{details.categoryLabel}</span>
-              {anchorHint && (
-                <span className="text-xs text-pf-text-tertiary">{anchorHint}</span>
-              )}
-              {task.relatedEntityCount > 0 && (
-                <span className="text-xs text-pf-text-tertiary">
-                  {task.relatedEntityCount} printer{task.relatedEntityCount !== 1 ? 's' : ''} waiting
-                </span>
-              )}
-              {details.isUnknownKind && (
-                <span className="text-xs text-pf-text-tertiary italic" data-testid="tasks-widget-unknown-badge">
-                  Unrecognized task — server info only
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-            <Button
-              variant="subtle"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onComplete(task.id);
-              }}
-              title="Mark complete"
-              aria-label={`Complete ${task.title}`}
-              className="h-7 w-7 p-0"
-              disabled={isRowBusy}
-              data-testid="tasks-widget-complete"
-            >
-              <CheckIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-status-online-text" />
-            </Button>
-            <Button
-              variant="subtle"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSkip(task.id);
-              }}
-              title="Skip task"
-              aria-label={`Skip ${task.title}`}
-              className="h-7 w-7 p-0"
-              disabled={isRowBusy}
-              data-testid="tasks-widget-skip"
-            >
-              <CloseIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-text-secondary" />
-            </Button>
-            <Button
-              variant="subtle"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDismiss(task.id);
-              }}
-              title="Dismiss task"
-              aria-label={`Dismiss ${task.title}`}
-              className="h-7 w-7 p-0"
-              disabled={isRowBusy}
-              data-testid="tasks-widget-dismiss"
-            >
-              <AlertCircleIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-text-secondary" />
-            </Button>
+            )}
+            {details.isUnknownKind && (
+              <span className="text-xs text-pf-text-tertiary italic" data-testid="tasks-widget-unknown-badge">
+                Unrecognized task — server info only
+              </span>
+            )}
           </div>
         </div>
+      </button>
+
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+        <Button
+          variant="subtle"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onComplete(task.id);
+          }}
+          title="Mark complete"
+          aria-label={`Complete ${task.title}`}
+          className="h-7 w-7 p-0"
+          disabled={isRowBusy}
+          data-testid="tasks-widget-complete"
+        >
+          <CheckIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-status-online-text" />
+        </Button>
+        <Button
+          variant="subtle"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSkip(task.id);
+          }}
+          title="Skip task"
+          aria-label={`Skip ${task.title}`}
+          className="h-7 w-7 p-0"
+          disabled={isRowBusy}
+          data-testid="tasks-widget-skip"
+        >
+          <CloseIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-text-secondary" />
+        </Button>
+        <Button
+          variant="subtle"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss(task.id);
+          }}
+          title="Dismiss task"
+          aria-label={`Dismiss ${task.title}`}
+          className="h-7 w-7 p-0"
+          disabled={isRowBusy}
+          data-testid="tasks-widget-dismiss"
+        >
+          <AlertCircleIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-text-secondary" />
+        </Button>
       </div>
     </div>
   );
