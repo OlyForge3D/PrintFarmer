@@ -367,10 +367,10 @@ public class PrintersController(
                         : $"Successfully connected to Moonraker printer on port {resolution.BackendPort}"
                 }
                 : new TestConnectionResponse
-            {
-                Success = false,
-                Message = "Moonraker did not respond on the standard 7125 endpoint or Snapmaker U1 port 80 endpoint"
-            };
+                {
+                    Success = false,
+                    Message = "Moonraker did not respond on the standard 7125 endpoint or Snapmaker U1 port 80 endpoint"
+                };
         }
         catch (TaskCanceledException)
         {
