@@ -98,6 +98,10 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
+        // Filament fallback groups (issue #711, F6)
+        services.AddScoped<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService,
+            Farm.Infrastructure.Services.Printers.FilamentFallbackGroupService>();
+
         // Attention Feed (issue #707) — unified operator feed composed from failure,
         // maintenance, and offline sources. Harvest items join after the #714 ledger exists;
         // runout items join via #709.

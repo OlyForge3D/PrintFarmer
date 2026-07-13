@@ -51,6 +51,19 @@ public class MaintenanceLog
     public MaintenanceTask? MaintenanceTask { get; set; }
 
     /// <summary>
+    /// Optional physical toolhead scope. When null, the log is printer-wide (legacy behavior).
+    /// When set, ties the maintenance activity to a specific physical toolhead so per-tool
+    /// history can be queried (issue #711, F6). Service layer enforces
+    /// <see cref="ToolheadType.Physical"/>.
+    /// </summary>
+    public Guid? ToolheadId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the scoped toolhead. Null when the log is printer-wide.
+    /// </summary>
+    public Toolhead? Toolhead { get; set; }
+
+    /// <summary>
     /// Name/title of the maintenance performed
     /// </summary>
     [MaxLength(128)]

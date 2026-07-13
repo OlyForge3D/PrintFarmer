@@ -39,11 +39,18 @@ public class MaintenanceLogConfiguration : IEntityTypeConfiguration<MaintenanceL
             .HasForeignKey(l => l.MaintenanceTaskId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // Optional physical toolhead scope (issue #711, F6). Null = printer-wide log.
+        _ = builder.HasOne(l => l.Toolhead)
+            .WithMany()
+            .HasForeignKey(l => l.ToolheadId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // Indexes for efficient queries
         _ = builder.HasIndex(l => l.PrinterId);
         _ = builder.HasIndex(l => l.PrinterMaintenanceScheduleId);
         _ = builder.HasIndex(l => l.ResolvedAlertId);
         _ = builder.HasIndex(l => l.MaintenanceTaskId);
+        _ = builder.HasIndex(l => l.ToolheadId);
         _ = builder.HasIndex(l => l.PerformedAt);
     }
 }

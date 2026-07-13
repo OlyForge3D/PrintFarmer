@@ -797,6 +797,77 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("FailureDetectionIncidents");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("MaterialType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId");
+
+                    b.HasIndex("PrinterId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_Name");
+
+                    b.ToTable("FilamentFallbackGroups");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FallbackGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ToolheadId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FallbackGroupId");
+
+                    b.HasIndex("ToolheadId");
+
+                    b.HasIndex("FallbackGroupId", "Position")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_Position");
+
+                    b.HasIndex("FallbackGroupId", "ToolheadId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_ToolheadId");
+
+                    b.ToTable("FilamentFallbackGroupMembers");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentSwapOverride", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1891,6 +1962,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<Guid?>("ToolheadId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -1903,6 +1977,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
+
+                    b.HasIndex("ToolheadId");
 
                     b.HasIndex("Status", "Severity");
 
@@ -2019,6 +2095,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<Guid?>("ToolheadId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("MaintenanceTaskId");
@@ -2030,6 +2109,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterMaintenanceScheduleId");
 
                     b.HasIndex("ResolvedAlertId");
+
+                    b.HasIndex("ToolheadId");
 
                     b.ToTable("MaintenanceLogs");
                 });
@@ -3851,6 +3932,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ToolheadId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -3860,8 +3944,12 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("PrinterId");
 
-                    b.HasIndex("MaintenancePlanId", "PrinterId")
-                        .IsUnique();
+                    b.HasIndex("ToolheadId");
+
+                    b.HasIndex("MaintenancePlanId", "PrinterId", "ToolheadId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_Toolhead")
+                        .HasFilter("[ToolheadId] IS NOT NULL");
 
                     b.ToTable("PrinterMaintenanceSchedules");
                 });
@@ -5383,6 +5471,36 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Printer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.FilamentFallbackGroup", "FallbackGroup")
+                        .WithMany("Members")
+                        .HasForeignKey("FallbackGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
+                        .WithMany()
+                        .HasForeignKey("ToolheadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FallbackGroup");
+
+                    b.Navigation("Toolhead");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
@@ -5558,11 +5676,18 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasForeignKey("PrinterMaintenanceScheduleId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
+                        .WithMany()
+                        .HasForeignKey("ToolheadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
 
                     b.Navigation("PrinterMaintenanceSchedule");
+
+                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceLog", b =>
@@ -5588,6 +5713,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasForeignKey("ResolvedAlertId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
+                        .WithMany()
+                        .HasForeignKey("ToolheadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
@@ -5595,6 +5725,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("PrinterMaintenanceSchedule");
 
                     b.Navigation("ResolvedAlert");
+
+                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenancePlan", b =>
@@ -5990,9 +6122,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
+                        .WithMany()
+                        .HasForeignKey("ToolheadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("MaintenancePlan");
 
                     b.Navigation("Printer");
+
+                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
@@ -6375,6 +6514,11 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldDefinition", b =>
                 {
                     b.Navigation("Values");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FolderNode", b =>

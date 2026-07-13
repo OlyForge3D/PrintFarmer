@@ -34,10 +34,17 @@ public class MaintenanceAlertConfiguration : IEntityTypeConfiguration<Maintenanc
             .HasForeignKey(a => a.MaintenanceTaskId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // Optional physical toolhead scope (issue #711, F6). Null = printer-wide.
+        _ = builder.HasOne(a => a.Toolhead)
+            .WithMany()
+            .HasForeignKey(a => a.ToolheadId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // Indexes for efficient queries
         _ = builder.HasIndex(a => a.PrinterId);
         _ = builder.HasIndex(a => a.PrinterMaintenanceScheduleId);
         _ = builder.HasIndex(a => a.MaintenanceTaskId);
+        _ = builder.HasIndex(a => a.ToolheadId);
         _ = builder.HasIndex(a => new { a.Status, a.Severity });
         _ = builder.HasIndex(a => a.CreatedAt);
     }

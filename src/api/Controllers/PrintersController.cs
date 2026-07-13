@@ -873,15 +873,19 @@ public class PrintersController(
     /// Gets detailed information about a specific printer including manufacturer, model, and configuration.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="fallbackGroupService">Injected fallback-group service used to include per-printer fallback chains in the details payload.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Detailed printer information including manufacturer, model, purchase information, and settings.</returns>
+    /// <returns>Detailed printer information including manufacturer, model, purchase information, settings, and configured fallback groups.</returns>
     /// <response code="200">Returns detailed printer information.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpGet("{id:guid}/details")]
     [ProducesResponseType(typeof(PrinterDetailsDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(
+        Guid id,
+        [FromServices] Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService fallbackGroupService,
+        CancellationToken ct)
     {
         Printer? p = await _printersService.FindByIdWithIncludesAsync(id, ct);
         if (p is null)
@@ -977,7 +981,8 @@ public class PrintersController(
             p.UseModelDispatchDefaults,
             p.BuddyCameraIp,
             p.NozzleDiameter,
-            p.HasMmu);
+            p.HasMmu,
+            await fallbackGroupService.ListForPrinterAsync(id, ct));
     }
 
     /// <summary>

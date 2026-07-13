@@ -231,6 +231,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Durable audit of guided filament-swap material-mismatch overrides (issue #710).
     public DbSet<FilamentSwapOverride> FilamentSwapOverrides => Set<FilamentSwapOverride>();
 
+    // Ordered same-material fallback chains over existing Toolheads (issue #711, F6).
+    public DbSet<FilamentFallbackGroup> FilamentFallbackGroups => Set<FilamentFallbackGroup>();
+
+    public DbSet<FilamentFallbackGroupMember> FilamentFallbackGroupMembers => Set<FilamentFallbackGroupMember>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

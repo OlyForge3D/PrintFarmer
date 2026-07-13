@@ -681,7 +681,22 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
 
         index.IsUnique.Should().BeTrue();
         index.GetDatabaseName().Should().Be("UX_Toolheads_PrinterId_Index");
-        toolheadEntity.GetReferencingForeignKeys().Should().BeEmpty();
+
+        // Referencing FKs are allowed only for the F6 (issue #711) additions: the fallback
+        // group member (Cascade) and the three optional maintenance-scope references
+        // (SetNull) on schedules, alerts, and logs. Anything else here would risk breaking
+        // canonical toolhead swap semantics and should be reviewed.
+        HashSet<string> allowedReferencingTypes =
+        [
+            nameof(Farm.Infrastructure.Domain.FilamentFallbackGroupMember),
+            nameof(Farm.Infrastructure.Domain.MaintenanceAlert),
+            nameof(Farm.Infrastructure.Domain.MaintenanceLog),
+            nameof(Farm.Infrastructure.Domain.PrinterMaintenanceSchedule),
+        ];
+        IEnumerable<string> actualReferencingTypes = toolheadEntity
+            .GetReferencingForeignKeys()
+            .Select(fk => fk.DeclaringEntityType.ClrType.Name);
+        actualReferencingTypes.Should().BeSubsetOf(allowedReferencingTypes);
     }
 
     [Fact]

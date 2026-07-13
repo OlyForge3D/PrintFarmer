@@ -24,6 +24,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
     private const double WeightColorMatch = 20;
 
     private const double NozzleDiameterTolerance = 0.01;
+    private const double WeightPerToolLoadout = 60;
 
     public async Task<List<DispatchScore>> ScorePrintersForJobAsync(Guid jobId, CancellationToken ct = default)
     {
@@ -138,6 +139,22 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             if (materialScore.EliminationReason is not null)
             {
                 eliminationReasons.Add(materialScore.EliminationReason);
+            }
+        }
+
+        // Factor 1b: Per-Tool Loadout (issue #711, F6). One explainable factor per required
+        // tool from #710 toolRequirements, cross-referenced with per-toolhead loaded-spool
+        // state from #709 (Toolhead.CurrentMaterial / CurrentSpoolId). This is a soft factor
+        // — it never eliminates a candidate on its own because the operator can still swap
+        // filament — but it explains why the raw material match may over- or under-score
+        // multi-material jobs.
+        IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
+        if (perToolReqs is { Count: > 0 })
+        {
+            foreach (PrintJobToolMaterialRequirement req in perToolReqs)
+            {
+                FactorScore toolFactor = ScorePerToolLoadout(printer, req);
+                breakdown[$"PerToolLoadout.T{req.Tool}"] = toolFactor;
             }
         }
 
@@ -270,6 +287,44 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
 
         // Availability is a pre-filter, contributes zero weight to the score
         return new FactorScore("Availability", 100, 0, 0, true);
+    }
+
+    private static FactorScore ScorePerToolLoadout(Printer printer, PrintJobToolMaterialRequirement req)
+    {
+        string factorName = $"PerToolLoadout.T{req.Tool}";
+
+        // When the slicer proved the tool is used but the material is unresolved, don't score
+        // this tool — it stays neutral and non-hard.
+        if (string.IsNullOrWhiteSpace(req.MaterialType))
+        {
+            return new FactorScore(factorName, 60, WeightPerToolLoadout, 60 * WeightPerToolLoadout, false);
+        }
+
+        // Prefer the toolhead whose Index matches the required tool slot (T0 = 0, T1 = 1, ...).
+        Toolhead? indexed = printer.Toolheads.FirstOrDefault(t => t.Index == req.Tool);
+        if (indexed is not null
+            && !string.IsNullOrWhiteSpace(indexed.CurrentMaterial)
+            && string.Equals(indexed.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase))
+        {
+            return new FactorScore(factorName, 100, WeightPerToolLoadout, 100 * WeightPerToolLoadout, false);
+        }
+
+        // Fall back: any physical toolhead on the printer currently loaded with the required material.
+        bool anyLoaded = printer.Toolheads.Any(t =>
+            t.ToolheadType == ToolheadType.Physical
+            && !string.IsNullOrWhiteSpace(t.CurrentMaterial)
+            && string.Equals(t.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase));
+        if (anyLoaded)
+        {
+            return new FactorScore(factorName, 75, WeightPerToolLoadout, 75 * WeightPerToolLoadout, false);
+        }
+
+        // No toolhead has this material loaded — soft penalty, still non-hard so the operator
+        // can decide to run a filament swap.
+        string reason = indexed is null
+            ? $"Tool T{req.Tool} not present on printer"
+            : $"Tool T{req.Tool} loaded with '{indexed.CurrentMaterial ?? "(empty)"}', requires '{req.MaterialType}'";
+        return new FactorScore(factorName, 20, WeightPerToolLoadout, 20 * WeightPerToolLoadout, false, reason);
     }
 
     private static FactorScore ScoreMaterialMatch(Printer printer, string? requiredMaterial, HashSet<string> clusterMateNames)

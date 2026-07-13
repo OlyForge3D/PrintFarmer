@@ -41,4 +41,5 @@ public record PrinterDetailsDto(
     bool UseModelDispatchDefaults = true,
     string? BuddyCameraIp = null,
     double? NozzleDiameter = null,
-    bool? HasMmu = null);
+    bool? HasMmu = null,
+    IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto>? FallbackGroups = null);
