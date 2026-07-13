@@ -3624,10 +3624,24 @@ export enum NotificationPreferenceEventType {
   // backend enum contract in NotificationsController is expected to accept
   // these string values once #708 lands. Legacy servers that do not know these
   // tokens must never receive them — see features/notifications/preferencesAdapter.
-  RunoutRisk = 'RunoutRisk',
+  FilamentRunout = 'FilamentRunout',
   HarvestReady = 'HarvestReady',
   MaintenanceDue = 'MaintenanceDue',
   PrinterOffline = 'PrinterOffline'
+}
+
+/**
+ * Capability probe response from `GET /notifications/capabilities` (introduced
+ * by #708). Legacy servers respond 404, which the client treats as
+ * "supportedEventTypes = the classic four job tokens only" so that unknown
+ * operator strings are never sent back on `PUT /notifications/preferences`.
+ *
+ * The `supportedEventTypes` array is a bag of raw enum strings so a
+ * forward-compatible client that has not yet updated its
+ * `NotificationPreferenceEventType` union does not lose values.
+ */
+export interface NotificationCapabilitiesResponse {
+  supportedEventTypes: string[];
 }
 
 export interface NotificationEventChannelPreferenceDto {

@@ -6,6 +6,7 @@ import { NotificationFrequency, NotificationPreferenceEventType } from '@/types/
 import type { NotificationPreferencesDto, UpdateNotificationPreferencesRequest } from '@/types/api';
 
 const mockUseNotificationPreferences = vi.fn();
+const mockUseNotificationCapabilities = vi.fn();
 const mockMutateAsync = vi.fn();
 const mockUseUpdateNotificationPreferences = vi.fn();
 const mockUsePushSubscription = vi.fn();
@@ -19,6 +20,7 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/features/notifications/hooks/useNotificationPreferences', () => ({
   useNotificationPreferences: () => mockUseNotificationPreferences(),
+  useNotificationCapabilities: () => mockUseNotificationCapabilities(),
   useUpdateNotificationPreferences: () => mockUseUpdateNotificationPreferences(),
 }));
 
@@ -52,13 +54,26 @@ function createCapablePreferences(): NotificationPreferencesDto {
   const p = createLegacyPreferences();
   p.eventChannelPreferences = [
     ...p.eventChannelPreferences,
-    { eventType: NotificationPreferenceEventType.RunoutRisk, inApp: true, email: true, push: false, telegram: false },
+    { eventType: NotificationPreferenceEventType.FilamentRunout, inApp: true, email: true, push: false, telegram: false },
     { eventType: NotificationPreferenceEventType.HarvestReady, inApp: true, email: false, push: true, telegram: false },
     { eventType: NotificationPreferenceEventType.MaintenanceDue, inApp: false, email: true, push: false, telegram: false },
     { eventType: NotificationPreferenceEventType.PrinterOffline, inApp: true, email: true, push: true, telegram: true },
   ];
   return p;
 }
+
+const CAPABLE_CAPABILITIES = {
+  supportedEventTypes: [
+    NotificationPreferenceEventType.JobStarted,
+    NotificationPreferenceEventType.JobCompleted,
+    NotificationPreferenceEventType.JobFailed,
+    NotificationPreferenceEventType.JobPaused,
+    NotificationPreferenceEventType.FilamentRunout,
+    NotificationPreferenceEventType.HarvestReady,
+    NotificationPreferenceEventType.MaintenanceDue,
+    NotificationPreferenceEventType.PrinterOffline,
+  ],
+};
 
 function renderPage() {
   return render(
@@ -73,6 +88,11 @@ describe('NotificationPreferencesPage', () => {
     vi.clearAllMocks();
     mockUseNotificationPreferences.mockReturnValue({
       data: createLegacyPreferences(),
+      isLoading: false,
+      error: null,
+    });
+    mockUseNotificationCapabilities.mockReturnValue({
+      data: null, // legacy: capabilities endpoint 404
       isLoading: false,
       error: null,
     });
@@ -175,9 +195,14 @@ describe('NotificationPreferencesPage', () => {
       ).toBeInTheDocument();
     });
 
-    it('hides the legacy notice when the server has demonstrated operator category support', () => {
+    it('hides the legacy notice when the capabilities probe advertises operator tokens', () => {
       mockUseNotificationPreferences.mockReturnValue({
         data: createCapablePreferences(),
+        isLoading: false,
+        error: null,
+      });
+      mockUseNotificationCapabilities.mockReturnValue({
+        data: CAPABLE_CAPABILITIES,
         isLoading: false,
         error: null,
       });
@@ -189,7 +214,7 @@ describe('NotificationPreferencesPage', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('strips operator tokens from the save payload on legacy servers', async () => {
+    it('strips operator tokens from the save payload on legacy servers (capabilities probe 404)', async () => {
       renderPage();
 
       // Toggle a harvest-ready channel — a legacy server must never receive this token.
@@ -211,14 +236,19 @@ describe('NotificationPreferencesPage', () => {
         ]),
       );
       expect(tokens).not.toContain(NotificationPreferenceEventType.HarvestReady);
-      expect(tokens).not.toContain(NotificationPreferenceEventType.RunoutRisk);
+      expect(tokens).not.toContain(NotificationPreferenceEventType.FilamentRunout);
       expect(tokens).not.toContain(NotificationPreferenceEventType.MaintenanceDue);
       expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
     });
 
-    it('keeps operator tokens in the save payload when the server supports them', async () => {
+    it('keeps operator tokens in the save payload when the capabilities probe advertises them', async () => {
       mockUseNotificationPreferences.mockReturnValue({
         data: createCapablePreferences(),
+        isLoading: false,
+        error: null,
+      });
+      mockUseNotificationCapabilities.mockReturnValue({
+        data: CAPABLE_CAPABILITIES,
         isLoading: false,
         error: null,
       });

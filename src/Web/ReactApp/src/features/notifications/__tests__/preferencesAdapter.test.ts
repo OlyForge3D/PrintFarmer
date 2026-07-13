@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   NotificationFrequency,
   NotificationPreferenceEventType,
+  type NotificationCapabilitiesResponse,
   type NotificationEventChannelPreferenceDto,
   type NotificationPreferencesDto,
   type UpdateNotificationPreferencesRequest,
@@ -10,6 +11,8 @@ import {
   buildSavePayload,
   defaultEventChannelPreferences,
   hydratePreferences,
+  resolveSupportedEventTypes,
+  serverAdvertisesOperatorCategories,
   withDerivedLegacyFlags,
 } from '../preferencesAdapter';
 
@@ -49,6 +52,77 @@ function baseLegacyServerResponse(): NotificationPreferencesDto {
   };
 }
 
+const CAPABLE_CAPABILITIES: NotificationCapabilitiesResponse = {
+  supportedEventTypes: [
+    NotificationPreferenceEventType.JobStarted,
+    NotificationPreferenceEventType.JobCompleted,
+    NotificationPreferenceEventType.JobFailed,
+    NotificationPreferenceEventType.JobPaused,
+    NotificationPreferenceEventType.FilamentRunout,
+    NotificationPreferenceEventType.HarvestReady,
+    NotificationPreferenceEventType.MaintenanceDue,
+    NotificationPreferenceEventType.PrinterOffline,
+  ],
+};
+
+describe('preferencesAdapter.resolveSupportedEventTypes', () => {
+  it('falls back to the classic four job tokens on 404 (null capabilities)', () => {
+    const set = resolveSupportedEventTypes(null);
+    expect([...set].sort()).toEqual(
+      [
+        NotificationPreferenceEventType.JobCompleted,
+        NotificationPreferenceEventType.JobFailed,
+        NotificationPreferenceEventType.JobPaused,
+        NotificationPreferenceEventType.JobStarted,
+      ].sort(),
+    );
+  });
+
+  it('honours the exact list the server advertised, including unknown tokens', () => {
+    const set = resolveSupportedEventTypes({
+      supportedEventTypes: [
+        NotificationPreferenceEventType.JobStarted,
+        NotificationPreferenceEventType.FilamentRunout,
+        'SomeFutureToken',
+      ],
+    });
+    expect(set.has(NotificationPreferenceEventType.JobStarted)).toBe(true);
+    expect(set.has(NotificationPreferenceEventType.FilamentRunout)).toBe(true);
+    expect(set.has('SomeFutureToken')).toBe(true);
+    expect(set.has(NotificationPreferenceEventType.HarvestReady)).toBe(false);
+  });
+});
+
+describe('preferencesAdapter.serverAdvertisesOperatorCategories', () => {
+  it('is false on legacy (null capabilities)', () => {
+    expect(serverAdvertisesOperatorCategories(null)).toBe(false);
+  });
+
+  it('is false when capabilities only advertise job tokens', () => {
+    expect(
+      serverAdvertisesOperatorCategories({
+        supportedEventTypes: [
+          NotificationPreferenceEventType.JobStarted,
+          NotificationPreferenceEventType.JobCompleted,
+          NotificationPreferenceEventType.JobFailed,
+          NotificationPreferenceEventType.JobPaused,
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it('is true when at least one operator token is advertised', () => {
+    expect(
+      serverAdvertisesOperatorCategories({
+        supportedEventTypes: [
+          NotificationPreferenceEventType.JobStarted,
+          NotificationPreferenceEventType.HarvestReady,
+        ],
+      }),
+    ).toBe(true);
+  });
+});
+
 describe('preferencesAdapter.hydratePreferences', () => {
   it('returns a full default matrix when the server has no preferences yet', () => {
     const { form, serverSupportsOperatorCategories } = hydratePreferences(null);
@@ -60,22 +134,22 @@ describe('preferencesAdapter.hydratePreferences', () => {
       NotificationPreferenceEventType.JobCompleted,
       NotificationPreferenceEventType.JobFailed,
       NotificationPreferenceEventType.JobPaused,
-      NotificationPreferenceEventType.RunoutRisk,
+      NotificationPreferenceEventType.FilamentRunout,
       NotificationPreferenceEventType.HarvestReady,
       NotificationPreferenceEventType.MaintenanceDue,
       NotificationPreferenceEventType.PrinterOffline,
     ]);
   });
 
-  it('marks a legacy server (job-only matrix) as not supporting operator categories', () => {
-    const { serverSupportsOperatorCategories, form } = hydratePreferences(baseLegacyServerResponse());
+  it('marks a legacy server (no capabilities probe) as not supporting operator categories', () => {
+    const { serverSupportsOperatorCategories, form } = hydratePreferences(baseLegacyServerResponse(), null);
 
     expect(serverSupportsOperatorCategories).toBe(false);
     const runout = form.eventChannelPreferences?.find(
-      r => r.eventType === NotificationPreferenceEventType.RunoutRisk,
+      r => r.eventType === NotificationPreferenceEventType.FilamentRunout,
     );
     expect(runout).toEqual({
-      eventType: NotificationPreferenceEventType.RunoutRisk,
+      eventType: NotificationPreferenceEventType.FilamentRunout,
       inApp: false,
       email: false,
       push: false,
@@ -83,13 +157,13 @@ describe('preferencesAdapter.hydratePreferences', () => {
     });
   });
 
-  it('marks a capable server (any operator row present) as supporting operator categories', () => {
+  it('marks a capable server (probe advertises operator tokens) as supporting operator categories', () => {
     const capable = baseLegacyServerResponse();
     capable.eventChannelPreferences.push(
       row(NotificationPreferenceEventType.HarvestReady, { inApp: true, push: true }),
     );
 
-    const { serverSupportsOperatorCategories, form } = hydratePreferences(capable);
+    const { serverSupportsOperatorCategories, form } = hydratePreferences(capable, CAPABLE_CAPABILITIES);
 
     expect(serverSupportsOperatorCategories).toBe(true);
     const harvest = form.eventChannelPreferences?.find(
@@ -104,7 +178,7 @@ describe('preferencesAdapter.hydratePreferences', () => {
     const unknownRow = row('SomeFuturePrefToken' as NotificationPreferenceEventType, { email: true });
     withUnknown.eventChannelPreferences.push(unknownRow);
 
-    const { form } = hydratePreferences(withUnknown);
+    const { form } = hydratePreferences(withUnknown, CAPABLE_CAPABILITIES);
 
     const echoed = form.eventChannelPreferences?.find(r => r.eventType === unknownRow.eventType);
     expect(echoed).toEqual(unknownRow);
@@ -120,7 +194,7 @@ describe('preferencesAdapter.hydratePreferences', () => {
       email: false,
     });
 
-    const { form } = hydratePreferences(tampered);
+    const { form } = hydratePreferences(tampered, null);
     const failed = form.eventChannelPreferences?.find(
       r => r.eventType === NotificationPreferenceEventType.JobFailed,
     );
@@ -158,7 +232,7 @@ describe('preferencesAdapter.withDerivedLegacyFlags', () => {
     expect(failed?.inApp).toBe(true);
   });
 
-  it('leaves operator rows in the matrix (adapter — not this function — strips them)', () => {
+  it('leaves operator rows in the matrix (buildSavePayload — not this function — strips them)', () => {
     const matrix = defaultEventChannelPreferences();
     const harvest = matrix.find(r => r.eventType === NotificationPreferenceEventType.HarvestReady)!;
     harvest.email = true;
@@ -203,27 +277,46 @@ describe('preferencesAdapter.buildSavePayload', () => {
     };
   }
 
-  it('strips operator rows on legacy servers so the request cannot 400', () => {
-    const payload = buildSavePayload(formWithOperatorChanges(), false);
+  it('strips operator rows on legacy servers (capabilities probe 404) so the request cannot 400', () => {
+    const payload = buildSavePayload(formWithOperatorChanges(), null);
     const tokens = payload.eventChannelPreferences?.map(r => r.eventType) ?? [];
 
     expect(tokens).toContain(NotificationPreferenceEventType.JobStarted);
     expect(tokens).toContain(NotificationPreferenceEventType.JobCompleted);
     expect(tokens).toContain(NotificationPreferenceEventType.JobFailed);
     expect(tokens).toContain(NotificationPreferenceEventType.JobPaused);
-    expect(tokens).not.toContain(NotificationPreferenceEventType.RunoutRisk);
+    expect(tokens).not.toContain(NotificationPreferenceEventType.FilamentRunout);
     expect(tokens).not.toContain(NotificationPreferenceEventType.HarvestReady);
     expect(tokens).not.toContain(NotificationPreferenceEventType.MaintenanceDue);
     expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
   });
 
-  it('keeps operator rows when the server has demonstrated support', () => {
-    const payload = buildSavePayload(formWithOperatorChanges(), true);
+  it('keeps operator rows when the capabilities probe advertises them', () => {
+    const payload = buildSavePayload(formWithOperatorChanges(), CAPABLE_CAPABILITIES);
     const harvest = payload.eventChannelPreferences?.find(
       r => r.eventType === NotificationPreferenceEventType.HarvestReady,
     );
     expect(harvest?.push).toBe(true);
     expect(harvest?.inApp).toBe(true);
+  });
+
+  it('only sends the exact tokens the server advertised (partial rollout)', () => {
+    // Server advertises jobs + HarvestReady, but not the other three operator tokens.
+    const partial: NotificationCapabilitiesResponse = {
+      supportedEventTypes: [
+        NotificationPreferenceEventType.JobStarted,
+        NotificationPreferenceEventType.JobCompleted,
+        NotificationPreferenceEventType.JobFailed,
+        NotificationPreferenceEventType.JobPaused,
+        NotificationPreferenceEventType.HarvestReady,
+      ],
+    };
+    const payload = buildSavePayload(formWithOperatorChanges(), partial);
+    const tokens = payload.eventChannelPreferences?.map(r => r.eventType) ?? [];
+    expect(tokens).toContain(NotificationPreferenceEventType.HarvestReady);
+    expect(tokens).not.toContain(NotificationPreferenceEventType.FilamentRunout);
+    expect(tokens).not.toContain(NotificationPreferenceEventType.MaintenanceDue);
+    expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
   });
 
   it('preserves job-row values, always-on JobFailed in-app, and derived master flags', () => {
@@ -233,7 +326,7 @@ describe('preferencesAdapter.buildSavePayload', () => {
     )!;
     started.email = true;
 
-    const payload = buildSavePayload(form, false);
+    const payload = buildSavePayload(form, null);
     const failed = payload.eventChannelPreferences?.find(
       r => r.eventType === NotificationPreferenceEventType.JobFailed,
     );

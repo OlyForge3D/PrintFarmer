@@ -4,6 +4,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Card, Toggle, Select, Alert, Button, Spinner } from '@/common/components/ui';
 import { BellIcon } from '@/common/components/icons/MdiIcons';
 import {
+  useNotificationCapabilities,
   useNotificationPreferences,
   useUpdateNotificationPreferences,
 } from '@/features/notifications/hooks/useNotificationPreferences';
@@ -48,6 +49,7 @@ const FREQUENCY_OPTIONS = [
 export function NotificationPreferencesPage({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const { data: preferences, isLoading, error } = useNotificationPreferences();
+  const { data: capabilities } = useNotificationCapabilities();
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
 
@@ -63,12 +65,15 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   useEffect(() => {
     if (isDirtyRef.current) return;
 
-    const { form, serverSupportsOperatorCategories: supports } = hydratePreferences(preferences ?? null);
+    const { form, serverSupportsOperatorCategories: supports } = hydratePreferences(
+      preferences ?? null,
+      capabilities ?? null,
+    );
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync server preferences into local form state
     setFormState(withDerivedLegacyFlags(form));
     setServerSupportsOperatorCategories(supports);
     setIsDirty(false);
-  }, [preferences]);
+  }, [preferences, capabilities]);
 
   const isAnyPushEnabled = useMemo(
     () => (formState.eventChannelPreferences ?? []).some(item => item.push),
@@ -106,7 +111,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
   const handleSave = async () => {
     try {
-      await updateMutation.mutateAsync(buildSavePayload(formState, serverSupportsOperatorCategories));
+      await updateMutation.mutateAsync(buildSavePayload(formState, capabilities ?? null));
       setIsDirty(false);
       toast.success('Notification preferences saved');
     } catch {

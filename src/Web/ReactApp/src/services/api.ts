@@ -112,6 +112,7 @@ import {
   DispatchHistoryPageDto,
   FailureDetectionEvent,
   NotificationDto,
+  NotificationCapabilitiesResponse,
   NotificationPreferencesDto,
   TelegramSettingsDto,
   TelegramTestResult,
@@ -4486,6 +4487,23 @@ export class ApiClient {
   async updateNotificationPreferences(preferences: UpdateNotificationPreferencesRequest): Promise<NotificationPreferencesDto> {
     const response = await this.client.put('/notifications/preferences', preferences);
     return response.data;
+  }
+
+  /**
+   * Capability probe for the notification preferences enum. Introduced by #708.
+   * Legacy servers respond 404; the client treats that as "supportedEventTypes
+   * = the classic four job tokens only" via the preferences adapter, so
+   * anticipatory operator tokens are never sent on the outbound PUT.
+   */
+  async getNotificationCapabilities(): Promise<NotificationCapabilitiesResponse | null> {
+    try {
+      const response = await this.client.get('/notifications/capabilities');
+      return response.data as NotificationCapabilitiesResponse;
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) return null;
+      throw err;
+    }
   }
 
   async getTelegramSettings(): Promise<TelegramSettingsDto> {

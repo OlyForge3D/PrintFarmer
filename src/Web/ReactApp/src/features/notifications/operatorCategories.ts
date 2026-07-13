@@ -10,7 +10,7 @@ import { NotificationPreferenceEventType } from '@/types/api';
  * outbound payloads when server capability has not been observed.
  */
 export const OPERATOR_EVENT_TYPES: readonly NotificationPreferenceEventType[] = [
-  NotificationPreferenceEventType.RunoutRisk,
+  NotificationPreferenceEventType.FilamentRunout,
   NotificationPreferenceEventType.HarvestReady,
   NotificationPreferenceEventType.MaintenanceDue,
   NotificationPreferenceEventType.PrinterOffline,
@@ -64,7 +64,7 @@ export const JOB_EVENT_ROWS: readonly EventRowMeta[] = [
 
 export const OPERATOR_EVENT_ROWS: readonly EventRowMeta[] = [
   {
-    eventType: NotificationPreferenceEventType.RunoutRisk,
+    eventType: NotificationPreferenceEventType.FilamentRunout,
     label: 'Filament Runout Risk',
     description: 'When a print is at risk of running out of filament before it finishes',
   },

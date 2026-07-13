@@ -1,6 +1,7 @@
 import {
   NotificationFrequency,
   NotificationPreferenceEventType,
+  type NotificationCapabilitiesResponse,
   type NotificationEventChannelPreferenceDto,
   type NotificationPreferencesDto,
   type UpdateNotificationPreferencesRequest,
@@ -19,18 +20,17 @@ import {
  *    known operator category so the UI can always render the full grid, even
  *    on legacy servers that only know the four job categories.
  *
- * 2. Detect whether the server understands operator categories. The probe is
- *    "the server returned at least one operator category row in the GET
- *    response". This is a lower bound: a capable server that has never had
- *    operator prefs written may still look legacy. That is safe because the
- *    only consequence is that operator toggles are kept as local pending state
- *    until the first authoritative response arrives.
+ * 2. Consume the `GET /notifications/capabilities` probe (introduced by #708)
+ *    to know exactly which enum tokens the server accepts. A `null`
+ *    capabilities response (endpoint 404) is treated as "legacy server:
+ *    supportedEventTypes = the classic four job tokens only".
  *
- * 3. On save, strip operator category rows from the outbound payload when the
- *    server has not been observed supporting them. Legacy servers therefore
- *    never receive an unknown enum token and cannot 400 on
- *    JsonStringEnumConverter deserialization, so previously saved job
- *    preferences are never corrupted by an anticipatory UI.
+ * 3. On save, filter the outbound matrix to only tokens the server is known
+ *    to accept. Legacy servers therefore never receive an unknown enum
+ *    token and cannot 400 on `JsonStringEnumConverter` deserialization, so
+ *    previously saved job preferences are never corrupted by an anticipatory
+ *    UI. Unknown tokens the server itself returned are still preserved on the
+ *    outbound payload — the server said it accepts them.
  *
  * The tokens/labels here are gated by #708 — when the backend contract lands
  * on `feature/705-operator-redesign`, the operator token set in
@@ -58,12 +58,41 @@ export function defaultEventChannelPreferences(): NotificationEventChannelPrefer
   ];
 }
 
+/**
+ * Resolve the effective set of accepted event tokens from the capabilities
+ * probe. `null` means the probe returned 404 → treat as legacy job-only.
+ * Returned as a Set of raw string tokens so we can compare against unknown
+ * (future) tokens without widening the client enum.
+ */
+export function resolveSupportedEventTypes(
+  capabilities: NotificationCapabilitiesResponse | null | undefined,
+): ReadonlySet<string> {
+  if (!capabilities || !Array.isArray(capabilities.supportedEventTypes)) {
+    return new Set<string>(JOB_EVENT_TYPES);
+  }
+  return new Set<string>(capabilities.supportedEventTypes);
+}
+
+/**
+ * True when the capabilities probe advertises at least one operator token.
+ * Used to drive the legacy-server info banner in the UI.
+ */
+export function serverAdvertisesOperatorCategories(
+  capabilities: NotificationCapabilitiesResponse | null | undefined,
+): boolean {
+  const supported = resolveSupportedEventTypes(capabilities);
+  for (const t of OPERATOR_EVENT_TYPES) {
+    if (supported.has(t)) return true;
+  }
+  return false;
+}
+
 export interface HydratedPreferences {
   form: UpdateNotificationPreferencesRequest;
   /**
-   * True when the server has demonstrated it understands operator category
-   * tokens in the preferences contract. Legacy servers report false; operator
-   * toggles remain local-only until the server upgrades.
+   * True when the capabilities probe advertised at least one operator token.
+   * Legacy servers (probe 404) report false and the operator card renders a
+   * banner explaining that selections will activate once the server updates.
    */
   serverSupportsOperatorCategories: boolean;
 }
@@ -78,10 +107,18 @@ export interface HydratedPreferences {
  *   forward-compatible client cannot silently drop server-side data.
  * - The `JobFailed` in-app toggle is coerced on to preserve the existing
  *   always-on invariant.
+ *
+ * The `capabilities` argument is authoritative for whether the operator card
+ * shows the legacy-server banner. It is intentionally decoupled from the raw
+ * matrix so an empty-preferences user on a capable server still gets the full
+ * UI.
  */
 export function hydratePreferences(
   preferences: NotificationPreferencesDto | null | undefined,
+  capabilities: NotificationCapabilitiesResponse | null | undefined = null,
 ): HydratedPreferences {
+  const serverSupportsOperatorCategories = serverAdvertisesOperatorCategories(capabilities);
+
   if (!preferences) {
     return {
       form: {
@@ -97,14 +134,11 @@ export function hydratePreferences(
         frequency: NotificationFrequency.RealTime,
         retentionDays: 30,
       },
-      serverSupportsOperatorCategories: false,
+      serverSupportsOperatorCategories,
     };
   }
 
   const serverMatrix = preferences.eventChannelPreferences ?? [];
-  const serverSupportsOperatorCategories = serverMatrix.some(row =>
-    isOperatorEventType(row.eventType),
-  );
 
   const known = new Set<NotificationPreferenceEventType>([
     ...JOB_EVENT_TYPES,
@@ -203,22 +237,27 @@ export function withDerivedLegacyFlags(
 /**
  * Prepare the payload sent to `PUT /notifications/preferences`.
  *
- * When the server does not yet understand operator categories, operator rows
- * are stripped from the outbound matrix so the request cannot fail
- * deserialization. All other state (job rows, unknown server-provided rows,
- * legacy flags, frequency, retentionDays) is passed through unchanged.
+ * Filters the outbound matrix to only tokens the server advertised in
+ * `GET /notifications/capabilities.supportedEventTypes`. Legacy servers
+ * (capabilities probe 404 → `capabilities === null`) accept only the four
+ * classic job tokens; every operator or unknown token is stripped so the
+ * request cannot fail JsonStringEnumConverter deserialization.
+ *
+ * All other state (job rows, legacy flags, frequency, retentionDays) is
+ * passed through unchanged.
  */
 export function buildSavePayload(
   request: UpdateNotificationPreferencesRequest,
-  serverSupportsOperatorCategories: boolean,
+  capabilities: NotificationCapabilitiesResponse | null | undefined,
 ): UpdateNotificationPreferencesRequest {
   const derived = withDerivedLegacyFlags(request);
-  if (serverSupportsOperatorCategories) {
-    return derived;
-  }
+  const supported = resolveSupportedEventTypes(capabilities);
   const matrix = derived.eventChannelPreferences ?? [];
   return {
     ...derived,
-    eventChannelPreferences: matrix.filter(row => !isOperatorEventType(row.eventType)),
+    eventChannelPreferences: matrix.filter(row => supported.has(row.eventType as string)),
   };
 }
+
+/** Re-exported for tests and other adapter consumers. */
+export { isOperatorEventType };

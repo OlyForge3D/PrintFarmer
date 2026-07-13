@@ -1,10 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import type { NotificationPreferencesDto, UpdateNotificationPreferencesRequest } from '@/types/api';
+import type {
+  NotificationCapabilitiesResponse,
+  NotificationPreferencesDto,
+  UpdateNotificationPreferencesRequest,
+} from '@/types/api';
 
 const KEYS = {
   all: ['notifications'] as const,
   preferences: () => [...KEYS.all, 'preferences'] as const,
+  capabilities: () => [...KEYS.all, 'capabilities'] as const,
 };
 
 export function useNotificationPreferences() {
@@ -18,6 +23,19 @@ export function useNotificationPreferences() {
         return null;
       }
     },
+  });
+}
+
+/**
+ * Capability probe (#708). `null` result = legacy server (endpoint 404).
+ * Isolated from `useNotificationPreferences` so the preferences query is not
+ * blocked on the probe and the adapter can render immediately.
+ */
+export function useNotificationCapabilities() {
+  return useQuery<NotificationCapabilitiesResponse | null>({
+    queryKey: KEYS.capabilities(),
+    queryFn: () => apiClient.getNotificationCapabilities(),
+    staleTime: 5 * 60 * 1000,
   });
 }
 
