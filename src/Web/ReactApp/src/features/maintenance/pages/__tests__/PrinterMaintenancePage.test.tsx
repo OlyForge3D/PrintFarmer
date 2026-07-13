@@ -13,6 +13,7 @@ vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinters: vi.fn(),
     getPrinterDetails: vi.fn(),
+    getSystemCapabilities: vi.fn(),
     get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
@@ -183,6 +184,7 @@ function seedDefaults(overrides: {
   alerts?: MaintenanceAlert[];
   logs?: MaintenanceLog[];
   deployments?: PrinterMaintenanceScheduleDto[];
+  capabilities?: unknown;
 } = {}) {
   (apiClient.getPrinters as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([printer]);
   (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -210,6 +212,17 @@ function seedDefaults(overrides: {
   );
   (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
     overrides.deployments ?? [legacyDeployment, scopedDeployment]
+  );
+
+  (apiClient.getSystemCapabilities as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    overrides.capabilities ?? {
+      architecture: 'x64',
+      slicingEnabled: true,
+      modelFilesEnabled: true,
+      thumbnailGenerationEnabled: true,
+      gcodeUploadEnabled: true,
+      operatorFeatures: { multiSlotFallbackEnabled: true },
+    }
   );
 }
 
@@ -290,5 +303,45 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     expect(screen.queryByRole('region', { name: /per-toolhead odometers/i })).not.toBeInTheDocument();
     // Picker still renders because there are 2 eligible toolheads.
     expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument();
+  });
+
+  it('hides odometer row and scope picker when multiSlotFallbackEnabled is false (#711 H5)', async () => {
+    seedDefaults({
+      capabilities: {
+        architecture: 'x64',
+        slicingEnabled: true,
+        modelFilesEnabled: true,
+        thumbnailGenerationEnabled: true,
+        gcodeUploadEnabled: true,
+        operatorFeatures: { multiSlotFallbackEnabled: false },
+      },
+    });
+    renderPage();
+
+    // Legacy printer-wide alert is still shown.
+    await waitFor(() => expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument());
+    // If the backend accidentally sends a scoped record, we still render it
+    // (defensive), but the per-toolhead UI (picker + odometer row) must not
+    // appear. Per the H5 fix, backend actually strips scoped rows server-side
+    // when the flag is off, so this is belt-and-suspenders.
+    expect(screen.queryByRole('region', { name: /per-toolhead odometers/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('printer-maintenance-scope')).not.toBeInTheDocument();
+  });
+
+  it('treats missing operatorFeatures block as enabled (older backend fallback)', async () => {
+    seedDefaults({
+      capabilities: {
+        architecture: 'x64',
+        slicingEnabled: true,
+        modelFilesEnabled: true,
+        thumbnailGenerationEnabled: true,
+        gcodeUploadEnabled: true,
+        // No operatorFeatures — pre-#711 backend.
+      },
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument());
+    expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument();
   });
 });

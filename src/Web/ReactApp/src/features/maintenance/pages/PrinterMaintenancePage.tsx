@@ -30,6 +30,7 @@ import {
   type ToolheadScopeValue,
 } from '../components/toolheadScope';
 import { selectMaintenanceEligibleToolheads } from '@/features/printers/utils/isEligibleMaintenanceToolhead';
+import { usePerToolMaintenanceEnabled } from '@/common/hooks/usePerToolMaintenanceEnabled';
 
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
@@ -85,10 +86,18 @@ export function PrinterMaintenancePage() {
     staleTime: 60_000,
   });
 
-  const eligibleToolheads = useMemo(
+  const eligibleToolheadsRaw = useMemo(
     () => selectMaintenanceEligibleToolheads(printerDetails?.toolheads),
     [printerDetails?.toolheads]
   );
+
+  // #711 gates per-toolhead maintenance behind `multiSlotFallbackEnabled`.
+  // When the backend reports the flag as `false` it strips scoped alerts,
+  // deployments, and per-tool analytics server-side (Round-10 finding H5,
+  // commit fcd37b37f), so the UI has to collapse to a printer-wide view
+  // even for multi-hotend printers.
+  const { enabled: perToolEnabled } = usePerToolMaintenanceEnabled();
+  const eligibleToolheads = perToolEnabled ? eligibleToolheadsRaw : [];
 
   // Fetch per-toolhead odometers (returns [] until #711 lands).
   const { data: odometers = [], isLoading: odometersLoading } = useQuery({
@@ -461,7 +470,7 @@ export function PrinterMaintenancePage() {
           printerId={printerId}
           printerName={printer?.name || 'Unknown Printer'}
           deployments={deployments}
-          toolheads={printerDetails?.toolheads ?? []}
+          toolheads={perToolEnabled ? printerDetails?.toolheads ?? [] : []}
           initialToolheadId={modalInitialToolheadId}
           onSubmit={handleLogSubmit}
           onClose={() => setShowLogModal(false)}
