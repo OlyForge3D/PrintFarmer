@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import { PrinterMaintenancePage } from '../PrinterMaintenancePage';
-import type { PrinterToolheadOdometer, MaintenanceAlert, MaintenanceLog, PrinterMaintenanceScheduleDto } from '@/types/maintenance';
+import type { MaintenanceAlert, MaintenanceLog, PrinterMaintenanceScheduleDto } from '@/types/maintenance';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
 import type { PrinterDetails, ToolheadDto } from '@/types/api';
 import { ToolheadType } from '@/types/api';
@@ -23,7 +23,6 @@ vi.mock('@/services/api', () => ({
 
 vi.mock('@/services/maintenanceService', () => ({
   maintenanceService: {
-    getPrinterToolheadOdometers: vi.fn(),
     getPrinterStatistics: vi.fn(),
     getPrinterMaintenanceLogs: vi.fn(),
     getPrinterAlerts: vi.fn(),
@@ -59,6 +58,7 @@ const physicalT0: ToolheadDto = {
   name: 'T0',
   isPrimary: true,
   toolheadType: ToolheadType.Physical,
+  cumulativePrintHours: 10,
 };
 const physicalT1: ToolheadDto = {
   id: 'th-1',
@@ -66,6 +66,7 @@ const physicalT1: ToolheadDto = {
   name: 'T1',
   isPrimary: false,
   toolheadType: ToolheadType.Physical,
+  cumulativePrintHours: 200,
 };
 const mmuGate: ToolheadDto = {
   id: 'th-mmu',
@@ -80,6 +81,15 @@ const printerDetailsMulti: PrinterDetails = {
   name: 'Voron 2.4',
   serverUrl: 'http://x',
   toolheads: [physicalT0, physicalT1],
+  supportsPerToolAttribution: true,
+} as PrinterDetails;
+
+const printerDetailsMultiUnattributed: PrinterDetails = {
+  id: printerId,
+  name: 'Voron 2.4',
+  serverUrl: 'http://x',
+  toolheads: [physicalT0, physicalT1],
+  supportsPerToolAttribution: false,
 } as PrinterDetails;
 
 const printerDetailsSingle: PrinterDetails = {
@@ -87,6 +97,7 @@ const printerDetailsSingle: PrinterDetails = {
   name: 'Voron 2.4',
   serverUrl: 'http://x',
   toolheads: [physicalT0],
+  supportsPerToolAttribution: true,
 } as PrinterDetails;
 
 const printerDetailsMmuOnly: PrinterDetails = {
@@ -94,6 +105,7 @@ const printerDetailsMmuOnly: PrinterDetails = {
   name: 'Voron 2.4',
   serverUrl: 'http://x',
   toolheads: [physicalT0, mmuGate],
+  supportsPerToolAttribution: true,
 } as PrinterDetails;
 
 const legacyAlert: MaintenanceAlert = {
@@ -155,11 +167,6 @@ const scopedDeployment: PrinterMaintenanceScheduleDto = {
   toolheadId: 'th-1',
 };
 
-const odometers: PrinterToolheadOdometer[] = [
-  { toolheadId: 'th-0', toolheadName: 'T0', nozzleHours: 10, hotendHours: 10, dueState: 'ok' },
-  { toolheadId: 'th-1', toolheadName: 'T1', nozzleHours: 200, hotendHours: 200, dueState: 'overdue', nextDueLabel: 'Nozzle' },
-];
-
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -180,7 +187,6 @@ function renderPage() {
 
 function seedDefaults(overrides: {
   details?: PrinterDetails | null;
-  odometersResult?: PrinterToolheadOdometer[] | Error;
   alerts?: MaintenanceAlert[];
   logs?: MaintenanceLog[];
   deployments?: PrinterMaintenanceScheduleDto[];
@@ -190,13 +196,6 @@ function seedDefaults(overrides: {
   (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
     overrides.details === undefined ? printerDetailsMulti : overrides.details
   );
-
-  const odom = overrides.odometersResult ?? odometers;
-  if (odom instanceof Error) {
-    (maintenanceService.getPrinterToolheadOdometers as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(odom);
-  } else {
-    (maintenanceService.getPrinterToolheadOdometers as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(odom);
-  }
 
   (maintenanceService.getPrinterStatistics as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
     printerId,
@@ -245,7 +244,8 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     await waitFor(() => {
       expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Alert for T1')).not.toBeInTheDocument();
+    const alertsSection = screen.getByRole('region', { name: /active alerts/i });
+    expect(within(alertsSection).queryByText('Alert for T1')).not.toBeInTheDocument();
     expect(screen.getByText('Deployment (printer-wide)')).toBeInTheDocument();
     expect(screen.queryByText('Deployment for T1')).not.toBeInTheDocument();
     expect(screen.getByText('Legacy log')).toBeInTheDocument();
@@ -264,9 +264,11 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     await user.click(screen.getByLabelText(/T1 · T1/));
 
     await waitFor(() => {
-      expect(screen.getByText('Alert for T1')).toBeInTheDocument();
+      const alertsSection = screen.getByRole('region', { name: /active alerts/i });
+      expect(within(alertsSection).getByText('Alert for T1')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Legacy alert (printer-wide)')).not.toBeInTheDocument();
+    const alertsSection = screen.getByRole('region', { name: /active alerts/i });
+    expect(within(alertsSection).queryByText('Legacy alert (printer-wide)')).not.toBeInTheDocument();
     expect(screen.getByText('Deployment for T1')).toBeInTheDocument();
     expect(screen.queryByText('Deployment (printer-wide)')).not.toBeInTheDocument();
     expect(screen.getByText('Log for T1')).toBeInTheDocument();
@@ -274,19 +276,18 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
   });
 
   it('single-toolhead printer does not show the scope picker or odometer row', async () => {
-    seedDefaults({ details: printerDetailsSingle, odometersResult: [] });
+    seedDefaults({ details: printerDetailsSingle });
     renderPage();
 
     await waitFor(() => expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument());
     expect(screen.queryByTestId('printer-maintenance-scope')).not.toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: /per-toolhead odometers/i })).not.toBeInTheDocument();
-    // Legacy printer with no eligible toolheads shows every record.
+    // One eligible toolhead still gets an odometer card, but no picker.
     expect(screen.getByText('Legacy log')).toBeInTheDocument();
     expect(screen.getByText('Log for T1')).toBeInTheDocument();
   });
 
   it('MMU-only printer excludes gate toolheads from the picker', async () => {
-    seedDefaults({ details: printerDetailsMmuOnly, odometersResult: [] });
+    seedDefaults({ details: printerDetailsMmuOnly });
     renderPage();
 
     await waitFor(() => expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument());
@@ -295,14 +296,16 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     expect(screen.queryByLabelText(/AMS 1/)).not.toBeInTheDocument();
   });
 
-  it('odometer 404 (empty result) still renders the rest of the page unchanged', async () => {
-    seedDefaults({ odometersResult: [] });
+  it('hides per-tool UI when printer reports supportsPerToolAttribution=false (#711)', async () => {
+    seedDefaults({ details: printerDetailsMultiUnattributed });
     renderPage();
 
+    // Legacy printer-wide alert is still shown regardless of gate.
     await waitFor(() => expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument());
+    // Per-tool surface must be hidden because the printer projection says
+    // the backend cannot attribute usage to specific toolheads.
     expect(screen.queryByRole('region', { name: /per-toolhead odometers/i })).not.toBeInTheDocument();
-    // Picker still renders because there are 2 eligible toolheads.
-    expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument();
+    expect(screen.queryByTestId('printer-maintenance-scope')).not.toBeInTheDocument();
   });
 
   it('hides odometer row and scope picker when multiSlotFallbackEnabled is false (#711 H5)', async () => {

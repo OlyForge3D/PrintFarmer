@@ -1247,6 +1247,14 @@ export interface ToolheadDto {
   supportedMaterials?: string[];
   isPrimary: boolean;
   lastUpdated?: Date;
+  /**
+   * Cumulative print hours accrued while this toolhead was the active tool,
+   * from `PrinterDetailsDto.toolheads[i].cumulativePrintHours` on the #711
+   * backend (`0bfa50343`). Null on older backends and on new toolheads that
+   * have not yet observed a print, or on printers with
+   * `supportsPerToolAttribution === false`.
+   */
+  cumulativePrintHours?: number | null;
   // Multi-toolhead filament tracking
   toolheadType?: ToolheadType | string;
   currentSpoolId?: number;
@@ -1297,6 +1305,15 @@ export interface PrinterDetails {
   buddyCameraIp?: string;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
+  /**
+   * True only for Moonraker printers with a supported multi-physical-tool
+   * topology (#711, `0bfa50343`). When false, the backend rejects hour-based
+   * maintenance schedules that carry a non-null `toolheadId` with HTTP 400,
+   * and per-tool odometers/scoped alerts are not populated. Omitted on
+   * older backends — the frontend defaults to treating omission as
+   * "unsupported" for the odometer surface but tolerant everywhere else.
+   */
+  supportsPerToolAttribution?: boolean;
 }
 
 // Temperature targets

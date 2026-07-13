@@ -4,7 +4,6 @@ import {
   ClockIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
-  ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import type { PrinterToolheadOdometer } from '@/types/maintenance';
 
@@ -18,9 +17,11 @@ export interface ToolheadOdometerCardProps {
 }
 
 /**
- * Compact per-toolhead odometer card used on `PrinterMaintenancePage`.
- * Renders nozzle/hotend hours plus a non-color due-state chip (icon + label)
- * so the state is perceivable without relying on color alone (WCAG 1.4.1).
+ * Compact per-toolhead odometer card used on `PrinterMaintenancePage`. Renders
+ * the toolhead's cumulative print hours (from
+ * `PrinterDetailsDto.toolheads[].cumulativePrintHours` on the #711 backend
+ * `0bfa50343`) plus a non-color due-state chip (icon + label) so the state is
+ * perceivable without relying on color alone (WCAG 1.4.1).
  */
 export function ToolheadOdometerCard({
   odometer,
@@ -29,12 +30,10 @@ export function ToolheadOdometerCard({
   className,
 }: ToolheadOdometerCardProps) {
   const dueState = deriveDueState(odometer);
-  const nozzle = formatHours(odometer.nozzleHours);
-  const hotend = formatHours(odometer.hotendHours);
+  const hours = formatHours(odometer.cumulativePrintHours);
   const label = describeToolhead(odometer);
 
   const interactive = typeof onActivate === 'function';
-
   const Container: React.ElementType = interactive ? 'button' : 'div';
 
   return (
@@ -54,14 +53,21 @@ export function ToolheadOdometerCard({
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-pf-text-primary truncate">{label}</div>
-          <div className="mt-2 grid grid-cols-2 gap-3 text-xs">
-            <OdometerCell icon={ClockIcon} label="Nozzle hours" value={nozzle} />
-            <OdometerCell icon={ArrowPathIcon} label="Hotend hours" value={hotend} />
+          <div className="mt-2 flex items-center gap-2 text-xs">
+            <ClockIcon className="h-4 w-4 shrink-0 text-pf-primary" aria-hidden />
+            <div className="min-w-0">
+              <div className="text-pf-text-tertiary">Cumulative print hours</div>
+              <div
+                className="text-pf-text-primary font-medium truncate"
+                aria-label={`Cumulative print hours: ${hours}`}
+              >
+                {hours}
+              </div>
+            </div>
           </div>
           {odometer.nextDueTaskName && (
             <p className="mt-2 text-xs text-pf-text-secondary truncate">
               Next: <span className="text-pf-text-primary">{odometer.nextDueTaskName}</span>
-              {renderRelativeDue(odometer)}
             </p>
           )}
         </div>
@@ -71,43 +77,12 @@ export function ToolheadOdometerCard({
   );
 }
 
-interface OdometerCellProps {
-  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
-  label: string;
-  value: string;
-}
-
-function OdometerCell({ icon: Icon, label, value }: OdometerCellProps) {
-  return (
-    <div className="flex items-center gap-2 min-w-0">
-      <Icon className="h-4 w-4 shrink-0 text-pf-primary" aria-hidden />
-      <div className="min-w-0">
-        <div className="text-pf-text-tertiary">{label}</div>
-        <div className="text-pf-text-primary font-medium truncate" aria-label={`${label}: ${value}`}>
-          {value}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type DueState = 'overdue' | 'due-today' | 'upcoming' | 'ok' | 'unknown';
+type DueState = 'overdue' | 'due-today' | 'ok' | 'unknown';
 
 function deriveDueState(o: PrinterToolheadOdometer): DueState {
   if (o.isOverdue) return 'overdue';
   if (o.isDueToday) return 'due-today';
-  if (typeof o.daysUntilDue === 'number') {
-    if (o.daysUntilDue < 0) return 'overdue';
-    if (o.daysUntilDue === 0) return 'due-today';
-    if (o.daysUntilDue <= 7) return 'upcoming';
-    return 'ok';
-  }
-  if (typeof o.hoursUntilDue === 'number') {
-    if (o.hoursUntilDue < 0) return 'overdue';
-    if (o.hoursUntilDue <= 4) return 'due-today';
-    if (o.hoursUntilDue <= 24) return 'upcoming';
-    return 'ok';
-  }
+  if (typeof o.cumulativePrintHours === 'number') return 'ok';
   return 'unknown';
 }
 
@@ -142,18 +117,13 @@ const DUE_STATE_META: Record<
     icon: ExclamationTriangleIcon,
     className: 'bg-pf-warning/10 border-pf-warning/40 text-pf-warning',
   },
-  upcoming: {
-    label: 'Upcoming',
-    icon: ClockIcon,
-    className: 'bg-pf-accent-bg/20 border-pf-accent/40 text-pf-primary',
-  },
   ok: {
     label: 'OK',
     icon: CheckCircleIcon,
     className: 'bg-pf-success/10 border-pf-success/40 text-pf-success',
   },
   unknown: {
-    label: 'No schedule',
+    label: 'No data',
     icon: ClockIcon,
     className: 'bg-pf-bg-dark/50 border-pf-border text-pf-text-tertiary',
   },
@@ -178,19 +148,6 @@ function formatHours(value: number | null | undefined): string {
     return '—';
   }
   return `${value.toFixed(1)} h`;
-}
-
-function renderRelativeDue(o: PrinterToolheadOdometer): string {
-  if (typeof o.daysUntilDue === 'number') {
-    if (o.daysUntilDue < 0) return ` · ${Math.abs(o.daysUntilDue)}d overdue`;
-    if (o.daysUntilDue === 0) return ' · due today';
-    return ` · in ${o.daysUntilDue}d`;
-  }
-  if (typeof o.hoursUntilDue === 'number') {
-    if (o.hoursUntilDue < 0) return ` · ${Math.abs(o.hoursUntilDue).toFixed(0)}h overdue`;
-    return ` · in ${o.hoursUntilDue.toFixed(0)}h`;
-  }
-  return '';
 }
 
 export default ToolheadOdometerCard;

@@ -15,7 +15,6 @@ import type {
   ResolveAlertResponse,
   CreateMaintenanceLogRequest,
   UpdateMaintenanceModeRequest,
-  PrinterToolheadOdometer
 } from '@/types/maintenance';
 
 // Analytics response types
@@ -254,38 +253,6 @@ export class MaintenanceService {
   async getPrinterStatistics(printerId: string): Promise<PrinterStatistics> {
     const response = await apiClient.get<PrinterStatistics>(`/maintenance/printers/${printerId}/statistics`);
     return response.data;
-  }
-
-  /**
-   * Gets per-physical-toolhead odometers and next-due summaries for a printer.
-   *
-   * The #711 backend (Dallas v2, verified at tip `0bfa50343`) has not yet
-   * shipped a dedicated `GET /api/maintenance/printers/{printerId}/toolhead-odometers`
-   * endpoint — per-tool cumulative hours live only in the server-side
-   * `IToolheadStatisticsRepository`. Until that endpoint lands (or a
-   * replacement contract is chosen), this method treats a 404 (and network
-   * `response.status === 404`) as "no per-toolhead data" and returns an
-   * empty list so the printer maintenance page keeps rendering the
-   * printer-wide view unchanged. Non-404 errors still propagate so the
-   * TanStack Query surface shows the usual error UI.
-   */
-  async getPrinterToolheadOdometers(printerId: string): Promise<PrinterToolheadOdometer[]> {
-    try {
-      const response = await apiClient.get<PrinterToolheadOdometer[]>(
-        `/maintenance/printers/${printerId}/toolhead-odometers`
-      );
-      return Array.isArray(response.data) ? response.data : [];
-    } catch (error) {
-      const statusCode =
-        typeof error === 'object' && error !== null
-          ? (error as { statusCode?: number; response?: { status?: number } }).statusCode ??
-            (error as { response?: { status?: number } }).response?.status
-          : undefined;
-      if (statusCode === 404) {
-        return [];
-      }
-      throw error;
-    }
   }
 
   /**

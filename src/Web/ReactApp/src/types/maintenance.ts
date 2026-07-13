@@ -222,36 +222,32 @@ export interface MaintenanceCompletedEvent {
 // ============================================================================
 
 /**
- * Per-physical-toolhead odometer + next-due summary.
+ * Per-physical-toolhead odometer displayed on the printer maintenance page.
  *
- * Returned by `GET /api/maintenance/printers/{printerId}/toolhead-odometers`
- * once the #711 backend contract is merged. Until then the service treats a
- * missing endpoint / 404 as "no per-toolhead data" and returns an empty list
- * so the printer maintenance page keeps rendering unchanged.
+ * There is no dedicated backend endpoint. The #711 stable contract
+ * (`jpapiez-squad-711-fallback-maintenance-backend` @ `0bfa50343`) surfaces
+ * per-tool cumulative print hours directly on `PrinterDetailsDto.toolheads[]`
+ * as `cumulativePrintHours`. This client-side shape is assembled by the
+ * printer maintenance page from that field plus locally-derived due state
+ * (from the active alerts feed).
  */
 export interface PrinterToolheadOdometer {
-  printerId: string;
   toolheadId: string;
   toolheadName?: string | null;
   toolheadIndex?: number | null;
-  /** Cumulative print hours accrued while this toolhead was active. */
-  nozzleHours?: number | null;
-  /** Cumulative print hours on the hotend behind this toolhead. */
-  hotendHours?: number | null;
-  /** Filament processed by this toolhead, in grams (optional). */
-  filamentUsedGrams?: number | null;
-  /** ISO 8601 timestamp of the last maintenance performed for this toolhead. */
-  lastMaintenanceAt?: string | null;
-  /** Optional soonest-due summary for the toolhead. */
-  nextDueTaskName?: string | null;
-  /** Hours until the soonest hour-based task is due (negative = overdue). */
-  hoursUntilDue?: number | null;
-  /** Days until the soonest day-based task is due (negative = overdue). */
-  daysUntilDue?: number | null;
-  /** True when at least one task on this toolhead is overdue. */
+  /**
+   * Cumulative print hours accrued while this toolhead was the active tool,
+   * from `PrinterDetailsDto.toolheads[i].cumulativePrintHours`. Null when
+   * the backend has not yet observed any per-tool activity for the toolhead
+   * (e.g. brand-new printer or non-attributable topology).
+   */
+  cumulativePrintHours?: number | null;
+  /** True when at least one active alert on this toolhead is overdue. */
   isOverdue?: boolean;
-  /** True when at least one task on this toolhead is due today. */
+  /** True when at least one active alert on this toolhead is due today. */
   isDueToday?: boolean;
+  /** Optional soonest-due summary derived from the upcoming feed. */
+  nextDueTaskName?: string | null;
 }
 
 // ============================================================================

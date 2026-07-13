@@ -6,8 +6,9 @@ import { Button } from '@/common/components/ui/Button';
 import { maintenanceService } from '@/services/maintenanceService';
 import { maintenancePlanService } from '@/services/maintenancePlanService';
 import { apiClient } from '@/services/api';
-import type { 
-  CreateMaintenanceLogRequest
+import type {
+  CreateMaintenanceLogRequest,
+  PrinterToolheadOdometer,
 } from '@/types/maintenance';
 import type { ApiError, Printer, PrinterDetails } from '@/types/api';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
@@ -91,21 +92,20 @@ export function PrinterMaintenancePage() {
     [printerDetails?.toolheads]
   );
 
-  // #711 gates per-toolhead maintenance behind `multiSlotFallbackEnabled`.
-  // When the backend reports the flag as `false` it strips scoped alerts,
-  // deployments, and per-tool analytics server-side (Round-10 finding H5,
-  // commit fcd37b37f), so the UI has to collapse to a printer-wide view
-  // even for multi-hotend printers.
+  // #711 gates per-toolhead maintenance behind two independent signals:
+  //   1. Global operator flag `operatorFeatures.multiSlotFallbackEnabled`
+  //      (H5 finding, commits fcd37b37f + a24f14250) — off ⇒ scoped
+  //      alerts / deployments / analytics are stripped server-side.
+  //   2. Per-printer `PrinterDetailsDto.supportsPerToolAttribution` — off
+  //      ⇒ backend rejects hour-scoped schedules with HTTP 400 and never
+  //      populates per-tool cumulative hours.
+  // The per-tool UI only lights up when both are on (or the field is
+  // omitted on an older backend, which we treat as "unknown → hide the
+  // odometer surface but keep any scoped legacy data readable elsewhere").
   const { enabled: perToolEnabled } = usePerToolMaintenanceEnabled();
-  const eligibleToolheads = perToolEnabled ? eligibleToolheadsRaw : [];
-
-  // Fetch per-toolhead odometers (returns [] until #711 lands).
-  const { data: odometers = [], isLoading: odometersLoading } = useQuery({
-    queryKey: ['printerToolheadOdometers', printerId],
-    queryFn: () => maintenanceService.getPrinterToolheadOdometers(printerId!),
-    enabled: !!printerId,
-    staleTime: 30_000,
-  });
+  const printerSupportsPerTool = printerDetails?.supportsPerToolAttribution === true;
+  const perToolAllowed = perToolEnabled && printerSupportsPerTool;
+  const eligibleToolheads = perToolAllowed ? eligibleToolheadsRaw : [];
 
   // Fetch printer statistics
   const { data: statistics, isLoading: statsLoading } = useQuery({
@@ -135,6 +135,35 @@ export function PrinterMaintenancePage() {
     queryFn: () => maintenanceService.getPrinterAlerts(printerId!),
     enabled: !!printerId,
   });
+
+  // Build per-toolhead odometers in-memory from `PrinterDetailsDto.toolheads[]`
+  // (#711 stable contract at 0bfa50343 — there is NO dedicated odometer
+  // endpoint; the backend surfaces per-tool cumulative hours as a field on
+  // each toolhead). Due-state is derived from the active alerts feed for
+  // the same toolhead so the card reflects real scheduled work.
+  const odometers = useMemo<PrinterToolheadOdometer[]>(() => {
+    if (!perToolAllowed) return [];
+    return eligibleToolheadsRaw.map(t => {
+      const toolheadAlerts = (alerts ?? []).filter(a =>
+        a.toolheadId === t.id &&
+        (a.status === MaintenanceAlertStatus.Active ||
+          a.status === MaintenanceAlertStatus.Acknowledged)
+      );
+      const overdue = toolheadAlerts.some(a => a.severity >= 3);
+      const dueToday = !overdue && toolheadAlerts.length > 0;
+      const nextDueTaskName = toolheadAlerts[0]?.title ?? null;
+      return {
+        toolheadId: t.id,
+        toolheadName: t.name ?? null,
+        toolheadIndex: typeof t.index === 'number' ? t.index : null,
+        cumulativePrintHours:
+          typeof t.cumulativePrintHours === 'number' ? t.cumulativePrintHours : null,
+        isOverdue: overdue,
+        isDueToday: dueToday,
+        nextDueTaskName,
+      };
+    });
+  }, [perToolAllowed, eligibleToolheadsRaw, alerts]);
 
   const toolheadLabel = (toolheadId: string | null | undefined): string => {
     if (!toolheadId) return 'Printer-wide';
@@ -167,17 +196,19 @@ export function PrinterMaintenancePage() {
 
   const handleLogSubmit = async (data: CreateMaintenanceLogRequest) => {
     await maintenanceService.createMaintenanceLog(data);
-    // Refresh data (including per-toolhead odometers and upcoming feed).
+    // Refresh data. `printerDetails` invalidation picks up the new
+    // per-tool `cumulativePrintHours` after the backend recomputes on
+    // `maintenancecompleted` (#711).
     queryClient.invalidateQueries({ queryKey: ['printerMaintenanceLogs', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerStatistics', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerAlerts', printerId] });
-    queryClient.invalidateQueries({ queryKey: ['printerToolheadOdometers', printerId] });
+    queryClient.invalidateQueries({ queryKey: ['printerDetails', printerId] });
     queryClient.invalidateQueries({ queryKey: ['upcomingMaintenance', printerId] });
     setShowLogModal(false);
   };
 
   const isLoading =
-    printerLoading || statsLoading || logsLoading || deploymentsLoading || alertsLoading || odometersLoading;
+    printerLoading || statsLoading || logsLoading || deploymentsLoading || alertsLoading;
 
   if (!printerId) {
     return (
@@ -303,7 +334,7 @@ export function PrinterMaintenancePage() {
 
           {/* Active Alerts Section */}
           {activeAlerts.length > 0 && (
-            <section className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
+            <section aria-label="Active alerts" className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
                 <ExclamationTriangleIcon className="h-5 w-5 text-pf-warning" />
                 Active Alerts
@@ -470,7 +501,7 @@ export function PrinterMaintenancePage() {
           printerId={printerId}
           printerName={printer?.name || 'Unknown Printer'}
           deployments={deployments}
-          toolheads={perToolEnabled ? printerDetails?.toolheads ?? [] : []}
+          toolheads={perToolAllowed ? printerDetails?.toolheads ?? [] : []}
           initialToolheadId={modalInitialToolheadId}
           onSubmit={handleLogSubmit}
           onClose={() => setShowLogModal(false)}
