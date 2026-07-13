@@ -7,6 +7,7 @@ using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -23,12 +24,18 @@ public sealed class MoonrakerSubscriptionService(
     ILogger<MoonrakerSubscriptionService> logger,
     IHttpClientFactory httpClientFactory,
     IPrinterStatusCacheWriter statusCacheWriter,
-    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IToolheadActivityAccumulator? activityAccumulator = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
 {
     private readonly ILogger<MoonrakerSubscriptionService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+
+    // Optional (issue #711, round-14): accumulates per-tool active seconds so the statistics sync
+    // can attribute the external-history delta to the toolheads that actually printed. Null when the
+    // accumulator is not registered (e.g. some test hosts), in which case sampling is a no-op.
+    private readonly IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
     private readonly ConcurrentDictionary<Guid, ConnectionMetrics> _connectionMetrics = new();
@@ -1090,8 +1097,70 @@ public sealed class MoonrakerSubscriptionService(
         // Send consolidated status update with persistent state for offline status and overall sync
         await EmitConsolidatedStatusAsync(printerId, state, spoolInfo, ct);
 
+        // Sample active-tool telemetry for interval-aware per-tool wear attribution (issue #711,
+        // round-14). The accumulator credits the elapsed time since the previous sample to the tool
+        // that was active while printing; the statistics sync later drains and attributes it.
+        DateTime nowUtc = DateTime.UtcNow;
+        _activityAccumulator?.Sample(printerId, ResolveActivePhysicalToolIndex(state), IsPrinting(state), nowUtc);
+
         // Track successful status update time
-        _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
+        _lastStatusUpdateTimes[printerId] = nowUtc;
+    }
+
+    /// <summary>
+    /// Resolves the backend/G-code index of the physically active toolhead for per-tool wear
+    /// attribution, or <c>null</c> when it cannot be determined (issue #711, round-14).
+    /// Snapmaker U1 (four physical lanes) and Happy Hare surface the active tool through
+    /// <see cref="PrinterState.MmuActiveTool"/>; a native Klipper toolchanger without an MMU object
+    /// is tracked via the active extruder index.
+    /// </summary>
+    private static int? ResolveActivePhysicalToolIndex(PrinterState state)
+    {
+        if (state is { MmuEnabled: true, MmuActiveTool: >= 0 })
+        {
+            return state.MmuActiveTool;
+        }
+
+        if (state.ActiveExtruderIndex is int extruderIndex && extruderIndex >= 0)
+        {
+            return extruderIndex;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the printer is actively printing. Only printing segments accrue per-tool wear so that
+    /// idle/paused time is never attributed (issue #711, round-14).
+    /// </summary>
+    private static bool IsPrinting(PrinterState state) =>
+        string.Equals(state.State, "printing", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Parses a Klipper extruder object name into a zero-based tool index: "extruder" → 0,
+    /// "extruder1" → 1, "extruder2" → 2, … Returns <c>null</c> for unrecognized names.
+    /// </summary>
+    private static int? ParseExtruderIndex(string? extruder)
+    {
+        if (string.IsNullOrEmpty(extruder))
+        {
+            return null;
+        }
+
+        const string prefix = "extruder";
+        if (!extruder.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (extruder.Length == prefix.Length)
+        {
+            return 0;
+        }
+
+        return int.TryParse(extruder.AsSpan(prefix.Length), out int index) && index >= 0
+            ? index
+            : null;
     }
 
     /// <summary>
@@ -1141,6 +1210,18 @@ public sealed class MoonrakerSubscriptionService(
             // Klipper reports homed_axes as a string (e.g., "xyz") or an empty string when not homed.
             // Treat empty string as a *known* state so the UI can show "not homed" rather than "unknown".
             homedAxes = ha.GetString() ?? string.Empty;
+        }
+
+        // Track the active Klipper extruder for native multi-extruder toolchangers (issue #711,
+        // round-14). Klipper names extruders "extruder", "extruder1", "extruder2", …; this index lets
+        // per-tool wear attribution follow tool changes on toolchangers that expose no MMU object.
+        if (th.TryGetProperty("extruder", out JsonElement activeExtruder) && activeExtruder.ValueKind == JsonValueKind.String)
+        {
+            int? parsedExtruderIndex = ParseExtruderIndex(activeExtruder.GetString());
+            if (parsedExtruderIndex.HasValue)
+            {
+                state.ActiveExtruderIndex = parsedExtruderIndex;
+            }
         }
 
         // Update persistent state
@@ -1288,11 +1369,12 @@ public sealed class MoonrakerSubscriptionService(
 
         if (mmu.TryGetProperty("tool", out JsonElement tool) && tool.ValueKind == JsonValueKind.Number)
         {
-            // TODO(#711): Happy Hare exposes the live active tool here, but per-toolhead wear
-            // attribution (Printer.SupportsPerToolAttribution) needs per-tool weights accumulated
-            // over the whole statistics-sync interval, not just the latest snapshot. Until this
-            // backend records active-tool dwell/consumption history, the printer stays
-            // SupportsPerToolAttribution=false and external-history hours remain unattributed.
+            // Happy Hare exposes the live active tool here. It feeds the interval-aware per-tool
+            // wear accumulator sampled in ProcessStatusUpdateAsync (issue #711, round-14): on a
+            // multi-physical-toolhead Moonraker printer (e.g. Snapmaker U1) this index maps 1:1 to a
+            // physical toolhead, so the external-history delta is attributed to the head that printed.
+            // Single-hotend Happy Hare printers keep SupportsPerToolAttribution=false (one hotend
+            // means there is nothing to differentiate), so their samples are drained but never applied.
             state.MmuActiveTool = tool.GetInt32();
         }
 
