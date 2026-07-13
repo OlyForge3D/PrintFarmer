@@ -2,32 +2,31 @@
 
 #nullable disable
 
-namespace Farm.Migrations.SqlServer.Migrations
+namespace Farm.Migrations.SqlServer.Migrations;
+
+/// <inheritdoc />
+public partial class AddPrinterStatisticsExternalJobsCompleted : Migration
 {
     /// <inheritdoc />
-    public partial class AddPrinterStatisticsExternalJobsCompleted : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.AddColumn<long>(
-                name: "ExternalJobsCompleted",
-                table: "PrinterStatisticsSet",
-                type: "bigint",
-                nullable: false,
-                defaultValue: 0L);
+        migrationBuilder.AddColumn<long>(
+            name: "ExternalJobsCompleted",
+            table: "PrinterStatisticsSet",
+            type: "bigint",
+            nullable: false,
+            defaultValue: 0L);
 
-            // Existing rows keep the 0 default (issue #711, round-7 Finding 1). See
-            // AddPrinterStatisticsExternalPrintHours for why the total is NOT snapshotted as the
-            // external baseline.
-        }
+        // Existing rows keep the 0 default (issue #711, round-7 Finding 1). See
+        // AddPrinterStatisticsExternalPrintHours for why the total is NOT snapshotted as the
+        // external baseline.
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropColumn(
-                name: "ExternalJobsCompleted",
-                table: "PrinterStatisticsSet");
-        }
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropColumn(
+            name: "ExternalJobsCompleted",
+            table: "PrinterStatisticsSet");
     }
 }
