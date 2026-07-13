@@ -7,7 +7,7 @@
  * adding a placeholder.
  */
 import React from "react";
-import { usePrinterFilamentCoverage } from "../hooks";
+import { usePrinterCoverageFromFleet } from "../hooks";
 import {
   FilamentCoverageBadge,
   RunoutRiskChip,
@@ -23,9 +23,10 @@ export function FilamentCoverageBreakdown({
   printerId,
   className,
 }: FilamentCoverageBreakdownProps): React.ReactElement | null {
-  const { data: coverage, isLoading, isError } = usePrinterFilamentCoverage(printerId);
+  const { data: coverage, isPending, isError } =
+    usePrinterCoverageFromFleet(printerId);
 
-  if (isLoading) {
+  if (isPending) {
     return null;
   }
 

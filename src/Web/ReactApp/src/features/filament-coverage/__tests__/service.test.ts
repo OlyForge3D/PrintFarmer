@@ -25,8 +25,8 @@ describe("filamentCoverageService", () => {
     });
     const result = await filamentCoverageService.getFleetCoverage();
     expect(mockGet).toHaveBeenCalledWith(
-      "/api/printers/filament-coverage",
-      expect.any(Object),
+      "/printers/filament-coverage",
+      { signal: undefined },
     );
     expect(result?.printers).toHaveLength(1);
     expect(result?.printers[0].status).toBe("covers");
@@ -35,12 +35,18 @@ describe("filamentCoverageService", () => {
   it("returns null when the feature is disabled (fleet 404)", async () => {
     mockGet.mockRejectedValueOnce({ response: { status: 404 } });
     const result = await filamentCoverageService.getFleetCoverage();
+    expect(mockGet).toHaveBeenCalledWith("/printers/filament-coverage", {
+      signal: undefined,
+    });
     expect(result).toBeNull();
   });
 
   it("returns null when the feature is disabled with wrapper statusCode", async () => {
     mockGet.mockRejectedValueOnce({ statusCode: 404 });
     const result = await filamentCoverageService.getFleetCoverage();
+    expect(mockGet).toHaveBeenCalledWith("/printers/filament-coverage", {
+      signal: undefined,
+    });
     expect(result).toBeNull();
   });
 
@@ -48,6 +54,9 @@ describe("filamentCoverageService", () => {
     const err = { response: { status: 500 }, message: "boom" };
     mockGet.mockRejectedValueOnce(err);
     await expect(filamentCoverageService.getFleetCoverage()).rejects.toBe(err);
+    expect(mockGet).toHaveBeenCalledWith("/printers/filament-coverage", {
+      signal: undefined,
+    });
   });
 
   it("encodes the printer id in the URL", async () => {
@@ -56,14 +65,18 @@ describe("filamentCoverageService", () => {
     });
     await filamentCoverageService.getPrinterCoverage("p /1");
     expect(mockGet).toHaveBeenCalledWith(
-      "/api/printers/p%20%2F1/filament-coverage",
-      expect.any(Object),
+      "/printers/p%20%2F1/filament-coverage",
+      { signal: undefined },
     );
   });
 
   it("returns null when per-printer coverage 404s", async () => {
     mockGet.mockRejectedValueOnce({ response: { status: 404 } });
     const result = await filamentCoverageService.getPrinterCoverage("nope");
+    expect(mockGet).toHaveBeenCalledWith(
+      "/printers/nope/filament-coverage",
+      { signal: undefined },
+    );
     expect(result).toBeNull();
   });
 });

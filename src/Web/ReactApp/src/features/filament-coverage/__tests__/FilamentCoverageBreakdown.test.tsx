@@ -15,13 +15,13 @@ import type { PrinterFilamentCoverage } from "../types";
 // Mock the hook so we can drive isLoading / isError / data independently
 // ---------------------------------------------------------------------------
 
-const mockUsePrinterFilamentCoverage = vi.fn<
+const mockUsePrinterCoverageFromFleet = vi.fn<
   [],
   Partial<UseQueryResult<PrinterFilamentCoverage | null>>
 >();
 
 vi.mock("../hooks", () => ({
-  usePrinterFilamentCoverage: () => mockUsePrinterFilamentCoverage(),
+  usePrinterCoverageFromFleet: () => mockUsePrinterCoverageFromFleet(),
   useFleetFilamentCoverage: vi.fn(() => ({ data: null, isLoading: false })),
 }));
 
@@ -53,9 +53,9 @@ const baseCoverage: PrinterFilamentCoverage = {
 };
 
 describe("FilamentCoverageBreakdown", () => {
-  it("renders nothing while loading (isLoading = true)", () => {
-    mockUsePrinterFilamentCoverage.mockReturnValue({
-      isLoading: true,
+  it("renders nothing while loading (isPending = true)", () => {
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: true,
       isError: false,
       data: undefined,
     });
@@ -68,8 +68,8 @@ describe("FilamentCoverageBreakdown", () => {
   });
 
   it("renders nothing on error (isError = true)", () => {
-    mockUsePrinterFilamentCoverage.mockReturnValue({
-      isLoading: false,
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false,
       isError: true,
       data: undefined,
     });
@@ -82,8 +82,8 @@ describe("FilamentCoverageBreakdown", () => {
   });
 
   it("renders nothing when coverage is null (feature disabled)", () => {
-    mockUsePrinterFilamentCoverage.mockReturnValue({
-      isLoading: false,
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false,
       isError: false,
       data: null,
     });
@@ -96,8 +96,8 @@ describe("FilamentCoverageBreakdown", () => {
   });
 
   it("renders the breakdown panel when coverage data is present", () => {
-    mockUsePrinterFilamentCoverage.mockReturnValue({
-      isLoading: false,
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false,
       isError: false,
       data: baseCoverage,
     });

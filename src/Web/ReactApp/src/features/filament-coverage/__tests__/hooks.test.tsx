@@ -35,6 +35,7 @@ import {
   __resetFilamentCoverageSubscriptionForTests,
   filamentCoverageQueryKeys,
   usePrinterFilamentCoverage,
+  usePrinterCoverageFromFleet,
   useFleetFilamentCoverage,
 } from "../hooks";
 
@@ -97,6 +98,67 @@ describe("filament coverage hooks", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toBeNull();
+  });
+
+  it("does not subscribe to SignalR when the fleet query is disabled", () => {
+    const qc = makeClient();
+    renderHook(() => useFleetFilamentCoverage({ enabled: false }), {
+      wrapper: wrapper(qc),
+    });
+
+    expect(hoisted.signalRMock.onFilamentCoverageChanged).not.toHaveBeenCalled();
+    expect(hoisted.signalRMock.connect).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates concurrent fleet selectors and decodes each printer", async () => {
+    const fleetResponse = {
+      data: {
+        printers: [
+          { printerId: "p-1", printerName: "Alpha", status: "covers", toolheads: [] },
+          { printerId: "p-2", printerName: "Beta", status: "Runout", toolheads: [] },
+          { printerId: "p-3", printerName: "Gamma", status: "Unknown", toolheads: [] },
+        ],
+        evaluatedAtUtc: "2025-01-01T00:00:00Z",
+      },
+    };
+    let resolveFleet!: (value: typeof fleetResponse) => void;
+    mockGet.mockReturnValueOnce(
+      new Promise<typeof fleetResponse>((resolve) => {
+        resolveFleet = resolve;
+      }),
+    );
+    const qc = makeClient();
+    const { result } = renderHook(
+      () => ({
+        fleet: useFleetFilamentCoverage(),
+        first: usePrinterCoverageFromFleet("p-1"),
+        second: usePrinterCoverageFromFleet("p-2"),
+        third: usePrinterCoverageFromFleet("p-3"),
+      }),
+      { wrapper: wrapper(qc) },
+    );
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+    expect(mockGet).toHaveBeenCalledWith("/printers/filament-coverage", {
+      signal: expect.any(AbortSignal),
+    });
+
+    act(() => resolveFleet(fleetResponse));
+
+    await waitFor(() => expect(result.current.fleet.isSuccess).toBe(true));
+    expect(result.current.first.data).toMatchObject({
+      printerId: "p-1",
+      status: "covers",
+    });
+    expect(result.current.second.data).toMatchObject({
+      printerId: "p-2",
+      status: "runout",
+    });
+    expect(result.current.third.data).toMatchObject({
+      printerId: "p-3",
+      status: "unknown",
+    });
+    expect(mockGet).toHaveBeenCalledTimes(1);
   });
 
   it("derives per-printer coverage from the fleet snapshot without extra requests", async () => {
@@ -251,7 +313,7 @@ describe("filament coverage hooks", () => {
     unsubscribeSpy.mockRestore?.();
   });
 
-  it("falls through to per-printer API when fleet cache is invalidated (stale guard)", async () => {
+  it("falls through to per-printer API when fleet cache is stale", async () => {
     // Arrange: prime the fleet cache successfully
     const fleetPayload = {
       data: {
@@ -276,7 +338,7 @@ describe("filament coverage hooks", () => {
         evaluatedAtUtc: "2025-01-01T01:00:00Z",
       },
     };
-    mockGet.mockResolvedValueOnce(printerPayload); // per-printer call after invalidation
+    mockGet.mockResolvedValueOnce(printerPayload); // per-printer call after cache expires
 
     const qc = makeClient();
 
@@ -286,15 +348,16 @@ describe("filament coverage hooks", () => {
     });
     await waitFor(() => expect(fleetResult.current.isSuccess).toBe(true));
 
-    // Invalidate fleet cache without triggering a refetch
-    await act(async () => {
-      await qc.invalidateQueries({
-        queryKey: ["filament-coverage", "fleet"],
-        refetchType: "none",
-      });
+    // Age the fleet snapshot beyond the hook's stale window.
+    act(() => {
+      qc.setQueryData(
+        filamentCoverageQueryKeys.fleet(),
+        fleetResult.current.data,
+        { updatedAt: Date.now() - 15_001 },
+      );
     });
 
-    // Now mount the per-printer hook — it must NOT derive from the invalidated fleet cache
+    // The per-printer hook must not derive from an expired fleet snapshot.
     const { result: printerResult } = renderHook(
       () => usePrinterFilamentCoverage("p-1"),
       { wrapper: wrapper(qc) },

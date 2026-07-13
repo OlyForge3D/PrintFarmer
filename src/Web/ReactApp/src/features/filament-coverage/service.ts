@@ -14,8 +14,8 @@ import {
 } from "./types";
 
 const PRINTER_COVERAGE_URL = (printerId: string) =>
-  `/api/printers/${encodeURIComponent(printerId)}/filament-coverage`;
-const FLEET_COVERAGE_URL = "/api/printers/filament-coverage";
+  `/printers/${encodeURIComponent(printerId)}/filament-coverage`;
+const FLEET_COVERAGE_URL = "/printers/filament-coverage";
 
 interface AxiosLikeError {
   response?: { status?: number };

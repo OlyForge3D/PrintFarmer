@@ -11,7 +11,7 @@
  *   mounted `QueryClient`; they invalidate the canonical queries so the
  *   next render refetches the truth from the API.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import {
   useQuery,
   useQueryClient,
@@ -73,9 +73,11 @@ function ensureCoverageSignalRSubscription() {
   );
 }
 
-function useCoverageSignalRSync() {
+function useCoverageSignalRSync(enabled: boolean) {
   const queryClient = useQueryClient();
   useEffect(() => {
+    if (!enabled) return;
+
     const prev = coverageQueryClients.get(queryClient) ?? 0;
     coverageQueryClients.set(queryClient, prev + 1);
     ensureCoverageSignalRSubscription();
@@ -91,7 +93,7 @@ function useCoverageSignalRSync() {
         coverageSignalRUnsubscribe = undefined;
       }
     };
-  }, [queryClient]);
+  }, [enabled, queryClient]);
 }
 
 /** Test-only reset for module-level SignalR wiring. */
@@ -103,28 +105,64 @@ export function __resetFilamentCoverageSubscriptionForTests(): void {
   coverageQueryClients.clear();
 }
 
-export interface UseFleetFilamentCoverageOptions {
+export interface UseFleetFilamentCoverageOptions<
+  TData = FleetFilamentCoverage | null,
+> {
   /** When false, disables both the query and the SignalR subscription. */
   enabled?: boolean;
+  select?: (fleet: FleetFilamentCoverage | null) => TData;
 }
 
 /**
  * Fleet coverage query. Returns `null` when the feature is disabled
  * (server responded with 404).
  */
-export function useFleetFilamentCoverage(
-  options: UseFleetFilamentCoverageOptions = {},
-): UseQueryResult<FleetFilamentCoverage | null> {
+export function useFleetFilamentCoverage<
+  TData = FleetFilamentCoverage | null,
+>(
+  options: UseFleetFilamentCoverageOptions<TData> = {},
+): UseQueryResult<TData> {
   const enabled = options.enabled ?? true;
-  useCoverageSignalRSync();
-  const queryOptions: UseQueryOptions<FleetFilamentCoverage | null> = {
+  useCoverageSignalRSync(enabled);
+  const queryOptions: UseQueryOptions<
+    FleetFilamentCoverage | null,
+    Error,
+    TData
+  > = {
     queryKey: filamentCoverageQueryKeys.fleet(),
     queryFn: ({ signal }) => filamentCoverageService.getFleetCoverage(signal),
     staleTime: FLEET_STALE_MS,
     refetchInterval: FLEET_REFETCH_MS,
     enabled,
+    select: options.select,
   };
   return useQuery(queryOptions);
+}
+
+/**
+ * Per-printer selector for grid surfaces. Every consumer shares the fleet
+ * query key, so concurrent cards produce one deduplicated fleet request.
+ */
+export function usePrinterCoverageFromFleet(
+  printerId: string,
+  options: Pick<UseFleetFilamentCoverageOptions, "enabled"> = {},
+): Pick<
+  UseQueryResult<PrinterFilamentCoverage | null>,
+  "data" | "isPending" | "isError" | "error"
+> {
+  const select = useCallback(
+    (fleet: FleetFilamentCoverage | null) =>
+      fleet
+        ? (fleet.printers.find((printer) => printer.printerId === printerId) ?? null)
+        : null,
+    [printerId],
+  );
+  const { data, isPending, isError, error } = useFleetFilamentCoverage({
+    ...options,
+    select,
+  });
+
+  return { data, isPending, isError, error };
 }
 
 /**
@@ -135,9 +173,9 @@ export function useFleetFilamentCoverage(
 export function usePrinterFilamentCoverage(
   printerId: string | null | undefined,
 ): UseQueryResult<PrinterFilamentCoverage | null> {
-  useCoverageSignalRSync();
-  const qc = useQueryClient();
   const enabled = typeof printerId === "string" && printerId.length > 0;
+  useCoverageSignalRSync(enabled);
+  const qc = useQueryClient();
 
   const queryOptions: UseQueryOptions<PrinterFilamentCoverage | null> = {
     queryKey: enabled
@@ -145,23 +183,16 @@ export function usePrinterFilamentCoverage(
       : [...filamentCoverageQueryKeys.all, "printer", "__disabled__"],
     queryFn: async ({ signal }) => {
       if (!enabled) return null;
-      // Only reuse the fleet cache when it is present, fresh, and not mid-flight.
-      // If the fleet query is invalidated or currently fetching its refetch, its
-      // cached data may be stale relative to the event that triggered this call,
-      // so we fall through to the per-printer endpoint to guarantee freshness.
-      const fleetState = qc.getQueryState(filamentCoverageQueryKeys.fleet());
-      if (
-        fleetState &&
-        !fleetState.isInvalidated &&
-        fleetState.fetchStatus !== "fetching"
-      ) {
-        const fleet = qc.getQueryData<FleetFilamentCoverage | null>(
-          filamentCoverageQueryKeys.fleet(),
-        );
-        if (fleet && Array.isArray(fleet.printers)) {
-          const hit = fleet.printers.find((p) => p.printerId === printerId);
-          if (hit) return hit;
-        }
+      const fleetState = qc.getQueryState<FleetFilamentCoverage | null>(
+        filamentCoverageQueryKeys.fleet(),
+      );
+      const hasFreshFleetData =
+        fleetState?.data !== undefined &&
+        fleetState.fetchStatus === "idle" &&
+        Date.now() - fleetState.dataUpdatedAt <= FLEET_STALE_MS;
+      if (hasFreshFleetData && fleetState.data) {
+        const hit = fleetState.data.printers.find((p) => p.printerId === printerId);
+        if (hit) return hit;
       }
       return filamentCoverageService.getPrinterCoverage(printerId, signal);
     },
