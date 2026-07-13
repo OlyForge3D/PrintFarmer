@@ -228,9 +228,8 @@ export interface MaintenanceCompletedEvent {
  * (`jpapiez-squad-711-fallback-maintenance-backend` @ `0bfa50343`) surfaces
  * per-tool cumulative print hours directly on `PrinterDetailsDto.toolheads[]`
  * as `cumulativePrintHours`. This client-side shape is assembled by the
- * printer maintenance page from that field plus due state derived from the
- * upcoming-maintenance feed joined by `toolheadId` (the schedule engine's own
- * verdict — alert severity is task priority, not timing).
+ * printer maintenance page from that field plus locally-derived due state
+ * (from the active alerts feed).
  */
 export interface PrinterToolheadOdometer {
   toolheadId: string;
@@ -243,27 +242,12 @@ export interface PrinterToolheadOdometer {
    * (e.g. brand-new printer or non-attributable topology).
    */
   cumulativePrintHours?: number | null;
-  /**
-   * True when the upcoming-maintenance feed reports this toolhead has at
-   * least one overdue task. Only meaningful when `dueStateUnavailable` is
-   * false; otherwise callers should treat this as unknown.
-   */
+  /** True when at least one active alert on this toolhead is overdue. */
   isOverdue?: boolean;
-  /**
-   * True when the upcoming-maintenance feed reports this toolhead has at
-   * least one task due today (and none overdue). Only meaningful when
-   * `dueStateUnavailable` is false.
-   */
+  /** True when at least one active alert on this toolhead is due today. */
   isDueToday?: boolean;
   /** Optional soonest-due summary derived from the upcoming feed. */
   nextDueTaskName?: string | null;
-  /**
-   * True when the upcoming-maintenance feed is loading or errored, so due
-   * state (`isOverdue`/`isDueToday`) cannot be determined. UIs must render
-   * an unknown/loading indicator instead of "OK" — a failed schedule query
-   * would otherwise give operators a false all-clear.
-   */
-  dueStateUnavailable?: boolean;
 }
 
 // ============================================================================

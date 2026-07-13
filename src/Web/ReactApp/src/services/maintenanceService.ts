@@ -53,10 +53,9 @@ export interface UpcomingMaintenanceTaskDto {
   /**
    * Optional physical toolhead scope carried through the upcoming feed once the
    * per-toolhead maintenance backend (#711) is merged. `null`/omitted = printer-wide.
-   * NOTE: the backend `UpcomingMaintenanceTaskDto` does NOT carry a `ToolheadName`;
-   * callers must resolve the display name from `PrinterDetailsDto.toolheads[]`.
    */
   toolheadId?: string | null;
+  toolheadName?: string | null;
   taskName: string;
   component?: string | null;
   description?: string | null;

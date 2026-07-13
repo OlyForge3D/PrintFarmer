@@ -19,6 +19,7 @@ function th(
     isPrimary: overrides.isPrimary ?? false,
     toolheadType: overrides.toolheadType ?? 'Physical',
     name: overrides.name,
+    supportsMaintenanceScope: overrides.supportsMaintenanceScope,
   };
 }
 

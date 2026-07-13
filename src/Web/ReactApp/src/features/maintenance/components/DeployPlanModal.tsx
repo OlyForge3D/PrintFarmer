@@ -54,35 +54,19 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
 
   // Fetch per-tool capability + toolhead list for the printer under the picker.
   // Only run when a printer is chosen and the modal is open.
-  //
-  // Loading/error state must be consumed by the Deploy button. Until this
-  // query resolves for a per-tool-capable printer we cannot know whether the
-  // picker should be shown, and deploying with `toolheadId: null` while the
-  // capability is unknown would silently miscategorise the schedule as
-  // printer-wide (Hicks review finding on #719 remediation).
-  const {
-    data: printerDetails,
-    isLoading: printerDetailsLoading,
-    isError: printerDetailsIsError,
-    error: printerDetailsError,
-    refetch: refetchPrinterDetails,
-  } = useQuery<PrinterDetails>({
+  const { data: printerDetails } = useQuery<PrinterDetails>({
     queryKey: ['printerDetails', selectedPrinterId],
     queryFn: () => apiClient.getPrinterDetails(selectedPrinterId),
     enabled: isOpen && !!selectedPrinterId,
     staleTime: 60_000,
   });
 
-  const detailsPending = !!selectedPrinterId && printerDetailsLoading;
-  const detailsFailed = !!selectedPrinterId && printerDetailsIsError;
-  const detailsReady = !!selectedPrinterId && !printerDetailsLoading && !printerDetailsIsError && !!printerDetails;
-
   const perToolAllowed = printerDetails?.supportsPerToolAttribution === true;
   const eligibleToolheads = useMemo(
     () => (printerDetails?.toolheads ?? []).filter(isEligibleMaintenanceToolhead),
     [printerDetails],
   );
-  const showScopePicker = detailsReady && perToolAllowed && eligibleToolheads.length >= 2;
+  const showScopePicker = perToolAllowed && eligibleToolheads.length >= 2;
 
   // Scope-aware duplicate filter. A printer may host multiple deployments of
   // the same plan as long as each targets a distinct `(printerId, toolheadId)`
@@ -190,10 +174,6 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
   const canDeploy =
     !!selectedPrinterId &&
     !deployMutation.isPending &&
-    // Never deploy while the capability query is unresolved or failed —
-    // otherwise we'd silently send `toolheadId: null` for a per-tool-capable
-    // printer whose picker hasn't rendered yet.
-    detailsReady &&
     (showScopePicker
       ? scope === PRINTER_WIDE_SCOPE
         ? printerWideAvailable
@@ -211,12 +191,7 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
             <h4 className="text-sm font-medium text-pf-text-secondary">Deploy to Printer</h4>
             <Select
               value={selectedPrinterId}
-              onChange={(e) => {
-                // Reset scope synchronously when the printer changes so we
-                // never carry a stale toolhead selection across printers.
-                setSelectedPrinterId(e.target.value);
-                setScope(PRINTER_WIDE_SCOPE);
-              }}
+              onChange={(e) => setSelectedPrinterId(e.target.value)}
               aria-label="Select printer to deploy to"
             >
               <option value="">Select printer…</option>
@@ -224,36 +199,6 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </Select>
-            {selectedPrinterId && detailsPending && (
-              <p
-                className="text-xs text-pf-text-tertiary"
-                data-testid="printer-details-loading"
-                aria-live="polite"
-              >
-                Loading printer capabilities…
-              </p>
-            )}
-            {selectedPrinterId && detailsFailed && (
-              <div
-                role="alert"
-                className="flex items-center gap-2 rounded-md border border-pf-error/40 bg-pf-error/10 px-3 py-2 text-xs text-pf-error"
-              >
-                <span className="flex-1">
-                  Could not load printer capabilities
-                  {printerDetailsError instanceof Error && printerDetailsError.message
-                    ? `: ${printerDetailsError.message}`
-                    : '.'}
-                </span>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => { void refetchPrinterDetails(); }}
-                  aria-label="Retry loading printer capabilities"
-                >
-                  Retry
-                </Button>
-              </div>
-            )}
             {selectedPrinterId && showScopePicker && (
               <ToolheadScopePicker
                 value={scope}

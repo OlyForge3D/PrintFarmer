@@ -80,9 +80,6 @@ export function ToolheadOdometerCard({
 type DueState = 'overdue' | 'due-today' | 'ok' | 'unknown';
 
 function deriveDueState(o: PrinterToolheadOdometer): DueState {
-  // When the schedule engine's verdict is unknown (upcoming query loading or
-  // errored) we must not imply "OK" — that would be a false all-clear.
-  if (o.dueStateUnavailable) return 'unknown';
   if (o.isOverdue) return 'overdue';
   if (o.isDueToday) return 'due-today';
   if (typeof o.cumulativePrintHours === 'number') return 'ok';

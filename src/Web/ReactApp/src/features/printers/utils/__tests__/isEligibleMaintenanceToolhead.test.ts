@@ -93,3 +93,40 @@ describe('selectMaintenanceEligibleToolheads', () => {
     expect(toolheads.map(t => t.id)).toEqual(before);
   });
 });
+
+describe('selectMaintenanceEligibleToolheads', () => {
+  it('returns an empty list for missing / empty input', () => {
+    expect(selectMaintenanceEligibleToolheads(undefined)).toEqual([]);
+    expect(selectMaintenanceEligibleToolheads(null)).toEqual([]);
+    expect(selectMaintenanceEligibleToolheads([])).toEqual([]);
+  });
+
+  it('filters out MMU gates and preserves physical toolheads', () => {
+    const toolheads = [
+      makeToolhead({ id: 't-0', index: 0, toolheadType: 'Physical' }),
+      makeToolhead({ id: 'g-0', index: 1, toolheadType: 'MmuGate' }),
+      makeToolhead({ id: 't-1', index: 2, toolheadType: 'Physical' }),
+    ];
+    const result = selectMaintenanceEligibleToolheads(toolheads);
+    expect(result.map(t => t.id)).toEqual(['t-0', 't-1']);
+  });
+
+  it('sorts eligible toolheads by index, then name, then id', () => {
+    const toolheads = [
+      makeToolhead({ id: 't-b', index: 2, name: 'B' }),
+      makeToolhead({ id: 't-a', index: 2, name: 'A' }),
+      makeToolhead({ id: 't-c', index: 0, name: 'C' }),
+    ];
+    expect(selectMaintenanceEligibleToolheads(toolheads).map(t => t.id)).toEqual(['t-c', 't-a', 't-b']);
+  });
+
+  it('does not mutate the input list', () => {
+    const toolheads = [
+      makeToolhead({ id: 't-2', index: 2 }),
+      makeToolhead({ id: 't-0', index: 0 }),
+    ];
+    const before = toolheads.map(t => t.id);
+    selectMaintenanceEligibleToolheads(toolheads);
+    expect(toolheads.map(t => t.id)).toEqual(before);
+  });
+});

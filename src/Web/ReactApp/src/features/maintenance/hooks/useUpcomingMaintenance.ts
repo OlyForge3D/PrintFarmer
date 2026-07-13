@@ -17,10 +17,9 @@ export interface UpcomingMaintenanceTask {
    * Optional physical toolhead scope. `null`/omitted means the task is
    * printer-wide. Populated by the #711 backend on toolhead-scoped
    * schedules so the UI can join upcoming tasks to specific tools.
-   * The backend `UpcomingMaintenanceTaskDto` does not carry a `ToolheadName`
-   * — callers resolve the display name from `PrinterDetailsDto.toolheads[]`.
    */
   toolheadId?: string | null;
+  toolheadName?: string | null;
   taskName: string;
   component?: string | null;
   description?: string | null;
@@ -105,6 +104,7 @@ export function useUpcomingMaintenance(
         printerId: t.printerId,
         printerName: t.printerName,
         toolheadId: t.toolheadId ?? null,
+        toolheadName: t.toolheadName ?? null,
         taskName: t.taskName,
         component: t.component,
         description: t.description,
