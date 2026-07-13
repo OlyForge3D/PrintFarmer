@@ -2,9 +2,11 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.PartsInventory;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -207,7 +209,15 @@ public class PartsInventoryController(
     /// harvest, qc-reject, or manual. An idempotency
     /// key on the request avoids double-application under client retries.
     /// </summary>
+    /// <remarks>
+    /// The persistent <c>Idempotency-Key</c> header (see #715) is layered on top
+    /// of the existing <c>operationKey</c> body field. The header guarantees an
+    /// identical response replay for retries; the body field prevents
+    /// double-application at the ledger level even when the general 7-day
+    /// window has elapsed.
+    /// </remarks>
     [HttpPost("{sku}/adjust")]
+    [Idempotent(IdempotencyRouteKeys.PartsInventoryAdjust)]
     [ProducesResponseType(typeof(PartAdjustmentResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]

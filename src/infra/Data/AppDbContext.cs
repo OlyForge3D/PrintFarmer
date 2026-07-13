@@ -245,6 +245,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Durable audit of guided filament-swap material-mismatch overrides (issue #710).
     public DbSet<FilamentSwapOverride> FilamentSwapOverrides => Set<FilamentSwapOverride>();
 
+    // Persistent Idempotency-Key records for offline write-replay (issue #715).
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

@@ -98,6 +98,15 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
+        // Persistent Idempotency-Key store and cleanup (issue #715). Store is
+        // registered scoped because it uses IDbContextFactory internally and is
+        // resolved per-request from the filter (and per-sweep from the cleanup
+        // hosted service via its own scope). See docs/OFFLINE_WRITE_REPLAY.md.
+        services.AddScoped<Farm.Infrastructure.Services.Idempotency.IIdempotencyStore,
+            Farm.Infrastructure.Services.Idempotency.IdempotencyStore>();
+        services.AddScoped<Farm.Web.Api.Infrastructure.Idempotency.IdempotencyFilter>();
+        services.AddHostedService<Farm.Infrastructure.Services.Idempotency.IdempotencyRecordCleanupService>();
+
         // Printed-part inventory (see #714). Distinct from MaintenanceComponents
         // (replacement parts) — this module tracks parts produced by prints.
         services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartInventoryRepository,

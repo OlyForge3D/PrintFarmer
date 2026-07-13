@@ -1,0 +1,285 @@
+using System.Security.Claims;
+using System.Text;
+using Farm.Infrastructure.Services.Idempotency;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Web.Api.Infrastructure.Idempotency;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Infrastructure.Idempotency;
+
+/// <summary>
+/// Focused tests for <see cref="IdempotencyFilter"/> driven directly against a
+/// <see cref="DefaultHttpContext"/>. The filter is exercised at the same seam
+/// MVC uses (<see cref="IAsyncResourceFilter.OnResourceExecutionAsync"/>) so
+/// the tests remain host-agnostic while still verifying the header contract,
+/// feature-gate bypass, replay behavior, and hash-conflict / abandon paths.
+/// A live <see cref="IdempotencyStore"/> against SQLite-in-memory is used so
+/// the filter <-> store handshake is not mocked away.
+/// </summary>
+public class IdempotencyFilterTests : IDisposable
+{
+    private readonly SqliteConnection _connection;
+    private readonly DbContextOptions<Farm.Infrastructure.Data.AppDbContext> _options;
+    private readonly IdempotencyStore _store;
+
+    public IdempotencyFilterTests()
+    {
+        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection.Open();
+
+        _options = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+            .UseSqlite(_connection)
+            .Options;
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = db.Database.EnsureCreated();
+
+        Mock<IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>> factoryMock = new();
+        _ = factoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new Farm.Infrastructure.Data.AppDbContext(_options));
+        _store = new IdempotencyStore(factoryMock.Object, NullLogger<IdempotencyStore>.Instance);
+    }
+
+    public void Dispose()
+    {
+        _connection.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    private static IOperatorFeatureGate GateWith(bool enabled)
+    {
+        Mock<IOperatorFeatureGate> gate = new();
+        _ = gate.Setup(g => g.IsEnabled(OperatorFeature.OfflineWriteReplay)).Returns(enabled);
+        return gate.Object;
+    }
+
+    private static ResourceExecutingContext CreateContext(
+        string routeKey,
+        string? idempotencyKey,
+        byte[]? body,
+        string? userId = "user-42",
+        string? contentType = "application/json")
+    {
+        DefaultHttpContext http = new();
+        http.Request.Method = HttpMethods.Post;
+        http.Request.Path = "/test";
+        if (idempotencyKey is not null)
+        {
+            http.Request.Headers[IdempotencyKeyUtilities.HeaderName] = idempotencyKey;
+        }
+
+        if (body is not null)
+        {
+            http.Request.Body = new MemoryStream(body);
+            http.Request.ContentLength = body.Length;
+            http.Request.ContentType = contentType;
+        }
+
+        http.Response.Body = new MemoryStream();
+
+        if (userId is not null)
+        {
+            ClaimsIdentity id = new(new[] { new Claim(ClaimTypes.NameIdentifier, userId) }, "test");
+            http.User = new ClaimsPrincipal(id);
+        }
+
+        ControllerActionDescriptor descriptor = new()
+        {
+            EndpointMetadata = new List<object> { new IdempotentAttribute(routeKey) },
+            RouteValues = new Dictionary<string, string?>(),
+        };
+        RouteData routeData = new();
+        ActionContext actionContext = new(http, routeData, descriptor);
+        return new ResourceExecutingContext(actionContext, new List<IFilterMetadata>(), new List<IValueProviderFactory>());
+    }
+
+    private IdempotencyFilter CreateFilter(bool featureEnabled = true)
+        => new(_store, GateWith(featureEnabled), NullLogger<IdempotencyFilter>.Instance);
+
+    private static async Task RunAsync(
+        IdempotencyFilter filter,
+        ResourceExecutingContext context,
+        int statusCode,
+        string responseBody,
+        string responseContentType = "application/json")
+    {
+        Task<ResourceExecutedContext> Next()
+        {
+            context.HttpContext.Response.StatusCode = statusCode;
+            context.HttpContext.Response.ContentType = responseContentType;
+            byte[] bytes = Encoding.UTF8.GetBytes(responseBody);
+            context.HttpContext.Response.Body.Write(bytes, 0, bytes.Length);
+            return Task.FromResult(new ResourceExecutedContext(context, context.Filters));
+        }
+
+        await filter.OnResourceExecutionAsync(context, Next);
+    }
+
+    [Fact]
+    public async Task FeatureDisabled_Bypasses_Store_And_Executes_Pipeline()
+    {
+        IdempotencyFilter filter = CreateFilter(featureEnabled: false);
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "k-1", Encoding.UTF8.GetBytes("{\"any\":true}"));
+
+        await RunAsync(filter, ctx, 200, "{\"ok\":1}");
+
+        _ = ctx.HttpContext.Response.StatusCode.Should().Be(200);
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(0, "the store must not be touched when the feature is off");
+    }
+
+    [Fact]
+    public async Task NoHeader_Executes_Pipeline_WithoutPersistence()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, idempotencyKey: null,
+            body: Encoding.UTF8.GetBytes("{\"any\":true}"));
+
+        await RunAsync(filter, ctx, 200, "{\"ok\":1}");
+
+        _ = ctx.HttpContext.Response.StatusCode.Should().Be(200);
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task MalformedKey_Returns_400_ProblemDetails()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete,
+            idempotencyKey: "has space",
+            body: Array.Empty<byte>());
+
+        await filter.OnResourceExecutionAsync(ctx, () => throw new InvalidOperationException("pipeline must not run"));
+
+        _ = ctx.Result.Should().BeOfType<BadRequestObjectResult>();
+    }
+
+    [Fact]
+    public async Task Replay_Returns_StoredResponse_WithReplayHeader()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"payload\":42}");
+
+        ResourceExecutingContext firstCtx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "abc-123", body);
+        await RunAsync(filter, firstCtx, 201, "{\"result\":\"created\"}", "application/json");
+        _ = firstCtx.HttpContext.Response.StatusCode.Should().Be(201);
+
+        ResourceExecutingContext replayCtx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "abc-123", body);
+
+        bool pipelineRan = false;
+        await filter.OnResourceExecutionAsync(replayCtx, () =>
+        {
+            pipelineRan = true;
+            return Task.FromResult(new ResourceExecutedContext(replayCtx, replayCtx.Filters));
+        });
+
+        _ = pipelineRan.Should().BeFalse("replay must short-circuit the pipeline");
+        _ = replayCtx.Result.Should().NotBeNull();
+
+        ActionContext execCtx = new(replayCtx.HttpContext, replayCtx.RouteData, replayCtx.ActionDescriptor);
+        await replayCtx.Result!.ExecuteResultAsync(execCtx);
+        replayCtx.HttpContext.Response.Body.Position = 0;
+        string replayed = new StreamReader(replayCtx.HttpContext.Response.Body).ReadToEnd();
+        _ = replayed.Should().Be("{\"result\":\"created\"}");
+        _ = replayCtx.HttpContext.Response.StatusCode.Should().Be(201);
+        _ = replayCtx.HttpContext.Response.Headers[IdempotencyFilter.ReplayHeaderName].ToString()
+            .Should().Be("true");
+    }
+
+    [Fact]
+    public async Task SameKey_DifferentBody_Returns_409_HashConflict()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        ResourceExecutingContext firstCtx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "abc-123", Encoding.UTF8.GetBytes("{\"a\":1}"));
+        await RunAsync(filter, firstCtx, 200, "{\"ok\":true}");
+
+        ResourceExecutingContext conflictCtx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "abc-123", Encoding.UTF8.GetBytes("{\"a\":999}"));
+
+        await filter.OnResourceExecutionAsync(conflictCtx,
+            () => throw new InvalidOperationException("pipeline must not run on hash-conflict"));
+
+        _ = conflictCtx.Result.Should().BeOfType<ConflictObjectResult>();
+    }
+
+    [Fact]
+    public async Task ServerError_AbandonsRecord_SoRetryCanReplayFreshly()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        ResourceExecutingContext failCtx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "abc-500", Encoding.UTF8.GetBytes("{\"a\":1}"));
+
+        await RunAsync(filter, failCtx, 500, "{\"error\":\"boom\"}");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(0, "5xx responses must not be cached; abandon must delete the processing row");
+    }
+
+    [Fact]
+    public async Task Exception_AbandonsRecord_AndRethrows()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "abc-throw", Encoding.UTF8.GetBytes("{\"a\":1}"));
+
+        Func<Task> act = () => filter.OnResourceExecutionAsync(
+            ctx, () => throw new InvalidOperationException("db went down"));
+        _ = await act.Should().ThrowAsync<InvalidOperationException>();
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(0, "exceptions must not leave a poisoned processing row");
+    }
+
+    [Fact]
+    public async Task DifferentUsers_SameKey_Do_Not_Cross_Contaminate()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"a\":1}");
+        ResourceExecutingContext userA = CreateContext(IdempotencyRouteKeys.TaskComplete, "shared", body, userId: "user-A");
+        ResourceExecutingContext userB = CreateContext(IdempotencyRouteKeys.TaskComplete, "shared", body, userId: "user-B");
+
+        await RunAsync(filter, userA, 200, "{\"user\":\"A\"}");
+        await RunAsync(filter, userB, 200, "{\"user\":\"B\"}");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        int count = await db.IdempotencyRecords.CountAsync(CancellationToken.None);
+        _ = count.Should().Be(2, "distinct users must not share replay state even with matching key");
+    }
+
+    [Fact]
+    public async Task AnonymousRequest_Executes_WithoutPersistence()
+    {
+        IdempotencyFilter filter = CreateFilter();
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "anon-key",
+            Encoding.UTF8.GetBytes("{}"),
+            userId: null);
+
+        await RunAsync(filter, ctx, 200, "{\"ok\":true}");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(0, "anonymous requests must bypass persistence; [Authorize] will 401 separately");
+    }
+}
