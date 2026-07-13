@@ -24,7 +24,11 @@ import { useFilamentTypes } from "@/common/hooks/useApi";
 import { usePrinterFilamentCoverage } from "@/features/filament-coverage/hooks";
 import type { ToolheadDto } from "@/types/api";
 import { ToolheadType } from "@/types/api";
-import { getErrorMessage } from "@/features/parts-inventory/utils/problemDetails";
+import {
+  getErrorMessage,
+  getErrorStatus,
+  isFeatureDisabledError,
+} from "@/features/parts-inventory/utils/problemDetails";
 import {
   useFallbackGroups,
   useCreateFallbackGroup,
@@ -103,6 +107,16 @@ export function FallbackGroupsPanel({
     setEditorOpen(true);
   };
 
+  // Backend requires the `farm_admin` role for POST/PUT/DELETE and returns
+  // 403 for non-admin users. `getErrorMessage` will pass through any server
+  // detail if present, but for a bare 403 we surface an actionable message.
+  const describeMutationError = (err: unknown, fallback: string): string => {
+    if (getErrorStatus(err) === 403) {
+      return "Admin role required to configure fallback chains.";
+    }
+    return getErrorMessage(err, fallback);
+  };
+
   const handleSubmit = async (request: {
     name: string;
     materialType: string;
@@ -119,7 +133,7 @@ export function FallbackGroupsPanel({
       setEditorOpen(false);
       setEditingGroup(null);
     } catch (err) {
-      setSubmitError(getErrorMessage(err, "Failed to save fallback chain"));
+      setSubmitError(describeMutationError(err, "Failed to save fallback chain"));
     }
   };
 
@@ -129,7 +143,7 @@ export function FallbackGroupsPanel({
       await deleteMutation.mutateAsync(pendingDelete.id);
       setPendingDelete(null);
     } catch (err) {
-      setSubmitError(getErrorMessage(err, "Failed to delete fallback chain"));
+      setSubmitError(describeMutationError(err, "Failed to delete fallback chain"));
       setPendingDelete(null);
     }
   };
@@ -144,13 +158,21 @@ export function FallbackGroupsPanel({
     try {
       await reorder.reorder(group, nextIds);
     } catch (err) {
-      setReorderError(getErrorMessage(err, "Failed to reorder chain"));
+      setReorderError(describeMutationError(err, "Failed to reorder chain"));
     }
   };
 
   // Gate: requires ≥2 physical toolheads. Rendered by parent as well, but we
   // also defend here so the component is safe to drop anywhere.
   if (physicalToolheads.length < 2) {
+    return null;
+  }
+
+  // Operator feature gate: backend returns 404 with ProblemDetails
+  // `code: "featureDisabled"` when the "multi-slot fallback" feature is
+  // switched off. Hide the panel silently in that case — surfacing an error
+  // would be noise since the operator has intentionally disabled it.
+  if (groupsQuery.isError && isFeatureDisabledError(groupsQuery.error)) {
     return null;
   }
 

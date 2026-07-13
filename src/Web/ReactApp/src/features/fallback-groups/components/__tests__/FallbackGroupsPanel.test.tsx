@@ -286,4 +286,55 @@ describe("FallbackGroupsPanel", () => {
     await waitFor(() => expect(hoisted.apiGet).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId("fallback-group-g1")).toBeInTheDocument();
   });
+
+  it("hides the panel when the operator feature is disabled (404 with featureDisabled code)", async () => {
+    // Backend gates every fallback endpoint on the MultiSlotFallback operator
+    // feature. When it's off the list endpoint returns 404 with the standard
+    // ProblemDetails `code: "featureDisabled"` extension — the panel should
+    // render nothing instead of a scary error, mirroring filament coverage.
+    const err = {
+      statusCode: 404,
+      message: "Feature disabled",
+      response: {
+        status: 404,
+        data: {
+          status: 404,
+          title: "Feature disabled",
+          detail: "The 'multiSlotFallback' operator feature is disabled by an administrator.",
+          type: "https://printfarmer.io/errors/feature-disabled",
+          code: "featureDisabled",
+          feature: "multiSlotFallback",
+        },
+      },
+    };
+    hoisted.apiGet.mockRejectedValueOnce(err);
+    const { container } = renderPanel();
+    await waitFor(() => expect(hoisted.apiGet).toHaveBeenCalled());
+    await waitFor(() => expect(container.firstChild).toBeNull());
+  });
+
+  it("renders a friendly admin-required message when a mutation returns 403", async () => {
+    // POST/PUT/DELETE now require the `farm_admin` role (round-5 remediation).
+    // A bare 403 without a ProblemDetails body should surface as actionable
+    // copy instead of the axios boilerplate.
+    hoisted.apiGet.mockResolvedValueOnce({ data: [] });
+    hoisted.apiPost.mockRejectedValueOnce({
+      statusCode: 403,
+      message: "Request failed with status code 403",
+      response: { status: 403 },
+    });
+    renderPanel();
+    await screen.findByText(/no fallback chains configured/i);
+    fireEvent.click(screen.getByRole("button", { name: /add a new fallback chain/i }));
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "PLA chain" } });
+    fireEvent.change(screen.getByLabelText(/^material$/i), { target: { value: "PLA" } });
+    fireEvent.click(screen.getByRole("button", { name: /add selected toolhead to chain/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add selected toolhead to chain/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /create chain/i }));
+    });
+    expect(
+      await screen.findByText(/admin role required to configure fallback chains/i),
+    ).toBeInTheDocument();
+  });
 });
