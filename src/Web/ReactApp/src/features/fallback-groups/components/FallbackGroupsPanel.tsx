@@ -39,6 +39,7 @@ import {
 import {
   buildCoverageLookup,
   deriveFallbackGroupChainState,
+  type CreateFilamentFallbackGroupRequest,
   type FilamentFallbackGroup,
 } from "@/features/fallback-groups/types";
 import { FallbackChainDisplay } from "./FallbackChainDisplay";
@@ -82,6 +83,7 @@ export function FallbackGroupsPanel({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<FilamentFallbackGroup | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const coverageLookup = useMemo(
     () => buildCoverageLookup(coverageQuery.data?.toolheads ?? null),
@@ -117,12 +119,7 @@ export function FallbackGroupsPanel({
     return getErrorMessage(err, fallback);
   };
 
-  const handleSubmit = async (request: {
-    name: string;
-    materialType: string;
-    displayOrder?: number;
-    toolheadIds: string[];
-  }) => {
+  const handleSubmit = async (request: CreateFilamentFallbackGroupRequest) => {
     setSubmitError(null);
     try {
       if (editingGroup) {
@@ -139,11 +136,14 @@ export function FallbackGroupsPanel({
 
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
+    setDeleteError(null);
     try {
       await deleteMutation.mutateAsync(pendingDelete.id);
       setPendingDelete(null);
     } catch (err) {
-      setSubmitError(describeMutationError(err, "Failed to delete fallback chain"));
+      // Surface the delete error at panel level so it survives closing the
+      // confirmation modal (submitError only renders inside the editor).
+      setDeleteError(describeMutationError(err, "Failed to delete fallback chain"));
       setPendingDelete(null);
     }
   };
@@ -219,6 +219,12 @@ export function FallbackGroupsPanel({
       {reorderError && (
         <Alert type="error" title="Reorder failed" className="mb-2">
           {reorderError}
+        </Alert>
+      )}
+
+      {deleteError && (
+        <Alert type="error" title="Delete failed" className="mb-2">
+          {deleteError}
         </Alert>
       )}
 

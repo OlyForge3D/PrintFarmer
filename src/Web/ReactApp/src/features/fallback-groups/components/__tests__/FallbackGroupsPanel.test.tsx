@@ -242,6 +242,30 @@ describe("FallbackGroupsPanel", () => {
     await waitFor(() => expect(hoisted.apiDelete).toHaveBeenCalledWith("/printers/p1/fallback-groups/g1"));
   });
 
+  it("surfaces a delete failure at the panel level after the confirmation modal closes", async () => {
+    // The confirmation modal auto-closes on both success and failure, so the
+    // delete error must be routed to a panel-level Alert rather than the
+    // editor's submitError (which is not rendered when the editor is closed).
+    hoisted.apiGet.mockResolvedValueOnce({ data: twoGroupResponse });
+    hoisted.apiDelete.mockRejectedValueOnce({
+      statusCode: 403,
+      message: "Request failed with status code 403",
+      response: { status: 403 },
+    });
+    renderPanel();
+    await screen.findByTestId("fallback-group-g1");
+    fireEvent.click(screen.getByRole("button", { name: /delete fallback chain pla lineup/i }));
+    const confirm = await screen.findByRole("button", { name: /delete chain/i });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(
+      await screen.findByText(/admin role required to configure fallback chains/i),
+    ).toBeInTheDocument();
+    // And the panel remains visible with the group still listed.
+    expect(screen.getByTestId("fallback-group-g1")).toBeInTheDocument();
+  });
+
   it("surfaces a server error message from a failed create", async () => {
     hoisted.apiGet.mockResolvedValueOnce({ data: [] });
     hoisted.apiPost.mockRejectedValueOnce({
@@ -254,6 +278,7 @@ describe("FallbackGroupsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /add a new fallback chain/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "PLA" } });
     fireEvent.change(screen.getByLabelText(/^material$/i), { target: { value: "PLA" } });
+    fireEvent.click(screen.getByRole("button", { name: /add selected toolhead to chain/i }));
     fireEvent.click(screen.getByRole("button", { name: /add selected toolhead to chain/i }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /create chain/i }));

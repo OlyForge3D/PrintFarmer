@@ -218,6 +218,17 @@ describe("validateFallbackGroupDraft", () => {
     ).toBe(true);
   });
 
+  it("rejects drafts with fewer than two toolheads (backend requires primary + fallback)", () => {
+    const errs = validateFallbackGroupDraft(
+      { name: "PLA lineup", materialType: "PLA", toolheadIds: ["t1"] },
+      [],
+      physical,
+    );
+    const toolheadErrs = errs.filter((e) => e.field === "toolheadIds");
+    expect(toolheadErrs.length).toBeGreaterThan(0);
+    expect(toolheadErrs[0].message).toMatch(/at least two/i);
+  });
+
   it("returns no errors for a valid draft", () => {
     expect(
       validateFallbackGroupDraft(

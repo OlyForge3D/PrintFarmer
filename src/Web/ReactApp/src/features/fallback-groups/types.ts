@@ -279,10 +279,13 @@ export function validateFallbackGroupDraft(
     errors.push({ field: "materialType", message: "Material type is required." });
   }
 
-  if (draft.toolheadIds.length === 0) {
+  if (draft.toolheadIds.length < 2) {
+    // Backend requires primary + at least one fallback (see
+    // FilamentFallbackGroupService.ValidateBasic). Mirror the rule client-side
+    // so the user gets an inline error instead of a 400 round-trip.
     errors.push({
       field: "toolheadIds",
-      message: "Add at least one physical toolhead to the chain.",
+      message: "Add at least two physical toolheads (primary + fallback) to the chain.",
     });
   } else {
     const seen = new Set<string>();
