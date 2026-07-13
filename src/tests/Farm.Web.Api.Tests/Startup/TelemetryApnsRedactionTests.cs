@@ -1,4 +1,4 @@
-using Farm.Web.Api.Startup;
+﻿using Farm.Web.Api.Startup;
 using FluentAssertions;
 using Xunit;
 

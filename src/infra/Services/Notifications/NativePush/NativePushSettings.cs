@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Notifications.NativePush;
+﻿namespace Farm.Infrastructure.Services.Notifications.NativePush;
 
 /// <summary>
 /// Deployment mode for the native-push sender. See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.

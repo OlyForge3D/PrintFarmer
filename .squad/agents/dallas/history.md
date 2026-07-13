@@ -16,6 +16,20 @@ Early entries (pre-2026-03-25) summarized for maintainability. See decisions-arc
 
 ---
 
+## 2026-07-13 CHARSET Gate Sweep on #708 (PR #750)
+
+**Symptom:** `dotnet format ./farm-web.sln --verify-no-changes` failed with 40 CHARSET errors and 7 WHITESPACE errors + 22 IDE0161 warnings at `bf3c9de5`.
+
+**Root cause of CHARSET failures:** Files introduced by the F3 native push commit (`271f45d48`) and predecessor commits were written without UTF-8 BOM, violating `src/.editorconfig`'s `[*.{cs,csx,vb,vbx}] charset = utf-8-bom`. The failures existed since the F3 commit, not introduced by v4/v5 remediation. 28 files new-in-PR, 12 pre-existing on `origin/development`.
+
+**Fix:** Prepend three-byte BOM (`EF BB BF`) to all 40 affected `.cs` files. Encoding-only change; every diff is exactly `1+/1-` on line 1, semantic content byte-identical after the BOM. CRLF line endings preserved.
+
+**Result:** CHARSET class now zero across the full solution. 99 native-push tests pass. Remaining format failures (7 WHITESPACE in `PrintersController.cs`, 22 IDE0161 on migrations) are different diagnostic classes and pre-date this remediation.
+
+**Key learning:** Editor tooling that strips BOMs silently is a repeat trap in this repo. When a "narrow" remediation task names a single file for a class-based diagnostic (like CHARSET), verify whether the class fails elsewhere before scoping — the same root cause usually affects sibling files added in the same feature commit.
+
+---
+
 
 _Last 4 most-recent learnings preserved from full history. Older entries are in `history-archive.md` (archived 2026-05-31 by Scribe)._
 

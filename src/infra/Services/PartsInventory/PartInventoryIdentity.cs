@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.PartsInventory;
+﻿namespace Farm.Infrastructure.Services.PartsInventory;
 
 /// <summary>Canonical identity normalization for printed-part SKUs and bin barcodes.</summary>
 public static class PartInventoryIdentity

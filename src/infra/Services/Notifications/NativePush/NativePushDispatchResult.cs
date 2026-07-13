@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Notifications.NativePush;
+﻿namespace Farm.Infrastructure.Services.Notifications.NativePush;
 
 /// <summary>
 /// Terminal outcome of a single native-push send attempt against

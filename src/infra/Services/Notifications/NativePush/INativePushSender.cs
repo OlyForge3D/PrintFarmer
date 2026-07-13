@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Notifications.NativePush;
+﻿namespace Farm.Infrastructure.Services.Notifications.NativePush;
 
 /// <summary>
 /// Provider-abstract native-push sender. One implementation is registered at any time

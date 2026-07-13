@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain.Notifications;
+﻿namespace Farm.Infrastructure.Domain.Notifications;
 
 /// <summary>
 /// Native push registration for a specific mobile installation. One row per

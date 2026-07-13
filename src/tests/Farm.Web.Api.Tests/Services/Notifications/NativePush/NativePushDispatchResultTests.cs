@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Notifications.NativePush;
+﻿using Farm.Infrastructure.Services.Notifications.NativePush;
 using FluentAssertions;
 using Xunit;
 
