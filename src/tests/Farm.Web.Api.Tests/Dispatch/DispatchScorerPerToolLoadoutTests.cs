@@ -1,8 +1,11 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Web.Api.Tests.Builders;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -365,5 +368,167 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
 
         scores.Should().HaveCount(2);
         gate.Verify(g => g.IsEnabled(OperatorFeature.MultiSlotFallback), Times.Once);
+    }
+
+    // ---- Finding 4: per-tool grams coverage overlay ----
+
+    [Fact]
+    public async Task ScorePrinters_ExactMatchWithSufficientGrams_KeepsFullFactor()
+    {
+        // (a) Exact indexed match AND the loaded spool has more grams than the tool needs →
+        // the material score is preserved at 100 with a "covers" explanation.
+        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 100.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        FleetFilamentCoverageDto fleet = CoverageFor(printer.Id, (0, 500.0), (1, 500.0));
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            featureGate: null,
+            coverageService: new StubCoverageService(fleet));
+
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        FactorScore f = s.ScoreBreakdown["PerToolLoadout.T0"];
+        f.Score.Should().Be(100);
+        f.EliminationReason.Should().Contain("covers");
+        s.Eliminated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ScorePrinters_ExactMatchButShortOnGrams_DiscountsProportionally()
+    {
+        // (b) Only 1g remaining for a 100g requirement, with no fallback group → the factor is
+        // discounted to ~1 (100 * 1/100) and the shortfall is spelled out for the operator.
+        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 100.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        FleetFilamentCoverageDto fleet = CoverageFor(printer.Id, (0, 1.0), (1, 500.0));
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            featureGate: null,
+            coverageService: new StubCoverageService(fleet));
+
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        FactorScore f = s.ScoreBreakdown["PerToolLoadout.T0"];
+        f.Score.Should().BeApproximately(1.0, 0.001);
+        f.EliminationReason.Should().Contain("short by 99g");
+        f.EliminationReason.Should().Contain("need 100g, have 1g");
+        f.IsHardRequirement.Should().BeFalse();
+        s.Eliminated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ScorePrinters_ShortfallCoveredByFallbackGroup_ReceivesDiscountedCredit()
+    {
+        // (c) T0 is loaded PLA but short; T1 is loaded PLA with plenty. A fallback group binding
+        // both toolheads for PLA lets the auto-switch dependency keep T0 viable at a reduced
+        // weight (60 = 100 * 0.6) rather than the near-zero proportional penalty.
+        (Printer printer, Toolhead t0, Toolhead t1) =
+            SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PLA");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 100.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        FilamentFallbackGroupService fallback =
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+        await fallback.CreateAsync(
+            printer.Id,
+            new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id]),
+            CancellationToken.None);
+
+        FleetFilamentCoverageDto fleet = CoverageFor(printer.Id, (0, 10.0), (1, 500.0));
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            featureGate: null,
+            coverageService: new StubCoverageService(fleet),
+            fallbackService: fallback);
+
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        FactorScore f = s.ScoreBreakdown["PerToolLoadout.T0"];
+        f.Score.Should().Be(60);
+        f.EliminationReason.Should().Contain("fallback");
+        s.Eliminated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ScorePrinters_CoverageDataMissing_KeepsMaterialScoreWithUnknownNote()
+    {
+        // (d) The coverage service is wired but returns no data for this printer → the factor
+        // falls back to the material-only score (100) and flags that grams are unverified.
+        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 100.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        FleetFilamentCoverageDto emptyFleet = new([], DateTime.UtcNow);
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            featureGate: null,
+            coverageService: new StubCoverageService(emptyFleet));
+
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        FactorScore f = s.ScoreBreakdown["PerToolLoadout.T0"];
+        f.Score.Should().Be(100);
+        f.EliminationReason.Should().Contain("coverage unknown");
+        s.Eliminated.Should().BeFalse();
+    }
+
+    private static FleetFilamentCoverageDto CoverageFor(
+        Guid printerId,
+        params (int Index, double? Remaining)[] toolheads)
+    {
+        List<ToolheadCoverageDto> rows = [.. toolheads.Select(t => new ToolheadCoverageDto(
+            ToolheadIndex: t.Index,
+            ToolheadName: $"T{t.Index}",
+            SpoolId: 1000 + t.Index,
+            Material: "PLA",
+            FilamentColor: null,
+            RemainingGrams: t.Remaining,
+            CurrentJobRequiredGrams: null,
+            CurrentJobRemainingGrams: null,
+            QueuedRequiredGrams: null,
+            TotalDemandGrams: null,
+            Status: FilamentCoverageStatus.Covers,
+            StatusReason: null,
+            PredictedRunoutAt: null,
+            PredictedRunoutLayer: null))];
+
+        PrinterFilamentCoverageDto printer = new(
+            printerId,
+            "Printer",
+            FilamentCoverageStatus.Covers,
+            rows,
+            ActiveJobId: null,
+            ActiveJobName: null,
+            ActiveJobProgress: null,
+            EarliestPredictedRunoutAt: null,
+            AssignedQueuedJobCount: 0,
+            EvaluatedAtUtc: DateTime.UtcNow);
+
+        return new FleetFilamentCoverageDto([printer], DateTime.UtcNow);
+    }
+
+    private sealed class StubCoverageService(FleetFilamentCoverageDto fleet) : IFilamentCoverageService
+    {
+        public Task<PrinterFilamentCoverageDto?> GetForPrinterAsync(Guid printerId, CancellationToken ct) =>
+            Task.FromResult(fleet.Printers.FirstOrDefault(p => p.PrinterId == printerId));
+
+        public Task<FleetFilamentCoverageDto> GetForFleetAsync(CancellationToken ct) =>
+            Task.FromResult(fleet);
     }
 }
