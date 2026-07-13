@@ -42,7 +42,9 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
-    private async Task<(Printer Printer, Toolhead T0, Toolhead T1, Toolhead Mmu)> SeedPrinterWithToolheadsAsync(string name = "Fallback Printer")
+    private async Task<(Printer Printer, Toolhead T0, Toolhead T1, Toolhead Mmu)> SeedPrinterWithToolheadsAsync(
+        string name = "Fallback Printer",
+        bool mmuTopology = false)
     {
         string suffix = Guid.NewGuid().ToString("N")[..8];
         Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = $"Mfg-{suffix}" };
@@ -57,8 +59,22 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
             IsEnabled = true,
         };
         Toolhead t0 = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 0, Name = "T0", ToolheadType = ToolheadType.Physical };
-        Toolhead t1 = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 1, Name = "T1", ToolheadType = ToolheadType.Physical };
-        Toolhead mmu = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 2, Name = "MMU-1", ToolheadType = ToolheadType.MmuGate };
+        Toolhead t1 = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Index = 1,
+            Name = mmuTopology ? "MMU-1" : "T1",
+            ToolheadType = mmuTopology ? ToolheadType.MmuGate : ToolheadType.Physical
+        };
+        Toolhead mmu = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Index = 2,
+            Name = mmuTopology ? "MMU-2" : "T2",
+            ToolheadType = mmuTopology ? ToolheadType.MmuGate : ToolheadType.Physical
+        };
 
         _db.Manufacturers.Add(mfg);
         _db.PrinterModels.Add(model);
@@ -93,16 +109,21 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
     {
         // Issue #711 (FIX D): AMS/MMU multi-slot fallback chains are the primary use case,
         // so MMU/AMS gates ARE eligible fallback-group members (unlike maintenance scope,
-        // which remains physical-only). A physical dock + an MMU gate is a valid chain.
-        (Printer p, Toolhead t0, _, Toolhead mmu) = await SeedPrinterWithToolheadsAsync();
+        // which remains physical-only). The shared physical hotend is intentionally excluded.
+        (Printer p, _, Toolhead gateOne, Toolhead gateTwo) =
+            await SeedPrinterWithToolheadsAsync(mmuTopology: true);
 
         FilamentFallbackGroupDto dto = await _service.CreateAsync(
             p.Id,
-            new CreateFilamentFallbackGroupRequest("AMS Chain", "PLA", null, [t0.Id, mmu.Id]),
+            new CreateFilamentFallbackGroupRequest(
+                "AMS Chain",
+                "PLA",
+                null,
+                [gateOne.Id, gateTwo.Id]),
             CancellationToken.None);
 
         dto.Members.Should().HaveCount(2);
-        dto.Members.Select(m => m.ToolheadId).Should().Contain(mmu.Id);
+        dto.Members.Select(m => m.ToolheadId).Should().Contain(gateTwo.Id);
     }
 
     [Fact]
@@ -256,25 +277,103 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
     {
         // Issue #711 (FIX D): an MMU/AMS gate loaded with the requested material is a valid
         // fallback slot and must be resolvable so the runout-attention flow can point at it.
-        (Printer p, Toolhead t0, _, Toolhead mmu) = await SeedPrinterWithToolheadsAsync();
-        mmu.CurrentMaterial = "PLA";
-        mmu.CurrentSpoolId = 7;
+        (Printer p, _, Toolhead gateOne, Toolhead gateTwo) =
+            await SeedPrinterWithToolheadsAsync(mmuTopology: true);
+        gateTwo.CurrentMaterial = "PLA";
+        gateTwo.CurrentSpoolId = 7;
         await _db.SaveChangesAsync();
 
         await _service.CreateAsync(
             p.Id,
-            new CreateFilamentFallbackGroupRequest("AMS Chain", "PLA", null, [t0.Id, mmu.Id]),
+            new CreateFilamentFallbackGroupRequest(
+                "AMS Chain",
+                "PLA",
+                null,
+                [gateOne.Id, gateTwo.Id]),
             CancellationToken.None);
 
         AvailableFallbackMember? result = await _service.FindAvailableFallbackAsync(
             p.Id,
-            sourceToolheadId: t0.Id,
+            sourceToolheadId: gateOne.Id,
             materialType: "PLA",
             CancellationToken.None);
 
         result.Should().NotBeNull();
-        result!.ToolheadId.Should().Be(mmu.Id);
+        result!.ToolheadId.Should().Be(gateTwo.Id);
         result.LoadedSpoolId.Should().Be(7);
+    }
+
+    [Fact]
+    public async Task CreateAsync_MmuPrinterSharedPhysicalHotend_Throws()
+    {
+        (Printer p, Toolhead physical, Toolhead gateOne, _) =
+            await SeedPrinterWithToolheadsAsync(mmuTopology: true);
+
+        Func<Task> act = () => _service.CreateAsync(
+            p.Id,
+            new CreateFilamentFallbackGroupRequest(
+                "Invalid shared hotend",
+                "PLA",
+                null,
+                [physical.Id, gateOne.Id]),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<FilamentFallbackGroupValidationException>()
+            .WithMessage("*not a filament source*");
+    }
+
+    [Fact]
+    public async Task GetAvailableFallbacksAsync_LegacyMmuChain_ExcludesSharedPhysicalHotend()
+    {
+        (Printer p, Toolhead physical, Toolhead gateOne, Toolhead gateTwo) =
+            await SeedPrinterWithToolheadsAsync(mmuTopology: true);
+        physical.CurrentMaterial = "PLA";
+        physical.CurrentSpoolId = 99;
+        gateTwo.CurrentMaterial = "PLA";
+        gateTwo.CurrentSpoolId = 42;
+
+        FilamentFallbackGroup group = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = p.Id,
+            Name = "Legacy mixed chain",
+            NameNormalized = "legacy mixed chain",
+            MaterialType = "PLA",
+            DisplayOrder = 0,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        group.Members.Add(new FilamentFallbackGroupMember
+        {
+            Id = Guid.NewGuid(),
+            FallbackGroupId = group.Id,
+            ToolheadId = gateOne.Id,
+            Position = 0,
+        });
+        group.Members.Add(new FilamentFallbackGroupMember
+        {
+            Id = Guid.NewGuid(),
+            FallbackGroupId = group.Id,
+            ToolheadId = physical.Id,
+            Position = 1,
+        });
+        group.Members.Add(new FilamentFallbackGroupMember
+        {
+            Id = Guid.NewGuid(),
+            FallbackGroupId = group.Id,
+            ToolheadId = gateTwo.Id,
+            Position = 2,
+        });
+        _db.FilamentFallbackGroups.Add(group);
+        await _db.SaveChangesAsync();
+
+        IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> results =
+            await _service.GetAvailableFallbacksAsync([p.Id], CancellationToken.None);
+
+        results[FilamentFallbackLookupKey.Create(p.Id, gateOne.Id, "PLA")]
+            .Members.Should().ContainSingle(member => member.ToolheadId == gateTwo.Id);
+        results.Should().NotContainKey(
+            FilamentFallbackLookupKey.Create(p.Id, physical.Id, "PLA"));
     }
 
     [Fact]

@@ -35,6 +35,7 @@ public sealed class FilamentRunoutSwitchEvaluator(
     IPrinterStatusCacheReader printerStatusCache) : IFilamentRunoutSwitchEvaluator
 {
     private const string ActiveRunoutReason = "runout-during-active-job";
+    private const int AvailableGateStatus = 1;
 
     // Live-telemetry evidence gate (Finding H3): a switch is only "confirmed" when the MMU reports
     // a fully-loaded filament state AND a settled (non-transitional) action. Backends use different
@@ -72,7 +73,11 @@ public sealed class FilamentRunoutSwitchEvaluator(
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         List<Toolhead> sourceCandidates =
-            [.. toolheads.Where(t => t.Index == warning.ToolheadIndex)];
+        [
+            .. toolheads.Where(t =>
+                t.Index == warning.ToolheadIndex
+                && ToolheadIndexMapper.IsFilamentSource(t, toolheads))
+        ];
         if (sourceCandidates.Count == 0)
         {
             return RunoutSwitchAssessment.NoBackup;
@@ -129,8 +134,8 @@ public sealed class FilamentRunoutSwitchEvaluator(
         foreach (FilamentFallbackChainMember backup in configuredBackups)
         {
             if (toolheadsById.TryGetValue(backup.ToolheadId, out Toolhead? toolhead)
-                && IsActiveFallback(toolhead, mmuStatus)
-                && LiveMaterialConfirms(toolhead, mmuStatus, warning.Material))
+                && IsActiveFallback(toolhead, toolheads, mmuStatus)
+                && LiveMaterialConfirms(toolhead, toolheads, mmuStatus, warning.Material))
             {
                 return RunoutSwitchAssessment.SwitchConfirmed;
             }
@@ -162,9 +167,13 @@ public sealed class FilamentRunoutSwitchEvaluator(
         return false;
     }
 
-    private static bool IsActiveFallback(Toolhead toolhead, MmuStatusDto status)
+    private static bool IsActiveFallback(
+        Toolhead toolhead,
+        IReadOnlyCollection<Toolhead> printerToolheads,
+        MmuStatusDto status)
     {
-        int? mappedIndex = ToolheadIndexMapper.ToGcodeToolIndex(toolhead);
+        int? mappedIndex =
+            ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(toolhead, printerToolheads);
         if (!mappedIndex.HasValue)
         {
             return false;
@@ -177,10 +186,12 @@ public sealed class FilamentRunoutSwitchEvaluator(
 
     private static bool LiveMaterialConfirms(
         Toolhead toolhead,
+        IReadOnlyCollection<Toolhead> printerToolheads,
         MmuStatusDto status,
         string requiredMaterial)
     {
-        int? mappedIndex = ToolheadIndexMapper.ToGcodeToolIndex(toolhead);
+        int? mappedIndex =
+            ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(toolhead, printerToolheads);
         MmuGateDto? liveGate = mappedIndex.HasValue
             ? status.Gates.FirstOrDefault(gate => gate.Index == mappedIndex.Value)
             : null;
@@ -194,9 +205,11 @@ public sealed class FilamentRunoutSwitchEvaluator(
             return toolhead.ToolheadType != ToolheadType.MmuGate;
         }
 
-        // A gate exists: require present, matching material. Missing (blank) material on the active
-        // gate is treated as unproven rather than a match (Finding H3, case e).
-        return !string.IsNullOrWhiteSpace(liveGate.Material)
+        // All supported MMU protocols normalize gate status to 1=available, 0=empty, 2=unknown,
+        // -1=disabled. Retained global Loaded/Idle state and stale material metadata cannot confirm
+        // a switch unless the active gate itself reports filament present.
+        return liveGate.Status == AvailableGateStatus
+            && !string.IsNullOrWhiteSpace(liveGate.Material)
             && string.Equals(liveGate.Material, requiredMaterial, StringComparison.OrdinalIgnoreCase);
     }
 }

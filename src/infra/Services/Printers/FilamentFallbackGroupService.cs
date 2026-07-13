@@ -158,10 +158,9 @@ public sealed class FilamentFallbackGroupService(
             .FirstOrDefaultAsync(p => p.Id == printerId, ct)
             ?? throw new KeyNotFoundException($"Printer {printerId} not found.");
 
-        // Enforce toolhead ownership (all members belong to this printer). Both physical tool
-        // docks AND MMU/AMS gates are eligible fallback-chain members: issue #711 is about
-        // AMS/MMU multi-slot fallback chains, so MMU gates are a primary use case here (unlike
-        // maintenance scope, which remains physical-only). See issue #711 (F6, FIX D).
+        // Enforce ownership and topology-aware filament-source eligibility. Physical docks remain
+        // valid on traditional/toolchanger printers, but an MMU printer carries filament only in
+        // its gates; its shared physical hotend cannot participate in a fallback chain.
         Dictionary<Guid, Toolhead> printerToolheadsById = printer.Toolheads.ToDictionary(t => t.Id);
         foreach (Guid id in request.ToolheadIds)
         {
@@ -171,10 +170,10 @@ public sealed class FilamentFallbackGroupService(
                     $"Toolhead {id} does not belong to printer {printerId}.");
             }
 
-            if (th.ToolheadType is not (ToolheadType.Physical or ToolheadType.MmuGate))
+            if (!ToolheadIndexMapper.IsFilamentSource(th, printer.Toolheads))
             {
                 throw new FilamentFallbackGroupValidationException(
-                    $"Toolhead {id} is not a spool-carrying toolhead and cannot participate in a fallback group.");
+                    $"Toolhead {id} is not a filament source in this printer topology and cannot participate in a fallback group.");
             }
         }
 
@@ -252,11 +251,10 @@ public sealed class FilamentFallbackGroupService(
                     $"Toolhead {id} does not belong to printer {printerId}.");
             }
 
-            // Both physical docks and MMU/AMS gates are eligible fallback members (issue #711, FIX D).
-            if (th.ToolheadType is not (ToolheadType.Physical or ToolheadType.MmuGate))
+            if (!ToolheadIndexMapper.IsFilamentSource(th, printer.Toolheads))
             {
                 throw new FilamentFallbackGroupValidationException(
-                    $"Toolhead {id} is not a spool-carrying toolhead and cannot participate in a fallback group.");
+                    $"Toolhead {id} is not a filament source in this printer topology and cannot participate in a fallback group.");
             }
         }
 
@@ -375,6 +373,13 @@ public sealed class FilamentFallbackGroupService(
                 .ThenInclude(m => m.Toolhead)
             .AsSingleQuery()
             .ToListAsync(ct);
+        List<Toolhead> candidateToolheads = await db.Toolheads
+            .AsNoTracking()
+            .Where(t => candidateIds.Contains(t.PrinterId))
+            .ToListAsync(ct);
+        Dictionary<Guid, List<Toolhead>> toolheadsByPrinter = candidateToolheads
+            .GroupBy(t => t.PrinterId)
+            .ToDictionary(group => group.Key, group => group.ToList());
 
         Dictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> resolutions = [];
         foreach (FilamentFallbackGroup group in groups
@@ -383,8 +388,23 @@ public sealed class FilamentFallbackGroupService(
             .ThenBy(g => g.CreatedAt)
             .ThenBy(g => g.Id))
         {
+            if (!toolheadsByPrinter.TryGetValue(
+                group.PrinterId,
+                out List<Toolhead>? printerToolheads))
+            {
+                continue;
+            }
+
             List<FilamentFallbackGroupMember> orderedMembers =
-                [.. group.Members.OrderBy(m => m.Position)];
+            [
+                .. group.Members
+                    .Where(member =>
+                        member.Toolhead is not null
+                        && ToolheadIndexMapper.IsFilamentSource(
+                            member.Toolhead,
+                            printerToolheads))
+                    .OrderBy(member => member.Position)
+            ];
             for (int sourceIndex = 0; sourceIndex < orderedMembers.Count - 1; sourceIndex++)
             {
                 FilamentFallbackGroupMember source = orderedMembers[sourceIndex];

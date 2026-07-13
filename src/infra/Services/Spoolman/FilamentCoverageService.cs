@@ -245,8 +245,11 @@ public class FilamentCoverageService(
     {
         SpoolCoverageSettings settings = GetSettings();
         DateTime evaluatedAt = DateTime.UtcNow;
-        List<Toolhead> toolheads = (printer.Toolheads ?? [])
+        List<Toolhead> allToolheads = (printer.Toolheads ?? [])
             .OrderBy(t => t.Index)
+            .ToList();
+        List<Toolhead> toolheads = allToolheads
+            .Where(t => ToolheadIndexMapper.IsFilamentSource(t, allToolheads))
             .ToList();
 
         PrintJob? activeJob = jobs.FirstOrDefault(j =>
@@ -337,7 +340,8 @@ public class FilamentCoverageService(
             // stored toolhead index (1-based for MMU gates) must be translated through the mapper
             // before matching (issue #711 round-10 Finding 2). A null G-code index is the shared
             // physical hotend of an MMU printer and never carries filament demand of its own.
-            int? gcodeIndex = ToolheadIndexMapper.ToGcodeToolIndex(th);
+            int? gcodeIndex =
+                ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(th, toolheads);
             bool activeHasThisSlot = gcodeIndex.HasValue && activePerCopy.ContainsKey(gcodeIndex.Value);
             double perCopyGrams = activeHasThisSlot ? activePerCopy[gcodeIndex!.Value] : 0.0;
 
@@ -660,7 +664,7 @@ public class FilamentCoverageService(
                 Toolhead? primaryToolhead = toolheads.FirstOrDefault(t => t.IsPrimary)
                     ?? toolheads.FirstOrDefault();
                 int primaryIdx = (primaryToolhead is not null
-                    ? ToolheadIndexMapper.ToGcodeToolIndex(primaryToolhead)
+                    ? ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(primaryToolhead, toolheads)
                     : null) ?? 0;
                 demand[primaryIdx] = single.Value;
                 return (demand, true, false);

@@ -494,7 +494,10 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                         // each stored toolhead through the mapper to bind MMU gates (stored 1-based)
                         // to the correct extruder instead of shifting by one gate (issue #711
                         // round-10 Finding 2).
-                        var toolhead = toolheads.FirstOrDefault(t => ToolheadIndexMapper.ToGcodeToolIndex(t) == toolIndex);
+                        var toolhead = toolheads.FirstOrDefault(t =>
+                            ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(
+                                t,
+                                toolheads) == toolIndex);
                         var usage = new PrintJobToolheadUsage
                         {
                             Id = Guid.NewGuid(),

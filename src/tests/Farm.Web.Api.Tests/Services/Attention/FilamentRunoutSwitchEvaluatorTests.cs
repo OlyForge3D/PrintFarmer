@@ -137,29 +137,35 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
     [Fact]
     public async Task AssessAsync_FreshActiveGateSelectsFallback_ReturnsSwitchConfirmed()
     {
-        (Printer p, Toolhead t0, Toolhead gate) = await SeedAsync();
-        gate.ToolheadType = ToolheadType.MmuGate;
+        (Printer p, Toolhead sourceGate, Toolhead gate) =
+            await SeedAsync(mmuTopology: true);
         gate.CurrentMaterial = "PLA";
         gate.CurrentSpoolId = BackupSpoolId;
         await _db.SaveChangesAsync();
-        await CreateGroupAsync(p, t0, gate);
+        await CreateGroupAsync(p, sourceGate, gate);
         SetStatus(
             p,
             new MmuStatusDto(
                 Enabled: true,
                 IsHomed: true,
-                ActiveTool: 0,
-                ActiveGate: 0,
+                ActiveTool: 1,
+                ActiveGate: 1,
                 FilamentState: "Loaded",
                 Action: "Idle",
-                NumGates: 1,
+                NumGates: 2,
                 HasBypass: false,
                 EndlessSpool: true,
                 ClogDetection: true,
-                Gates: [new MmuGateDto(0, 1, "PLA", null, null, BackupSpoolId)]));
+                Gates:
+                [
+                    new MmuGateDto(0, 0, null, null, null, -1),
+                    new MmuGateDto(1, 1, "PLA", null, null, BackupSpoolId)
+                ]));
 
         RunoutSwitchAssessment result =
-            await _evaluator.AssessAsync(RunoutWarning(p), CancellationToken.None);
+            await _evaluator.AssessAsync(
+                RunoutWarning(p, sourceGate.Index),
+                CancellationToken.None);
 
         result.Should().Be(RunoutSwitchAssessment.SwitchConfirmed);
     }
@@ -167,29 +173,35 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
     [Fact]
     public async Task AssessAsync_LiveFallbackGateMaterialMismatch_ReturnsBackupAvailable()
     {
-        (Printer p, Toolhead t0, Toolhead gate) = await SeedAsync();
-        gate.ToolheadType = ToolheadType.MmuGate;
+        (Printer p, Toolhead sourceGate, Toolhead gate) =
+            await SeedAsync(mmuTopology: true);
         gate.CurrentMaterial = "PLA";
         gate.CurrentSpoolId = BackupSpoolId;
         await _db.SaveChangesAsync();
-        await CreateGroupAsync(p, t0, gate);
+        await CreateGroupAsync(p, sourceGate, gate);
         SetStatus(
             p,
             new MmuStatusDto(
                 Enabled: true,
                 IsHomed: true,
-                ActiveTool: 0,
-                ActiveGate: 0,
+                ActiveTool: 1,
+                ActiveGate: 1,
                 FilamentState: "Loaded",
                 Action: "Idle",
-                NumGates: 1,
+                NumGates: 2,
                 HasBypass: false,
                 EndlessSpool: false,
                 ClogDetection: false,
-                Gates: [new MmuGateDto(0, 1, "PETG", null, null, BackupSpoolId)]));
+                Gates:
+                [
+                    new MmuGateDto(0, 0, null, null, null, -1),
+                    new MmuGateDto(1, 1, "PETG", null, null, BackupSpoolId)
+                ]));
 
         RunoutSwitchAssessment result =
-            await _evaluator.AssessAsync(RunoutWarning(p), CancellationToken.None);
+            await _evaluator.AssessAsync(
+                RunoutWarning(p, sourceGate.Index),
+                CancellationToken.None);
 
         result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
     }
@@ -266,33 +278,82 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
         result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
     }
 
+    [Fact]
+    public async Task AssessAsync_SelectedGateEmptyWithRetainedLoadedMetadata_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Loaded",
+            action: "Idle",
+            gateMaterial: "PLA",
+            gateStatus: 0);
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
+    [Fact]
+    public async Task AssessAsync_SelectedGateAvailableWithLoadedMetadata_ReturnsSwitchConfirmed()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Loaded",
+            action: "Idle",
+            gateMaterial: "PLA",
+            gateStatus: 1);
+
+        result.Should().Be(RunoutSwitchAssessment.SwitchConfirmed);
+    }
+
+    [Fact]
+    public async Task AssessAsync_SelectedGateUnknownOrTransitionalStatus_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Loaded",
+            action: "Idle",
+            gateMaterial: "PLA",
+            gateStatus: 2);
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
     private async Task<RunoutSwitchAssessment> AssessGateAsync(
         string? filamentState,
         string? action,
-        string? gateMaterial)
+        string? gateMaterial,
+        int gateStatus = 1)
     {
-        (Printer p, Toolhead t0, Toolhead gate) = await SeedAsync();
-        gate.ToolheadType = ToolheadType.MmuGate;
+        (Printer p, Toolhead sourceGate, Toolhead gate) =
+            await SeedAsync(mmuTopology: true);
         gate.CurrentMaterial = "PLA";
         gate.CurrentSpoolId = BackupSpoolId;
         await _db.SaveChangesAsync();
-        await CreateGroupAsync(p, t0, gate);
+        await CreateGroupAsync(p, sourceGate, gate);
         SetStatus(
             p,
             new MmuStatusDto(
                 Enabled: true,
                 IsHomed: true,
-                ActiveTool: 0,
-                ActiveGate: 0,
+                ActiveTool: 1,
+                ActiveGate: 1,
                 FilamentState: filamentState,
                 Action: action,
-                NumGates: 1,
+                NumGates: 2,
                 HasBypass: false,
                 EndlessSpool: false,
                 ClogDetection: false,
-                Gates: [new MmuGateDto(0, 1, gateMaterial, null, null, BackupSpoolId)]));
+                Gates:
+                [
+                    new MmuGateDto(0, 0, null, null, null, -1),
+                    new MmuGateDto(
+                        1,
+                        gateStatus,
+                        gateMaterial,
+                        null,
+                        null,
+                        BackupSpoolId)
+                ]));
 
-        return await _evaluator.AssessAsync(RunoutWarning(p), CancellationToken.None);
+        return await _evaluator.AssessAsync(
+            RunoutWarning(p, sourceGate.Index),
+            CancellationToken.None);
     }
 
     [Fact]
@@ -345,11 +406,13 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
         result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
     }
 
-    private static FilamentRunoutWarningDto RunoutWarning(Printer printer)
+    private static FilamentRunoutWarningDto RunoutWarning(
+        Printer printer,
+        int toolheadIndex = 0)
         => new(
             printer.Id,
             printer.Name,
-            ToolheadIndex: 0,
+            ToolheadIndex: toolheadIndex,
             SpoolId: RunoutSpoolId,
             Material: "PLA",
             RemainingGrams: 5,
@@ -380,7 +443,8 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
                 updatedAtUtc ?? DateTime.UtcNow));
     }
 
-    private async Task<(Printer Printer, Toolhead T0, Toolhead T1)> SeedAsync()
+    private async Task<(Printer Printer, Toolhead T0, Toolhead T1)> SeedAsync(
+        bool mmuTopology = false)
     {
         string suffix = Guid.NewGuid().ToString("N")[..8];
         Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = $"Mfg-{suffix}" };
@@ -394,13 +458,44 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
             ServerUrl = $"http://10.0.1.{(Math.Abs(suffix.GetHashCode(StringComparison.Ordinal)) % 240) + 2}",
             IsEnabled = true,
         };
-        Toolhead t0 = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 0, Name = "T0", ToolheadType = ToolheadType.Physical };
-        Toolhead t1 = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 1, Name = "T1", ToolheadType = ToolheadType.Physical };
+        Toolhead physical = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Index = 0,
+            Name = "T0",
+            ToolheadType = ToolheadType.Physical
+        };
+        Toolhead t0 = mmuTopology
+            ? new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Index = 1,
+                Name = "Gate 1",
+                ToolheadType = ToolheadType.MmuGate
+            }
+            : physical;
+        Toolhead t1 = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Index = mmuTopology ? 2 : 1,
+            Name = mmuTopology ? "Gate 2" : "T1",
+            ToolheadType = mmuTopology ? ToolheadType.MmuGate : ToolheadType.Physical
+        };
 
         _db.Manufacturers.Add(mfg);
         _db.PrinterModels.Add(model);
         _db.Printers.Add(printer);
-        _db.Toolheads.AddRange(t0, t1);
+        if (mmuTopology)
+        {
+            _db.Toolheads.AddRange(physical, t0, t1);
+        }
+        else
+        {
+            _db.Toolheads.AddRange(t0, t1);
+        }
         await _db.SaveChangesAsync();
 
         return (printer, t0, t1);

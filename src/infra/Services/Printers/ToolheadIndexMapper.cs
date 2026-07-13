@@ -26,6 +26,41 @@ namespace Farm.Infrastructure.Services.Printers;
 public static class ToolheadIndexMapper
 {
     /// <summary>
+    /// Determines whether a toolhead is a spool-carrying filament source for its printer topology.
+    /// When MMU gates exist, filament flows through those gates and the shared physical hotend is
+    /// only an extruder. Without MMU gates, physical toolheads remain the filament sources.
+    /// </summary>
+    public static bool IsFilamentSource(
+        Toolhead toolhead,
+        IEnumerable<Toolhead> printerToolheads)
+    {
+        ArgumentNullException.ThrowIfNull(toolhead);
+        ArgumentNullException.ThrowIfNull(printerToolheads);
+
+        bool hasMmuGates = printerToolheads.Any(candidate =>
+            candidate.ToolheadType == ToolheadType.MmuGate);
+
+        return toolhead.ToolheadType switch
+        {
+            ToolheadType.MmuGate => toolhead.Index > 0,
+            ToolheadType.Physical => !hasMmuGates,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Translates a spool-carrying toolhead to its 0-based G-code tool index while accounting for
+    /// the printer's complete topology. Returns <c>null</c> for the shared physical hotend of an MMU
+    /// printer so it cannot collide with gate 1 at G-code T0.
+    /// </summary>
+    public static int? ToFilamentSourceGcodeToolIndex(
+        Toolhead toolhead,
+        IEnumerable<Toolhead> printerToolheads) =>
+        IsFilamentSource(toolhead, printerToolheads)
+            ? ToGcodeToolIndex(toolhead)
+            : null;
+
+    /// <summary>
     /// Translates a stored <see cref="Toolhead"/> to its 0-based G-code tool index.
     /// Returns <c>null</c> when the toolhead is a virtual MMU gate at
     /// <see cref="Toolhead.Index"/> = 0 (which would produce a negative G-code tool

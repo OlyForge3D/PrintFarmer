@@ -448,7 +448,10 @@ public class DispatchScorer(
                     {
                         Toolhead? memberToolhead =
                             printer.Toolheads.FirstOrDefault(t => t.Id == member.ToolheadId);
-                        if (memberToolhead is null)
+                        if (memberToolhead is null
+                            || !ToolheadIndexMapper.IsFilamentSource(
+                                memberToolhead,
+                                printer.Toolheads))
                         {
                             continue;
                         }
@@ -495,14 +498,16 @@ public class DispatchScorer(
 
     private static Toolhead? MatchIndexedToolhead(Printer printer, int tool) =>
         printer.Toolheads
-            .Where(t => ToolheadIndexMapper.ToGcodeToolIndex(t) == tool)
-            .OrderByDescending(t => t.ToolheadType == ToolheadType.MmuGate)
-            .ThenBy(t => t.Index)
+            .Where(t =>
+                ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(
+                    t,
+                    printer.Toolheads) == tool)
+            .OrderBy(t => t.Index)
             .FirstOrDefault();
 
     private static Toolhead? FindLoadedMaterialToolhead(Printer printer, string material) =>
         printer.Toolheads.FirstOrDefault(t =>
-            (t.ToolheadType == ToolheadType.Physical || t.ToolheadType == ToolheadType.MmuGate)
+            ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads)
             && !string.IsNullOrWhiteSpace(t.CurrentMaterial)
             && string.Equals(t.CurrentMaterial, material, StringComparison.OrdinalIgnoreCase));
 
@@ -706,6 +711,7 @@ public class DispatchScorer(
         }
 
         if (printer.Toolheads.Any(t =>
+            ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads) &&
             !string.IsNullOrWhiteSpace(t.CurrentMaterial) &&
             string.Equals(t.CurrentMaterial, requiredMaterial, StringComparison.OrdinalIgnoreCase)))
         {
@@ -714,6 +720,7 @@ public class DispatchScorer(
 
         if (clusterMateNames.Count > 0 &&
             printer.Toolheads.Any(t =>
+                ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads) &&
                 !string.IsNullOrWhiteSpace(t.CurrentMaterial) &&
                 clusterMateNames.Contains(t.CurrentMaterial)))
         {
@@ -986,6 +993,7 @@ public class DispatchScorer(
         }
 
         string[] printerColors = printer.Toolheads
+            .Where(t => ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads))
             .Select(t => t.CurrentFilamentColor)
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Select(c => c!)

@@ -3811,7 +3811,8 @@ public class PrintJobManagementService(
             // perExtruderWeights is 0-based G-code T-index; translate each stored toolhead through
             // the mapper so MMU gates (stored 1-based) bind to the correct extruder estimate
             // instead of being shifted by one gate (issue #711 round-10 Finding 2).
-            var toolhead = toolheads.FirstOrDefault(t => ToolheadIndexMapper.ToGcodeToolIndex(t) == i);
+            var toolhead = toolheads.FirstOrDefault(t =>
+                ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(t, toolheads) == i);
             var usage = new PrintJobToolheadUsage
             {
                 Id = Guid.NewGuid(),

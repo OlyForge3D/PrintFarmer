@@ -311,6 +311,7 @@ public class FilamentCoverageServiceTests
         Printer p = SeedPrinter(
             db,
             "mmu",
+            T(0, spoolId: 999, primary: true, material: "STALE"),
             Gate(1, spoolId: 100, material: "PLA"),
             Gate(2, spoolId: 200, material: "PETG"),
             Gate(3, spoolId: 300, material: "ABS"));
@@ -324,10 +325,14 @@ public class FilamentCoverageServiceTests
         spool.Setup(s => s.GetSpoolByIdAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(100, remainingG: 500, material: "PLA"));
         spool.Setup(s => s.GetSpoolByIdAsync(200, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(200, remainingG: 500, material: "PETG"));
         spool.Setup(s => s.GetSpoolByIdAsync(300, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(300, remainingG: 500, material: "ABS"));
+        spool.Setup(s => s.GetSpoolByIdAsync(999, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(999, remainingG: 500, material: "PLA"));
 
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
 
         cov!.Toolheads.Should().HaveCount(3, "each demand key maps onto a real gate; no phantom slots");
+        cov.Toolheads.Should().NotContain(
+            toolhead => toolhead.ToolheadIndex == 0,
+            "the shared physical hotend is not a filament source when MMU gates exist");
 
         // T0 (G-code 0) -> gate stored at Index 1, T1 -> Index 2, T2 -> Index 3.
         cov.Toolheads.Single(t => t.ToolheadIndex == 1).CurrentJobRequiredGrams.Should().Be(10);
