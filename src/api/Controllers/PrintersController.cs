@@ -899,6 +899,15 @@ public class PrintersController(
         // Get primary toolhead for capabilities DTO (backward compatibility)
         Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
 
+        // Only expose per-tool attribution surface (SupportsPerToolAttribution flag and
+        // per-toolhead CumulativePrintHours) when the multi-slot-fallback operator feature
+        // is on AND the printer's persisted domain capability flag is true (issue #711, F6
+        // backend). When either condition fails, both the capability flag and the odometer
+        // values collapse to their unset defaults (false / null) so #719 UI consumers see a
+        // deterministic "not applicable" shape rather than stale or fabricated wear.
+        bool multiSlotFallbackEnabled = featureGate.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback);
+        bool perToolAttributionActive = multiSlotFallbackEnabled && p.SupportsPerToolAttribution;
+
         // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
         // This provides backward compatibility while we transition to using Toolheads directly
         PrinterCapabilitiesDto? capabilitiesDto = new PrinterCapabilitiesDto(
@@ -947,13 +956,19 @@ public class PrintersController(
             t.ToolheadType,
             t.CurrentSpoolId,
             t.CurrentMaterial,
-            t.CurrentFilamentColor)).ToArray();
+            t.CurrentFilamentColor,
+
+            // Only project the per-toolhead odometer when the capability is active for this
+            // printer; otherwise emit explicit null so consumers can distinguish "no
+            // attribution available" from "zero hours accrued" (a supported printer with a
+            // fresh baseline still returns 0.0 here).
+            perToolAttributionActive ? t.CumulativePrintHours : null)).ToArray();
 
         // Only expose fallback chains when the multi-slot-fallback operator feature is on
         // (issue #711, FIX E); otherwise return an empty list so gated-off clients never
         // see fallback config.
         IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto> fallbackGroups =
-            featureGate.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback)
+            multiSlotFallbackEnabled
                 ? await fallbackGroupService.ListForPrinterAsync(id, ct)
                 : [];
 
@@ -993,7 +1008,8 @@ public class PrintersController(
             p.BuddyCameraIp,
             p.NozzleDiameter,
             p.HasMmu,
-            fallbackGroups);
+            fallbackGroups,
+            perToolAttributionActive);
     }
 
     /// <summary>
