@@ -126,4 +126,50 @@ describe('AdjustStockModal', () => {
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
     expect(mockMutateAsync.mock.calls[0][0].request.binCode).toBeNull();
   });
+
+  it('rotates the operationKey when distinct payloads share the same delimiter-concatenated signature', async () => {
+    // Bin codes and notes may contain the delimiter ("|"). Under the old
+    // `${delta}|${reason}|${bin}|${notes}` scheme these two distinct payloads
+    // both serialize to "1|manual|A|B|C", so the corrected retry would wrongly
+    // reuse the first operationKey and the backend would replay the first
+    // adjustment. JSON serialization must keep the signatures distinct.
+    mockMutateAsync.mockResolvedValue({});
+
+    const collisionBins: BinDto[] = [
+      { ...bins[0], id: 'bin-a', code: 'A', name: 'Bin A' },
+      { ...bins[0], id: 'bin-ab', code: 'A|B', name: 'Bin A pipe B' },
+    ];
+
+    render(
+      <AdjustStockModal
+        isOpen
+        onClose={vi.fn()}
+        part={makePart({ defaultBinCode: 'A', defaultBinId: 'bin-a', defaultBinName: 'Bin A' })}
+        bins={collisionBins}
+      />
+    );
+
+    // First payload: bin "A" + notes "B|C" → old signature "1|manual|A|B|C".
+    fireEvent.change(screen.getByLabelText('Bin'), { target: { value: 'A' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'B|C' } });
+    submit();
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+
+    // Second payload: bin "A|B" + notes "C" → old signature ALSO "1|manual|A|B|C".
+    fireEvent.change(screen.getByLabelText('Bin'), { target: { value: 'A|B' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'C' } });
+    submit();
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(2));
+
+    const firstCall = mockMutateAsync.mock.calls[0][0].request;
+    const secondCall = mockMutateAsync.mock.calls[1][0].request;
+    // Sanity: the two submissions really are the colliding payloads.
+    expect(firstCall.binCode).toBe('A');
+    expect(firstCall.notes).toBe('B|C');
+    expect(secondCall.binCode).toBe('A|B');
+    expect(secondCall.notes).toBe('C');
+    // The operationKey must rotate — distinct payloads are distinct operations.
+    expect(firstCall.operationKey).toBeTruthy();
+    expect(secondCall.operationKey).not.toBe(firstCall.operationKey);
+  });
 });

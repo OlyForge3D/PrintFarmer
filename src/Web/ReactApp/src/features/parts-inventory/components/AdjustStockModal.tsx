@@ -99,7 +99,10 @@ function AdjustStockFormBody({ part, bins, onClose }: AdjustStockFormBodyProps) 
 
     // One operationKey per logical adjustment: reuse the cached key when the
     // payload is unchanged (a retry), mint a fresh one when the payload changed.
-    const signature = `${deltaNum}|${reason}|${effectiveBinCode ?? ''}|${notes.trim()}`;
+    // JSON.stringify gives an unambiguous, canonical signature — bin codes and
+    // notes may contain the delimiter (`|`), so plain concatenation could make
+    // distinct payloads collide and wrongly reuse a stale operationKey.
+    const signature = JSON.stringify([deltaNum, reason, effectiveBinCode ?? null, notes.trim()]);
     if (!opKeyRef.current || opKeyRef.current.signature !== signature) {
       opKeyRef.current = { signature, key: generateOperationKey() };
     }
