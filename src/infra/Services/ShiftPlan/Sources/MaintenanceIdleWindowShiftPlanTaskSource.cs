@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
@@ -16,17 +17,20 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
     private readonly IMaintenanceAlertRepository _alerts;
     private readonly IIdleWindowService _idleWindows;
     private readonly ISettingsService _settings;
+    private readonly IOperatorFeatureGate _featureGate;
     private readonly ILogger<MaintenanceIdleWindowShiftPlanTaskSource> _logger;
 
     public MaintenanceIdleWindowShiftPlanTaskSource(
         IMaintenanceAlertRepository alerts,
         IIdleWindowService idleWindows,
         ISettingsService settings,
+        IOperatorFeatureGate featureGate,
         ILogger<MaintenanceIdleWindowShiftPlanTaskSource> logger)
     {
         _alerts = alerts;
         _idleWindows = idleWindows;
         _settings = settings;
+        _featureGate = featureGate;
         _logger = logger;
     }
 
@@ -64,6 +68,20 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
         if (active.Count == 0)
         {
             return Array.Empty<ShiftPlanTaskSpec>();
+        }
+
+        // Finding H5 (issue #711): when the multi-slot fallback feature is off,
+        // per-toolhead maintenance must not leak into the shift plan. Drop any
+        // alert scoped to a specific toolhead so only printer-wide maintenance is
+        // projected. Printer-wide alerts (ToolheadId == null) always flow through.
+        bool perToolEnabled = _featureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+        if (!perToolEnabled)
+        {
+            active = active.Where(a => !a.ToolheadId.HasValue).ToList();
+            if (active.Count == 0)
+            {
+                return Array.Empty<ShiftPlanTaskSpec>();
+            }
         }
 
         IdleWindowResult idleResult = await _idleWindows

@@ -41,7 +41,8 @@ public sealed class AttentionService(
     IAttentionBroadcaster? broadcaster = null,
     Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService? failureHistory = null,
     IPartHarvestService? partHarvestService = null,
-    IOperatorFeatureGate? featureGate = null) : IAttentionService
+    IOperatorFeatureGate? featureGate = null,
+    IMaintenanceAlertResolutionService? alertResolution = null) : IAttentionService
 {
     /// <summary>Default number of items returned when the caller does not specify a limit.</summary>
     public const int DefaultLimit = 100;
@@ -63,6 +64,13 @@ public sealed class AttentionService(
     private readonly Farm.Infrastructure.Services.FailureDetection.IFailureDetectionIncidentHistoryService? _failureHistory = failureHistory;
     private readonly IPartHarvestService? _partHarvestService = partHarvestService;
     private readonly IOperatorFeatureGate? _featureGate = featureGate;
+
+    // Finding H6 (issue #711): resolving a maintenance attention item must produce an authoritative
+    // completion log, not just an alert status flip. When present, the resolution coordinator writes
+    // the log and transitions the alert atomically so the alert engine does not re-derive the alert
+    // as still-due and recreate it. Optional so unit contexts that don't exercise resolve are
+    // unaffected; production DI always supplies it.
+    private readonly IMaintenanceAlertResolutionService? _alertResolution = alertResolution;
 
     /// <inheritdoc />
     public async Task<AttentionFeedResult> GetFeedAsync(
@@ -463,6 +471,25 @@ public sealed class AttentionService(
                     await _maintenanceAlerts.AcknowledgeAlertAsync(alertId, userName, ct);
                     return new AttentionActionResult(AttentionActionOutcome.Ok, null);
                 case AttentionActionKind.Resolve:
+                    // Finding H6: route resolve through the completion coordinator so an
+                    // authoritative maintenance log is written and the alert transitions atomically.
+                    // Falling back to the alert-only ResolveAlertAsync would flip the status without
+                    // a log, and the alert engine (which derives due-state from the latest log)
+                    // would recreate the alert on its next evaluation — making the resolve look
+                    // broken. When no coordinator is wired (legacy/unit contexts), preserve the
+                    // prior alert-only behavior.
+                    if (_alertResolution is not null)
+                    {
+                        MaintenanceAlertResolutionResult? resolution =
+                            await _alertResolution.ResolveAlertWithCompletionLogAsync(alertId, userName, notes: null, ct);
+                        if (resolution is null)
+                        {
+                            return new AttentionActionResult(AttentionActionOutcome.NotFound, $"Maintenance alert {alertId} not found.");
+                        }
+
+                        return new AttentionActionResult(AttentionActionOutcome.Ok, null);
+                    }
+
                     await _maintenanceAlerts.ResolveAlertAsync(alertId, userName, ct);
                     return new AttentionActionResult(AttentionActionOutcome.Ok, null);
                 case AttentionActionKind.Dismiss:
@@ -471,6 +498,10 @@ public sealed class AttentionService(
                 default:
                     return new AttentionActionResult(AttentionActionOutcome.InvalidAction, $"Action '{actionKind}' is not valid for maintenance items.");
             }
+        }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return new AttentionActionResult(AttentionActionOutcome.InvalidAction, ex.Message);
         }
         catch (Exception ex)
         {
