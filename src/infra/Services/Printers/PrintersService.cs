@@ -1654,7 +1654,7 @@ public class PrintersService(
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
 
             // SupportsPerToolAttribution is derived after the toolheads are built (see
-            // DeterminePerToolAttributionSupport before AddAsync below): it is true only for a
+            // PerToolAttributionCapability.Refresh before AddAsync below): it is true only for a
             // Moonraker printer with two or more physical hotends, the case where interval-aware
             // active-tool telemetry can genuinely differentiate per-head wear (issue #711, round-14).
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
@@ -1756,7 +1756,7 @@ public class PrintersService(
         // Derive per-tool attribution capability now that the physical toolheads exist (issue #711,
         // round-14). True only for a Moonraker printer with ≥2 physical hotends, where interval-aware
         // active-tool telemetry can genuinely differentiate per-head wear.
-        p.SupportsPerToolAttribution = DeterminePerToolAttributionSupport(dto.Backend, p.Toolheads);
+        _ = PerToolAttributionCapability.Refresh(p);
 
         await AddAsync(p, ct);
 
@@ -1904,6 +1904,8 @@ public class PrintersService(
                 }
             }
         }
+
+        updated = PerToolAttributionCapability.Refresh(printer) || updated;
 
         // Always mark the sync as complete so HasCatalogUpdate clears,
         // even when the printer already has all template values.
@@ -3156,6 +3158,7 @@ public class PrintersService(
                         "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
                         p.Name, id, toolheadIndex);
                     p.MultiMaterial = true;
+                    _ = PerToolAttributionCapability.Refresh(p);
                 }
 
                 if (p.MultiMaterial)
@@ -3317,6 +3320,7 @@ public class PrintersService(
         }
 
         printer.MultiMaterial = previousMultiMaterial;
+        _ = PerToolAttributionCapability.Refresh(printer);
         _db.Entry(printer).Property(p => p.MultiMaterial).IsModified = false;
 
         if (existingToolhead is not null && previousUpdatedAt.HasValue)
@@ -3449,6 +3453,7 @@ public class PrintersService(
                     "ClearToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
                     p.Name, id, toolheadIndex);
                 p.MultiMaterial = true;
+                _ = PerToolAttributionCapability.Refresh(p);
             }
 
             if (p.MultiMaterial)
@@ -3613,31 +3618,7 @@ public class PrintersService(
             }
         }
 
-        // Re-derive per-tool attribution capability after a topology change (issue #711, round-14).
-        // Guarded so it stays a no-op — and does not mark the printer Modified — unless the physical
-        // hotend count actually flips the outcome (toggling MMU gates never changes physical count).
-        bool derivedSupport = DeterminePerToolAttributionSupport((PrinterBackend)printer.Backend, printer.Toolheads);
-        if (printer.SupportsPerToolAttribution != derivedSupport)
-        {
-            printer.SupportsPerToolAttribution = derivedSupport;
-        }
-    }
-
-    /// <summary>
-    /// Determines whether a printer can genuinely attribute per-toolhead wear from interval-aware
-    /// active-tool telemetry (issue #711, round-14). True only when the backend samples active-tool
-    /// telemetry (today only Moonraker) AND the printer has two or more physical hotends, since a
-    /// single-hotend printer — even with an MMU/AMS — has just one wear-bearing head to attribute to.
-    /// </summary>
-    internal static bool DeterminePerToolAttributionSupport(PrinterBackend backend, IEnumerable<Toolhead> toolheads)
-    {
-        if (backend != PrinterBackend.Moonraker)
-        {
-            return false;
-        }
-
-        int physicalToolheadCount = toolheads.Count(toolhead => toolhead.ToolheadType == ToolheadType.Physical);
-        return physicalToolheadCount >= 2;
+        _ = PerToolAttributionCapability.Refresh(printer);
     }
 
     /// <summary>

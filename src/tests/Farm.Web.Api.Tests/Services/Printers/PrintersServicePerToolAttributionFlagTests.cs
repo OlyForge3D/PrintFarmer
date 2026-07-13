@@ -22,7 +22,7 @@ public class PrintersServicePerToolAttributionFlagTests
             Physical(1)
         ];
 
-        PrintersService.DeterminePerToolAttributionSupport(PrinterBackend.Moonraker, toolheads)
+        PerToolAttributionCapability.IsSupported(PrinterBackend.Moonraker, toolheads)
             .Should().BeTrue();
     }
 
@@ -40,7 +40,7 @@ public class PrintersServicePerToolAttributionFlagTests
             MmuGate(3)
         ];
 
-        PrintersService.DeterminePerToolAttributionSupport(PrinterBackend.Moonraker, toolheads)
+        PerToolAttributionCapability.IsSupported(PrinterBackend.Moonraker, toolheads)
             .Should().BeFalse();
     }
 
@@ -57,7 +57,7 @@ public class PrintersServicePerToolAttributionFlagTests
             MmuGate(1)
         ];
 
-        PrintersService.DeterminePerToolAttributionSupport(PrinterBackend.Moonraker, toolheads)
+        PerToolAttributionCapability.IsSupported(PrinterBackend.Moonraker, toolheads)
             .Should().BeTrue();
     }
 
@@ -78,16 +78,60 @@ public class PrintersServicePerToolAttributionFlagTests
             Physical(1)
         ];
 
-        PrintersService.DeterminePerToolAttributionSupport(backend, toolheads)
+        PerToolAttributionCapability.IsSupported(backend, toolheads)
             .Should().BeFalse();
     }
 
     [Fact]
     public void DeterminePerToolAttributionSupport_MoonrakerWithNoToolheads_ReturnsFalse()
     {
-        PrintersService.DeterminePerToolAttributionSupport(PrinterBackend.Moonraker, [])
+        PerToolAttributionCapability.IsSupported(PrinterBackend.Moonraker, [])
             .Should().BeFalse();
     }
+
+    [Fact]
+    public void Refresh_NewMoonrakerWithTwoPhysicalToolheads_SetsCapabilityTrue()
+    {
+        Printer printer = PrinterWithBackend(PrinterBackend.Moonraker);
+        printer.Toolheads.Add(Physical(0));
+        printer.Toolheads.Add(Physical(1));
+
+        bool changed = PerToolAttributionCapability.Refresh(printer);
+
+        changed.Should().BeTrue();
+        printer.SupportsPerToolAttribution.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Refresh_BackendChangedFromMoonrakerToPrusaLink_FlipsCapabilityFalse()
+    {
+        Printer printer = PrinterWithBackend(PrinterBackend.Moonraker);
+        printer.Toolheads.Add(Physical(0));
+        printer.Toolheads.Add(Physical(1));
+        _ = PerToolAttributionCapability.Refresh(printer);
+        printer.Backend = (int)PrinterBackend.PrusaLink;
+
+        bool changed = PerToolAttributionCapability.Refresh(printer);
+
+        changed.Should().BeTrue();
+        printer.SupportsPerToolAttribution.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Refresh_DerivedValueUnchanged_PreservesEqualityGuard()
+    {
+        Printer printer = PrinterWithBackend(PrinterBackend.PrusaLink);
+
+        PerToolAttributionCapability.Refresh(printer).Should().BeFalse();
+        printer.SupportsPerToolAttribution.Should().BeFalse();
+    }
+
+    private static Printer PrinterWithBackend(PrinterBackend backend) => new()
+    {
+        Id = Guid.NewGuid(),
+        Name = "Capability test",
+        Backend = (int)backend
+    };
 
     private static Toolhead Physical(int index) => new()
     {

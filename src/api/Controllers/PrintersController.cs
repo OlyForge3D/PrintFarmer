@@ -30,6 +30,7 @@ using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
+using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -1882,6 +1883,10 @@ public class PrintersController(
                 await _printersService.SyncBuddyCameraAsync(p, ip, ct);
             }
         }
+
+        // Backend, multi-material, and topology edits all converge on one equality-guarded
+        // capability derivation before the unit of work commits.
+        _ = PerToolAttributionCapability.Refresh(p);
 
         // Save all changes (printer + toolhead updates) with concurrency retry.
         // Background polling services may update the same printer row (e.g. status, temps),
