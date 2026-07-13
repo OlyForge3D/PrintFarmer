@@ -1826,10 +1826,14 @@ export const NewSliceJobPage: React.FC = () => {
               : selectedProcessPresetId.startsWith('custom:')
               ? selectedProcessPresetId.slice('custom:'.length)
               : selectedProcessPresetId,
-            overrides: {
-              ...advancedProcessSettings,
-              ...modifiedProcessOverrides,
-            },
+            overrides: scrubSettingsForVersion(
+              {
+                ...advancedProcessSettings,
+                ...modifiedProcessOverrides,
+              },
+              'process',
+              selectedEngineVersion ?? latestAvailableForEngine,
+            ),
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)

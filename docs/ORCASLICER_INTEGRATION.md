@@ -968,13 +968,13 @@ Both functions are driven by `orca-settings-version-delta.ts`, a hand-maintained
 - 2.4-added fields disappear from tabs and from the "Other Settings" fallback when the job is pinned to 2.3.1.
 - Renamed fields render under the version-correct key (older key on 2.3.1, newer key on 2.4.1) when a rename is declared in the delta.
 
-`NewSliceJobPage` computes `effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine` and passes it to `<SlicerSettingsPanel>`. A dedicated `useEffect` on `effectiveEngineVersion` runs `scrubSettingsForVersion` against `advancedProcessSettings`, so:
+`NewSliceJobPage` computes `effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine` and passes it to `<SlicerSettingsPanel>`. A dedicated `useEffect` on `effectiveEngineVersion` runs `scrubSettingsForVersion` against **all three** in-flight settings state objects atomically — `advancedProcessSettings` (dynamic dict), `slicerSettings` (typed OrcaProcessSettings the inline editor writes to), and `originalProcessSettings` (baseline snapshot used by `diffProcessOverrides` at submit time). This is what makes the added/removed/renamed guarantee real:
 
-- Keys not valid on the newly selected engine are dropped from in-flight edit state.
-- Renamed keys migrate atomically (newer-key → older-key on downgrade, and are dropped on upgrade because they no longer exist in the target metadata — the user must re-opt into the new key).
-- The scrub is skipped when settings are already clean (identity preserved) to avoid render loops.
+- Keys not valid on the newly selected engine are dropped from every state path.
+- Renamed keys migrate atomically (newer-key → older-key on downgrade, and are dropped on upgrade because they no longer exist in the target metadata — the user must re-opt into the new field).
+- Identity is preserved when settings are already clean to avoid render loops.
 
-Because the submit payload is a spread of `advancedProcessSettings`, the scrub effect alone guarantees that the payload sent to `POST /api/slicer/jobs` never contains stale keys from a previously-selected engine. The persisted `slicerEngineVersion` field on the job (Path A) already binds the job to that engine.
+The submit payload constructs `overrides` as `{ ...advancedProcessSettings, ...diffProcessOverrides(slicerSettings, originalProcessSettings) }`. Both source objects are scrubbed by the effect, and the merged result is additionally scrubbed by `scrubSettingsForVersion` at submit time as defense-in-depth so a stale key introduced by any future state path cannot leak into `POST /api/slicer/jobs`. The persisted `slicerEngineVersion` field on the job (Path A) binds the job to that engine.
 
 ### Persisted-job reopen
 

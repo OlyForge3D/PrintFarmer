@@ -168,6 +168,19 @@ describe('multi-state scrub → submit-payload diff (Vasquez r7)', () => {
   // effect must remove the key from `slicerSettings` AND
   // `originalProcessSettings` so `diffProcessOverrides()` at submit time
   // cannot leak the 2.4-only key into the legacy worker's overrides payload.
+  it('DEFENSE-IN-DEPTH: submit-time scrub of merged overrides also strips a 2.4-only key on 2.3.1', () => {
+    // Reproduces the r7 leak path Bishop identified: even if per-state scrubs
+    // are bypassed or a future state path is added, scrubbing the merged
+    // overrides at submit time is a final guarantee.
+    const advancedProcessSettings = { precise_z_height: 0.05 } as Record<string, unknown>;
+    const modifiedProcessOverrides = { alternate_extra_wall: true, layer_height: 0.3 } as Record<string, unknown>;
+    const merged = { ...advancedProcessSettings, ...modifiedProcessOverrides };
+    const scrubbed = scrubSettingsForVersion(merged, 'process', '2.3.1');
+    expect(scrubbed.precise_z_height).toBeUndefined();
+    expect(scrubbed.alternate_extra_wall).toBeUndefined();
+    expect(scrubbed.layer_height).toBe(0.3);
+  });
+
   it('scrubbed slicerSettings + originalProcessSettings yields empty overrides for a 2.4-only edit on 2.3.1', () => {
     // BEFORE version change (on 2.4.1): user edited precise_z_height
     const originalOn24 = { layer_height: 0.2 } as Record<string, unknown>;
