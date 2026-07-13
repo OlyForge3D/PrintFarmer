@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
@@ -229,5 +231,140 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
         (await verify.MaintenanceLogs.CountAsync()).Should().Be(0);
         MaintenanceAlert? persisted = await verify.MaintenanceAlerts.FirstOrDefaultAsync(a => a.Id == alert.Id);
         persisted!.Status.Should().Be(MaintenanceAlertStatus.Active);
+    }
+
+    [Fact]
+    public async Task ResolveAlertWithCompletionLog_WritesAuthoritativeLogWithBaselinesAndResolvesAlert()
+    {
+        // Finding H6 (issue #711): the coordinator entry point (used by the unified attention Resolve)
+        // must produce a real completion log carrying the hour baselines the alert engine reads
+        // (PrinterHoursAtMaintenance / ToolheadHoursAtMaintenance) so a resolved alert is not
+        // re-derived as still-due and recreated on the next evaluation.
+        MaintenanceAlert alert = SeedToolheadAlert();
+
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        var printerStats = new Mock<IPrinterStatisticsRepository>(MockBehavior.Loose);
+        printerStats
+            .Setup(r => r.GetByPrinterIdAsync(alert.PrinterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatistics { PrinterId = alert.PrinterId, TotalPrintHours = 123.5 });
+        var toolheadStats = new Mock<IToolheadStatisticsRepository>(MockBehavior.Loose);
+        toolheadStats
+            .Setup(r => r.GetCumulativeHoursAsync(alert.ToolheadId!.Value, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(42.0);
+
+        var service = new MaintenanceAlertResolutionService(
+            _context,
+            gate.Object,
+            attentionBroadcaster: null,
+            printerStatisticsRepository: printerStats.Object,
+            toolheadStatisticsRepository: toolheadStats.Object);
+
+        MaintenanceAlertResolutionResult? result =
+            await service.ResolveAlertWithCompletionLogAsync(alert.Id, "operator", notes: "done", CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Alert.Status.Should().Be(MaintenanceAlertStatus.Resolved);
+
+        await using AppDbContext verify = NewContext();
+        MaintenanceLog? log = await verify.MaintenanceLogs.FirstOrDefaultAsync(l => l.ResolvedAlertId == alert.Id);
+        log.Should().NotBeNull();
+        log!.ToolheadId.Should().Be(alert.ToolheadId);
+        log.PrinterHoursAtMaintenance.Should().Be(123.5);
+        log.ToolheadHoursAtMaintenance.Should().Be(42.0);
+        log.PerformedBy.Should().Be("operator");
+        log.Notes.Should().Be("done");
+    }
+
+    [Fact]
+    public async Task ResolveWithLog_CalledTwiceForSameAlert_PersistsSingleLogAndSecondReturnsExisting()
+    {
+        // Finding H7 (issue #711) idempotency: a duplicate submission (client retry after a dropped
+        // response, or a double-click) must NOT create a second completion log. The already-Resolved
+        // alert short-circuits to the existing linked log.
+        MaintenanceAlert alert = SeedToolheadAlert();
+
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        var service = new MaintenanceAlertResolutionService(_context, gate.Object);
+
+        MaintenanceAlertResolutionResult? first =
+            await service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
+        first.Should().NotBeNull();
+        Guid firstLogId = first!.Log.Id;
+
+        MaintenanceAlertResolutionResult? second =
+            await service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
+        second.Should().NotBeNull();
+        second!.Log.Id.Should().Be(firstLogId);
+        second.Alert.Status.Should().Be(MaintenanceAlertStatus.Resolved);
+
+        await using AppDbContext verify = NewContext();
+        (await verify.MaintenanceLogs.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ResolveWithLog_BroadcasterThrows_StillPersistsLogAndReturnsSuccess()
+    {
+        // Finding H7: broadcasting runs AFTER the resolution commits. A broadcast failure is an
+        // observability concern, not a correctness one, so it must be swallowed — the resolution is
+        // already durable and the caller must observe success (no HTTP 500 that would prompt a retry
+        // and a duplicate completion).
+        MaintenanceAlert alert = SeedToolheadAlert();
+
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        var broadcaster = new Mock<IAttentionBroadcaster>(MockBehavior.Loose);
+        broadcaster
+            .Setup(b => b.NotifyChangedAsync(It.IsAny<AttentionChangedPayload>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("hub down"));
+
+        var service = new MaintenanceAlertResolutionService(_context, gate.Object, broadcaster.Object);
+
+        MaintenanceAlertResolutionResult? result =
+            await service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
+
+        result.Should().NotBeNull();
+        result!.Alert.Status.Should().Be(MaintenanceAlertStatus.Resolved);
+
+        await using AppDbContext verify = NewContext();
+        (await verify.MaintenanceLogs.CountAsync()).Should().Be(1);
+        MaintenanceAlert? persisted = await verify.MaintenanceAlerts.FirstOrDefaultAsync(a => a.Id == alert.Id);
+        persisted!.Status.Should().Be(MaintenanceAlertStatus.Resolved);
+        broadcaster.Verify(
+            b => b.NotifyChangedAsync(It.IsAny<AttentionChangedPayload>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveWithLog_DuplicateCompletionForSameAlert_UniqueIndexCatchesAndReturnsWinner()
+    {
+        // Finding H7: even if two resolves race past the status pre-check (both observe an Active
+        // alert), the filtered-unique index on ResolvedAlertId guarantees at most one completion log
+        // per alert. Here the "winning" racer's log is pre-inserted directly while the alert is left
+        // Active, so the service's insert collides on the index. The service must catch the
+        // DbUpdateException and return the committed winner rather than surfacing an error.
+        MaintenanceAlert alert = SeedToolheadAlert();
+
+        MaintenanceLog winner = BuildLog(alert);
+        winner.ResolvedAlertId = alert.Id;
+        _context.MaintenanceLogs.Add(winner);
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        var service = new MaintenanceAlertResolutionService(_context, gate.Object);
+
+        MaintenanceAlertResolutionResult? result =
+            await service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
+
+        result.Should().NotBeNull();
+        result!.Log.Id.Should().Be(winner.Id);
+
+        await using AppDbContext verify = NewContext();
+        (await verify.MaintenanceLogs.CountAsync(l => l.ResolvedAlertId == alert.Id)).Should().Be(1);
     }
 }

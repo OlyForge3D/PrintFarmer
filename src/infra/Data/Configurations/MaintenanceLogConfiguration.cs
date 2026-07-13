@@ -48,7 +48,11 @@ public class MaintenanceLogConfiguration : IEntityTypeConfiguration<MaintenanceL
         // Indexes for efficient queries
         _ = builder.HasIndex(l => l.PrinterId);
         _ = builder.HasIndex(l => l.PrinterMaintenanceScheduleId);
-        _ = builder.HasIndex(l => l.ResolvedAlertId);
+
+        // NOTE: the ResolvedAlertId index is declared in AppDbContext.OnModelCreating as a
+        // provider-switched FILTERED-UNIQUE index (issue #711, Finding H7) so at most one
+        // completion log can link to a given alert. The filter SQL is provider-specific and
+        // therefore cannot live here.
         _ = builder.HasIndex(l => l.MaintenanceTaskId);
         _ = builder.HasIndex(l => l.ToolheadId);
         _ = builder.HasIndex(l => l.PerformedAt);
