@@ -52,16 +52,38 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
   const [notes, setNotes] = useState('');
   const [undeploying, setUndeploying] = useState<PrinterMaintenanceScheduleDto | null>(null);
 
-  // Fetch per-tool capability + toolhead list for the printer under the picker.
-  // Only run when a printer is chosen and the modal is open.
-  const { data: printerDetails } = useQuery<PrinterDetails>({
+  // Fetch per-tool capability + toolhead list for the printer under the
+  // picker. Only run when a printer is chosen and the modal is open.
+  //
+  // Consuming `status`/`isLoading`/`isError` alongside `data` is critical: a
+  // per-tool-capable printer will start with `printerDetails === undefined`
+  // during the first fetch, and without a load gate on Deploy the modal
+  // would silently send `toolheadId: null` for a printer whose scope picker
+  // simply hadn't rendered yet. `refetch` powers the accessible Retry
+  // button below.
+  const {
+    data: printerDetails,
+    isLoading: printerDetailsLoading,
+    isError: printerDetailsIsError,
+    error: printerDetailsError,
+    refetch: refetchPrinterDetails,
+  } = useQuery<PrinterDetails>({
     queryKey: ['printerDetails', selectedPrinterId],
     queryFn: () => apiClient.getPrinterDetails(selectedPrinterId),
     enabled: isOpen && !!selectedPrinterId,
     staleTime: 60_000,
   });
 
-  const perToolAllowed = printerDetails?.supportsPerToolAttribution === true;
+  // Explicit three-state gate over the details query. Each state has a
+  // matching UI (loading indicator / retry banner / picker or hidden) and
+  // `canDeploy` requires `detailsReady`.
+  const hasPrinterSelected = !!selectedPrinterId;
+  const detailsPending = hasPrinterSelected && printerDetailsLoading;
+  const detailsFailed = hasPrinterSelected && printerDetailsIsError;
+  const detailsReady =
+    hasPrinterSelected && !printerDetailsLoading && !printerDetailsIsError && !!printerDetails;
+
+  const perToolAllowed = detailsReady && printerDetails?.supportsPerToolAttribution === true;
   const eligibleToolheads = useMemo(
     () => (printerDetails?.toolheads ?? []).filter(isEligibleMaintenanceToolhead),
     [printerDetails],
@@ -134,6 +156,11 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
 
   const handleDeploy = async () => {
     if (!plan || !selectedPrinterId) return;
+    // Defence in depth. Even though `canDeploy` disables the button while
+    // `detailsReady` is false, an assistive-tech or programmatic click on a
+    // disabled control must not send a stale `toolheadId: null` for a
+    // printer whose capability we haven't confirmed yet.
+    if (!detailsReady) return;
     const toolheadId = showScopePicker ? toolheadIdFromScope(scope) : null;
     try {
       await deployMutation.mutateAsync({
@@ -174,6 +201,10 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
   const canDeploy =
     !!selectedPrinterId &&
     !deployMutation.isPending &&
+    // Details must be fully resolved. This is the guard that prevents a
+    // per-tool-capable printer from being silently deployed as printer-wide
+    // during the capability-query race window (loading OR errored).
+    detailsReady &&
     (showScopePicker
       ? scope === PRINTER_WIDE_SCOPE
         ? printerWideAvailable
@@ -191,7 +222,16 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
             <h4 className="text-sm font-medium text-pf-text-secondary">Deploy to Printer</h4>
             <Select
               value={selectedPrinterId}
-              onChange={(e) => setSelectedPrinterId(e.target.value)}
+              onChange={(e) => {
+                // Reset scope synchronously on every printer change. A stale
+                // toolhead id from the previous printer would otherwise be
+                // carried across (the effect below runs after render, so the
+                // Deploy button briefly sees an invalid scope). Setting the
+                // scope back to PRINTER_WIDE_SCOPE at the same tick as
+                // `selectedPrinterId` closes that window.
+                setSelectedPrinterId(e.target.value);
+                setScope(PRINTER_WIDE_SCOPE);
+              }}
               aria-label="Select printer to deploy to"
             >
               <option value="">Select printer…</option>
@@ -199,6 +239,48 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </Select>
+            {/* Details query — three states.
+                Loading: role="status" gives the visible text an implicit
+                aria-live="polite" and aria-atomic="true" so screen readers
+                announce the pending capability check without stealing
+                focus.
+                Error: role="alert" for assertive announcement plus a Retry
+                action wired to the query's own `refetch` (same key, so
+                react-query re-uses the mutation-observer wiring).
+                Ready: the picker or absence of picker is what the operator
+                sees. */}
+            {detailsPending && (
+              <p
+                role="status"
+                className="text-xs text-pf-text-tertiary"
+                data-testid="printer-details-loading"
+              >
+                Loading printer capabilities…
+              </p>
+            )}
+            {detailsFailed && (
+              <div
+                role="alert"
+                className="flex items-center gap-2 rounded-md border border-pf-error/40 bg-pf-error/10 px-3 py-2 text-xs text-pf-error"
+                data-testid="printer-details-error"
+              >
+                <span className="flex-1">
+                  Could not load printer capabilities
+                  {printerDetailsError instanceof Error && printerDetailsError.message
+                    ? `: ${printerDetailsError.message}`
+                    : '.'}
+                </span>
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="sm"
+                  onClick={() => { void refetchPrinterDetails(); }}
+                  aria-label="Retry loading printer capabilities"
+                >
+                  Retry
+                </Button>
+              </div>
+            )}
             {selectedPrinterId && showScopePicker && (
               <ToolheadScopePicker
                 value={scope}

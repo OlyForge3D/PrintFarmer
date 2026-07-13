@@ -4,8 +4,9 @@ import {
   ClockIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
+  QuestionMarkCircleIcon,
 } from '@heroicons/react/24/outline';
-import type { PrinterToolheadOdometer } from '@/types/maintenance';
+import type { PrinterToolheadOdometer, ToolheadDueState } from '@/types/maintenance';
 
 export interface ToolheadOdometerCardProps {
   odometer: PrinterToolheadOdometer;
@@ -20,8 +21,14 @@ export interface ToolheadOdometerCardProps {
  * Compact per-toolhead odometer card used on `PrinterMaintenancePage`. Renders
  * the toolhead's cumulative print hours (from
  * `PrinterDetailsDto.toolheads[].cumulativePrintHours` on the #711 backend
- * `0bfa50343`) plus a non-color due-state chip (icon + label) so the state is
- * perceivable without relying on color alone (WCAG 1.4.1).
+ * contract at feature head `1b696b954`) plus a non-color due-state chip
+ * (icon + label) so state is perceivable without relying on color alone
+ * (WCAG 1.4.1).
+ *
+ * The card does NOT infer due-state from cumulative hours; that would let a
+ * loading/failed upcoming-maintenance feed render as a false "OK". The
+ * schedule engine's verdict is pre-computed by the page and passed in via
+ * `odometer.dueState`.
  */
 export function ToolheadOdometerCard({
   odometer,
@@ -29,7 +36,7 @@ export function ToolheadOdometerCard({
   isActive,
   className,
 }: ToolheadOdometerCardProps) {
-  const dueState = deriveDueState(odometer);
+  const dueState = odometer.dueState;
   const hours = formatHours(odometer.cumulativePrintHours);
   const label = describeToolhead(odometer);
 
@@ -65,7 +72,7 @@ export function ToolheadOdometerCard({
               </div>
             </div>
           </div>
-          {odometer.nextDueTaskName && (
+          {odometer.nextDueTaskName && dueState !== 'unknown' && (
             <p className="mt-2 text-xs text-pf-text-secondary truncate">
               Next: <span className="text-pf-text-primary">{odometer.nextDueTaskName}</span>
             </p>
@@ -77,16 +84,7 @@ export function ToolheadOdometerCard({
   );
 }
 
-type DueState = 'overdue' | 'due-today' | 'ok' | 'unknown';
-
-function deriveDueState(o: PrinterToolheadOdometer): DueState {
-  if (o.isOverdue) return 'overdue';
-  if (o.isDueToday) return 'due-today';
-  if (typeof o.cumulativePrintHours === 'number') return 'ok';
-  return 'unknown';
-}
-
-function DueStateChip({ state }: { state: DueState }) {
+function DueStateChip({ state }: { state: ToolheadDueState }) {
   const meta = DUE_STATE_META[state];
   const Icon = meta.icon;
   return (
@@ -96,6 +94,11 @@ function DueStateChip({ state }: { state: DueState }) {
         meta.className
       )}
       data-testid={`due-state-${state}`}
+      // The chip is the accessible name for the tooth-scoped due state; it
+      // stands alone alongside the toolhead label so screen readers announce
+      // the state without needing to read the whole card.
+      aria-label={`Maintenance due state: ${meta.label}`}
+      role="status"
     >
       <Icon className="h-3.5 w-3.5" aria-hidden />
       <span>{meta.label}</span>
@@ -104,7 +107,7 @@ function DueStateChip({ state }: { state: DueState }) {
 }
 
 const DUE_STATE_META: Record<
-  DueState,
+  ToolheadDueState,
   { label: string; className: string; icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }> }
 > = {
   overdue: {
@@ -122,9 +125,13 @@ const DUE_STATE_META: Record<
     icon: CheckCircleIcon,
     className: 'bg-pf-success/10 border-pf-success/40 text-pf-success',
   },
+  // The "unknown" chip is intentionally distinct from "OK": it uses a
+  // question-mark icon and neutral color so operators can distinguish
+  // "schedule engine says everything's clear" (green ✓) from "we don't know
+  // yet — the schedule feed is loading or failed" (neutral ?).
   unknown: {
     label: 'No data',
-    icon: ClockIcon,
+    icon: QuestionMarkCircleIcon,
     className: 'bg-pf-bg-dark/50 border-pf-border text-pf-text-tertiary',
   },
 };

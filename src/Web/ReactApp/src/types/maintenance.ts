@@ -222,32 +222,68 @@ export interface MaintenanceCompletedEvent {
 // ============================================================================
 
 /**
+ * Due state for a single toolhead's maintenance load. Modelled as a closed
+ * string union so exhaustiveness checks catch the `'unknown'` case at build
+ * time and downstream UI cannot silently fall through to "OK" when the
+ * schedule feed is unavailable.
+ *
+ *  - `'unknown'`    — the upcoming-maintenance feed is loading or errored,
+ *                     so we cannot make any claim about this toolhead. UIs
+ *                     must render this as "No data" / loading, NOT "OK".
+ *  - `'overdue'`    — the schedule engine (#711 backend) reports at least
+ *                     one overdue task on this toolhead.
+ *  - `'due-today'`  — the schedule engine reports at least one task due
+ *                     today (and none overdue).
+ *  - `'ok'`         — the schedule engine returned successfully and has no
+ *                     overdue / due-today tasks for this toolhead.
+ */
+export type ToolheadDueState = 'unknown' | 'overdue' | 'due-today' | 'ok';
+
+/**
  * Per-physical-toolhead odometer displayed on the printer maintenance page.
  *
- * There is no dedicated backend endpoint. The #711 stable contract
- * (`jpapiez-squad-711-fallback-maintenance-backend` @ `0bfa50343`) surfaces
- * per-tool cumulative print hours directly on `PrinterDetailsDto.toolheads[]`
- * as `cumulativePrintHours`. This client-side shape is assembled by the
- * printer maintenance page from that field plus locally-derived due state
- * (from the active alerts feed).
+ * There is no dedicated backend endpoint. The #711 stable contract at feature
+ * head `1b696b954` surfaces per-tool cumulative print hours directly on
+ * `PrinterDetailsDto.toolheads[]` as `cumulativePrintHours`. The client-side
+ * shape below is assembled by the printer maintenance page from that field
+ * plus the schedule engine's own verdict (joined by `toolheadId` on the
+ * `/maintenance/upcoming` feed — alert severity is priority, NOT timing,
+ * and must not be used for due-state).
+ *
+ * Every field is intentionally required (never `?:`). The type carries three
+ * pieces of information the odometer card needs and the maintenance page
+ * always knows:
+ *   - `cumulativePrintHours: number | null` — nullable but present, mirroring
+ *     the wire contract's `[JsonIgnore(Never)] double? CumulativePrintHours`
+ *     rule (zero renders "0.0 h"; null renders "—").
+ *   - `dueState: ToolheadDueState` — pre-computed by the page so the card is
+ *     a pure render and no derivation gap can regress into a false "OK".
+ *   - `nextDueTaskName: string | null` — soonest-due label from the feed, or
+ *     null when unknown / not applicable.
  */
 export interface PrinterToolheadOdometer {
   toolheadId: string;
-  toolheadName?: string | null;
-  toolheadIndex?: number | null;
+  toolheadName: string | null;
+  toolheadIndex: number | null;
   /**
    * Cumulative print hours accrued while this toolhead was the active tool,
-   * from `PrinterDetailsDto.toolheads[i].cumulativePrintHours`. Null when
-   * the backend has not yet observed any per-tool activity for the toolhead
-   * (e.g. brand-new printer or non-attributable topology).
+   * from `PrinterDetailsDto.toolheads[i].cumulativePrintHours`. `null` means
+   * unavailable (feature off or unattributable topology); numeric zero means
+   * supported but no accrued hours and must render as `"0.0 h"`, never as a
+   * dash placeholder.
    */
-  cumulativePrintHours?: number | null;
-  /** True when at least one active alert on this toolhead is overdue. */
-  isOverdue?: boolean;
-  /** True when at least one active alert on this toolhead is due today. */
-  isDueToday?: boolean;
-  /** Optional soonest-due summary derived from the upcoming feed. */
-  nextDueTaskName?: string | null;
+  cumulativePrintHours: number | null;
+  /**
+   * The schedule engine's verdict for this toolhead. Callers compute this
+   * once at the page level so the card cannot accidentally infer "OK" from
+   * a numeric hours count while the schedule feed is loading or failed.
+   */
+  dueState: ToolheadDueState;
+  /**
+   * Soonest-due task label for this toolhead, when known. `null` when the
+   * upcoming feed reports no upcoming tasks OR when `dueState === 'unknown'`.
+   */
+  nextDueTaskName: string | null;
 }
 
 // ============================================================================

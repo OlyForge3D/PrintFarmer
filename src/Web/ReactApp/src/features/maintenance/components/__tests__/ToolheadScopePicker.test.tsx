@@ -13,13 +13,18 @@ function th(
   id: string,
   overrides: Partial<MaintenanceEligibleToolhead> = {}
 ): MaintenanceEligibleToolhead {
+  // Only fields declared on `MaintenanceEligibleToolhead` are surfaced by
+  // the default factory. `supportsMaintenanceScope` is deliberately absent
+  // — it never was a real field on the type, and the rogue-field regression
+  // test below injects it via an `as unknown as Record<string, unknown>`
+  // cast to prove the picker still ignores it (`#711 is physical-only`
+  // case).
   return {
     id,
     index: overrides.index ?? 0,
     isPrimary: overrides.isPrimary ?? false,
     toolheadType: overrides.toolheadType ?? 'Physical',
     name: overrides.name,
-    supportsMaintenanceScope: overrides.supportsMaintenanceScope,
   };
 }
 

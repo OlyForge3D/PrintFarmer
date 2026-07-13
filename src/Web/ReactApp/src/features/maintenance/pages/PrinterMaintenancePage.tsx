@@ -9,6 +9,7 @@ import { apiClient } from '@/services/api';
 import type {
   CreateMaintenanceLogRequest,
   PrinterToolheadOdometer,
+  ToolheadDueState,
 } from '@/types/maintenance';
 import type { ApiError, Printer, PrinterDetails } from '@/types/api';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
@@ -141,40 +142,63 @@ export function PrinterMaintenancePage() {
   // Alert severity is task priority, NOT timing, so we must not conflate
   // "high-severity alert" with "overdue task" — a low-priority schedule
   // can be overdue and a high-priority one can be perfectly on time.
-  const { tasks: upcomingTasks } = useUpcomingMaintenance({
+  //
+  // When the feed is loading or errored we must NOT default the odometer
+  // cards to "OK" — that gives operators a false all-clear. Instead we
+  // stamp every card's `dueState` as `'unknown'` and surface a role="alert"
+  // banner when the feed errors so operators can distinguish "clear" from
+  // "we don't know".
+  const {
+    tasks: upcomingTasks,
+    isLoading: upcomingLoading,
+    error: upcomingError,
+  } = useUpcomingMaintenance({
     printerId,
     includeOverdue: true,
   });
+  const dueStateResolved = !upcomingLoading && upcomingError == null;
 
   // Build per-toolhead odometers in-memory from `PrinterDetailsDto.toolheads[]`
-  // (#711 stable contract at 0bfa50343 — there is NO dedicated odometer
-  // endpoint; the backend surfaces per-tool cumulative hours as a field on
-  // each toolhead). Due-state joins the upcoming-maintenance feed by
+  // (#711 stable contract at feature head `1b696b954` — there is NO dedicated
+  // odometer endpoint; the backend surfaces per-tool cumulative hours as a
+  // field on each toolhead). Due-state joins the upcoming-maintenance feed by
   // `toolheadId` so the card reflects the schedule engine's own verdict.
   const odometers = useMemo<PrinterToolheadOdometer[]>(() => {
     if (!perToolAllowed) return [];
     return eligibleToolheadsRaw.map(t => {
-      const toolheadTasks = upcomingTasks.filter(
-        task => task.toolheadId === t.id
-      );
-      const overdue = toolheadTasks.some(task => task.isOverdue);
-      const dueToday = !overdue && toolheadTasks.some(task => task.isDueToday);
-      const nextDueTask =
-        toolheadTasks.find(task => task.isOverdue) ??
-        toolheadTasks.find(task => task.isDueToday) ??
-        toolheadTasks[0];
+      const toolheadTasks = upcomingTasks.filter(task => task.toolheadId === t.id);
+      let dueState: ToolheadDueState;
+      let nextDueTaskName: string | null;
+      if (!dueStateResolved) {
+        // Loading or errored: the schedule engine's verdict is unknown, so we
+        // MUST NOT collapse to "OK" (a false all-clear). Both `nextDueTaskName`
+        // and the state are stamped as unknown so the card renders "No data".
+        dueState = 'unknown';
+        nextDueTaskName = null;
+      } else if (toolheadTasks.some(task => task.isOverdue)) {
+        dueState = 'overdue';
+        nextDueTaskName = toolheadTasks.find(task => task.isOverdue)?.taskName ?? null;
+      } else if (toolheadTasks.some(task => task.isDueToday)) {
+        dueState = 'due-today';
+        nextDueTaskName = toolheadTasks.find(task => task.isDueToday)?.taskName ?? null;
+      } else {
+        // Feed resolved and reports no overdue / due-today tasks for this
+        // toolhead → OK. This is the ONLY path that produces "OK"; we never
+        // infer OK from a numeric hours count.
+        dueState = 'ok';
+        nextDueTaskName = toolheadTasks[0]?.taskName ?? null;
+      }
       return {
         toolheadId: t.id,
         toolheadName: t.name ?? null,
         toolheadIndex: typeof t.index === 'number' ? t.index : null,
         cumulativePrintHours:
           typeof t.cumulativePrintHours === 'number' ? t.cumulativePrintHours : null,
-        isOverdue: overdue,
-        isDueToday: dueToday,
-        nextDueTaskName: nextDueTask?.taskName ?? null,
+        dueState,
+        nextDueTaskName,
       };
     });
-  }, [perToolAllowed, eligibleToolheadsRaw, upcomingTasks]);
+  }, [perToolAllowed, eligibleToolheadsRaw, upcomingTasks, dueStateResolved]);
 
   const toolheadLabel = (toolheadId: string | null | undefined): string => {
     if (!toolheadId) return 'Printer-wide';
@@ -307,6 +331,24 @@ export function PrinterMaintenancePage() {
             >
               Could not load printer details. Per-toolhead maintenance data
               may be unavailable — try refreshing.
+            </div>
+          )}
+          {/*
+            Surface upcoming-maintenance load failures explicitly. The
+            odometer cards are already stamped as `dueState: 'unknown'` when
+            the feed is loading or errored, but that alone is ambiguous —
+            "No data" could just mean "brand-new printer". This banner
+            distinguishes "the schedule feed is broken; check back" from
+            "everything is genuinely quiet".
+          */}
+          {upcomingError && (
+            <div
+              role="alert"
+              className="rounded-md border border-pf-warning/40 bg-pf-warning/10 px-4 py-3 text-sm text-pf-warning"
+              data-testid="upcoming-maintenance-error"
+            >
+              Could not load upcoming maintenance. Due-state indicators are
+              unavailable until the request succeeds.
             </div>
           )}
           {/* Per-toolhead odometer row (#711/#719). Hidden entirely when the

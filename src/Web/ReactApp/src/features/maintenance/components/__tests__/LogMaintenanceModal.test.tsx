@@ -179,12 +179,19 @@ describe('LogMaintenanceModal — toolhead scope', () => {
     expect(onSubmit.mock.calls[0][0].deploymentId).toBe('sched-th2');
   });
 
-  it('does NOT cross-scope-fall-back: leaves deploymentId undefined when no exact-scope deployment exists (Hicks #2)', async () => {
+  it('does NOT cross-scope-fall-back: submits deploymentId as null when no exact-scope deployment exists (Hicks #2)', async () => {
     // Regression guard: previously the modal would fall back to the printer-wide
     // deployment when the operator chose a specific toolhead but no
     // toolhead-scoped deployment existed. That corrupts attribution — the log
     // would be tied to a deployment whose scope disagrees with the log's own
-    // `toolheadId`. The new behavior is exact match only.
+    // `toolheadId`. The new behaviour is exact match only.
+    //
+    // The submit payload in `LogMaintenanceModal.handleSubmit` uses
+    // `matchingDeployment?.id ?? null`, so with no exact-scope deployment the
+    // request DTO carries `deploymentId: null` — never `'sched-wide'` and
+    // never `undefined`. The `?? null` on the assertion below matches the
+    // shape of the request even if the mock capture were to drop-undefined a
+    // property (jest / vitest do not, but the tolerance is cheap).
     const printerWide = makeDeployment({ id: 'sched-wide', toolheadId: null });
     const otherScoped = makeDeployment({ id: 'sched-th1', toolheadId: 'th-1' });
     const { onSubmit } = renderModal({
@@ -198,10 +205,8 @@ describe('LogMaintenanceModal — toolhead scope', () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0].toolheadId).toBe('th-2');
-    // No exact-scope deployment → deploymentId must not point at the
-    // printer-wide fallback (may be undefined or null depending on how the
-    // modal represents "no deployment"; both are acceptable — the point is
-    // it MUST NOT equal 'sched-wide').
+    // No exact-scope deployment → deploymentId must be explicit `null`
+    // (never the printer-wide fallback id 'sched-wide').
     expect(onSubmit.mock.calls[0][0].deploymentId ?? null).toBeNull();
   });
 });

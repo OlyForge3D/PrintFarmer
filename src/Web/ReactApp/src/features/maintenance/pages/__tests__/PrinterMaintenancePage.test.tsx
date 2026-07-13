@@ -458,4 +458,71 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(/could not load printer details/i)
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // Odometer must never render "OK" while the schedule feed is unavailable
+  // (Hicks rejection: loading/errored upcoming feed must NOT imply all-clear).
+  // ---------------------------------------------------------------------------
+
+  it('renders every odometer chip as "unknown" (never "OK") while the upcoming-maintenance feed is loading', async () => {
+    // The upcoming feed never resolves during the assertion window. All
+    // cards MUST render the unknown chip and none may render OK — even the
+    // cards whose toolheads have a valid numeric `cumulativePrintHours`
+    // count (the pre-fix heuristic would have collapsed those to "OK" on
+    // hours alone).
+    seedDefaults();
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise(() => { /* never resolves */ })
+    );
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+
+    const t0Card = screen.getByTestId('toolhead-odometer-th-0');
+    const t1Card = screen.getByTestId('toolhead-odometer-th-1');
+    expect(t0Card.querySelector('[data-testid="due-state-unknown"]')).not.toBeNull();
+    expect(t1Card.querySelector('[data-testid="due-state-unknown"]')).not.toBeNull();
+    expect(t0Card.querySelector('[data-testid="due-state-ok"]')).toBeNull();
+    expect(t1Card.querySelector('[data-testid="due-state-ok"]')).toBeNull();
+  });
+
+  it('renders unknown chips and a role="alert" banner when the upcoming-maintenance feed errors', async () => {
+    seedDefaults();
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('feed offline')
+    );
+    renderPage();
+
+    // The page-level banner distinguishes "printer is fine" from "schedule
+    // feed broken" — without it the operator would see only "No data"
+    // chips with no explanation.
+    await waitFor(() =>
+      expect(screen.getByTestId('upcoming-maintenance-error')).toBeInTheDocument()
+    );
+    expect(screen.getByTestId('upcoming-maintenance-error')).toHaveAttribute('role', 'alert');
+
+    // Cards themselves are stamped unknown, never ok.
+    const t0Card = screen.getByTestId('toolhead-odometer-th-0');
+    expect(t0Card.querySelector('[data-testid="due-state-unknown"]')).not.toBeNull();
+    expect(t0Card.querySelector('[data-testid="due-state-ok"]')).toBeNull();
+  });
+
+  it('marks the odometer as "ok" only when the schedule feed loads successfully and reports no due tasks', async () => {
+    // Positive control for the two failure-mode tests above: an empty but
+    // successful upcoming feed IS the OK case. Without this coverage the
+    // unknown-vs-ok distinction could silently regress into
+    // "always unknown".
+    seedDefaults({ upcoming: [] });
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+
+    const t0Card = screen.getByTestId('toolhead-odometer-th-0');
+    expect(t0Card.querySelector('[data-testid="due-state-ok"]')).not.toBeNull();
+    expect(t0Card.querySelector('[data-testid="due-state-unknown"]')).toBeNull();
+  });
 });
