@@ -184,6 +184,13 @@ public class UserTaskServiceTests
 
         _repositoryMock.Setup(r => r.GetPendingCountAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(1);
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+                existingTask,
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _repositoryMock.Setup(r => r.GetByIdAsync(existingTask.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingTask);
 
         // Act
         UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(dto);
@@ -198,7 +205,7 @@ public class UserTaskServiceTests
         // Complete/Skip/Dismiss is not clobbered back to Pending. Status must NOT be
         // among the written columns.
         _repositoryMock.Verify(
-            r => r.UpdateFieldsAsync(
+            r => r.TryUpdateFieldsIfOpenAsync(
                 existingTask,
                 It.Is<IReadOnlyCollection<string>>(props =>
                     props.Contains(nameof(UserTask.RelatedEntityIdsJson))
@@ -206,8 +213,71 @@ public class UserTaskServiceTests
                     && !props.Contains(nameof(UserTask.Status))),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+        _repositoryMock.Verify(r => r.UpdateFieldsAsync(It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()), Times.Never);
         _repositoryMock.Verify(r => r.UpdateAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Never);
-        _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(
+            b => b.BroadcastTaskUpdatedAsync(
+                It.Is<UserTaskDto>(task => task.Status == UserTaskStatus.Pending && task.RelatedEntityCount == 2),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_ExistingTaskBecameTerminal_CreatesNewTaskAndDoesNotBroadcastStaleUpdate()
+    {
+        // Arrange
+        var printerModelId = Guid.NewGuid();
+        var existingPrinterId = Guid.NewGuid();
+        var newPrinterId = Guid.NewGuid();
+
+        var existingTask = CreateUserTask("Import slicer profiles for Prusa MK4S", UserTaskType.ProfileImport);
+        existingTask.EntityType = "PrinterModel";
+        existingTask.EntityId = printerModelId;
+        existingTask.RelatedEntityIdsJson = $"[\"{existingPrinterId}\"]";
+
+        var dto = new CreateProfileImportTaskDto(
+            PrinterModelId: printerModelId,
+            PrinterModelName: "MK4S",
+            ManufacturerName: "Prusa",
+            PrinterId: newPrinterId);
+
+        _repositoryMock.Setup(r => r.GetByEntityAsync(
+            UserTaskType.ProfileImport,
+            "PrinterModel",
+            printerModelId,
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingTask);
+
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+                existingTask,
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        _repositoryMock.Setup(r => r.GetPendingCountAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        UserTask? added = null;
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Callback<UserTask, CancellationToken>((task, _) => added = task)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(dto);
+
+        // Assert
+        Assert.NotNull(added);
+        Assert.NotEqual(existingTask.Id, result.Id);
+        Assert.Equal(UserTaskStatus.Pending, result.Status);
+        Assert.Equal(1, result.RelatedEntityCount);
+
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        _broadcasterMock.Verify(
+            b => b.BroadcastTaskCreatedAsync(
+                It.Is<UserTaskDto>(task => task.Id == added.Id && task.Status == UserTaskStatus.Pending),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

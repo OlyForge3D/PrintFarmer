@@ -27,6 +27,7 @@ namespace Farm.Infrastructure.Data.Configurations;
 ///   compiler task per source (issue #713 Fix E) and covers the compiler's
 ///   <c>GetOpenBySourceAsync</c> lookup (Fix I).</description></item>
 ///   <item><description><c>IX_UserTasks_Status_AnchorKind_AnchorAtUtc</c> — supports the shift-plan grouped/ordered query.</description></item>
+///   <item><description><c>IX_UserTasks_Status_UpdatedAt</c> — supports suppressed-key bootstrap and recently-updated task lookbacks.</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -63,6 +64,10 @@ public sealed class UserTaskConfiguration : IEntityTypeConfiguration<UserTask>
         // Shift-plan grouped/ordered query support.
         _ = builder.HasIndex(t => new { t.Status, t.AnchorKind, t.AnchorAtUtc })
             .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
+
+        // Supports suppression lookbacks and other recent-by-status task queries.
+        _ = builder.HasIndex(t => new { t.Status, t.UpdatedAt })
+            .HasDatabaseName("IX_UserTasks_Status_UpdatedAt");
     }
 
     // Canonical wire values. Delegates to the domain converters so EF and JSON stay in lockstep.

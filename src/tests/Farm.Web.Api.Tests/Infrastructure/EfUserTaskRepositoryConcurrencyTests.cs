@@ -147,14 +147,13 @@ public class EfUserTaskRepositoryConcurrencyTests
     }
 
     /// <summary>
-    /// Fix R4-2: the profile-import path patches only its own columns via
-    /// UpdateFieldsAsync. A user Skip that commits after the import loaded the (detached,
-    /// no-tracking) task must NOT be clobbered back to Pending, yet the import's
-    /// RelatedEntityIdsJson/Description changes must still persist — because
-    /// UpdateFieldsAsync marks only those columns modified and never touches Status.
+    /// Fix R5-C: the profile-import append path writes only if the row is still open.
+    /// A user Skip that commits after the import loaded the detached task must win
+    /// completely: Status remains Skipped and the terminal row does not accrete the
+    /// import's RelatedEntityIdsJson/Description changes.
     /// </summary>
     [Fact]
-    public async Task UpdateFieldsAsync_ProfileImportRacesUserSkip_StatusSurvives_ImportedFieldsPersist()
+    public async Task TryUpdateFieldsIfOpenAsync_ProfileImportRacesUserSkip_TerminalRowUnchanged()
     {
         using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
         Guid taskId = Guid.NewGuid();
@@ -187,7 +186,7 @@ public class EfUserTaskRepositoryConcurrencyTests
             _ = await userCtx.SaveChangesAsync();
         }
 
-        // Import path patches only its own columns (never Status).
+        // Import path tries to patch only its own columns, but the row is no longer open.
         string importedJson = $"[\"{firstPrinter}\",\"{importedPrinter}\"]";
         const string importedDescription = "2 printers waiting for slicer profiles";
         detached.RelatedEntityIdsJson = importedJson;
@@ -196,39 +195,35 @@ public class EfUserTaskRepositoryConcurrencyTests
         await using (AppDbContext importCtx = TestInfrastructure.TestHelpers.CreateContext(connection))
         {
             EfUserTaskRepository importRepo = new(importCtx);
-            await importRepo.UpdateFieldsAsync(
+            bool updated = await importRepo.TryUpdateFieldsIfOpenAsync(
                 detached,
                 [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)]);
+            updated.Should().BeFalse();
         }
 
         await using AppDbContext verifyCtx = TestInfrastructure.TestHelpers.CreateContext(connection);
         UserTask finalTask = await verifyCtx.UserTasks.AsNoTracking().SingleAsync(t => t.Id == taskId);
 
-        finalTask.Status.Should().Be(UserTaskStatus.Skipped);          // user action wins
-        finalTask.RelatedEntityIdsJson.Should().Be(importedJson);      // import fields persisted
-        finalTask.Description.Should().Be(importedDescription);
+        finalTask.Status.Should().Be(UserTaskStatus.Skipped);
+        finalTask.RelatedEntityIdsJson.Should().Be($"[\"{firstPrinter}\"]");
+        finalTask.Description.Should().Be("1 printer waiting for slicer profiles");
     }
 
     /// <summary>
-    /// Fix R4-4: on process restart the bootstrap suppression lookback (widened from 24h
-    /// to 7d) must rediscover a still-active episode a user Skipped several days ago, so
-    /// the compiler does not resurrect a task the user dismissed 25h+ ago. A Skip 3 days
-    /// old is inside the window; one 30 days old is beyond it, proving the bound still
-    /// exists.
+    /// Fix R5-E: on process restart, bootstrap suppression is episode-aware instead of
+    /// time-window based. A source key the user skipped 30 days ago is still suppressed
+    /// when the first live pass proves that exact source key is currently active.
     /// </summary>
     [Fact]
-    public async Task CompileAsync_Bootstrap_SuppressionLookbackIncludesSkipsWithinSevenDays()
+    public async Task CompileAsync_Bootstrap_ActiveSuppressedSourceOlderThanSevenDays_DoesNotRecreate()
     {
         using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
         DateTime now = DateTime.UtcNow;
 
         await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
         {
-            UserTask recent = NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:recent", UserTaskStatus.Skipped);
-            recent.UpdatedAt = now.AddDays(-3);
             UserTask old = NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:old", UserTaskStatus.Skipped);
             old.UpdatedAt = now.AddDays(-30);
-            _ = seed.UserTasks.Add(recent);
             _ = seed.UserTasks.Add(old);
             _ = await seed.SaveChangesAsync();
         }
@@ -236,19 +231,37 @@ public class EfUserTaskRepositoryConcurrencyTests
         await using AppDbContext ctx = TestInfrastructure.TestHelpers.CreateContext(connection);
         EfUserTaskRepository repo = new(ctx);
 
-        // The source owns a DIFFERENT kind and produces nothing, so the compiler's
-        // end-of-pass RemoveWhere (which only drops keys for successfully-evaluated
-        // kinds) cannot discard the bootstrapped Maintenance keys under assertion.
+        ShiftPlanTaskSpec activeSpec = new(
+            TaskType: UserTaskType.MaintenanceDue,
+            SourceKind: UserTaskSourceKind.Maintenance,
+            SourceId: "maintenancealert:old",
+            Title: "still active",
+            Description: null,
+            Priority: UserTaskPriority.Normal,
+            AnchorKind: UserTaskAnchorKind.Window,
+            AnchorAtUtc: null,
+            WindowStartUtc: now.AddHours(1),
+            WindowEndUtc: null,
+            EntityType: "Printer",
+            EntityId: Guid.NewGuid());
+
         ShiftPlanCompiler compiler = new(
-            new[] { new NoSpecSource([UserTaskSourceKind.FailureIncident]) },
+            new[] { new SingleSpecSource(activeSpec) },
             repo,
             NullLogger<ShiftPlanCompiler>.Instance);
 
         ShiftPlanSuppressionState state = new(); // fresh: LastPassAtUtc == null → bootstrap path
-        _ = await compiler.CompileAsync(state);
+        ShiftPlanCompileResult first = await compiler.CompileAsync(state);
+        ShiftPlanCompileResult second = await compiler.CompileAsync(state);
 
-        state.SuppressedKeys.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:recent"));
-        state.SuppressedKeys.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:old"));
+        first.Created.Should().Be(0);
+        second.Created.Should().Be(0);
+        state.SuppressedKeys.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:old"));
+        int openRows = await ctx.UserTasks.CountAsync(t =>
+            t.SourceKind == UserTaskSourceKind.Maintenance &&
+            t.SourceId == "maintenancealert:old" &&
+            (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress));
+        openRows.Should().Be(0);
     }
 
     private static UserTask NewOpenTask(

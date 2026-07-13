@@ -15,7 +15,12 @@ namespace Farm.Infrastructure.Services.ShiftPlan;
 /// "a printer is not idle when a dispatchable job is waiting" invariant per
 /// Dallas's F8 acceptance addendum on #713.
 /// </param>
-public sealed record IdleWindow(
+/// <remarks>
+/// Kept as a readonly record struct: the value is small and immutable, and avoiding
+/// one heap object per idle printer is cheaper than pooling per-pass DTO containers.
+/// </remarks>
+// R5-D: this value is small enough to copy; avoiding per-pass heap objects is the better tradeoff here.
+public readonly record struct IdleWindow(
     Guid PrinterId,
     string PrinterName,
     DateTime StartUtc,
@@ -38,7 +43,12 @@ public sealed record IdleWindow(
 /// dispatch eligibility was indeterminate (a scorer outage), NOT because they are
 /// busy, have no projected window, or were conclusively found ineligible.
 /// </param>
-public sealed record IdleWindowResult(
+/// <remarks>
+/// This wrapper is two references, so copying is cheap; making it a readonly struct
+/// avoids a per-pass heap allocation without changing value-equality semantics.
+/// </remarks>
+// R5-D: two references copy cheaply, so a struct wrapper beats pooling a tiny result object.
+public readonly record struct IdleWindowResult(
     IReadOnlyList<IdleWindow> Windows,
     IReadOnlySet<Guid> IndeterminatePrinterIds);
 

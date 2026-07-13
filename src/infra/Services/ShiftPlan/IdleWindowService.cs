@@ -117,6 +117,7 @@ public sealed class IdleWindowService : IIdleWindowService
         }
 
         List<IdleWindow> results = new(printers.Count);
+        Dictionary<Guid, IReadOnlyDictionary<Guid, DispatchScore>?> scorerCache = new();
 
         // Fix R4-1: printers whose dispatch eligibility could not be determined this
         // pass (every evaluated candidate's scoring threw). They are excluded from
@@ -160,7 +161,7 @@ public sealed class IdleWindowService : IIdleWindowService
             // work into a window that may in fact be dispatch-eligible).
             bool? dispatchEligibleNow = await IsDispatchEligibleAsync(
                     printer, printerDispatchState, globalDispatchEnabled,
-                    globalCandidates, assigned, minScore, ct)
+                    globalCandidates, assigned, minScore, scorerCache, ct)
                 .ConfigureAwait(false);
 
             if (dispatchEligibleNow is null)
@@ -212,6 +213,7 @@ public sealed class IdleWindowService : IIdleWindowService
         List<PrintJob> globalCandidates,
         List<PrintJob> assignedJobs,
         double minScore,
+        Dictionary<Guid, IReadOnlyDictionary<Guid, DispatchScore>?> scorerCache,
         CancellationToken ct)
     {
         // Fix 2: mirror all dispatcher gates exactly.
@@ -266,20 +268,15 @@ public sealed class IdleWindowService : IIdleWindowService
         {
             ct.ThrowIfCancellationRequested();
 
-            List<DispatchScore> scores;
-            try
+            IReadOnlyDictionary<Guid, DispatchScore>? scoresByPrinter =
+                await GetScoresByPrinterAsync(job.Id, scorerCache, ct).ConfigureAwait(false);
+            if (scoresByPrinter is null)
             {
-                scores = await _dispatchScorer.ScorePrintersForJobAsync(job.Id, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Idle window: dispatch scoring failed for job {JobId}", job.Id);
                 anyScorerFailed = true;
                 continue;
             }
 
-            DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printer.Id);
-            if (printerScore is null || printerScore.Eliminated)
+            if (!scoresByPrinter.TryGetValue(printer.Id, out DispatchScore? printerScore) || printerScore.Eliminated)
             {
                 continue;
             }
@@ -294,5 +291,32 @@ public sealed class IdleWindowService : IIdleWindowService
         }
 
         return anyScorerFailed ? null : false;
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, DispatchScore>?> GetScoresByPrinterAsync(
+        Guid jobId,
+        Dictionary<Guid, IReadOnlyDictionary<Guid, DispatchScore>?> scorerCache,
+        CancellationToken ct)
+    {
+        if (scorerCache.TryGetValue(jobId, out IReadOnlyDictionary<Guid, DispatchScore>? cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            List<DispatchScore> scores = await _dispatchScorer.ScorePrintersForJobAsync(jobId, ct).ConfigureAwait(false);
+            IReadOnlyDictionary<Guid, DispatchScore> byPrinter = scores
+                .GroupBy(s => s.PrinterId)
+                .ToDictionary(g => g.Key, g => g.First());
+            scorerCache[jobId] = byPrinter;
+            return byPrinter;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Idle window: dispatch scoring failed for job {JobId}", jobId);
+            scorerCache[jobId] = null;
+            return null;
+        }
     }
 }

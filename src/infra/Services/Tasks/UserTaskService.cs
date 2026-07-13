@@ -77,49 +77,48 @@ public class UserTaskService(
                 int count = relatedPrinterIds.Count;
                 existingTask.Description = $"{count} printer{(count == 1 ? string.Empty : "s")} waiting for slicer profiles";
 
-                // Fix R4-2: the task was loaded via GetByEntityAsync (no-tracking), so a
+                // Fix R4-2/R5-C: the task was loaded via GetByEntityAsync (no-tracking), so a
                 // blind full-entity UpdateAsync marks EVERY column modified and would
                 // clobber a concurrent user Complete/Skip/Dismiss back to the stale
                 // Pending status (the same lost-update bug R3-5 fixed for the
                 // complete/skip/dismiss paths). Write only the columns this import path
-                // actually changes — never Status — so a concurrent terminal user action
-                // wins the race. UpdateFieldsAsync also stamps UpdatedAt. A row that
-                // already went terminal is filtered out by GetByEntityAsync on the next
-                // call, where the new-task branch handles it.
-                await _taskRepository.UpdateFieldsAsync(
+                // actually changes, and only if the row is still open at write time.
+                // If a concurrent terminal user action wins, create a fresh occurrence
+                // rather than appending stale printer state or broadcasting a stale DTO.
+                bool updated = await _taskRepository.TryUpdateFieldsIfOpenAsync(
                     existingTask,
                     [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)],
                     ct);
+                if (!updated)
+                {
+                    _logger.LogWarning(
+                        "[UserTaskService] Profile import task {TaskId} for {PrinterModelName} became terminal before append; creating a new occurrence",
+                        existingTask.Id,
+                        dto.PrinterModelName);
+
+                    UserTask recoveredTask = CreateProfileImportTask(dto);
+                    recoveredTask.SourceKind = existingTask.SourceKind;
+                    recoveredTask.SourceId = existingTask.SourceId;
+                    await _taskRepository.AddAsync(recoveredTask, ct);
+
+                    UserTaskDto recoveredDto = MapToDto(recoveredTask);
+                    await BroadcastTaskCreatedAsync(recoveredDto, ct);
+                    return recoveredDto;
+                }
+
                 _logger.LogInformation("[UserTaskService] Updated profile import task for {PrinterModelName}, now {PrinterCount} printers waiting", dto.PrinterModelName, count);
 
-                UserTaskDto updatedDto = MapToDto(existingTask);
+                UserTask persisted = await _taskRepository.GetByIdAsync(existingTask.Id, ct) ?? existingTask;
+                UserTaskDto updatedDto = MapToDto(persisted);
                 await BroadcastTaskUpdatedAsync(updatedDto, ct);
+                return updatedDto;
             }
 
             return MapToDto(existingTask);
         }
 
         // Create new task
-        UserTask newTask = new()
-        {
-            Id = Guid.NewGuid(),
-            TaskType = UserTaskType.ProfileImport,
-            EntityType = "PrinterModel",
-            EntityId = dto.PrinterModelId,
-            Title = $"Import slicer profiles for {dto.ManufacturerName} {dto.PrinterModelName}",
-            Description = "1 printer waiting for slicer profiles",
-            Status = UserTaskStatus.Pending,
-            Priority = UserTaskPriority.High,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            MetadataJson = JsonSerializer.Serialize(new
-            {
-                printerModelId = dto.PrinterModelId,
-                manufacturerName = dto.ManufacturerName,
-                printerModelName = dto.PrinterModelName
-            }),
-            RelatedEntityIdsJson = JsonSerializer.Serialize(new List<Guid> { dto.PrinterId })
-        };
+        UserTask newTask = CreateProfileImportTask(dto);
 
         await _taskRepository.AddAsync(newTask, ct);
         _logger.LogInformation("[UserTaskService] Created profile import task for {ManufacturerName} {PrinterModelName}", dto.ManufacturerName, dto.PrinterModelName);
@@ -310,6 +309,31 @@ public class UserTaskService(
         }
 
         return new ShiftPlanDto(groups, DateTime.UtcNow);
+    }
+
+    private static UserTask CreateProfileImportTask(CreateProfileImportTaskDto dto)
+    {
+        DateTime now = DateTime.UtcNow;
+        return new UserTask
+        {
+            Id = Guid.NewGuid(),
+            TaskType = UserTaskType.ProfileImport,
+            EntityType = "PrinterModel",
+            EntityId = dto.PrinterModelId,
+            Title = $"Import slicer profiles for {dto.ManufacturerName} {dto.PrinterModelName}",
+            Description = "1 printer waiting for slicer profiles",
+            Status = UserTaskStatus.Pending,
+            Priority = UserTaskPriority.High,
+            CreatedAt = now,
+            UpdatedAt = now,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                printerModelId = dto.PrinterModelId,
+                manufacturerName = dto.ManufacturerName,
+                printerModelName = dto.PrinterModelName
+            }),
+            RelatedEntityIdsJson = JsonSerializer.Serialize(new List<Guid> { dto.PrinterId })
+        };
     }
 
     private static UserTaskDto MapToDto(UserTask task)

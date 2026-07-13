@@ -41,6 +41,10 @@ public class ShiftPlanCompilerTests
         // Fix F: default to no suppressed source keys so existing tests behave as before.
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
+        _tasks.Setup(r => r.GetOpenSuppressedByKeysAsync(
+                It.IsAny<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
         // Fix R3-5: default auto-complete to "won the race" so existing auto-complete
         // tests behave as before unless a test explicitly overrides this.
         _tasks.Setup(r => r.TryAutoCompleteAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
@@ -308,17 +312,9 @@ public class ShiftPlanCompilerTests
         // Pass 2's query observes the skip iff its lookback watermark reaches back to
         // skipUpdatedAt (t0 - 1ms). With the overlap the watermark is t0 - 15s, which
         // does; without it the watermark would be t0, which does not.
-        int call = 0;
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns((DateTime since, CancellationToken _) =>
             {
-                call++;
-                if (call == 1)
-                {
-                    return Task.FromResult<IReadOnlyCollection<(UserTaskSourceKind, string)>>(
-                        Array.Empty<(UserTaskSourceKind, string)>());
-                }
-
                 IReadOnlyCollection<(UserTaskSourceKind, string)> observed = since <= skipUpdatedAt
                     ? [(UserTaskSourceKind.FailureIncident, "failure:1")]
                     : Array.Empty<(UserTaskSourceKind, string)>();
@@ -391,7 +387,6 @@ public class ShiftPlanCompilerTests
         int bootstrapCall = 0;
         IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
         [
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 1: not suppressed yet
             [(UserTaskSourceKind.FailureIncident, "failure:1")], // pass 2: DB reflects the user's skip
             Array.Empty<(UserTaskSourceKind, string)>(), // pass 3: DB query for "since last pass" finds nothing new
         ];
@@ -432,7 +427,6 @@ public class ShiftPlanCompilerTests
         int bootstrapCall = 0;
         IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
         [
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 1: not suppressed yet
             [(UserTaskSourceKind.FailureIncident, "failure:1")], // pass 2: DB reflects the user's skip
             Array.Empty<(UserTaskSourceKind, string)>(), // pass 3
             Array.Empty<(UserTaskSourceKind, string)>(), // pass 4
@@ -481,7 +475,6 @@ public class ShiftPlanCompilerTests
         int bootstrapCall = 0;
         IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
         [
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 1: not suppressed yet
             [(UserTaskSourceKind.Maintenance, "idle:printer:1")], // pass 2: user dismissed it
             Array.Empty<(UserTaskSourceKind, string)>(), // pass 3: idle window ends (no specs)
             Array.Empty<(UserTaskSourceKind, string)>(), // pass 4: a new idle window starts
@@ -830,4 +823,3 @@ public class ShiftPlanCompilerTests
             => throw new InvalidOperationException("simulated");
     }
 }
-

@@ -297,15 +297,64 @@ public class IdleWindowServiceTests
         Assert.True(windows[0].IsDispatchEligibleNow);
     }
 
+    /// <summary>
+    /// Fix R5-B: shared global candidates are scored once per compile pass, not once
+    /// per printer, so the idle-window pass is O(candidate jobs) for scorer calls.
+    /// </summary>
+    [Fact]
+    public async Task GetIdleWindowsAsync_SharedCandidatesAcrossPrinters_ScoresEachCandidateOnce()
+    {
+        List<Printer> printers = Enumerable.Range(0, 5)
+            .Select(i => BuildPrinter(autoDispatch: true, Guid.Parse($"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAA{i}")))
+            .ToList();
+
+        List<PrintJob> candidates = Enumerable.Range(0, 3)
+            .Select(i =>
+            {
+                PrintJob job = BuildJob(null, PrintJobStatus.Queued);
+                job.Priority = i;
+                job.QueuePosition = i;
+                return job;
+            })
+            .ToList();
+
+        SetupQueueData(printers, []);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, candidates, printerReady: true, printers);
+
+        int scorerCalls = 0;
+        _scorer.Setup(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, CancellationToken>((_, _) =>
+            {
+                scorerCalls++;
+                List<DispatchScore> scores = printers
+                    .Select(p => new DispatchScore(
+                        p.Id,
+                        p.Name,
+                        TotalScore: 0.0,
+                        new Dictionary<string, FactorScore>(),
+                        Eliminated: false,
+                        []))
+                    .ToList();
+                return Task.FromResult(scores);
+            });
+
+        IdleWindowService svc = BuildService();
+        IReadOnlyList<IdleWindow> windows = await svc.GetIdleWindowsAsync(TimeSpan.Zero);
+
+        Assert.Equal(printers.Count, windows.Count);
+        Assert.All(windows, window => Assert.False(window.IsDispatchEligibleNow));
+        Assert.Equal(candidates.Count, scorerCalls);
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    private static Printer BuildPrinter(bool autoDispatch)
+    private static Printer BuildPrinter(bool autoDispatch, Guid? id = null)
         => new()
         {
-            Id = PrinterId,
-            Name = "TestPrinter",
+            Id = id ?? PrinterId,
+            Name = id.HasValue ? $"TestPrinter-{id.Value:N}" : "TestPrinter",
             ServerUrl = "http://test-printer:7125",
             AutoDispatchEnabled = autoDispatch,
         };
@@ -328,15 +377,23 @@ public class IdleWindowServiceTests
     {
         _queue.Setup(q => q.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(printers);
-        _queue.Setup(q => q.GetPrintJobsForPrinterAsync(PrinterId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(printerJobs);
+
+        foreach (Printer printer in printers)
+        {
+            List<PrintJob> jobsForPrinter = printerJobs
+                .Where(j => j.AssignedPrinterId == printer.Id)
+                .ToList();
+            _queue.Setup(q => q.GetPrintJobsForPrinterAsync(printer.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(jobsForPrinter);
+        }
     }
 
     private void SetupDb(
         bool globalEnabled,
         AutoDispatchMode globalMode,
         List<PrintJob> candidates,
-        bool printerReady)
+        bool printerReady,
+        IReadOnlyList<Printer>? printers = null)
     {
         DispatchSettings settings = new()
         {
@@ -353,20 +410,25 @@ public class IdleWindowServiceTests
         db.PrintJobs.AddRange(candidates);
 
         // Add the printer and its dispatch state so the include query returns it.
-        Printer dbPrinter = new()
+        IReadOnlyList<Printer> dbPrinters = printers ?? [BuildPrinter(autoDispatch: true)];
+        foreach (Printer printer in dbPrinters)
         {
-            Id = PrinterId,
-            Name = "TestPrinter",
-            ServerUrl = "http://test-printer:7125",
-        };
-        db.Printers.Add(dbPrinter);
+            Printer dbPrinter = new()
+            {
+                Id = printer.Id,
+                Name = printer.Name,
+                ServerUrl = printer.ServerUrl,
+                AutoDispatchEnabled = printer.AutoDispatchEnabled,
+            };
+            db.Printers.Add(dbPrinter);
 
-        db.PrinterDispatchStates.Add(new PrinterDispatchState
-        {
-            PrinterId = PrinterId,
-            Printer = dbPrinter,
-            AutoDispatchState = printerReady ? AutoDispatchState.Ready : AutoDispatchState.None,
-        });
+            db.PrinterDispatchStates.Add(new PrinterDispatchState
+            {
+                PrinterId = printer.Id,
+                Printer = dbPrinter,
+                AutoDispatchState = printerReady ? AutoDispatchState.Ready : AutoDispatchState.None,
+            });
+        }
 
         db.SaveChanges();
 
@@ -381,4 +443,3 @@ public class IdleWindowServiceTests
             _dbFactory.Object,
             NullLogger<IdleWindowService>.Instance);
 }
-

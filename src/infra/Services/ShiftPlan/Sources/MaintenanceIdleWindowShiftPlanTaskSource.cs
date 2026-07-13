@@ -93,7 +93,7 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
         {
             ct.ThrowIfCancellationRequested();
 
-            if (!byPrinter.TryGetValue(alert.PrinterId, out IdleWindow? window))
+            if (!byPrinter.TryGetValue(alert.PrinterId, out IdleWindow window))
             {
                 // No idle window on this printer right now — skip. When the queue
                 // drains, a subsequent compile will pick it up.

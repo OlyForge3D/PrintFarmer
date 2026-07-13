@@ -5533,6 +5533,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasDatabaseName("IX_UserTasks_SourceKind_SourceId")
                         .HasFilter("\"SourceId\" IS NOT NULL AND \"Status\" IN (0, 1)");
 
+                    b.HasIndex("Status", "UpdatedAt")
+                        .HasDatabaseName("IX_UserTasks_Status_UpdatedAt");
+
                     b.HasIndex("Status", "AnchorKind", "AnchorAtUtc")
                         .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
 

@@ -38,24 +38,10 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
     private static readonly SemaphoreSlim CompileGate = new(1, 1);
 
     /// <summary>
-    /// Fix F / Fix R3-6 / Fix R4-4: fallback lookback used to bootstrap suppression
-    /// continuity only on the very first compile pass after process start (before any
-    /// <see cref="ShiftPlanSuppressionState.LastPassAtUtc"/> exists). Every pass after
-    /// that, suppression continuity is tracked precisely via
-    /// <see cref="ShiftPlanSuppressionState"/> rather than a flat rolling window — see
-    /// that type's remarks for why a fixed window over- and under-suppresses.
-    /// <para>
-    /// Fix R4-4: widened from 24h to 7d. <see cref="ShiftPlanSuppressionState"/> is
-    /// process-local, so on restart the only way to rediscover a still-active episode a
-    /// user already Skipped/Dismissed is this bootstrap query. A 24h window resurrected
-    /// any suppression older than a day (e.g. a printer skipped 25h ago that is still
-    /// alerting), spuriously recreating the task the user dismissed. 7 days is a
-    /// defensible bound: Skipped/Dismissed episodes rarely stay active longer, and it
-    /// keeps the query cheap. The residual gap (an episode continuously active for &gt;7d)
-    /// is accepted; the durable fix is option (c) — persisting suppression-episode state
-    /// to the database (a new table/column + migration) — left as a follow-up if
-    /// operators report resurrections beyond this bound.
-    /// </para>
+    /// Fix R5-E: ad hoc compiles without a cross-pass state object still need a
+    /// defensive suppression query. The hosted service uses the episode-aware active-key
+    /// bootstrap below; this long fallback is only for one-off callers that do not carry
+    /// <see cref="ShiftPlanSuppressionState"/> between passes.
     /// </summary>
     private static readonly TimeSpan SuppressionBootstrapLookback = TimeSpan.FromDays(7);
 
@@ -175,9 +161,21 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         HashSet<(UserTaskSourceKind, string)> suppressed;
         if (suppressionState is not null)
         {
-            DateTime bootstrapSinceUtc = suppressionState.LastPassAtUtc ?? now - SuppressionBootstrapLookback;
-            IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? bootstrapped =
-                await _tasks.GetSuppressedSourceKeysAsync(bootstrapSinceUtc, ct).ConfigureAwait(false);
+            IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? bootstrapped;
+            if (suppressionState.LastPassAtUtc is null)
+            {
+                // Fix R5-E: first live pass doubles as the bootstrap probe. Query only
+                // currently-active keys and apply no UpdatedAt cutoff, so a source that
+                // stayed active for more than seven days remains suppressed after restart
+                // until a successful pass observes the source clear.
+                bootstrapped = await _tasks.GetOpenSuppressedByKeysAsync(specs.Keys.ToList(), ct).ConfigureAwait(false);
+            }
+            else
+            {
+                bootstrapped = await _tasks.GetSuppressedSourceKeysAsync(suppressionState.LastPassAtUtc.Value, ct)
+                    .ConfigureAwait(false);
+            }
+
             if (bootstrapped is not null)
             {
                 foreach ((UserTaskSourceKind SourceKind, string SourceId) key in bootstrapped)

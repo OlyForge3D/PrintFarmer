@@ -75,6 +75,16 @@ public interface IUserTaskRepository
         DateTime updatedAfterUtc, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns suppressed compiler task source keys that match the currently-active
+    /// source keys without applying a time cutoff. Used once on shift-plan compiler
+    /// bootstrap so a continuously-active episode skipped before process start stays
+    /// suppressed until its source clears.
+    /// </summary>
+    Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetOpenSuppressedByKeysAsync(
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Adds a new task.
     /// </summary>
     Task AddAsync(UserTask task, CancellationToken ct = default);
@@ -106,6 +116,14 @@ public interface IUserTaskRepository
     /// (issue #713 Fix R3-5).
     /// </summary>
     Task UpdateFieldsAsync(UserTask task, IReadOnlyCollection<string> propertyNames, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically updates only the named properties when the row is still open
+    /// (<see cref="UserTaskStatus.Pending"/> or <see cref="UserTaskStatus.InProgress"/>).
+    /// Returns <c>false</c> without changing the row if a concurrent action already
+    /// moved it to a terminal status.
+    /// </summary>
+    Task<bool> TryUpdateFieldsIfOpenAsync(UserTask task, IReadOnlyCollection<string> propertyNames, CancellationToken ct = default);
 
     /// <summary>
     /// Atomically completes the task with <paramref name="taskId"/> only if its

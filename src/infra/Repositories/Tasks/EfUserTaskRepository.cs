@@ -146,6 +146,36 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetOpenSuppressedByKeysAsync(
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys,
+        CancellationToken ct = default)
+    {
+        HashSet<(UserTaskSourceKind SourceKind, string SourceId)> keySet = activeKeys
+            .Where(k => k.SourceKind != UserTaskSourceKind.Unspecified && !string.IsNullOrWhiteSpace(k.SourceId))
+            .ToHashSet();
+        if (keySet.Count == 0)
+        {
+            return Array.Empty<(UserTaskSourceKind, string)>();
+        }
+
+        HashSet<UserTaskSourceKind> sourceKinds = [.. keySet.Select(k => k.SourceKind)];
+        HashSet<string> sourceIds = [.. keySet.Select(k => k.SourceId)];
+
+        List<UserTask> rows = await _db.UserTasks.AsNoTracking()
+            .Where(t =>
+                (t.Status == UserTaskStatus.Skipped || t.Status == UserTaskStatus.Dismissed) &&
+                t.SourceId != null &&
+                sourceKinds.Contains(t.SourceKind) &&
+                sourceIds.Contains(t.SourceId))
+            .ToListAsync(ct);
+
+        return rows
+            .Where(t => t.SourceId is not null && keySet.Contains((t.SourceKind, t.SourceId)))
+            .Select(t => (t.SourceKind, t.SourceId!))
+            .ToHashSet();
+    }
+
+    /// <inheritdoc />
     public async Task AddAsync(UserTask task, CancellationToken ct = default)
     {
         _ = _db.UserTasks.Add(task);
@@ -207,6 +237,33 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
         }
 
         return _db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryUpdateFieldsIfOpenAsync(
+        UserTask task,
+        IReadOnlyCollection<string> propertyNames,
+        CancellationToken ct = default)
+    {
+        HashSet<string> properties = propertyNames.ToHashSet(StringComparer.Ordinal);
+        DateTime updatedAt = DateTime.UtcNow;
+
+        if (properties.SetEquals([nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)]))
+        {
+            int rows = await _db.UserTasks
+                .Where(t => t.Id == task.Id && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(t => t.UpdatedAt, updatedAt)
+                        .SetProperty(t => t.RelatedEntityIdsJson, task.RelatedEntityIdsJson)
+                        .SetProperty(t => t.Description, task.Description),
+                    ct);
+
+            return rows > 0;
+        }
+
+        throw new NotSupportedException(
+            $"{nameof(TryUpdateFieldsIfOpenAsync)} does not support the requested property set: {string.Join(", ", properties.OrderBy(p => p, StringComparer.Ordinal))}");
     }
 
     /// <inheritdoc />
