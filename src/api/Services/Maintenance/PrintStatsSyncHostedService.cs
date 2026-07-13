@@ -182,19 +182,25 @@ public class PrintStatsSyncHostedService(
         // Get or create printer statistics
         PrinterStatistics? stats = await statsRepo.GetByPrinterIdAsync(printer.Id, ct);
 
-        // Capture whether this printer already had a statistics row and its prior EXTERNAL-only
-        // hours. Per-toolhead attribution (issue #711, FIX B) only credits INCREMENTAL external
-        // hours to a toolhead once a baseline exists. A brand-new statistics row dumps the full
-        // backend history into the printer-wide counter but NOT onto any toolhead, so per-tool
-        // tracking effectively "starts fresh" from the next sync forward.
+        // Capture prior state BEFORE any mutation (issue #711, round-7 Finding 1).
+        //
+        // Per-toolhead attribution (FIX B) only credits INCREMENTAL external hours once a baseline
+        // exists. A brand-new statistics row dumps the full backend history into the printer-wide
+        // counter but NOT onto any toolhead, so per-tool tracking "starts fresh" from the next sync.
         //
         // The baseline is read from the dedicated ExternalPrintHours counter, NOT TotalPrintHours
-        // (issue #711, round-5 BLOCKER). TotalPrintHours is inflated at the end of every cycle by
-        // SyncPrintFarmerJobStatisticsAsync; reading the baseline from it made the external delta
-        // collapse to 0 forever after the first cycle. ExternalPrintHours snapshots only the
-        // external backend total, so cross-cycle delta math stays isolated from PF-job inflation.
+        // (round-5 BLOCKER): TotalPrintHours is inflated at the end of every cycle by
+        // SyncPrintFarmerJobStatisticsAsync, so reading the baseline from it made the external delta
+        // collapse to 0 forever after the first cycle.
+        //
+        // ExternalBaselineInitializedUtc is a null-sentinel gate (round-7 Finding 1). While it is
+        // null the external baseline has NEVER been trustworthy-captured, so we must not snapshot a
+        // possibly PF-inflated TotalPrintHours as the baseline, must not attribute a historical
+        // delta, and (for a supported-but-failed sync) must not run the reset-then-add that would
+        // otherwise permanently double a previously-inflated total.
         bool statsExisted = stats != null;
         double previousExternalHours = stats?.ExternalPrintHours ?? 0;
+        bool baselineInitialized = stats?.ExternalBaselineInitializedUtc != null;
 
         if (stats == null)
         {
@@ -205,8 +211,10 @@ public class PrintStatsSyncHostedService(
             };
         }
 
-        // Sync from external printer API
-        bool externalSyncSuccess = await SyncExternalPrinterStatisticsAsync(
+        // Sync from external printer API. The tri-state outcome distinguishes a trustworthy refresh
+        // (Succeeded) from a backend that cannot report external history (Unsupported, e.g.
+        // PrusaLink) and a supported backend whose call failed this cycle (Failed).
+        ExternalSyncOutcome outcome = await SyncExternalPrinterStatisticsAsync(
             printer,
             stats,
             settings,
@@ -214,20 +222,69 @@ public class PrintStatsSyncHostedService(
             ct);
 
         double externalDelta = 0;
-        if (externalSyncSuccess)
+        bool attributionEligible = false;
+
+        switch (outcome)
         {
-            // Snapshot the external-only total BEFORE PrintFarmer job aggregation inflates
-            // TotalPrintHours. From this point forward ExternalPrintHours tracks only external
-            // growth, so the next cycle's baseline is uncontaminated (issue #711, round-5).
-            stats.ExternalPrintHours = stats.TotalPrintHours;
-            stats.ExternalJobsCompleted = stats.TotalJobsCompleted;
-            externalDelta = Math.Max(0, stats.ExternalPrintHours - previousExternalHours);
+            case ExternalSyncOutcome.Succeeded:
+                // Backend history just refreshed TotalPrintHours/TotalJobsCompleted. Snapshot the
+                // external-only totals from the freshly synced values BEFORE PrintFarmer job
+                // aggregation inflates TotalPrintHours.
+                double freshExternalHours = stats.TotalPrintHours;
+                long freshExternalJobs = stats.TotalJobsCompleted;
+
+                if (baselineInitialized)
+                {
+                    // Established baseline: attribute only the incremental external growth.
+                    externalDelta = Math.Max(0, freshExternalHours - previousExternalHours);
+                    attributionEligible = true;
+                }
+                else
+                {
+                    // First trustworthy external sync: capture the baseline but DO NOT attribute the
+                    // full historical total as one cycle's wear (round-7 Finding 1).
+                    externalDelta = 0;
+                    attributionEligible = false;
+                }
+
+                stats.ExternalPrintHours = freshExternalHours;
+                stats.ExternalJobsCompleted = freshExternalJobs;
+                stats.ExternalBaselineInitializedUtc ??= DateTime.UtcNow;
+                baselineInitialized = true;
+                break;
+
+            case ExternalSyncOutcome.Unsupported:
+                // Backend cannot report external history (e.g. PrusaLink). The authoritative external
+                // baseline is zero and PrintFarmer job history is the only source. Snapshot the zero
+                // baseline once so the reset-then-add below stays idempotent instead of compounding
+                // PF totals every cycle. Importantly this snapshots an authoritative zero, NOT a
+                // possibly PF-inflated TotalPrintHours.
+                stats.ExternalPrintHours = 0;
+                stats.ExternalJobsCompleted = 0;
+                stats.ExternalBaselineInitializedUtc ??= DateTime.UtcNow;
+                baselineInitialized = true;
+                externalDelta = 0;
+                attributionEligible = false;
+                break;
+
+            default:
+                // Supported backend that failed this cycle (ExternalSyncOutcome.Failed). Keep the
+                // last-known external baseline untouched and attribute nothing. If the baseline was
+                // never initialized we must NOT snapshot a possibly PF-inflated TotalPrintHours, so
+                // we leave TotalPrintHours authoritative and skip the reset-then-add below (guarded
+                // by baselineInitialized).
+                externalDelta = 0;
+                attributionEligible = false;
+                break;
         }
 
         // PrintFarmer history is an absolute all-time aggregate, not a per-cycle delta. Reset the
         // combined totals to their last-known external baselines before adding it so failed or
-        // unsupported external syncs (for example PrusaLink) cannot compound PF totals each cycle.
-        if (settings.IncludePrintFarmerJobs)
+        // unsupported external syncs cannot compound PF totals each cycle. Only aggregate once a
+        // trustworthy baseline exists; otherwise the reset target (ExternalPrintHours) is not yet
+        // meaningful and TotalPrintHours stays authoritative (round-7 Finding 1).
+        bool aggregatePrintFarmerJobs = settings.IncludePrintFarmerJobs && baselineInitialized;
+        if (aggregatePrintFarmerJobs)
         {
             stats.TotalPrintHours = stats.ExternalPrintHours;
             stats.TotalJobsCompleted = checked((int)stats.ExternalJobsCompleted);
@@ -235,22 +292,23 @@ public class PrintStatsSyncHostedService(
         }
 
         // Update statistics in database
-        if (externalSyncSuccess || settings.IncludePrintFarmerJobs)
+        if (outcome == ExternalSyncOutcome.Succeeded || aggregatePrintFarmerJobs)
         {
             stats.LastSyncTime = DateTime.UtcNow;
             await statsRepo.UpsertAsync(stats, ct);
 
-            // Attribute only the successful external backend's per-cycle delta. PrintFarmer job
+            // Attribute only an established external backend's per-cycle delta. PrintFarmer job
             // aggregation above is mutable and model-wide, so it is not a reliable wear source.
             // The increment remains uncommitted until the outer scoped SaveChangesAsync.
             IReadOnlyList<Guid> credited = await AttributeExternalToolheadHoursAsync(
                 printer.Id,
                 statsExisted,
-                externalSyncSuccess,
+                attributionEligible,
                 featureGate.IsEnabled(OperatorFeature.MultiSlotFallback),
                 externalDelta,
                 toolheadStatsRepo,
-                ct);
+                ct,
+                _logger);
             if (credited.Count > 0)
             {
                 _logger.LogDebug(
@@ -262,6 +320,21 @@ public class PrintStatsSyncHostedService(
         }
     }
 
+    /// <summary>
+    /// Tri-state result of an external-backend statistics sync (issue #711, round-7 Finding 1).
+    /// </summary>
+    internal enum ExternalSyncOutcome
+    {
+        /// <summary>Backend history was refreshed successfully this cycle.</summary>
+        Succeeded,
+
+        /// <summary>Backend does not support external history totals (e.g. PrusaLink).</summary>
+        Unsupported,
+
+        /// <summary>A supported backend's history call failed or returned no data this cycle.</summary>
+        Failed
+    }
+
     internal static async Task<IReadOnlyList<Guid>> AttributeExternalToolheadHoursAsync(
         Guid printerId,
         bool statsExisted,
@@ -269,7 +342,8 @@ public class PrintStatsSyncHostedService(
         bool perToolMaintenanceEnabled,
         double externalDelta,
         IToolheadStatisticsRepository toolheadStatsRepo,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger? logger = null)
     {
         if (!statsExisted
             || !externalSyncSuccess
@@ -279,10 +353,21 @@ public class PrintStatsSyncHostedService(
             return [];
         }
 
+        // No backend currently reports per-tool consumption for the external history delta, so wear
+        // is approximated by an equal split across the printer's active physical toolheads. Emit an
+        // operator-visible diagnostic so it is clear the per-toolhead wear for this delta is only an
+        // estimate (issue #711, round-7 Finding 3). When a backend gains per-tool telemetry, build a
+        // ToolheadHourAttribution.FromWeights(...) and call ApplyToolheadHoursAsync instead.
+        logger?.LogInformation(
+            "Per-toolhead wear for printer {PrinterId} is approximated by equal split: no per-tool " +
+            "consumption telemetry is available for the {Delta:F2}h external history delta (issue #711).",
+            printerId,
+            externalDelta);
+
         return await toolheadStatsRepo.IncrementActiveToolheadHoursAsync(printerId, externalDelta, ct);
     }
 
-    private async Task<bool> SyncExternalPrinterStatisticsAsync(
+    private async Task<ExternalSyncOutcome> SyncExternalPrinterStatisticsAsync(
         Printer printer,
         PrinterStatistics stats,
         PrintStatsSyncSettings settings,
@@ -297,10 +382,11 @@ public class PrintStatsSyncHostedService(
             if (backend != PrinterBackend.Moonraker && backend != PrinterBackend.OctoPrint)
             {
                 _logger.LogDebug("{Backend} printer '{Name}' - using PrintFarmer job history only", backend, printer.Name);
-                return false;
+                return ExternalSyncOutcome.Unsupported;
             }
 
-            return await SyncBackendHistoryStatisticsAsync(printer, stats, serviceProvider, settings, ct);
+            bool synced = await SyncBackendHistoryStatisticsAsync(printer, stats, serviceProvider, settings, ct);
+            return synced ? ExternalSyncOutcome.Succeeded : ExternalSyncOutcome.Failed;
         }
         catch (Exception ex)
         {
@@ -308,7 +394,7 @@ public class PrintStatsSyncHostedService(
                 ex,
                 "Failed to sync external statistics for printer '{Name}'",
                 printer.Name);
-            return false;
+            return ExternalSyncOutcome.Failed;
         }
     }
 

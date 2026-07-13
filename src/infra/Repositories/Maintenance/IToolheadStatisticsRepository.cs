@@ -41,4 +41,15 @@ public interface IToolheadStatisticsRepository
     /// toolhead ID, or an empty list when no positive increment can be applied.
     /// </summary>
     Task<IReadOnlyList<Guid>> IncrementActiveToolheadHoursAsync(Guid printerId, double deltaHours, CancellationToken ct = default);
+
+    /// <summary>
+    /// Credits explicit per-toolhead print-hours described by <paramref name="attribution"/> to the
+    /// printer's physical toolheads (issue #711, round-7 Finding 3). Only positive weights whose
+    /// toolhead belongs to the printer and is <c>Physical</c> are applied; MMU/AMS gate toolheads are
+    /// never wear sources. Like <see cref="IncrementActiveToolheadHoursAsync"/> this mutates tracked
+    /// entities without calling <c>SaveChangesAsync</c> so the increment commits atomically with the
+    /// caller's unit-of-work. Returns the credited toolhead IDs, or an empty list when nothing
+    /// positive applies.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ApplyToolheadHoursAsync(Guid printerId, ToolheadHourAttribution attribution, CancellationToken ct = default);
 }

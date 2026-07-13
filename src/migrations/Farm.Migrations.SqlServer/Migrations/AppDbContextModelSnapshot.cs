@@ -4648,6 +4648,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("ExternalBaselineInitializedUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<long>("ExternalJobsCompleted")
                         .HasColumnType("bigint");
 

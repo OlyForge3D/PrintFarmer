@@ -67,14 +67,49 @@ public class EfToolheadStatisticsRepository : IToolheadStatisticsRepository
         // Until per-job tool telemetry is available, equal utilization is the conservative
         // estimate: secondary physical heads accrue wear instead of being permanently ignored,
         // while the printer-wide delta is not multiplied across the toolheads.
-        double perToolheadDelta = deltaHours / toolheads.Count;
-        DateTime updatedAt = DateTime.UtcNow;
-        foreach (Toolhead toolhead in toolheads)
+        ToolheadHourAttribution attribution = ToolheadHourAttribution.EqualSplit(
+            [.. toolheads.Select(t => t.Id)],
+            deltaHours);
+        return ApplyToAll(toolheads, attribution);
+    }
+
+    public async Task<IReadOnlyList<Guid>> ApplyToolheadHoursAsync(Guid printerId, ToolheadHourAttribution attribution, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(attribution);
+
+        // Only physical toolheads with a positive attributed weight are eligible; MMU/AMS gates are
+        // never wear sources (issue #711, round-7 Finding 3).
+        HashSet<Guid> wanted = [.. attribution.Hours.Where(kvp => kvp.Value > 0).Select(kvp => kvp.Key)];
+        if (wanted.Count == 0)
         {
-            toolhead.CumulativePrintHours += perToolheadDelta;
-            toolhead.UpdatedAt = updatedAt;
+            return [];
         }
 
-        return [.. toolheads.Select(t => t.Id)];
+        List<Toolhead> toolheads = await _context.Toolheads
+            .Where(t => t.PrinterId == printerId
+                && t.ToolheadType == ToolheadType.Physical
+                && wanted.Contains(t.Id))
+            .ToListAsync(ct);
+
+        return toolheads.Count == 0 ? [] : ApplyToAll(toolheads, attribution);
+    }
+
+    private static List<Guid> ApplyToAll(List<Toolhead> toolheads, ToolheadHourAttribution attribution)
+    {
+        DateTime updatedAt = DateTime.UtcNow;
+        List<Guid> credited = [];
+        foreach (Toolhead toolhead in toolheads)
+        {
+            if (!attribution.Hours.TryGetValue(toolhead.Id, out double hours) || hours <= 0)
+            {
+                continue;
+            }
+
+            toolhead.CumulativePrintHours += hours;
+            toolhead.UpdatedAt = updatedAt;
+            credited.Add(toolhead.Id);
+        }
+
+        return credited;
     }
 }

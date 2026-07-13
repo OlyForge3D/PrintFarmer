@@ -234,7 +234,12 @@ public class PrintStatsExternalBaselineTests
                 ExternalPrintHours = 100,
                 ExternalJobsCompleted = 5,
                 TotalPrintHours = 150,
-                TotalJobsCompleted = 6
+                TotalJobsCompleted = 6,
+                // Already-synced printer: the external baseline was captured on a prior successful
+                // sync (issue #711, round-7 Finding 1), so a subsequent failure re-adds PrintFarmer
+                // history to the last-known external baseline (100h + 50h = 150h) rather than leaving
+                // the total stale or doubling it.
+                ExternalBaselineInitializedUtc = DateTime.UtcNow
             });
             await seed.SaveChangesAsync();
         }
@@ -293,6 +298,103 @@ public class PrintStatsExternalBaselineTests
         stats.ExternalJobsCompleted.Should().Be(5);
         stats.TotalPrintHours.Should().BeApproximately(150.0, 0.0001);
         stats.TotalJobsCompleted.Should().Be(6);
+    }
+
+    [Fact]
+    public async Task SyncPrinterStatisticsAsync_ExistingInflatedPrusaLinkRow_DoesNotDoubleTotals()
+    {
+        // Issue #711 round-7 Finding 1: a PrusaLink-shaped row that pre-dates the fix carries a
+        // TotalPrintHours/TotalJobsCompleted value already inflated by the prior PF-absolute
+        // compounding bug. After migration ExternalPrintHours defaults to 0 and the external
+        // baseline is uninitialized (ExternalBaselineInitializedUtc == null). The first sync must
+        // snapshot an AUTHORITATIVE ZERO external baseline (not the polluted total) and re-derive
+        // TotalPrintHours from the clean PrintFarmer aggregate, and subsequent cycles must be
+        // idempotent (no doubling).
+        string dbName = Guid.NewGuid().ToString("N");
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        await using (AppDbContext seed = new(options))
+        {
+            seed.PrinterStatisticsSet.Add(new PrinterStatistics
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                // Post-migration state: external baseline defaulted to 0 and NOT yet initialized.
+                ExternalPrintHours = 0,
+                ExternalJobsCompleted = 0,
+                ExternalBaselineInitializedUtc = null,
+                // Pre-existing inflation from the compounding bug.
+                TotalPrintHours = 250,
+                TotalJobsCompleted = 99
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "PrusaLink Printer",
+            Backend = (int)PrinterBackend.PrusaLink,
+            ModelId = modelId
+        };
+        // Clean PrintFarmer job history: 3h across 2 jobs.
+        List<PrintJobStatistics> pfJobs =
+        [
+            new() { ActualDurationMs = (long)(2.0 * 3600 * 1000) },
+            new() { ActualDurationMs = (long)(1.0 * 3600 * 1000) }
+        ];
+        Mock<IPrintJobStatisticsRepository> jobStats = new();
+        jobStats
+            .Setup(r => r.GetByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pfJobs);
+        using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
+        PrintStatsSyncHostedService service = CreateService(provider);
+        PrintStatsSyncSettings settings = new()
+        {
+            IncludePrintFarmerJobs = true,
+            ApiTimeoutSeconds = 30
+        };
+
+        double afterCycle1Hours = 0;
+        int afterCycle1Jobs = 0;
+        for (int cycle = 0; cycle < 2; cycle++)
+        {
+            await using AppDbContext db = new(options);
+            await service.SyncPrinterStatisticsAsync(
+                printer,
+                settings,
+                new EfPrinterStatisticsRepository(db),
+                new EfToolheadStatisticsRepository(db),
+                jobStats.Object,
+                Mock.Of<IOperatorFeatureGate>(),
+                provider,
+                CancellationToken.None);
+            await db.SaveChangesAsync();
+
+            if (cycle == 0)
+            {
+                PrinterStatistics afterFirst = await db.PrinterStatisticsSet.SingleAsync();
+                afterCycle1Hours = afterFirst.TotalPrintHours;
+                afterCycle1Jobs = afterFirst.TotalJobsCompleted;
+            }
+        }
+
+        await using AppDbContext verify = new(options);
+        PrinterStatistics stats = await verify.PrinterStatisticsSet.SingleAsync();
+        stats.ExternalPrintHours.Should().Be(0,
+            "an unsupported external backend snapshots an authoritative zero baseline");
+        stats.ExternalJobsCompleted.Should().Be(0);
+        stats.TotalPrintHours.Should().BeApproximately(3.0, 0.0001,
+            "the inflated 250h total must be corrected to the clean PrintFarmer aggregate");
+        stats.TotalJobsCompleted.Should().Be(2,
+            "the inflated 99 job count must be corrected to the clean PrintFarmer aggregate");
+        stats.TotalPrintHours.Should().BeApproximately(afterCycle1Hours, 0.0001,
+            "the second cycle must be idempotent and NOT double the total");
+        stats.TotalJobsCompleted.Should().Be(afterCycle1Jobs,
+            "the second cycle must be idempotent and NOT double the job count");
     }
 
     private static PrintStatsSyncHostedService CreateService(IServiceProvider provider)

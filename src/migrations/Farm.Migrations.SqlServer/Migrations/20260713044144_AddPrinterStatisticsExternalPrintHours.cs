@@ -17,12 +17,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                 nullable: false,
                 defaultValue: 0.0);
 
-            // Backfill the external-only baseline for existing rows to their current total hours
-            // (issue #711, round-5 FIX 1). This is a best-guess baseline: it may include prior
-            // PrintFarmer-job inflation, so the first post-migration sync yields a zero external
-            // delta, after which ExternalPrintHours tracks only external growth correctly.
-            migrationBuilder.Sql(
-                "UPDATE [PrinterStatisticsSet] SET [ExternalPrintHours] = [TotalPrintHours];");
+            // Existing rows intentionally keep the 0 default (issue #711, round-7 Finding 1).
+            // Backfilling ExternalPrintHours = TotalPrintHours would snapshot any prior
+            // PrintFarmer-job inflation as the "external" baseline and permanently double the PF
+            // portion once the reset-then-add pattern runs. Instead the external baseline is left
+            // uninitialized (see AddPrinterStatisticsExternalBaselineInitialized) and captured on the
+            // first trustworthy external sync.
         }
 
         /// <inheritdoc />

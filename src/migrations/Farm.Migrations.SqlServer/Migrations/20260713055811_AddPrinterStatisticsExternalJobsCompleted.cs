@@ -17,8 +17,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                 nullable: false,
                 defaultValue: 0L);
 
-            migrationBuilder.Sql(
-                "UPDATE [PrinterStatisticsSet] SET [ExternalJobsCompleted] = [TotalJobsCompleted];");
+            // Existing rows keep the 0 default (issue #711, round-7 Finding 1). See
+            // AddPrinterStatisticsExternalPrintHours for why the total is NOT snapshotted as the
+            // external baseline.
         }
 
         /// <inheritdoc />
