@@ -406,6 +406,132 @@ public class PrintStatsExternalBaselineTests
     }
 
     [Fact]
+    public async Task SyncPrinterStatisticsAsync_RestartWindow_UsesPersistedAttributionBoundaryForCoverage()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid t0Id = Guid.NewGuid();
+        Guid t1Id = Guid.NewGuid();
+        DateTime lastDrainUtc = DateTime.UtcNow.AddHours(-4);
+
+        await using (AppDbContext seed = new(options))
+        {
+            seed.PrinterStatisticsSet.Add(new PrinterStatistics
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                TotalPrintHours = 100,
+                ExternalPrintHours = 100,
+                ExternalJobsCompleted = 10,
+                TotalJobsCompleted = 10,
+                ExternalBaselineInitializedUtc = lastDrainUtc.AddHours(-1),
+                LastExternalHoursAttributionUtc = lastDrainUtc
+            });
+            seed.Toolheads.AddRange(
+                new Toolhead
+                {
+                    Id = t0Id,
+                    PrinterId = printerId,
+                    Name = "T0",
+                    Index = 0,
+                    ToolheadType = ToolheadType.Physical
+                },
+                new Toolhead
+                {
+                    Id = t1Id,
+                    PrinterId = printerId,
+                    Name = "T1",
+                    Index = 1,
+                    ToolheadType = ToolheadType.Physical
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "Restarted Moonraker printer",
+            Backend = (int)PrinterBackend.Moonraker,
+            BackendPort = 7125,
+            ModelId = modelId,
+            ServerUrl = "http://moonraker.local",
+            SupportsPerToolAttribution = true
+        };
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsHistory>()
+            .Setup(history => history.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryTotals
+            {
+                JobTotals = new JobTotals
+                {
+                    TotalPrintTime = 104 * 3600,
+                    TotalJobs = 11
+                }
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+        Mock<IOperatorFeatureGate> featureGate = new();
+        featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        var clock = new ManualTimeProvider();
+        var accumulator = new ToolheadActivityAccumulator(TimeSpan.FromMinutes(10), clock);
+        accumulator.Sample(printerId, activeToolIndex: 1, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        accumulator.Sample(printerId, activeToolIndex: 1, isPrinting: true);
+
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton(factory.Object)
+            .AddSingleton<IToolheadActivityAccumulator>(accumulator)
+            .BuildServiceProvider();
+        PrintStatsSyncHostedService service = CreateService(provider);
+
+        await using (AppDbContext db = new(options))
+        {
+            var statsRepo = new EfPrinterStatisticsRepository(db);
+            ToolheadActivitySnapshot? snapshot = await service.SyncPrinterStatisticsAsync(
+                printer,
+                new PrintStatsSyncSettings
+                {
+                    IncludePrintFarmerJobs = false,
+                    ApiTimeoutSeconds = 30
+                },
+                statsRepo,
+                new EfToolheadStatisticsRepository(db),
+                Mock.Of<IPrintJobStatisticsRepository>(),
+                featureGate.Object,
+                provider,
+                CancellationToken.None);
+            await PrintStatsSyncHostedService.CommitAndAcknowledgeAsync(
+                statsRepo,
+                accumulator,
+                snapshot,
+                CancellationToken.None);
+        }
+
+        await using AppDbContext verify = new(options);
+        Toolhead t0 = await verify.Toolheads.SingleAsync(toolhead => toolhead.Id == t0Id);
+        Toolhead t1 = await verify.Toolheads.SingleAsync(toolhead => toolhead.Id == t1Id);
+        PrinterStatistics stats = await verify.PrinterStatisticsSet.SingleAsync(s => s.PrinterId == printerId);
+
+        t0.CumulativePrintHours.Should().Be(0);
+        t1.CumulativePrintHours.Should().BeApproximately(30d / 3600d, 0.001,
+            "only the 30 observed post-restart seconds should be credited across the full persisted 4h window");
+        (t0.CumulativePrintHours + t1.CumulativePrintHours).Should().BeLessThan(4,
+            "the unobserved restart gap remains unattributed");
+        stats.ExternalPrintHours.Should().BeApproximately(104, 0.0001);
+        stats.LastExternalHoursAttributionUtc.Should().NotBeNull();
+        stats.LastExternalHoursAttributionUtc!.Value.Should().BeAfter(lastDrainUtc);
+        accumulator.PeekActiveSeconds(printerId).WindowSeconds.Should().Be(0);
+    }
+
+    [Fact]
     public async Task SyncPrinterStatisticsAsync_MidSyncFailure_RollsBackPrinterAndContinuesBatch()
     {
         string dbName = Guid.NewGuid().ToString("N");
@@ -568,5 +694,16 @@ public class PrintStatsExternalBaselineTests
             Mock.Of<ILogger<PrintStatsSyncHostedService>>(),
             Mock.Of<IOptionsMonitor<PrintStatsSyncSettings>>(),
             Mock.Of<IBackgroundServiceMonitor>());
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _timestamp;
+
+        public void Advance(TimeSpan elapsed) => _timestamp = checked(_timestamp + elapsed.Ticks);
     }
 }

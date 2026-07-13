@@ -218,7 +218,9 @@ public class PrintStatsSyncHostedService(
         // otherwise permanently double a previously-inflated total.
         bool statsExisted = stats != null;
         double previousExternalHours = stats?.ExternalPrintHours ?? 0;
+        DateTime? previousExternalAttributionUtc = stats?.LastExternalHoursAttributionUtc;
         bool baselineInitialized = stats?.ExternalBaselineInitializedUtc != null;
+        DateTime syncUtc = DateTime.UtcNow;
 
         if (stats == null)
         {
@@ -267,7 +269,7 @@ public class PrintStatsSyncHostedService(
 
                 stats.ExternalPrintHours = freshExternalHours;
                 stats.ExternalJobsCompleted = freshExternalJobs;
-                stats.ExternalBaselineInitializedUtc ??= DateTime.UtcNow;
+                stats.ExternalBaselineInitializedUtc ??= syncUtc;
                 baselineInitialized = true;
                 break;
 
@@ -279,7 +281,7 @@ public class PrintStatsSyncHostedService(
                 // possibly PF-inflated TotalPrintHours.
                 stats.ExternalPrintHours = 0;
                 stats.ExternalJobsCompleted = 0;
-                stats.ExternalBaselineInitializedUtc ??= DateTime.UtcNow;
+                stats.ExternalBaselineInitializedUtc ??= syncUtc;
                 baselineInitialized = true;
                 externalDelta = 0;
                 attributionEligible = false;
@@ -310,13 +312,11 @@ public class PrintStatsSyncHostedService(
         }
 
         ToolheadActivitySnapshot? snapshotToAcknowledge = null;
+        double? attributionWindowSeconds = null;
 
         // Update statistics in database
         if (outcome == ExternalSyncOutcome.Succeeded || aggregatePrintFarmerJobs)
         {
-            stats.LastSyncTime = DateTime.UtcNow;
-            await statsRepo.UpsertAsync(stats, ct);
-
             // Attribute only an established external backend's per-cycle delta. PrintFarmer job
             // aggregation above is mutable and model-wide, so it is not a reliable wear source.
             // The increment remains uncommitted until the outer scoped SaveChangesAsync.
@@ -325,7 +325,27 @@ public class PrintStatsSyncHostedService(
             if (externalDelta > 0)
             {
                 snapshotToAcknowledge = activityAccumulator?.PeekActiveSeconds(printer.Id);
+                if (previousExternalAttributionUtc is DateTime previousAttribution)
+                {
+                    attributionWindowSeconds = Math.Max(
+                        0,
+                        (syncUtc - previousAttribution).TotalSeconds);
+                }
+                else
+                {
+                    attributionEligible = false;
+                    _logger.LogInformation(
+                        "Printer '{Name}' advanced external history by {Delta:F2}h with no persisted " +
+                        "attribution boundary; per-toolhead wear is unattributed for this cycle.",
+                        printer.Name,
+                        externalDelta);
+                }
+
+                stats.LastExternalHoursAttributionUtc = syncUtc;
             }
+
+            stats.LastSyncTime = syncUtc;
+            await statsRepo.UpsertAsync(stats, ct);
 
             IReadOnlyList<Guid> credited = await AttributeExternalToolheadHoursAsync(
                 printer.Id,
@@ -337,7 +357,8 @@ public class PrintStatsSyncHostedService(
                 toolheadStatsRepo,
                 ct,
                 _logger,
-                snapshotToAcknowledge);
+                snapshotToAcknowledge,
+                attributionWindowSeconds: attributionWindowSeconds);
             if (credited.Count > 0)
             {
                 _logger.LogDebug(
@@ -391,7 +412,8 @@ public class PrintStatsSyncHostedService(
         CancellationToken ct,
         ILogger? logger = null,
         ToolheadActivitySnapshot? activitySnapshot = null,
-        IToolheadActivityAccumulator? activityAccumulator = null)
+        IToolheadActivityAccumulator? activityAccumulator = null,
+        double? attributionWindowSeconds = null)
     {
         if (!statsExisted
             || !externalSyncSuccess
@@ -443,9 +465,10 @@ public class PrintStatsSyncHostedService(
         }
 
         double recognizedPhysicalSeconds = perToolheadSeconds.Values.Sum();
-        if (recognizedPhysicalSeconds > 0 && snapshot.WindowSeconds > 0)
+        double windowSeconds = attributionWindowSeconds ?? snapshot.WindowSeconds;
+        if (recognizedPhysicalSeconds > 0 && windowSeconds > 0)
         {
-            double coverage = Math.Min(recognizedPhysicalSeconds / snapshot.WindowSeconds, 1);
+            double coverage = Math.Min(recognizedPhysicalSeconds / windowSeconds, 1);
             Dictionary<Guid, double> weights = perToolheadSeconds.ToDictionary(
                 static kvp => kvp.Key,
                 kvp => (kvp.Value / recognizedPhysicalSeconds) * coverage);
@@ -468,7 +491,7 @@ public class PrintStatsSyncHostedService(
             "duration telemetry for its {Window:F0}s baseline window; per-toolhead wear is " +
             "unattributed for the {Delta:F2}h external history delta (issue #711).",
             printerId,
-            snapshot.WindowSeconds,
+            windowSeconds,
             externalDelta);
         return [];
     }

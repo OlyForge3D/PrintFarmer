@@ -58,6 +58,14 @@ public class PrinterStatistics
     public DateTime? ExternalBaselineInitializedUtc { get; set; }
 
     /// <summary>
+    /// UTC wall-clock boundary for the most recent successful external-hours attribution drain.
+    /// When null, the next external delta is left unattributed because the full baseline window is
+    /// unknown; after the commit succeeds this is advanced to the drain time so retry failures never
+    /// lose the previous boundary (issue #711, round-18).
+    /// </summary>
+    public DateTime? LastExternalHoursAttributionUtc { get; set; }
+
+    /// <summary>
     /// Total number of completed print jobs
     /// </summary>
     public int TotalJobsCompleted { get; set; }

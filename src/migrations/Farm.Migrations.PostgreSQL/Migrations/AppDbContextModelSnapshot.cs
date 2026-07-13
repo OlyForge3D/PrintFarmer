@@ -4654,6 +4654,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<double>("ExternalPrintHours")
                         .HasColumnType("double precision");
 
+                    b.Property<DateTime?>("LastExternalHoursAttributionUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("LastSyncTime")
                         .HasColumnType("timestamp with time zone");
 
