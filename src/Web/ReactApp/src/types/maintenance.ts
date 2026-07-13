@@ -24,6 +24,13 @@ export enum MaintenanceAlertStatus {
 export interface MaintenanceAlert {
   id: string;
   printerId: string;
+  /**
+   * Optional physical toolhead scope (see issue #711/#719). When present the
+   * alert applies to a single toolhead on the printer; when `null`/omitted the
+   * alert is printer-wide, which preserves legacy records. MMU/AMS gates are
+   * never a valid maintenance toolhead scope.
+   */
+  toolheadId?: string | null;
   printerMaintenanceScheduleId?: string | null;
   maintenanceTaskId?: string | null;
   title: string;
@@ -55,6 +62,11 @@ export interface MaintenanceAlert {
 export interface MaintenanceLog {
   id: string;
   printerId: string;
+  /**
+   * Optional physical toolhead scope. `null` (or omitted) means the log applies
+   * to the printer as a whole — legacy records preserve this behaviour.
+   */
+  toolheadId?: string | null;
   printerMaintenanceScheduleId?: string | null;
   maintenanceTaskId?: string | null;
   resolvedAlertId?: string | null;
@@ -138,6 +150,11 @@ export interface ResolveAlertRequest {
 
 export interface CreateMaintenanceLogRequest {
   printerId: string;
+  /**
+   * Optional physical toolhead scope. Omit or set `null` for printer-wide logs.
+   * MMU/AMS gate toolheads must never be sent as a scope.
+   */
+  toolheadId?: string | null;
   deploymentId?: string | null;
   taskId?: string | null;
   taskName?: string | null;
@@ -193,9 +210,48 @@ export interface AlertStatusChangedEvent {
 export interface MaintenanceCompletedEvent {
   logId: string;
   printerId: string;
+  /** Optional physical toolhead scope carried on lowercase realtime events. */
+  toolheadId?: string | null;
   scheduleId?: string | null;
   performedAt: string;
   performedBy?: string | null;
+}
+
+// ============================================================================
+// Per-toolhead odometers (#711/#719)
+// ============================================================================
+
+/**
+ * Per-physical-toolhead odometer + next-due summary.
+ *
+ * Returned by `GET /api/maintenance/printers/{printerId}/toolhead-odometers`
+ * once the #711 backend contract is merged. Until then the service treats a
+ * missing endpoint / 404 as "no per-toolhead data" and returns an empty list
+ * so the printer maintenance page keeps rendering unchanged.
+ */
+export interface PrinterToolheadOdometer {
+  printerId: string;
+  toolheadId: string;
+  toolheadName?: string | null;
+  toolheadIndex?: number | null;
+  /** Cumulative print hours accrued while this toolhead was active. */
+  nozzleHours?: number | null;
+  /** Cumulative print hours on the hotend behind this toolhead. */
+  hotendHours?: number | null;
+  /** Filament processed by this toolhead, in grams (optional). */
+  filamentUsedGrams?: number | null;
+  /** ISO 8601 timestamp of the last maintenance performed for this toolhead. */
+  lastMaintenanceAt?: string | null;
+  /** Optional soonest-due summary for the toolhead. */
+  nextDueTaskName?: string | null;
+  /** Hours until the soonest hour-based task is due (negative = overdue). */
+  hoursUntilDue?: number | null;
+  /** Days until the soonest day-based task is due (negative = overdue). */
+  daysUntilDue?: number | null;
+  /** True when at least one task on this toolhead is overdue. */
+  isOverdue?: boolean;
+  /** True when at least one task on this toolhead is due today. */
+  isDueToday?: boolean;
 }
 
 // ============================================================================
@@ -309,6 +365,13 @@ export interface PrinterMaintenanceScheduleDto {
   planName: string;
   printerId: string;
   printerName?: string | null;
+  /**
+   * Optional physical toolhead scope. `null`/omitted means the plan is
+   * deployed printer-wide (legacy behaviour).
+   */
+  toolheadId?: string | null;
+  /** Human-readable name of the scoped toolhead when the API resolves it. */
+  toolheadName?: string | null;
   isActive: boolean;
   deployedAt: string;
   notes?: string | null;
@@ -399,6 +462,11 @@ export interface AddTaskComponentDto {
 export interface DeployMaintenancePlanDto {
   maintenancePlanId: string;
   printerId: string;
+  /**
+   * Optional physical toolhead scope. Omit for printer-wide deployment.
+   * See per-toolhead maintenance work (#711/#719).
+   */
+  toolheadId?: string | null;
   notes?: string | null;
 }
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Modal } from '@/common/components/modals/Modal';
@@ -7,14 +7,37 @@ import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
 import type { CreateMaintenanceLogRequest, PrinterMaintenanceScheduleDto, MaintenanceTaskDto } from '@/types/maintenance';
+import type { ToolheadDto } from '@/types/api';
 import { maintenancePlanService } from '@/services/maintenancePlanService';
 import { WrenchIcon } from '@heroicons/react/24/outline';
+import { ToolheadScopePicker } from './ToolheadScopePicker';
+import {
+  scopeFromToolheadId,
+  toolheadIdFromScope,
+  type ToolheadScopeValue,
+} from './toolheadScope';
+import {
+  isEligibleMaintenanceToolhead,
+  type MaintenanceEligibleToolhead,
+} from '@/features/printers/utils/isEligibleMaintenanceToolhead';
 
 interface LogMaintenanceModalProps {
   isOpen: boolean;
   printerId: string;
   printerName: string;
   deployments: PrinterMaintenanceScheduleDto[];
+  /**
+   * Physical + gate toolheads for the printer. Used to render the maintenance
+   * scope picker and to filter the active deployment we link against. Optional
+   * so single-toolhead printers can omit it entirely.
+   */
+  toolheads?: readonly (MaintenanceEligibleToolhead | ToolheadDto)[] | null;
+  /**
+   * Initial toolhead scope. Pass a toolhead id to preselect a specific
+   * toolhead (e.g. when opening the modal from a per-toolhead card) or `null`
+   * for printer-wide (default).
+   */
+  initialToolheadId?: string | null;
   onSubmit: (data: CreateMaintenanceLogRequest) => Promise<void>;
   onClose: () => void;
 }
@@ -28,6 +51,8 @@ export function LogMaintenanceModal({
   printerId,
   printerName,
   deployments,
+  toolheads,
+  initialToolheadId = null,
   onSubmit,
   onClose,
 }: LogMaintenanceModalProps) {
@@ -43,6 +68,14 @@ export function LogMaintenanceModal({
   const [durationMinutes, setDurationMinutes] = useState<string>('');
   const [cost, setCost] = useState<string>('');
   const [partsReplaced, setPartsReplaced] = useState('');
+  const [scope, setScope] = useState<ToolheadScopeValue>(scopeFromToolheadId(initialToolheadId));
+
+  // Reset scope when the modal reopens so a per-toolhead entry point sticks.
+  useEffect(() => {
+    if (isOpen) {
+      setScope(scopeFromToolheadId(initialToolheadId));
+    }
+  }, [isOpen, initialToolheadId]);
 
   // Load V3 task catalog for task selection
   const { data: catalogTasks = [] } = useQuery({
@@ -102,12 +135,21 @@ export function LogMaintenanceModal({
     setError(null);
 
     try {
-      // Link to the first active deployment for this printer (if any)
-      const activeDeployment = deployments.find(d => d.isActive);
+      const scopedToolheadId = toolheadIdFromScope(scope);
+
+      // Link to a deployment scoped to the same toolhead if possible; otherwise
+      // fall back to a printer-wide (null-toolhead) active deployment, and
+      // only then to any active deployment for backward compatibility.
+      const activeDeployments = deployments.filter(d => d.isActive);
+      const matchingDeployment =
+        activeDeployments.find(d => (d.toolheadId ?? null) === scopedToolheadId) ??
+        activeDeployments.find(d => (d.toolheadId ?? null) === null) ??
+        activeDeployments[0];
 
       const request: CreateMaintenanceLogRequest = {
         printerId,
-        deploymentId: activeDeployment?.id ?? null,
+        toolheadId: scopedToolheadId,
+        deploymentId: matchingDeployment?.id ?? null,
         taskId: selectedTaskId || null,
         taskName: taskName.trim(),
         componentName: component.trim() || null,
@@ -167,6 +209,23 @@ export function LogMaintenanceModal({
             {error}
           </div>
         )}
+
+        {/* Toolhead scope picker (#711/#719). Collapses for single-toolhead printers. */}
+        {(() => {
+          const eligible = (toolheads ?? []).filter(isEligibleMaintenanceToolhead);
+          if (eligible.length < 2) return null;
+          return (
+            <ToolheadScopePicker
+              toolheads={toolheads ?? []}
+              value={scope}
+              onChange={setScope}
+              label="Maintenance scope"
+              helperText="Choose whether this record applies to the whole printer or a specific toolhead."
+              disabled={isSubmitting}
+              data-testid="log-maintenance-scope"
+            />
+          );
+        })()}
 
         {/* Maintenance Type Selection */}
         <div>

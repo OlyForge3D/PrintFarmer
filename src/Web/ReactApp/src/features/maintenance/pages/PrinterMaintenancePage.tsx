@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -9,7 +9,7 @@ import { apiClient } from '@/services/api';
 import type { 
   CreateMaintenanceLogRequest
 } from '@/types/maintenance';
-import type { ApiError, Printer } from '@/types/api';
+import type { ApiError, Printer, PrinterDetails } from '@/types/api';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
 import { 
   WrenchIcon, 
@@ -22,6 +22,14 @@ import {
 } from '@heroicons/react/24/outline';
 import { formatDistanceToNow, format } from 'date-fns';
 import { LogMaintenanceModal } from '../components/LogMaintenanceModal';
+import { ToolheadOdometerCard } from '../components/ToolheadOdometerCard';
+import { ToolheadScopePicker } from '../components/ToolheadScopePicker';
+import {
+  PRINTER_WIDE_SCOPE,
+  toolheadIdFromScope,
+  type ToolheadScopeValue,
+} from '../components/toolheadScope';
+import { selectMaintenanceEligibleToolheads } from '@/features/printers/utils/isEligibleMaintenanceToolhead';
 
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
@@ -48,6 +56,8 @@ export function PrinterMaintenancePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showLogModal, setShowLogModal] = useState(false);
+  const [modalInitialToolheadId, setModalInitialToolheadId] = useState<string | null>(null);
+  const [scope, setScope] = useState<ToolheadScopeValue>(PRINTER_WIDE_SCOPE);
 
   // Fetch printer details
   const { data: printer, isLoading: printerLoading } = useQuery({
@@ -57,6 +67,35 @@ export function PrinterMaintenancePage() {
       return printers.find(p => p.id === printerId);
     },
     enabled: !!printerId,
+  });
+
+  // Fetch printer details for the toolhead list (independent of the summary
+  // /printers endpoint above so both paths keep working with the current API).
+  const { data: printerDetails } = useQuery<PrinterDetails | null>({
+    queryKey: ['printerDetails', printerId],
+    queryFn: async () => {
+      if (!printerId) return null;
+      try {
+        return await apiClient.getPrinterDetails(printerId);
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!printerId,
+    staleTime: 60_000,
+  });
+
+  const eligibleToolheads = useMemo(
+    () => selectMaintenanceEligibleToolheads(printerDetails?.toolheads),
+    [printerDetails?.toolheads]
+  );
+
+  // Fetch per-toolhead odometers (returns [] until #711 lands).
+  const { data: odometers = [], isLoading: odometersLoading } = useQuery({
+    queryKey: ['printerToolheadOdometers', printerId],
+    queryFn: () => maintenanceService.getPrinterToolheadOdometers(printerId!),
+    enabled: !!printerId,
+    staleTime: 30_000,
   });
 
   // Fetch printer statistics
@@ -88,26 +127,48 @@ export function PrinterMaintenancePage() {
     enabled: !!printerId,
   });
 
-  const activeAlerts = alerts.filter(a => 
-    a.status === MaintenanceAlertStatus.Active || 
+  const toolheadLabel = (toolheadId: string | null | undefined): string => {
+    if (!toolheadId) return 'Printer-wide';
+    const th = (printerDetails?.toolheads ?? []).find(t => t.id === toolheadId);
+    return th?.name ?? 'Toolhead';
+  };
+
+  const scopedToolheadId = toolheadIdFromScope(scope);
+  const showEverything = eligibleToolheads.length < 2; // picker hidden → no way to filter
+  const scopeMatches = (recordToolheadId: string | null | undefined): boolean => {
+    if (showEverything) return true;
+    if (scope === PRINTER_WIDE_SCOPE) {
+      return recordToolheadId == null;
+    }
+    return recordToolheadId === scopedToolheadId;
+  };
+
+  const scopedAlerts = alerts.filter(a => scopeMatches(a.toolheadId));
+  const activeAlerts = scopedAlerts.filter(a =>
+    a.status === MaintenanceAlertStatus.Active ||
     a.status === MaintenanceAlertStatus.Acknowledged
   );
+  const scopedDeployments = deployments.filter(d => scopeMatches(d.toolheadId));
+  const scopedLogs = logs.filter(l => scopeMatches(l.toolheadId));
 
-  const handleLogMaintenance = () => {
+  const handleLogMaintenance = (toolheadId?: string | null) => {
+    setModalInitialToolheadId(toolheadId ?? toolheadIdFromScope(scope));
     setShowLogModal(true);
   };
 
   const handleLogSubmit = async (data: CreateMaintenanceLogRequest) => {
     await maintenanceService.createMaintenanceLog(data);
-    // Refresh data
+    // Refresh data (including per-toolhead odometers and upcoming feed).
     queryClient.invalidateQueries({ queryKey: ['printerMaintenanceLogs', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerStatistics', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerAlerts', printerId] });
+    queryClient.invalidateQueries({ queryKey: ['printerToolheadOdometers', printerId] });
     queryClient.invalidateQueries({ queryKey: ['upcomingMaintenance', printerId] });
     setShowLogModal(false);
   };
 
-  const isLoading = printerLoading || statsLoading || logsLoading || deploymentsLoading || alertsLoading;
+  const isLoading =
+    printerLoading || statsLoading || logsLoading || deploymentsLoading || alertsLoading || odometersLoading;
 
   if (!printerId) {
     return (
@@ -170,6 +231,38 @@ export function PrinterMaintenancePage() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Per-toolhead odometer row (#711/#719). Hidden entirely when the
+              printer has no eligible physical toolheads or no odometer data. */}
+          {eligibleToolheads.length > 0 && odometers.length > 0 && (
+            <section
+              aria-label="Per-toolhead odometers"
+              className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"
+            >
+              {odometers.map(o => (
+                <ToolheadOdometerCard
+                  key={o.toolheadId}
+                  odometer={o}
+                  isActive={scope === o.toolheadId}
+                  onActivate={id => setScope(id)}
+                />
+              ))}
+            </section>
+          )}
+
+          {/* Scope filter — only for multi-toolhead printers. */}
+          {eligibleToolheads.length >= 2 && (
+            <div className="bg-pf-bg-card border border-pf-border rounded-lg p-4">
+              <ToolheadScopePicker
+                toolheads={printerDetails?.toolheads ?? []}
+                value={scope}
+                onChange={setScope}
+                label="Viewing"
+                helperText="Filter alerts, deployed plans, and history by maintenance scope."
+                data-testid="printer-maintenance-scope"
+              />
+            </div>
+          )}
+
           {/* Statistics Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <StatCard
@@ -218,6 +311,14 @@ export function PrinterMaintenancePage() {
                           {getPriorityLabel(alert.severity)}
                         </span>
                         <span className="font-medium text-pf-text-primary">{alert.title}</span>
+                        {alert.toolheadId && (
+                          <span
+                            className="text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-full"
+                            data-testid={`alert-toolhead-tag-${alert.id}`}
+                          >
+                            {toolheadLabel(alert.toolheadId)}
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-pf-text-secondary mt-1">{alert.message}</p>
                       <p className="text-xs text-pf-text-tertiary mt-1">
@@ -227,7 +328,7 @@ export function PrinterMaintenancePage() {
                     <Button
                       size="sm"
                       variant="primary"
-                      onClick={() => handleLogMaintenance()}
+                      onClick={() => handleLogMaintenance(alert.toolheadId ?? null)}
                     >
                       Resolve
                     </Button>
@@ -245,11 +346,11 @@ export function PrinterMaintenancePage() {
                 <ClockIcon className="h-5 w-5 text-pf-primary" />
                 Deployed Plans
               </h2>
-              {deployments.length === 0 ? (
+              {scopedDeployments.length === 0 ? (
                 <p className="text-pf-text-secondary text-sm">No maintenance plans deployed to this printer.</p>
               ) : (
                 <div className="space-y-3">
-                  {deployments.map(deployment => (
+                  {scopedDeployments.map(deployment => (
                     <div 
                       key={deployment.id}
                       className="p-4 rounded-lg border bg-pf-bg-dark/50 border-pf-border"
@@ -257,6 +358,14 @@ export function PrinterMaintenancePage() {
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <span className="font-medium text-pf-text-primary">{deployment.planName}</span>
+                          {deployment.toolheadId && (
+                            <span
+                              className="ml-2 text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-full"
+                              data-testid={`deployment-toolhead-tag-${deployment.id}`}
+                            >
+                              {toolheadLabel(deployment.toolheadId)}
+                            </span>
+                          )}
                           {deployment.notes && (
                             <p className="text-sm text-pf-text-secondary mt-1">{deployment.notes}</p>
                           )}
@@ -270,7 +379,7 @@ export function PrinterMaintenancePage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => handleLogMaintenance()}
+                          onClick={() => handleLogMaintenance(deployment.toolheadId ?? null)}
                         >
                           Log
                         </Button>
@@ -287,11 +396,11 @@ export function PrinterMaintenancePage() {
                 <CheckCircleIcon className="h-5 w-5 text-pf-success" />
                 Maintenance History
               </h2>
-              {logs.length === 0 ? (
+              {scopedLogs.length === 0 ? (
                 <p className="text-pf-text-secondary text-sm">No maintenance has been logged for this printer yet.</p>
               ) : (
                 <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {logs
+                  {scopedLogs
                     .sort((a, b) => new Date(b.performedAt).getTime() - new Date(a.performedAt).getTime())
                     .slice(0, 10)
                     .map(log => (
@@ -305,6 +414,14 @@ export function PrinterMaintenancePage() {
                             {log.component && (
                               <span className="ml-2 text-xs px-2 py-0.5 bg-pf-accent-bg/20 text-pf-primary rounded-sm">
                                 {log.component}
+                              </span>
+                            )}
+                            {log.toolheadId && (
+                              <span
+                                className="ml-2 text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-full"
+                                data-testid={`log-toolhead-tag-${log.id}`}
+                              >
+                                {toolheadLabel(log.toolheadId)}
                               </span>
                             )}
                             {log.notes && (
@@ -325,9 +442,9 @@ export function PrinterMaintenancePage() {
                         </div>
                       </div>
                     ))}
-                  {logs.length > 10 && (
+                  {scopedLogs.length > 10 && (
                     <p className="text-center text-sm text-pf-text-tertiary pt-2">
-                      Showing 10 of {logs.length} entries
+                      Showing 10 of {scopedLogs.length} entries
                     </p>
                   )}
                 </div>
@@ -344,6 +461,8 @@ export function PrinterMaintenancePage() {
           printerId={printerId}
           printerName={printer?.name || 'Unknown Printer'}
           deployments={deployments}
+          toolheads={printerDetails?.toolheads ?? []}
+          initialToolheadId={modalInitialToolheadId}
           onSubmit={handleLogSubmit}
           onClose={() => setShowLogModal(false)}
         />
