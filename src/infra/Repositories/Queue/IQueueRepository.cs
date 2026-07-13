@@ -34,6 +34,15 @@ public interface IQueueRepository
     /// <param name="ct">Cancellation token for async operation</param>
     Task AddAsync(PrintJob item, CancellationToken ct);
 
+    /// <summary>Adds a print job without saving so related rows can share one transaction.</summary>
+    void Add(PrintJob item);
+
+    /// <summary>Adds a print job asynchronously without saving.</summary>
+    Task AddWithoutSaveAsync(PrintJob item, CancellationToken ct);
+
+    /// <summary>Adds a dispatch audit row without saving.</summary>
+    void AddDispatchLog(DispatchLog log);
+
     /// <summary>
     /// Removes a print job from the queue and persists the deletion immediately.
     /// </summary>

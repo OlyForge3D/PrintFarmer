@@ -14,5 +14,7 @@ public record BarcodeScanLogDto(
     int HttpStatus,
     int? MatchedFilamentId,
     int? CreatedSpoolId,
+    Guid? BinId,
+    Guid? PartInventoryId,
     string? UserId,
     string? Message);

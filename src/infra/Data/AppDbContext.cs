@@ -225,6 +225,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Per-user settings (theme, locale, slicer defaults, etc.)
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
 
+    // Printed-part inventory (see #714). Distinct from MaintenanceComponents which
+    // are consumed by printer maintenance, not produced by prints.
+    public DbSet<PartInventory> PartInventories => Set<PartInventory>();
+
+    public DbSet<Bin> Bins => Set<Bin>();
+
+    public DbSet<PartInventoryAdjustment> PartInventoryAdjustments => Set<PartInventoryAdjustment>();
+
+    public DbSet<PartOutputMapping> PartOutputMappings => Set<PartOutputMapping>();
+
+    public DbSet<PrintJobPartOutputSnapshot> PrintJobPartOutputSnapshots => Set<PrintJobPartOutputSnapshot>();
+
+    public DbSet<PartHarvestOutputSnapshot> PartHarvestOutputSnapshots => Set<PartHarvestOutputSnapshot>();
+
     // Per-user snoozes for the unified attention feed (issue #707).
     public DbSet<AttentionSnooze> AttentionSnoozes => Set<AttentionSnooze>();
 
@@ -279,6 +293,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        EnsurePartInventoryLedgerIsAppendOnly();
+        EnsureInventoryIdentitiesAreImmutable();
         PopulateCaseInsensitiveShadowColumns();
         StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -286,9 +302,53 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        EnsurePartInventoryLedgerIsAppendOnly();
+        EnsureInventoryIdentitiesAreImmutable();
         PopulateCaseInsensitiveShadowColumns();
         StampRowVersions();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void EnsurePartInventoryLedgerIsAppendOnly()
+    {
+        bool mutationRequested = ChangeTracker.Entries<PartInventoryAdjustment>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted);
+        if (mutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part inventory adjustments are immutable; append a correcting adjustment instead.");
+        }
+
+        bool outputSnapshotMutationRequested = ChangeTracker.Entries<PrintJobPartOutputSnapshot>()
+            .Any(entry => entry.State == EntityState.Modified
+                || (entry.State == EntityState.Deleted && !IsParentJobDeleted(entry.Entity.PrintJobId)));
+        bool harvestSnapshotMutationRequested = ChangeTracker.Entries<PartHarvestOutputSnapshot>()
+            .Any(entry => entry.State == EntityState.Modified
+                || (entry.State == EntityState.Deleted && !IsParentJobDeleted(entry.Entity.PrintJobId)));
+        if (outputSnapshotMutationRequested || harvestSnapshotMutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part output snapshots are immutable; append a new harvest instead.");
+        }
+    }
+
+    private bool IsParentJobDeleted(Guid printJobId)
+        => ChangeTracker.Entries<PrintJob>()
+            .Any(entry => entry.Entity.Id == printJobId && entry.State == EntityState.Deleted);
+
+    private void EnsureInventoryIdentitiesAreImmutable()
+    {
+        bool skuMutationRequested = ChangeTracker.Entries<PartInventory>()
+            .Any(entry => entry.State == EntityState.Modified
+                && entry.Property(part => part.Sku).IsModified);
+        bool binCodeMutationRequested = ChangeTracker.Entries<Bin>()
+            .Any(entry => entry.State == EntityState.Modified
+                && entry.Property(bin => bin.Code).IsModified);
+        if (skuMutationRequested || binCodeMutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part SKU and bin-code identities are immutable; create a new identity instead.");
+        }
     }
 
     private void PopulateCaseInsensitiveShadowColumns()

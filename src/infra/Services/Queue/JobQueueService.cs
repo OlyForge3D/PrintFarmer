@@ -8,6 +8,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -44,6 +45,7 @@ public class JobQueueService : IJobQueueService
     private readonly IPrinterGroupService? _printerGroupService;
     private readonly ISettingsService? _settingsService;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster;
+    private readonly IPartOutputSnapshotService? _partOutputSnapshotService;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -57,6 +59,7 @@ public class JobQueueService : IJobQueueService
     /// <param name="printerGroupService">Optional printer group service for ACL checks on queue submission</param>
     /// <param name="settingsService">Optional app settings service for queue deadline policy enforcement</param>
     /// <param name="coverageBroadcaster">Optional filament coverage invalidation broadcaster.</param>
+    /// <param name="partOutputSnapshotService">Optional immutable printed-output snapshot service.</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -67,7 +70,8 @@ public class JobQueueService : IJobQueueService
         IAutoDispatchService? autoDispatchService = null,
         IPrinterGroupService? printerGroupService = null,
         ISettingsService? settingsService = null,
-        IFilamentCoverageBroadcaster? coverageBroadcaster = null)
+        IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+        IPartOutputSnapshotService? partOutputSnapshotService = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -81,6 +85,7 @@ public class JobQueueService : IJobQueueService
         _printerGroupService = printerGroupService;
         _settingsService = settingsService;
         _coverageBroadcaster = coverageBroadcaster;
+        _partOutputSnapshotService = partOutputSnapshotService;
     }
 
     /// <summary>
@@ -369,7 +374,21 @@ public class JobQueueService : IJobQueueService
             }
         }
 
-        await _repo.AddAsync(job, ct);
+        if (_partOutputSnapshotService is null)
+        {
+            await _repo.AddAsync(job, ct);
+        }
+        else
+        {
+            await _repo.AddWithoutSaveAsync(job, ct);
+            if (assignedPrinterId.HasValue)
+            {
+                await PrepareFirstAssignmentAsync(job, assignedPrinterId.Value, userId?.ToString("D"), ct);
+            }
+
+            await _repo.SaveChangesAsync(ct);
+        }
+
         if (_coverageBroadcaster is not null && assignedPrinterId.HasValue)
         {
             await _coverageBroadcaster.BroadcastPrinterChangedAsync(
@@ -638,6 +657,10 @@ public class JobQueueService : IJobQueueService
             }
 
             job.AssignedPrinterId = request.AssignedPrinterId.Value;
+            if (priorAssignedPrinterId != request.AssignedPrinterId.Value)
+            {
+                await PrepareFirstAssignmentAsync(job, request.AssignedPrinterId.Value, userId: null, ct);
+            }
         }
 
         if (request.ActualFilamentUsage.HasValue)
@@ -743,6 +766,35 @@ public class JobQueueService : IJobQueueService
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job!)
         };
+    }
+
+    private async Task PrepareFirstAssignmentAsync(
+        PrintJob job,
+        Guid printerId,
+        string? userId,
+        CancellationToken ct)
+    {
+        if (_partOutputSnapshotService is null)
+        {
+            return;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        job.DispatchedAt ??= now;
+        job.DispatchMode ??= (int)DispatchMode.Manual;
+        _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
+        _repo.AddDispatchLog(new DispatchLog
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            Action = DispatchAction.Dispatched,
+            DispatchMode = DispatchMode.Manual,
+            DispatchedAt = new DateTimeOffset(now, TimeSpan.Zero),
+            DispatchedByUserId = userId,
+            Reason = "Assigned during queue operation.",
+            CreatedAtUtc = now,
+        });
     }
 
     private async Task<Guid?> FindBestAvailablePrinterAsync(QueuePrintJobDto request, CancellationToken ct)

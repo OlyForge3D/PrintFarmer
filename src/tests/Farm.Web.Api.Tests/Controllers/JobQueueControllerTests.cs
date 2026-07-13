@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -25,6 +26,8 @@ public class JobQueueControllerTests
     private readonly Mock<IBatchDispatchService> _batchDispatchServiceMock;
     private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
     private readonly Mock<IPrintFarmerTelemetryService> _telemetryServiceMock;
+    private readonly Mock<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService> _partHarvestServiceMock;
+    private readonly Mock<IOperatorFeatureGate> _operatorFeatureGateMock;
     private readonly JobQueueController _controller;
 
     public JobQueueControllerTests()
@@ -37,6 +40,11 @@ public class JobQueueControllerTests
         _batchDispatchServiceMock = new Mock<IBatchDispatchService>();
         _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
         _telemetryServiceMock = new Mock<IPrintFarmerTelemetryService>();
+        _partHarvestServiceMock = new Mock<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService>();
+        _operatorFeatureGateMock = new Mock<IOperatorFeatureGate>();
+        _operatorFeatureGateMock
+            .Setup(gate => gate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+            .Returns(true);
         _controller = new JobQueueController(
             _queueServiceMock.Object,
             _printJobManagementServiceMock.Object,
@@ -45,6 +53,8 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
+            _partHarvestServiceMock.Object,
+            _operatorFeatureGateMock.Object,
             _loggerMock.Object);
 
         // Set up authenticated user with valid GUID claim for ACL enforcement
@@ -69,6 +79,8 @@ public class JobQueueControllerTests
             _batchDispatchServiceMock.Object,
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
+            _partHarvestServiceMock.Object,
+            _operatorFeatureGateMock.Object,
             _loggerMock.Object);
 
         // Assert
@@ -411,5 +423,153 @@ public class JobQueueControllerTests
         // Assert
         ObjectResult problemResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, problemResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_MapsOkResultFromService()
+    {
+        var jobId = Guid.NewGuid();
+        var expectedResponse = new Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse(
+            jobId,
+            DateTime.UtcNow,
+            null,
+            null,
+            AlreadyHarvested: false,
+            new List<Farm.Infrastructure.Dtos.PartsInventory.PartAdjustmentResponse>(),
+            new List<Farm.Infrastructure.Dtos.PartsInventory.HarvestOutputResponse>());
+        _partHarvestServiceMock
+            .Setup(s => s.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.Ok,
+                expectedResponse,
+                null));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(expectedResponse, ok.Value);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_JobNotCompleted_MapsToConflict()
+    {
+        var jobId = Guid.NewGuid();
+        _partHarvestServiceMock
+            .Setup(s => s.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.JobNotCompleted,
+                null,
+                "not completed"));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        _ = Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_NoMappings_ReturnsCanonicalConflictProblemDetails()
+    {
+        var jobId = Guid.NewGuid();
+        Guid projectFileId = Guid.NewGuid();
+        Guid gcodeFileId = Guid.NewGuid();
+        const string Guidance =
+            "Configure a printed-part output mapping or resubmit with a complete explicit outputs[] list.";
+        _partHarvestServiceMock
+            .Setup(s => s.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.NoMappings,
+                null,
+                "no mappings",
+                MappingRequired: new Farm.Infrastructure.Dtos.PartsInventory.PartMappingRequiredResponse(
+                    jobId,
+                    projectFileId,
+                    gcodeFileId,
+                    Guidance)));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        ObjectResult conflict = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        Assert.Contains("application/problem+json", conflict.ContentTypes);
+        ProblemDetails problem = Assert.IsType<ProblemDetails>(conflict.Value);
+        Assert.Equal("partMappingRequired", problem.Extensions["code"]);
+        Assert.Equal(jobId, problem.Extensions["jobId"]);
+        Assert.Equal(projectFileId, problem.Extensions["projectFileId"]);
+        Assert.Equal(gcodeFileId, problem.Extensions["gcodeFileId"]);
+        Assert.Equal(Guidance, problem.Extensions["guidance"]);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_WrongBin_ReturnsCanonicalConflictProblemDetails()
+    {
+        Guid jobId = Guid.NewGuid();
+        var mismatches = new[]
+        {
+            new Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse(
+                "SKU-A",
+                "BIN-A",
+                "BIN-B"),
+        };
+        _partHarvestServiceMock
+            .Setup(service => service.HarvestJobAsync(
+                jobId,
+                It.IsAny<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.PartsInventory.HarvestResult(
+                Farm.Infrastructure.Services.PartsInventory.PartInventoryOutcome.WrongBin,
+                null,
+                "wrong bin",
+                new Farm.Infrastructure.Dtos.PartsInventory.WrongBinResponse(mismatches)));
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(jobId, null, CancellationToken.None);
+
+        ObjectResult conflict = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        Assert.Contains("application/problem+json", conflict.ContentTypes);
+        ProblemDetails problem = Assert.IsType<ProblemDetails>(conflict.Value);
+        Assert.Equal("wrongBin", problem.Extensions["code"]);
+        IReadOnlyList<Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse> payload =
+            Assert.IsAssignableFrom<IReadOnlyList<Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse>>(
+                problem.Extensions["mismatches"]);
+        Farm.Infrastructure.Dtos.PartsInventory.WrongBinMismatchResponse mismatch = Assert.Single(payload);
+        Assert.Equal("SKU-A", mismatch.PartSku);
+        Assert.Equal("BIN-A", mismatch.ExpectedBinCode);
+        Assert.Equal("BIN-B", mismatch.ScannedBinCode);
+    }
+
+    [Fact]
+    public async Task HarvestJobAsync_FeatureDisabled_Returns404WithoutCallingService()
+    {
+        _operatorFeatureGateMock
+            .Setup(gate => gate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+            .Returns(false);
+        _operatorFeatureGateMock
+            .Setup(gate => gate.GetFlagName(OperatorFeature.PrintedPartsInventory))
+            .Returns("printedPartsInventoryEnabled");
+
+        ActionResult<Farm.Infrastructure.Dtos.PartsInventory.HarvestJobResponse> result =
+            await _controller.HarvestJobAsync(Guid.NewGuid(), null, CancellationToken.None);
+
+        NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result.Result);
+        ProblemDetails problem = Assert.IsType<ProblemDetails>(notFound.Value);
+        Assert.Equal("featureDisabled", problem.Extensions["code"]);
+        _partHarvestServiceMock.VerifyNoOtherCalls();
     }
 }
