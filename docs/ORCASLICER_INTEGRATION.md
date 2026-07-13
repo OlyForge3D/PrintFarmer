@@ -945,6 +945,52 @@ The example version-scoped fields (`wallGenerator`, `enableArcFitting`, `legacyP
 
 ---
 
+## Live Slice-Job Editor Version Scoping (#578 Path B)
+
+The schema endpoints above serve the profile-management surface. The **live New Slice Job page** — the primary settings editor for a running slice — historically consumed the static `orcaSettingsMetadata.json` bundle directly, bypassing the versioned schema pipeline. Issue #578 (Path B) closes that gap so the live editor renders and submits the correct field set for the pinned engine.
+
+### Resolver
+
+`src/Web/ReactApp/src/features/slicer/components/settings/orcaSettingsMetadataResolver.ts` exposes two pure functions:
+
+- `getMetadataForVersion(engineVersion?)` returns a version-scoped `{ profileTypes, renameFromNewToThis, renameFromThisToNew, resolvedFor }` view of the static bundle:
+  - Fields whose `addedIn` window falls after `engineVersion` are omitted from `settings` and from every tab.
+  - Fields whose `renamedIn` window falls after `engineVersion` are emitted under the older key, and the newer key is hidden.
+  - Passing `undefined`/`null`/`''` returns the full union bundle unchanged — safe fallback for engine-agnostic surfaces.
+- `scrubSettingsForVersion(settings, profileType, engineVersion, deltasOverride?)` returns a new dictionary containing only the keys valid for `engineVersion`, migrating renamed values to the version-correct key and dropping any key that has no version-correct home.
+
+Both functions are driven by `orca-settings-version-delta.ts`, a hand-maintained delta table that pins real 2.4 additions (`precise_z_height`, `alternate_extra_wall`, `interlocking_beam`). The rename mechanic is present but unused in the shipped delta pending confirmation of a real 2.3 → 2.4 rename; injected test deltas exercise it in the test suite.
+
+### Live wiring
+
+`MetadataProfileEditor` (used by `SlicerSettingsPanel` and therefore by `NewSliceJobPage`) accepts an optional `engineVersion?: string` prop and calls `getMetadataForVersion(engineVersion)` inside a `useMemo`. All tabs/sections/settings the user sees come from the returned scoped bundle — so:
+
+- 2.4-added fields disappear from tabs and from the "Other Settings" fallback when the job is pinned to 2.3.1.
+- Renamed fields render under the version-correct key (older key on 2.3.1, newer key on 2.4.1) when a rename is declared in the delta.
+
+`NewSliceJobPage` computes `effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine` and passes it to `<SlicerSettingsPanel>`. A dedicated `useEffect` on `effectiveEngineVersion` runs `scrubSettingsForVersion` against `advancedProcessSettings`, so:
+
+- Keys not valid on the newly selected engine are dropped from in-flight edit state.
+- Renamed keys migrate atomically (newer-key → older-key on downgrade, and are dropped on upgrade because they no longer exist in the target metadata — the user must re-opt into the new key).
+- The scrub is skipped when settings are already clean (identity preserved) to avoid render loops.
+
+Because the submit payload is a spread of `advancedProcessSettings`, the scrub effect alone guarantees that the payload sent to `POST /api/slicer/jobs` never contains stale keys from a previously-selected engine. The persisted `slicerEngineVersion` field on the job (Path A) already binds the job to that engine.
+
+### Persisted-job reopen
+
+A slice job carries `slicerEngineVersion` in its record. Any future edit/reopen entry that rehydrates `selectedEngineVersion` from that stored value will drive the same resolver + scrub flow, so the reopened editor renders and submits under the job's pinned engine version without cross-version contamination.
+
+### Testing (Path B)
+
+- `orcaSettingsMetadataResolver.test.ts` — verifies 2.4.1 includes real Orca 2.4 additions (`precise_z_height`, `alternate_extra_wall`, `interlocking_beam`); 2.3.1 hides them from both `settings` and tab layouts. Injected test deltas prove the rename mechanic in both directions (2.4→2.3 migrates value onto old key; 2.3→2.4 drops old key). Idempotence and unfiltered fallback are covered.
+- Path A tests (`useProfileSchema.test.tsx`, `ProfileSchemaProviderTests`, `ProfilesControllerSchemaVersionTests`) continue to guard the profile-management schema endpoints.
+
+### Deprecation lifecycle
+
+The runtime supports exactly the **current** OrcaSlicer major version and the **immediately previous** major version. When the current engine advances (e.g. 2.5.0 becomes current), the previous 2.3.1 plugin/worker/asset lane is retired: the plugin project, worker Docker layer, and `orca-settings-version-delta.ts` entries for that version are removed together, and the next release notes call out the removal. The delta file is the single audit point for the frontend — refreshing it to match new upstream release notes is the recommended step whenever a new OrcaSlicer major version is added.
+
+---
+
 ## Conclusion
 
 OrcaSlicer integration has substantial infrastructure built but is **NOT production ready**:

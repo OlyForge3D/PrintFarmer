@@ -24,6 +24,7 @@ import {
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { resolveProcessSettingsBaseline } from '@/features/slicer/components/settings/processSettingsBaseline';
+import { scrubSettingsForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
 import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
@@ -290,6 +291,26 @@ export const NewSliceJobPage: React.FC = () => {
     setExtruderFilamentProfileIds({});
     setExtruderFilamentColours({});
   }, [selectedEngineVersion]);
+
+  // Version-scoped settings scrub (issue #578). When the pinned engine version
+  // changes, drop keys that don't exist in the new version's metadata and
+  // migrate renamed keys to their target-version equivalents. This guarantees
+  // added fields appear, removed fields disappear and are omitted from the
+  // submit payload, and renamed fields only submit under the new key.
+  const effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine;
+  useEffect(() => {
+    setAdvancedProcessSettings((prev) => {
+      if (!prev || Object.keys(prev).length === 0) return prev;
+      const scrubbed = scrubSettingsForVersion(prev, 'process', effectiveEngineVersion);
+      // Preserve identity when no changes to avoid render loops.
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(scrubbed);
+      if (prevKeys.length === nextKeys.length && prevKeys.every((k) => k in scrubbed && scrubbed[k] === prev[k])) {
+        return prev;
+      }
+      return scrubbed;
+    });
+  }, [effectiveEngineVersion]);
 
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>(() => {
     try {
@@ -2743,6 +2764,7 @@ export const NewSliceJobPage: React.FC = () => {
                 advancedSettings={advancedProcessSettings}
                 onAdvancedSettingsChange={setAdvancedProcessSettings}
                 originalSettings={originalProcessSettings}
+                engineVersion={effectiveEngineVersion}
               />
             </div>
           )}
