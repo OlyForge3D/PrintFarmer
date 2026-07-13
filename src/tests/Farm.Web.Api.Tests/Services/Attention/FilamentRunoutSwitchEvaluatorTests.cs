@@ -164,10 +164,61 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
 
         RunoutSwitchAssessment result =
             await _evaluator.AssessAsync(
-                RunoutWarning(p, sourceGate.Index),
+                // The warning carries the 0-based G-code index (issue #711, round-19 M19-2), not
+                // the raw 1-based stored gate index.
+                RunoutWarning(p, ToolheadIndexMapper.ToGcodeToolIndex(sourceGate) ?? 0),
                 CancellationToken.None);
 
         result.Should().Be(RunoutSwitchAssessment.SwitchConfirmed);
+    }
+
+    // H19-2 (issue #711, round-19): a settled/loaded fallback gate alone must not be classified as
+    // SwitchConfirmed unless the printer's fresh status confirms an active print. Paused, idle, and
+    // errored printers with the fallback gate selected have NOT proven the print continued — they
+    // must downgrade only to BackupAvailable so the operator still sees a deadline.
+    [Theory]
+    [InlineData("Paused")]
+    [InlineData("Idle")]
+    [InlineData("Error")]
+    public async Task AssessAsync_SettledMmuFallbackGate_PrinterNotConfirmedPrinting_ReturnsBackupAvailable(
+        string state)
+    {
+        (Printer p, Toolhead sourceGate, Toolhead gate) =
+            await SeedAsync(mmuTopology: true);
+        gate.CurrentMaterial = "PLA";
+        gate.CurrentSpoolId = BackupSpoolId;
+        await _db.SaveChangesAsync();
+        await CreateGroupAsync(p, sourceGate, gate);
+        SetStatus(
+            p,
+            new MmuStatusDto(
+                Enabled: true,
+                IsHomed: true,
+                ActiveTool: 1,
+                ActiveGate: 1,
+                FilamentState: "Loaded",
+                Action: "Idle",
+                NumGates: 2,
+                HasBypass: false,
+                EndlessSpool: true,
+                ClogDetection: true,
+                Gates:
+                [
+                    new MmuGateDto(0, 0, null, null, null, -1),
+                    new MmuGateDto(1, 1, "PLA", null, null, BackupSpoolId)
+                ]),
+            state: state);
+
+        RunoutSwitchAssessment result =
+            await _evaluator.AssessAsync(
+                // The warning carries the 0-based G-code index (issue #711, round-19 M19-2), not
+                // the raw 1-based stored gate index.
+                RunoutWarning(p, ToolheadIndexMapper.ToGcodeToolIndex(sourceGate) ?? 0),
+                CancellationToken.None);
+
+        result.Should().Be(
+            RunoutSwitchAssessment.BackupAvailable,
+            $"a '{state}' printer has not proven printing continued even with a settled fallback gate");
     }
 
     [Fact]
@@ -200,7 +251,9 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
 
         RunoutSwitchAssessment result =
             await _evaluator.AssessAsync(
-                RunoutWarning(p, sourceGate.Index),
+                // The warning carries the 0-based G-code index (issue #711, round-19 M19-2), not
+                // the raw 1-based stored gate index.
+                RunoutWarning(p, ToolheadIndexMapper.ToGcodeToolIndex(sourceGate) ?? 0),
                 CancellationToken.None);
 
         result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
@@ -352,7 +405,9 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
                 ]));
 
         return await _evaluator.AssessAsync(
-            RunoutWarning(p, sourceGate.Index),
+            // The warning carries the 0-based G-code index (issue #711, round-19 M19-2), not the
+            // raw 1-based stored gate index.
+            RunoutWarning(p, ToolheadIndexMapper.ToGcodeToolIndex(sourceGate) ?? 0),
             CancellationToken.None);
     }
 
@@ -430,7 +485,8 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
     private void SetStatus(
         Printer printer,
         MmuStatusDto mmuStatus,
-        DateTime? updatedAtUtc = null)
+        DateTime? updatedAtUtc = null,
+        string state = "printing")
     {
         _statusCache
             .Setup(cache => cache.GetSnapshot(printer.Id))
@@ -438,7 +494,7 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
                 new PrinterStatusDto(
                     printer.Id,
                     IsOnline: true,
-                    State: "printing",
+                    State: state,
                     MmuStatus: mmuStatus),
                 updatedAtUtc ?? DateTime.UtcNow));
     }

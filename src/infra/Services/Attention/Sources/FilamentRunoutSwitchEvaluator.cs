@@ -19,8 +19,10 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// <list type="bullet">
 ///   <item><b>SwitchConfirmed</b> — fresh MMU telemetry identifies a configured compatible
 ///     fallback member as the active tool/gate <i>and</i> reports a completed load (loaded
-///     filament state + settled action + matching live material). This is the only tier that
-///     permits an informational downgrade.</item>
+///     filament state + settled action + matching live material) <i>and</i> the printer's fresh
+///     status confirms it is actively printing (issue #711, round-19 H19-2). This is the only
+///     tier that permits an informational downgrade — a paused/idle/errored/completed printer
+///     with a settled fallback gate has NOT proven the print continued.</item>
 ///   <item><b>BackupAvailable</b> — a configured fallback member currently holds a loaded
 ///     compatible spool, but live telemetry does not (yet) prove the switch happened.</item>
 ///   <item><b>NoBackup</b> — no configured, loaded, compatible backup exists (or the warning is
@@ -66,7 +68,11 @@ public sealed class FilamentRunoutSwitchEvaluator(
             return RunoutSwitchAssessment.NoBackup;
         }
 
-        // The warning carries a stored toolhead index but fallback chains key on stable IDs.
+        // The warning carries the 0-based G-code tool index (issue #711, round-19 M19-2 — matches
+        // the documented ToolheadCoverageDto contract), while fallback chains key on stable IDs.
+        // Match toolheads via the SAME mapper used to produce that index rather than comparing
+        // against the raw stored Toolhead.Index, which is 1-based for MMU gates and would
+        // otherwise misidentify the source by one gate.
         List<Toolhead> toolheads = await _dbContext.Toolheads
             .AsNoTracking()
             .Where(t => t.PrinterId == warning.PrinterId)
@@ -75,8 +81,7 @@ public sealed class FilamentRunoutSwitchEvaluator(
         List<Toolhead> sourceCandidates =
         [
             .. toolheads.Where(t =>
-                t.Index == warning.ToolheadIndex
-                && ToolheadIndexMapper.IsFilamentSource(t, toolheads))
+                ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(t, toolheads) == warning.ToolheadIndex)
         ];
         if (sourceCandidates.Count == 0)
         {
@@ -130,6 +135,18 @@ public sealed class FilamentRunoutSwitchEvaluator(
             return RunoutSwitchAssessment.BackupAvailable;
         }
 
+        // H19-2 (issue #711, round-19): a settled/loaded fallback gate alone does not prove the
+        // print continued. A paused, idle, errored, or completed printer that merely has the
+        // fallback gate selected must NOT be downgraded to SwitchConfirmed — that would tell the
+        // operator "printing continued" when it has not. Only a printer CONFIRMED to be actively
+        // printing may receive the SwitchConfirmed severity downgrade; anything else with a
+        // loaded/settled backup falls back to BackupAvailable, which the downstream severity
+        // mapping already handles without dropping the attention deadline.
+        if (!IsConfirmedPrinting(snapshot!.Status.State))
+        {
+            return RunoutSwitchAssessment.BackupAvailable;
+        }
+
         Dictionary<Guid, Toolhead> toolheadsById = toolheads.ToDictionary(t => t.Id);
         foreach (FilamentFallbackChainMember backup in configuredBackups)
         {
@@ -147,6 +164,15 @@ public sealed class FilamentRunoutSwitchEvaluator(
     private static bool IsLoadedAndSettled(MmuStatusDto status)
         => IsWhitelisted(status.FilamentState, LoadedFilamentStates)
             && IsWhitelisted(status.Action, SettledActions);
+
+    /// <summary>
+    /// Whether the printer's fresh status snapshot confirms an ACTIVE print in progress (issue
+    /// #711, round-19 H19-2). A settled/loaded MMU fallback gate is not, by itself, proof that
+    /// printing continued: the printer could be paused, idle, in an error state, or have already
+    /// completed/cancelled the job while the MMU retains its last-loaded gate selection.
+    /// </summary>
+    private static bool IsConfirmedPrinting(string? state)
+        => string.Equals(state, "printing", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsWhitelisted(string? value, string[] whitelist)
     {

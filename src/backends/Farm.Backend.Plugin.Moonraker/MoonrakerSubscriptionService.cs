@@ -1238,11 +1238,20 @@ public sealed class MoonrakerSubscriptionService(
         // Sample active-tool telemetry for interval-aware per-tool wear attribution (issue #711,
         // round-14). The accumulator credits the elapsed time since the previous sample to the tool
         // that was active while printing; the statistics sync later drains and attributes it.
+        // A CONFIRMED non-printing state (round-19 V19-1/H19-1) is sampled as known-idle so the
+        // coverage denominator excludes it, instead of diluting attribution as unknown coverage.
         DateTime nowUtc = DateTime.UtcNow;
-        _ = TrySampleActiveToolTelemetry(
-            printerId,
-            ResolveActivePhysicalToolIndex(state),
-            IsPrinting(state));
+        if (IsConfirmedNotPrinting(state))
+        {
+            _ = TrySampleKnownIdleTelemetry(printerId);
+        }
+        else
+        {
+            _ = TrySampleActiveToolTelemetry(
+                printerId,
+                ResolveActivePhysicalToolIndex(state),
+                IsPrinting(state));
+        }
 
         // Track successful status update time
         _lastStatusUpdateTimes[printerId] = nowUtc;
@@ -1272,6 +1281,26 @@ public sealed class MoonrakerSubscriptionService(
 
         _activityAccumulator.Sample(printerId, sampledToolIndex, isPrinting);
         return accepted;
+    }
+
+    /// <summary>
+    /// Records a CONFIRMED not-printing observation for interval-aware per-tool wear attribution
+    /// (issue #711, round-19 V19-1/H19-1), so the coverage denominator can exclude known idle time
+    /// instead of treating it as unknown/unattributed coverage.
+    /// </summary>
+    internal bool TrySampleKnownIdleTelemetry(Guid printerId)
+    {
+        if (_activityAccumulator is null
+            || !_loopCancellationSources.TryGetValue(
+                printerId,
+                out CancellationTokenSource? printerCts)
+            || printerCts.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        _activityAccumulator.SampleKnownIdle(printerId);
+        return true;
     }
 
     private void UpdateKnownPhysicalToolheadIndices(Printer printer)
@@ -1321,6 +1350,30 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     private static bool IsPrinting(PrinterState state) =>
         string.Equals(state.State, "printing", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The complete set of Klipper <c>print_stats.state</c> values other than "printing". Any of
+    /// these on a fresh snapshot means the printer is CONFIRMED not printing (issue #711, round-19
+    /// V19-1/H19-1) — as opposed to a stale/disconnected snapshot or an unmapped tool index, where
+    /// the active-tool state is merely unknown rather than confirmed idle.
+    /// </summary>
+    private static readonly HashSet<string> ConfirmedNotPrintingStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "standby",
+        "paused",
+        "complete",
+        "cancelled",
+        "error",
+    };
+
+    /// <summary>
+    /// Whether a fresh snapshot CONFIRMS the printer is not printing (issue #711, round-19
+    /// V19-1/H19-1), so the elapsed segment can be sampled as known-idle instead of unknown
+    /// coverage. Returns <c>false</c> for a missing/unrecognized state string — an absent state is
+    /// missing telemetry, not a confirmed observation.
+    /// </summary>
+    private static bool IsConfirmedNotPrinting(PrinterState state) =>
+        state.State is string value && ConfirmedNotPrintingStates.Contains(value);
 
     /// <summary>
     /// Parses a Klipper extruder object name into a zero-based tool index: "extruder" → 0,

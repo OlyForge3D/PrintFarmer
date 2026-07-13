@@ -25,6 +25,18 @@ public class PrintStatsSyncHostedService(
     IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
     private const string ServiceId = "PrintStatsSyncService";
+
+    // M19-1 (issue #711, round-19): external print-hours counter discontinuity detection.
+    // HoursEpsilon absorbs floating-point noise so a flat/no-op reading is never misread as a
+    // decrease. ReboundSlackFactor/ReboundSlackHours bound how much the external total may
+    // plausibly grow between two ticks: cumulative print-hours can never advance faster than
+    // real wall-clock time elapses, so a "rebound" delta that exceeds elapsed time (plus a small
+    // multiplicative + additive slack for clock jitter) indicates the reading itself is spurious
+    // (e.g. Moonraker history.reset_totals, or a transient dip-then-recovery), not real wear.
+    private const double HoursEpsilon = 0.001;
+    private const double ReboundSlackFactor = 1.05;
+    private const double ReboundSlackHours = 0.05;
+
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<PrintStatsSyncHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<PrintStatsSyncSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
@@ -244,6 +256,14 @@ public class PrintStatsSyncHostedService(
         double externalDelta = 0;
         bool attributionEligible = false;
 
+        // M19-1 (issue #711, round-19): set when this cycle's fresh external total is a
+        // discontinuity (a decrease, e.g. Moonraker history.reset_totals, or an implausible
+        // rebound) rather than genuine incremental wear. A discontinuity still needs its epoch
+        // closed out below — the accumulator must be drained and the attribution boundary
+        // advanced — but with zero credited hours, so the NEXT cycle starts a clean window
+        // instead of spanning across the reset.
+        bool externalCounterDiscontinuity = false;
+
         switch (outcome)
         {
             case ExternalSyncOutcome.Succeeded:
@@ -255,9 +275,40 @@ public class PrintStatsSyncHostedService(
 
                 if (baselineInitialized)
                 {
-                    // Established baseline: attribute only the incremental external growth.
-                    externalDelta = Math.Max(0, freshExternalHours - previousExternalHours);
-                    attributionEligible = true;
+                    double rawDelta = freshExternalHours - previousExternalHours;
+                    bool isDecrease = rawDelta < -HoursEpsilon;
+
+                    // Cumulative print-hours can advance by at most one wall-clock hour per
+                    // wall-clock hour elapsed. A same-or-larger jump (beyond a small slack for
+                    // clock/sync jitter) since the last attributed tick is physically implausible
+                    // as real wear, so treat it as a discontinuity too — this also covers a
+                    // transient dip immediately followed by a "recovery" that would otherwise
+                    // re-credit the historical gap once compared against the dip's low baseline.
+                    bool isImplausibleRebound = !isDecrease
+                        && previousExternalAttributionUtc is DateTime prevAttributionForRebound
+                        && rawDelta > (Math.Max(0, (syncUtc - prevAttributionForRebound).TotalHours) * ReboundSlackFactor) + ReboundSlackHours;
+
+                    if (isDecrease || isImplausibleRebound)
+                    {
+                        externalCounterDiscontinuity = true;
+                        externalDelta = 0;
+                        attributionEligible = false;
+                        _logger.LogWarning(
+                            "Printer '{Name}' external print-hours counter discontinuity detected " +
+                            "(previous={Previous:F2}h, fresh={Fresh:F2}h, reason={Reason}); baseline " +
+                            "and attribution boundary advance this cycle with zero hours credited " +
+                            "(issue #711, round-19 M19-1).",
+                            printer.Name,
+                            previousExternalHours,
+                            freshExternalHours,
+                            isDecrease ? "decrease" : "implausible-rebound");
+                    }
+                    else
+                    {
+                        // Established baseline, no discontinuity: attribute the incremental growth.
+                        externalDelta = Math.Max(0, rawDelta);
+                        attributionEligible = true;
+                    }
                 }
                 else
                 {
@@ -322,23 +373,33 @@ public class PrintStatsSyncHostedService(
             // The increment remains uncommitted until the outer scoped SaveChangesAsync.
             IToolheadActivityAccumulator? activityAccumulator =
                 serviceProvider.GetService<IToolheadActivityAccumulator>();
-            if (externalDelta > 0)
+
+            // M19-1 (issue #711, round-19): a discontinuity closes out its epoch the same way a
+            // genuine credit does — peek-and-later-acknowledge the accumulator through "now" and
+            // advance the boundary — but WITHOUT computing an attribution window, so the (already
+            // zeroed) externalDelta below is guaranteed to attribute nothing for this cycle. The
+            // next cycle's real delta then measures from this fresh boundary instead of spanning
+            // across the reset.
+            if (externalDelta > 0 || externalCounterDiscontinuity)
             {
                 snapshotToAcknowledge = activityAccumulator?.PeekActiveSeconds(printer.Id);
-                if (previousExternalAttributionUtc is DateTime previousAttribution)
+                if (externalDelta > 0)
                 {
-                    attributionWindowSeconds = Math.Max(
-                        0,
-                        (syncUtc - previousAttribution).TotalSeconds);
-                }
-                else
-                {
-                    attributionEligible = false;
-                    _logger.LogInformation(
-                        "Printer '{Name}' advanced external history by {Delta:F2}h with no persisted " +
-                        "attribution boundary; per-toolhead wear is unattributed for this cycle.",
-                        printer.Name,
-                        externalDelta);
+                    if (previousExternalAttributionUtc is DateTime previousAttribution)
+                    {
+                        attributionWindowSeconds = Math.Max(
+                            0,
+                            (syncUtc - previousAttribution).TotalSeconds);
+                    }
+                    else
+                    {
+                        attributionEligible = false;
+                        _logger.LogInformation(
+                            "Printer '{Name}' advanced external history by {Delta:F2}h with no persisted " +
+                            "attribution boundary; per-toolhead wear is unattributed for this cycle.",
+                            printer.Name,
+                            externalDelta);
+                    }
                 }
 
                 stats.LastExternalHoursAttributionUtc = syncUtc;
@@ -466,9 +527,17 @@ public class PrintStatsSyncHostedService(
 
         double recognizedPhysicalSeconds = perToolheadSeconds.Values.Sum();
         double windowSeconds = attributionWindowSeconds ?? snapshot.WindowSeconds;
-        if (recognizedPhysicalSeconds > 0 && windowSeconds > 0)
+
+        // Known-idle seconds (issue #711, round-19 V19-1/H19-1) are a CONFIRMED absence of print —
+        // not missing telemetry — so they must be excluded from the coverage denominator entirely.
+        // Otherwise a printer that is idle most of the day has its print-time coverage diluted by
+        // the idle hours, destroying the vast majority of the external-history delta attribution
+        // (e.g. 1h of fully-observed printing after 23h of confirmed idle would previously compute
+        // coverage = 1h / 24h ≈ 0.04 instead of the correct 1.0).
+        double effectiveWindowSeconds = Math.Max(0, windowSeconds - snapshot.KnownIdleSeconds);
+        if (recognizedPhysicalSeconds > 0 && effectiveWindowSeconds > 0)
         {
-            double coverage = Math.Min(recognizedPhysicalSeconds / windowSeconds, 1);
+            double coverage = Math.Min(recognizedPhysicalSeconds / effectiveWindowSeconds, 1);
             Dictionary<Guid, double> weights = perToolheadSeconds.ToDictionary(
                 static kvp => kvp.Key,
                 kvp => (kvp.Value / recognizedPhysicalSeconds) * coverage);
@@ -476,22 +545,30 @@ public class PrintStatsSyncHostedService(
             IReadOnlyList<Guid> intervalCredited = await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, intervalAttribution, ct);
             logger?.LogDebug(
                 "Printer {PrinterId} attributed {Credited:F2}h of a {Delta:F2}h external delta across " +
-                "{ToolheadCount} physical toolhead(s) with {Coverage:P1} telemetry coverage (issue #711).",
+                "{ToolheadCount} physical toolhead(s) with {Coverage:P1} telemetry coverage over a " +
+                "{EffectiveWindow:F0}s effective window ({Window:F0}s minus {KnownIdle:F0}s known-idle) " +
+                "(issue #711).",
                 printerId,
                 intervalAttribution.TotalHours,
                 externalDelta,
                 intervalCredited.Count,
-                coverage);
+                coverage,
+                effectiveWindowSeconds,
+                windowSeconds,
+                snapshot.KnownIdleSeconds);
             return intervalCredited;
         }
 
         // A point-in-time status cannot quantify coverage, so no full-delta fallback is permitted.
         logger?.LogInformation(
             "Printer {PrinterId} supports per-tool attribution but produced no active-tool " +
-            "duration telemetry for its {Window:F0}s baseline window; per-toolhead wear is " +
+            "duration telemetry for its {Window:F0}s baseline window ({EffectiveWindow:F0}s " +
+            "effective after excluding {KnownIdle:F0}s known-idle); per-toolhead wear is " +
             "unattributed for the {Delta:F2}h external history delta (issue #711).",
             printerId,
             windowSeconds,
+            effectiveWindowSeconds,
+            snapshot.KnownIdleSeconds,
             externalDelta);
         return [];
     }

@@ -16,6 +16,8 @@ public sealed class ToolheadActivitySnapshot
         new Dictionary<int, double>(),
         0,
         0,
+        0,
+        0,
         0);
 
     internal ToolheadActivitySnapshot(
@@ -26,7 +28,9 @@ public sealed class ToolheadActivitySnapshot
         IReadOnlyDictionary<int, double> cumulativeActiveSeconds,
         double recognizedSeconds,
         double windowSeconds,
-        double cumulativeWindowSeconds)
+        double cumulativeWindowSeconds,
+        double knownIdleSeconds,
+        double cumulativeKnownIdleSeconds)
     {
         PrinterId = printerId;
         Generation = generation;
@@ -37,6 +41,8 @@ public sealed class ToolheadActivitySnapshot
         RecognizedSeconds = recognizedSeconds;
         WindowSeconds = windowSeconds;
         CumulativeWindowSeconds = cumulativeWindowSeconds;
+        KnownIdleSeconds = knownIdleSeconds;
+        CumulativeKnownIdleSeconds = cumulativeKnownIdleSeconds;
     }
 
     /// <summary>Gets the printer represented by this snapshot.</summary>
@@ -54,6 +60,15 @@ public sealed class ToolheadActivitySnapshot
     /// </summary>
     public double WindowSeconds { get; }
 
+    /// <summary>
+    /// Gets the portion of <see cref="WindowSeconds"/> that was CONFIRMED not-printing based on
+    /// fresh telemetry (issue #711, round-19 V19-1/H19-1) — recorded via
+    /// <see cref="IToolheadActivityAccumulator.SampleKnownIdle"/>. A caller computing coverage should
+    /// subtract this from <see cref="WindowSeconds"/> before dividing, because known idle time is a
+    /// confirmed absence of print, not missing telemetry, and must never dilute the coverage ratio.
+    /// </summary>
+    public double KnownIdleSeconds { get; }
+
     internal Guid Generation { get; }
 
     internal long ThroughSequence { get; }
@@ -61,4 +76,6 @@ public sealed class ToolheadActivitySnapshot
     internal IReadOnlyDictionary<int, double> CumulativeActiveSeconds { get; }
 
     internal double CumulativeWindowSeconds { get; }
+
+    internal double CumulativeKnownIdleSeconds { get; }
 }

@@ -308,10 +308,11 @@ public class FilamentCoverageServiceTests
             CurrentMaterial = material,
         };
 
+        Toolhead physical = T(0, spoolId: 999, primary: true, material: "STALE");
         Printer p = SeedPrinter(
             db,
             "mmu",
-            T(0, spoolId: 999, primary: true, material: "STALE"),
+            physical,
             Gate(1, spoolId: 100, material: "PLA"),
             Gate(2, spoolId: 200, material: "PETG"),
             Gate(3, spoolId: 300, material: "ABS"));
@@ -331,13 +332,51 @@ public class FilamentCoverageServiceTests
 
         cov!.Toolheads.Should().HaveCount(3, "each demand key maps onto a real gate; no phantom slots");
         cov.Toolheads.Should().NotContain(
-            toolhead => toolhead.ToolheadIndex == 0,
+            toolhead => toolhead.ToolheadId == physical.Id,
             "the shared physical hotend is not a filament source when MMU gates exist");
 
-        // T0 (G-code 0) -> gate stored at Index 1, T1 -> Index 2, T2 -> Index 3.
-        cov.Toolheads.Single(t => t.ToolheadIndex == 1).CurrentJobRequiredGrams.Should().Be(10);
-        cov.Toolheads.Single(t => t.ToolheadIndex == 2).CurrentJobRequiredGrams.Should().Be(20);
-        cov.Toolheads.Single(t => t.ToolheadIndex == 3).CurrentJobRequiredGrams.Should().Be(30);
+        // ToolheadIndex is the 0-based G-code index (issue #711, round-19 M19-2 — the DTO must
+        // emit the mapped G-code index, not the raw stored gate index): gate stored at Index 1
+        // maps to G-code T0, Index 2 -> T1, Index 3 -> T2.
+        cov.Toolheads.Single(t => t.ToolheadIndex == 0).CurrentJobRequiredGrams.Should().Be(10);
+        cov.Toolheads.Single(t => t.ToolheadIndex == 1).CurrentJobRequiredGrams.Should().Be(20);
+        cov.Toolheads.Single(t => t.ToolheadIndex == 2).CurrentJobRequiredGrams.Should().Be(30);
+    }
+
+    // Issue #711 round-19 Finding M19-2: the coverage DTO must emit the mapped 0-based G-code
+    // index, not the raw 1-based stored gate index — the doc-comment already claimed 0-based,
+    // but the wire value was the bug.
+    [Fact]
+    public async Task MmuGate_StoredIndexOne_EmitsZeroBasedGcodeToolheadIndex()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0.0);
+
+        Printer p = SeedPrinter(
+            db,
+            "single-gate-mmu",
+            T(0, spoolId: null, primary: true, material: null),
+            new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                Index = 1,
+                Name = "Gate 1",
+                ToolheadType = ToolheadType.MmuGate,
+                CurrentSpoolId = 100,
+                CurrentMaterial = "PLA",
+            });
+
+        GcodeFile g = Gcode(estimatedTotalGrams: 10, perExtruder: [10], extruderCount: 1, printTimeMinutes: 10);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(10)));
+        _ = await db.SaveChangesAsync();
+
+        spool.Setup(s => s.GetSpoolByIdAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(100, remainingG: 500, material: "PLA"));
+
+        PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
+
+        ToolheadCoverageDto gate = cov!.Toolheads.Should().ContainSingle().Which;
+        gate.ToolheadIndex.Should().Be(0, "gate stored at Index 1 must emit the mapped G-code T0, not the raw stored index 1");
     }
 
     [Fact]

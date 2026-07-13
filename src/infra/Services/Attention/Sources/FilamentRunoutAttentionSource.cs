@@ -88,7 +88,13 @@ public sealed class FilamentRunoutAttentionSource(
         string remaining = warning.RemainingGrams is double grams
             ? $"{Math.Max(0, grams).ToString("0.#", CultureInfo.InvariantCulture)} g"
             : "unknown remaining weight";
-        int displayTool = warning.ToolheadIndex + 1;
+
+        // warning.ToolheadIndex is already the 0-based G-code T-index (issue #711, round-19
+        // M19-2 — the coverage DTO now correctly emits the mapped G-code index instead of the raw
+        // 1-based stored index for MMU gates). Adding 1 here double-counted that mapping and
+        // displayed gate 1 / T0 as "tool 2"; display the value as-is to match gcode T-command
+        // convention (T0 = "tool 0").
+        int displayTool = warning.ToolheadIndex;
 
         string title;
         string detail;

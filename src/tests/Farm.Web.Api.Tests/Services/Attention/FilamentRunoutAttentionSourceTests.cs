@@ -170,6 +170,34 @@ public class FilamentRunoutAttentionSourceTests
             Times.Never);
     }
 
+    [Fact]
+    public async Task GetItemsAsync_ActiveRunout_MmuGateZeroBasedIndex_DisplaysToolZeroNotToolOne()
+    {
+        // Issue #711 round-19 Finding M19-2: warning.ToolheadIndex is now the 0-based G-code
+        // index (matching the mapped ToolheadCoverageDto contract). MMU gate 1 maps to G-code T0,
+        // so the attention text must say "tool 0" — the old "+1" double-add displayed "tool 2"
+        // for gate 1 instead of the correct "tool 0".
+        Guid printerId = Guid.NewGuid();
+        DateTime runoutAt = new(2026, 7, 11, 4, 30, 0, DateTimeKind.Utc);
+        Mock<IFilamentCoverageAttentionSource> coverage = Source(
+            new FilamentRunoutWarningDto(
+                printerId,
+                "Printer One",
+                ToolheadIndex: 0,
+                SpoolId: 42,
+                Material: "PLA",
+                RemainingGrams: 12.5,
+                PredictedRunoutAt: runoutAt,
+                Reason: "runout-during-active-job"));
+        FilamentRunoutAttentionSource source = new(coverage.Object);
+
+        AttentionItemDto item = (await source.GetItemsAsync(CancellationToken.None)).Should().ContainSingle().Which;
+
+        item.Detail.Should().Contain("tool 0");
+        item.Detail.Should().NotContain("tool 1");
+        item.ToolheadIndex.Should().Be(0);
+    }
+
     private static FilamentRunoutWarningDto ActiveRunout()
         => new(
             Guid.NewGuid(),

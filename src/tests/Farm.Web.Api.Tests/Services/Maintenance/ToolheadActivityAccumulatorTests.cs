@@ -150,6 +150,112 @@ public class ToolheadActivityAccumulatorTests
     }
 
     [Fact]
+    public void SampleKnownIdle_ConfirmedIdleSegment_TracksKnownIdleSecondsAlongsideWindow()
+    {
+        // Issue #711, round-19 V19-1/H19-1: a confirmed-idle segment (fresh telemetry showing the
+        // printer is not printing) must accrue both the window total and the known-idle total in
+        // parallel, while never creating an active-seconds bucket for any tool.
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();
+        Guid printerId = Guid.NewGuid();
+
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromSeconds(45));
+        accumulator.SampleKnownIdle(printerId);
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        snapshot.ActiveSeconds.Should().BeEmpty();
+        snapshot.RecognizedSeconds.Should().Be(0);
+        snapshot.WindowSeconds.Should().BeApproximately(45, 0.0001);
+        snapshot.KnownIdleSeconds.Should().BeApproximately(45, 0.0001);
+    }
+
+    [Fact]
+    public void Sample_TransitionFromKnownIdleToPrinting_CreditsPriorSegmentAsIdleNotToTheNewTool()
+    {
+        // The segment BEFORE a state-changing Sample/SampleKnownIdle call is attributed to whatever
+        // state the PREVIOUS call established, so a known-idle-to-printing transition must credit the
+        // preceding elapsed time as known-idle, not to the newly-observed tool.
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
+            NewAccumulator(TimeSpan.FromHours(1));
+        Guid printerId = Guid.NewGuid();
+
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromMinutes(30));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromMinutes(10));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        snapshot.ActiveSeconds.Should().ContainSingle().Which.Should().Be(new KeyValuePair<int, double>(0, 600));
+        snapshot.KnownIdleSeconds.Should().BeApproximately(1800, 0.0001);
+        snapshot.WindowSeconds.Should().BeApproximately(2400, 0.0001);
+    }
+
+    [Fact]
+    public void Sample_TransitionFromPrintingToKnownIdle_DoesNotRetroactivelyReclassifyPriorPrintingSegment()
+    {
+        // Symmetric to the above: the printing segment that occurred BEFORE the printer was
+        // confirmed idle must remain credited as printing; only the segment AFTER the
+        // SampleKnownIdle call is excluded from the numerator and the effective coverage denominator.
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
+            NewAccumulator(TimeSpan.FromHours(1));
+        Guid printerId = Guid.NewGuid();
+
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromMinutes(15));
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromMinutes(20));
+        accumulator.SampleKnownIdle(printerId);
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        snapshot.ActiveSeconds.Should().ContainSingle().Which.Should().Be(new KeyValuePair<int, double>(0, 900));
+        snapshot.KnownIdleSeconds.Should().BeApproximately(1200, 0.0001);
+        snapshot.WindowSeconds.Should().BeApproximately(2100, 0.0001);
+    }
+
+    [Fact]
+    public void AckActiveSecondsThrough_Snapshot_PreservesKnownIdleSecondsRecordedAfterPeek()
+    {
+        // Mirrors AckActiveSecondsThrough_Snapshot_PreservesSamplesRecordedAfterPeek but for the
+        // known-idle bucket: acknowledging an earlier snapshot must not discard known-idle seconds
+        // accrued after that snapshot was taken.
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();
+        Guid printerId = Guid.NewGuid();
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        accumulator.SampleKnownIdle(printerId);
+        ToolheadActivitySnapshot first = accumulator.PeekActiveSeconds(printerId);
+
+        clock.Advance(TimeSpan.FromSeconds(45));
+        accumulator.SampleKnownIdle(printerId);
+        accumulator.AckActiveSecondsThrough(first);
+
+        ToolheadActivitySnapshot pending = accumulator.PeekActiveSeconds(printerId);
+        pending.KnownIdleSeconds.Should().BeApproximately(45, 0.0001);
+        pending.WindowSeconds.Should().BeApproximately(45, 0.0001);
+    }
+
+    [Fact]
+    public void AckActiveSecondsThrough_CurrentSnapshot_ClearsKnownIdleSecondsToo()
+    {
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();
+        Guid printerId = Guid.NewGuid();
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        accumulator.SampleKnownIdle(printerId);
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        accumulator.AckActiveSecondsThrough(snapshot);
+
+        ToolheadActivitySnapshot pending = accumulator.PeekActiveSeconds(printerId);
+        pending.KnownIdleSeconds.Should().Be(0);
+        pending.WindowSeconds.Should().Be(0);
+    }
+
+    [Fact]
     public void Sample_OutOfRangeIndexes_AreTreatedAsUnknownAndDoNotCreateBuckets()
     {
         (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();

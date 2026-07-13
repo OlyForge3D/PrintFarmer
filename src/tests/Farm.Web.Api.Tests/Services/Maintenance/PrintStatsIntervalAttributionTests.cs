@@ -226,6 +226,120 @@ public class PrintStatsIntervalAttributionTests
         accumulator.PeekActiveSeconds(printerId).RecognizedSeconds.Should().BeApproximately(120, 0.0001);
     }
 
+    [Fact]
+    public async Task IntervalTelemetry_KnownIdleThenFullPrint_ExcludesIdleFromCoverageDenominator()
+    {
+        // Issue #711, round-19 V19-1/H19-1: known-idle seconds (a printer CONFIRMED not printing via
+        // fresh telemetry) must be excluded from both the numerator and the coverage denominator.
+        // Before the fix, 23h of confirmed idle followed by 1h of fully-observed printing computed
+        // coverage = 1h / 24h ~= 0.04, destroying 96% of the attributable external-history delta.
+        await using AppDbContext db = NewDb();
+        Guid printerId = Guid.NewGuid();
+        Toolhead t0 = CreateToolhead(printerId, index: 0);
+        Toolhead t1 = CreateToolhead(printerId, index: 1);
+        db.Toolheads.AddRange(t0, t1);
+        await db.SaveChangesAsync();
+        EfToolheadStatisticsRepository repository = new(db);
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator(TimeSpan.FromHours(2));
+
+        accumulator.SampleKnownIdle(printerId);
+        clock.Advance(TimeSpan.FromHours(23));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromHours(1));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
+            printerId,
+            statsExisted: true,
+            externalSyncSuccess: true,
+            perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
+            externalDelta: 1,
+            repository,
+            CancellationToken.None,
+            activityAccumulator: accumulator);
+        await db.SaveChangesAsync();
+
+        credited.Should().Equal(t0.Id);
+        t0.CumulativePrintHours.Should().BeApproximately(1, 0.0001,
+            "the full observed print hour must be credited, not diluted by the preceding 23h of confirmed idle");
+        t1.CumulativePrintHours.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task IntervalTelemetry_UnmappedToolSegment_CountsTowardDenominatorOnlyNotIdleOrNumerator()
+    {
+        // Issue #711, round-19 V19-1/H19-1: printing with an unrecognized/unmapped tool index (H17-3
+        // safety -- e.g. an MMU state Farm cannot resolve, or an out-of-range backend tool index) is
+        // genuinely "unknown coverage": it must dilute the coverage denominator (unlike known-idle,
+        // which is excluded entirely) but must never be credited to any specific toolhead's numerator.
+        await using AppDbContext db = NewDb();
+        Guid printerId = Guid.NewGuid();
+        Toolhead t0 = CreateToolhead(printerId, index: 0);
+        Toolhead t1 = CreateToolhead(printerId, index: 1);
+        db.Toolheads.AddRange(t0, t1);
+        await db.SaveChangesAsync();
+        EfToolheadStatisticsRepository repository = new(db);
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator(TimeSpan.FromHours(2));
+
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromHours(1));
+        // Index 99 is out of the accumulator's tracked range and normalizes to "unmapped" -- printing
+        // continued, but Farm cannot resolve which physical tool is responsible for this segment.
+        accumulator.Sample(printerId, activeToolIndex: 99, isPrinting: true);
+        clock.Advance(TimeSpan.FromMinutes(30));
+        accumulator.Sample(printerId, activeToolIndex: 99, isPrinting: true);
+
+        IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
+            printerId,
+            statsExisted: true,
+            externalSyncSuccess: true,
+            perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
+            externalDelta: 1.5,
+            repository,
+            CancellationToken.None,
+            activityAccumulator: accumulator);
+        await db.SaveChangesAsync();
+
+        credited.Should().Equal(t0.Id);
+        t0.CumulativePrintHours.Should().BeApproximately(1, 0.0001,
+            "the unmapped 30-minute segment dilutes coverage via the denominator but is never credited " +
+            "to any specific toolhead");
+        t1.CumulativePrintHours.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AttributeExternalToolheadHoursAsync_NotEligibleForAttribution_ReturnsEmptyWithoutTouchingRepository()
+    {
+        // Issue #711, round-17/19: H17-1's restart-gap safety is preserved through the V19-1/H19-1
+        // coverage-denominator fix. When the caller has no persisted attribution boundary (a fresh
+        // baseline / restart gap), it passes externalSyncSuccess=false for this cycle; no hours may be
+        // attributed regardless of how much telemetry the accumulator has pending, and the repository
+        // (a strict mock with zero setups) must never be touched.
+        Mock<IToolheadStatisticsRepository> repository = new(MockBehavior.Strict);
+        Guid printerId = Guid.NewGuid();
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(120));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
+            printerId,
+            statsExisted: true,
+            externalSyncSuccess: false,
+            perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
+            externalDelta: 8,
+            repository.Object,
+            CancellationToken.None,
+            activityAccumulator: accumulator);
+
+        credited.Should().BeEmpty();
+        accumulator.PeekActiveSeconds(printerId).RecognizedSeconds.Should().BeApproximately(120, 0.0001,
+            "pending telemetry must survive an ineligible cycle untouched for the next real attempt");
+    }
+
     private static Task<IReadOnlyList<Guid>> AttributeAsync(
         Guid printerId,
         double externalDelta,

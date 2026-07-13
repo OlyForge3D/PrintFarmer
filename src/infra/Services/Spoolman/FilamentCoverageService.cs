@@ -486,8 +486,13 @@ public class FilamentCoverageService(
                 }
             }
 
+            // ToolheadIndex is documented as the 0-based G-code T-index (issue #711, round-19
+            // M19-2) — use the already-computed gcodeIndex mapping rather than the raw stored
+            // Toolhead.Index, which is 1-based for MMU gates and would otherwise misreport gate 1
+            // as "tool 1" instead of the correct G-code T0. Falls back to th.Index only for the
+            // shared physical hotend of an MMU printer, which has no G-code tool mapping of its own.
             slots.Add(new ToolheadCoverageDto(
-                th.Index,
+                gcodeIndex ?? th.Index,
                 string.IsNullOrWhiteSpace(th.Name) ? $"Extruder {th.Index + 1}" : th.Name,
                 effectiveSpoolId,
                 loadedMaterial,

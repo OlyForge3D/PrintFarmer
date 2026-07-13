@@ -44,11 +44,20 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
     }
 
     /// <inheritdoc />
-    public void Sample(Guid printerId, int? activeToolIndex, bool isPrinting)
+    public void Sample(Guid printerId, int? activeToolIndex, bool isPrinting) =>
+        RecordSegment(
+            printerId,
+            NormalizeToolIndex(activeToolIndex),
+            isPrinting ? SegmentState.Printing : SegmentState.Unknown);
+
+    /// <inheritdoc />
+    public void SampleKnownIdle(Guid printerId) =>
+        RecordSegment(printerId, trackedToolIndex: null, SegmentState.KnownIdle);
+
+    private void RecordSegment(Guid printerId, int? trackedToolIndex, SegmentState state)
     {
         PrinterActivity activity = _activity.GetOrAdd(printerId, static _ => new PrinterActivity());
         long timestamp = _timeProvider.GetTimestamp();
-        int? trackedToolIndex = NormalizeToolIndex(activeToolIndex);
         lock (activity.Gate)
         {
             if (activity.LastTimestamp is long last)
@@ -61,10 +70,19 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
                 TimeSpan elapsed = _timeProvider.GetElapsedTime(last, timestamp);
                 if (elapsed > TimeSpan.Zero)
                 {
+                    // The complete monotonic window always advances (issue #711, round-19
+                    // V19-1/H19-1): known-idle seconds are tracked IN PARALLEL, not instead of, so
+                    // callers can compute an effective coverage denominator as
+                    // (windowSeconds - knownIdleSeconds) without losing the raw total.
                     activity.CumulativeWindowSeconds += elapsed.TotalSeconds;
+
+                    if (activity.LastState == SegmentState.KnownIdle)
+                    {
+                        activity.CumulativeKnownIdleSeconds += elapsed.TotalSeconds;
+                    }
                 }
 
-                if (activity.LastPrinting
+                if (activity.LastState == SegmentState.Printing
                     && activity.LastToolIndex is int tool
                     && tool >= 0
                     && tool < MaxTrackedToolIndexExclusive
@@ -80,7 +98,7 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
 
             activity.LastTimestamp = timestamp;
             activity.LastToolIndex = trackedToolIndex;
-            activity.LastPrinting = isPrinting;
+            activity.LastState = state;
             activity.Sequence++;
         }
     }
@@ -120,6 +138,9 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
             double windowSeconds = Math.Max(
                 0,
                 activity.CumulativeWindowSeconds - activity.AcknowledgedWindowSeconds);
+            double knownIdleSeconds = Math.Max(
+                0,
+                activity.CumulativeKnownIdleSeconds - activity.AcknowledgedKnownIdleSeconds);
             return new ToolheadActivitySnapshot(
                 printerId,
                 activity.Generation,
@@ -128,7 +149,9 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
                 cumulativeSnapshot,
                 pending.Values.Sum(),
                 windowSeconds,
-                activity.CumulativeWindowSeconds);
+                activity.CumulativeWindowSeconds,
+                knownIdleSeconds,
+                activity.CumulativeKnownIdleSeconds);
         }
     }
 
@@ -162,6 +185,9 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
             activity.AcknowledgedWindowSeconds = Math.Max(
                 activity.AcknowledgedWindowSeconds,
                 snapshot.CumulativeWindowSeconds);
+            activity.AcknowledgedKnownIdleSeconds = Math.Max(
+                activity.AcknowledgedKnownIdleSeconds,
+                snapshot.CumulativeKnownIdleSeconds);
             activity.AcknowledgedThroughSequence = snapshot.ThroughSequence;
             CompactAcknowledged(activity);
         }
@@ -192,6 +218,38 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
             activity.AcknowledgedWindowSeconds = 0;
             activity.CumulativeWindowSeconds = 0;
         }
+
+        if (activity.AcknowledgedKnownIdleSeconds >= activity.CumulativeKnownIdleSeconds)
+        {
+            activity.AcknowledgedKnownIdleSeconds = 0;
+            activity.CumulativeKnownIdleSeconds = 0;
+        }
+    }
+
+    /// <summary>
+    /// The observation recorded by the most recent <see cref="Sample"/>/<see cref="SampleKnownIdle"/>
+    /// call, used to attribute the NEXT elapsed segment (issue #711, round-19 V19-1/H19-1).
+    /// </summary>
+    private enum SegmentState
+    {
+        /// <summary>
+        /// Not printing, but not confirmed idle either (stale/disconnected telemetry, a restart-gap
+        /// survivor, or printing with an unrecognized/unmapped tool index). Contributes to the window
+        /// denominator only — this is where a legitimate coverage clamp reduces attribution.
+        /// </summary>
+        Unknown = 0,
+
+        /// <summary>
+        /// Actively printing with a recognized physical tool. Contributes to both the active-seconds
+        /// numerator and the window denominator.
+        /// </summary>
+        Printing = 1,
+
+        /// <summary>
+        /// Confirmed not printing based on fresh telemetry. Excluded from both the active-seconds
+        /// numerator and the effective coverage denominator.
+        /// </summary>
+        KnownIdle = 2,
     }
 
     private sealed class PrinterActivity
@@ -208,7 +266,7 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
 
         public int? LastToolIndex { get; set; }
 
-        public bool LastPrinting { get; set; }
+        public SegmentState LastState { get; set; }
 
         public long Sequence { get; set; }
 
@@ -217,5 +275,9 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
         public double CumulativeWindowSeconds { get; set; }
 
         public double AcknowledgedWindowSeconds { get; set; }
+
+        public double CumulativeKnownIdleSeconds { get; set; }
+
+        public double AcknowledgedKnownIdleSeconds { get; set; }
     }
 }

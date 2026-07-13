@@ -532,6 +532,369 @@ public class PrintStatsExternalBaselineTests
     }
 
     [Fact]
+    public async Task SyncPrinterStatisticsAsync_ExternalHistoryReset_DiscardsDeltaAndAdvancesBoundaryWithoutCrediting()
+    {
+        // Issue #711, round-19 M19-1: a Moonraker history.reset_totals call (or any backend total
+        // that decreases) must not silently replace the baseline while leaving the attribution
+        // boundary and accumulator untouched -- otherwise the NEXT cycle's real increase would
+        // attribute hours using samples that span across the reset. This proves the reset itself
+        // credits nothing AND drains the pending accumulator snapshot, so no residual samples leak
+        // into the next epoch.
+        string dbName = Guid.NewGuid().ToString("N");
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+        DateTime priorBoundaryUtc = DateTime.UtcNow.AddMinutes(-1);
+
+        await using (AppDbContext seed = new(options))
+        {
+            seed.PrinterStatisticsSet.Add(new PrinterStatistics
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                TotalPrintHours = 100,
+                ExternalPrintHours = 100,
+                ExternalJobsCompleted = 10,
+                TotalJobsCompleted = 10,
+                ExternalBaselineInitializedUtc = DateTime.UtcNow.AddHours(-2),
+                LastExternalHoursAttributionUtc = priorBoundaryUtc
+            });
+            seed.Toolheads.Add(new Toolhead
+            {
+                Id = toolheadId,
+                PrinterId = printerId,
+                Name = "T0",
+                Index = 0,
+                ToolheadType = ToolheadType.Physical
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "Reset Moonraker printer",
+            Backend = (int)PrinterBackend.Moonraker,
+            ModelId = modelId,
+            ServerUrl = "http://moonraker.local",
+            SupportsPerToolAttribution = true
+        };
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsHistory>()
+            .Setup(history => history.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryTotals
+            {
+                // The backend total collapsed from 100h to 5h -- a history.reset_totals discontinuity.
+                JobTotals = new JobTotals { TotalPrintTime = 5 * 3600, TotalJobs = 1 }
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+        Mock<IOperatorFeatureGate> featureGate = new();
+        featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        var clock = new ManualTimeProvider();
+        var accumulator = new ToolheadActivityAccumulator(TimeSpan.FromMinutes(10), clock);
+        // Telemetry recorded before the reset belongs to the (soon-to-be-discarded) epoch. Without
+        // the fix this would leak into whichever cycle finally advances the boundary.
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(45));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton(factory.Object)
+            .AddSingleton<IToolheadActivityAccumulator>(accumulator)
+            .BuildServiceProvider();
+        PrintStatsSyncHostedService service = CreateService(provider);
+
+        await using (AppDbContext db = new(options))
+        {
+            var statsRepo = new EfPrinterStatisticsRepository(db);
+            ToolheadActivitySnapshot? snapshot = await service.SyncPrinterStatisticsAsync(
+                printer,
+                new PrintStatsSyncSettings { IncludePrintFarmerJobs = false, ApiTimeoutSeconds = 30 },
+                statsRepo,
+                new EfToolheadStatisticsRepository(db),
+                Mock.Of<IPrintJobStatisticsRepository>(),
+                featureGate.Object,
+                provider,
+                CancellationToken.None);
+            await PrintStatsSyncHostedService.CommitAndAcknowledgeAsync(
+                statsRepo,
+                accumulator,
+                snapshot,
+                CancellationToken.None);
+        }
+
+        await using AppDbContext verify = new(options);
+        Toolhead toolhead = await verify.Toolheads.SingleAsync(t => t.Id == toolheadId);
+        PrinterStatistics stats = await verify.PrinterStatisticsSet.SingleAsync(s => s.PrinterId == printerId);
+
+        stats.ExternalPrintHours.Should().Be(5,
+            "the baseline must always track the latest fresh read, even after a decrease");
+        stats.LastExternalHoursAttributionUtc.Should().NotBeNull();
+        stats.LastExternalHoursAttributionUtc!.Value.Should().BeAfter(priorBoundaryUtc,
+            "the attribution boundary must advance past the reset instead of staying stale");
+        toolhead.CumulativePrintHours.Should().Be(0,
+            "a counter decrease must never be attributed as wear");
+        accumulator.PeekActiveSeconds(printerId).WindowSeconds.Should().Be(0,
+            "the pending accumulator snapshot must be acknowledged/drained across the reset, even " +
+            "though zero hours were credited, so stale samples do not leak into the next epoch");
+    }
+
+    [Fact]
+    public async Task SyncPrinterStatisticsAsync_TransientDipThenRecovery_TreatsReboundAsDiscontinuityWithoutRecrediting()
+    {
+        // Issue #711, round-19 M19-1: a transient dip (e.g. a bad read of 5h after 100h) followed
+        // immediately by a "recovery" back toward the true total must not re-credit the historical
+        // gap as if it were real wear observed in the few milliseconds between the two sync ticks.
+        // Both the dip AND the implausible rebound are discontinuities; only a subsequent PLAUSIBLE
+        // increase (relative to real elapsed time) would ever be credited.
+        string dbName = Guid.NewGuid().ToString("N");
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+
+        await using (AppDbContext seed = new(options))
+        {
+            seed.PrinterStatisticsSet.Add(new PrinterStatistics
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                TotalPrintHours = 100,
+                ExternalPrintHours = 100,
+                ExternalJobsCompleted = 10,
+                TotalJobsCompleted = 10,
+                ExternalBaselineInitializedUtc = DateTime.UtcNow.AddHours(-2),
+                LastExternalHoursAttributionUtc = DateTime.UtcNow.AddMinutes(-1)
+            });
+            seed.Toolheads.Add(new Toolhead
+            {
+                Id = toolheadId,
+                PrinterId = printerId,
+                Name = "T0",
+                Index = 0,
+                ToolheadType = ToolheadType.Physical
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "Dip-recovery Moonraker printer",
+            Backend = (int)PrinterBackend.Moonraker,
+            ModelId = modelId,
+            ServerUrl = "http://moonraker.local",
+            SupportsPerToolAttribution = true
+        };
+        // First cycle reads the dip (5h); second cycle reads a "recovery" (8h) -- a 3h jump that
+        // cannot possibly be real wear given the near-instant real elapsed time between the two
+        // test cycles.
+        Queue<double> externalHoursByCycle = new([5.0, 8.0]);
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsHistory>()
+            .Setup(history => history.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new HistoryTotals
+            {
+                JobTotals = new JobTotals
+                {
+                    TotalPrintTime = externalHoursByCycle.Dequeue() * 3600,
+                    TotalJobs = 1
+                }
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+        Mock<IOperatorFeatureGate> featureGate = new();
+        featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        var clock = new ManualTimeProvider();
+        var accumulator = new ToolheadActivityAccumulator(TimeSpan.FromMinutes(10), clock);
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton(factory.Object)
+            .AddSingleton<IToolheadActivityAccumulator>(accumulator)
+            .BuildServiceProvider();
+        PrintStatsSyncHostedService service = CreateService(provider);
+        PrintStatsSyncSettings settings = new() { IncludePrintFarmerJobs = false, ApiTimeoutSeconds = 30 };
+
+        // Cycle A: the dip (100h -> 5h).
+        await using (AppDbContext db = new(options))
+        {
+            var statsRepo = new EfPrinterStatisticsRepository(db);
+            ToolheadActivitySnapshot? snapshot = await service.SyncPrinterStatisticsAsync(
+                printer,
+                settings,
+                statsRepo,
+                new EfToolheadStatisticsRepository(db),
+                Mock.Of<IPrintJobStatisticsRepository>(),
+                featureGate.Object,
+                provider,
+                CancellationToken.None);
+            await PrintStatsSyncHostedService.CommitAndAcknowledgeAsync(
+                statsRepo, accumulator, snapshot, CancellationToken.None);
+        }
+
+        // More telemetry accrues between the two ticks; if the fix were absent this would be
+        // exactly the kind of "real" per-tool coverage that would let the recovery's 3h delta be
+        // fully attributed.
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        // Cycle B: the "recovery" (5h -> 8h).
+        await using (AppDbContext db = new(options))
+        {
+            var statsRepo = new EfPrinterStatisticsRepository(db);
+            ToolheadActivitySnapshot? snapshot = await service.SyncPrinterStatisticsAsync(
+                printer,
+                settings,
+                statsRepo,
+                new EfToolheadStatisticsRepository(db),
+                Mock.Of<IPrintJobStatisticsRepository>(),
+                featureGate.Object,
+                provider,
+                CancellationToken.None);
+            await PrintStatsSyncHostedService.CommitAndAcknowledgeAsync(
+                statsRepo, accumulator, snapshot, CancellationToken.None);
+        }
+
+        await using AppDbContext verify = new(options);
+        Toolhead toolhead = await verify.Toolheads.SingleAsync(t => t.Id == toolheadId);
+        PrinterStatistics stats = await verify.PrinterStatisticsSet.SingleAsync(s => s.PrinterId == printerId);
+
+        stats.ExternalPrintHours.Should().Be(8,
+            "the baseline must track the latest fresh read after both the dip and the recovery");
+        toolhead.CumulativePrintHours.Should().Be(0,
+            "neither the dip nor the implausible rebound may be attributed as wear");
+    }
+
+    [Fact]
+    public async Task SyncPrinterStatisticsAsync_NormalIncrease_AttributesUnaffectedByDiscontinuityGuard()
+    {
+        // Issue #711, round-19 M19-1: the discontinuity guard must not interfere with a genuine,
+        // physically-plausible increase -- it only rejects decreases and rebounds that could not
+        // possibly represent real elapsed wear.
+        string dbName = Guid.NewGuid().ToString("N");
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+        DateTime priorBoundaryUtc = DateTime.UtcNow.AddHours(-1);
+
+        await using (AppDbContext seed = new(options))
+        {
+            seed.PrinterStatisticsSet.Add(new PrinterStatistics
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                TotalPrintHours = 100,
+                ExternalPrintHours = 100,
+                ExternalJobsCompleted = 10,
+                TotalJobsCompleted = 10,
+                ExternalBaselineInitializedUtc = DateTime.UtcNow.AddHours(-2),
+                LastExternalHoursAttributionUtc = priorBoundaryUtc
+            });
+            seed.Toolheads.Add(new Toolhead
+            {
+                Id = toolheadId,
+                PrinterId = printerId,
+                Name = "T0",
+                Index = 0,
+                ToolheadType = ToolheadType.Physical
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "Steady Moonraker printer",
+            Backend = (int)PrinterBackend.Moonraker,
+            ModelId = modelId,
+            ServerUrl = "http://moonraker.local",
+            SupportsPerToolAttribution = true
+        };
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsHistory>()
+            .Setup(history => history.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryTotals
+            {
+                // A plausible 0.5h increase over the persisted 1h-ago boundary.
+                JobTotals = new JobTotals { TotalPrintTime = 100.5 * 3600, TotalJobs = 11 }
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+        Mock<IOperatorFeatureGate> featureGate = new();
+        featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        var clock = new ManualTimeProvider();
+        // Max segment must cover the full 1h sampling interval below (the default 10-minute test cap
+        // would otherwise treat this single long segment as a stale/dropped-telemetry gap and reject
+        // it from the numerator entirely).
+        var accumulator = new ToolheadActivityAccumulator(TimeSpan.FromHours(2), clock);
+        // Observed active-tool telemetry spans the full persisted 1h window, so coverage is ~100%
+        // and the entire plausible delta is attributed.
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromHours(1));
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton(factory.Object)
+            .AddSingleton<IToolheadActivityAccumulator>(accumulator)
+            .BuildServiceProvider();
+        PrintStatsSyncHostedService service = CreateService(provider);
+
+        await using (AppDbContext db = new(options))
+        {
+            var statsRepo = new EfPrinterStatisticsRepository(db);
+            ToolheadActivitySnapshot? snapshot = await service.SyncPrinterStatisticsAsync(
+                printer,
+                new PrintStatsSyncSettings { IncludePrintFarmerJobs = false, ApiTimeoutSeconds = 30 },
+                statsRepo,
+                new EfToolheadStatisticsRepository(db),
+                Mock.Of<IPrintJobStatisticsRepository>(),
+                featureGate.Object,
+                provider,
+                CancellationToken.None);
+            await PrintStatsSyncHostedService.CommitAndAcknowledgeAsync(
+                statsRepo,
+                accumulator,
+                snapshot,
+                CancellationToken.None);
+        }
+
+        await using AppDbContext verify = new(options);
+        Toolhead toolhead = await verify.Toolheads.SingleAsync(t => t.Id == toolheadId);
+        PrinterStatistics stats = await verify.PrinterStatisticsSet.SingleAsync(s => s.PrinterId == printerId);
+
+        stats.ExternalPrintHours.Should().Be(100.5);
+        stats.LastExternalHoursAttributionUtc.Should().NotBeNull();
+        stats.LastExternalHoursAttributionUtc!.Value.Should().BeAfter(priorBoundaryUtc);
+        toolhead.CumulativePrintHours.Should().BeApproximately(0.5, 0.01,
+            "a genuine, physically-plausible increase must still be attributed via observed telemetry");
+    }
+
+    [Fact]
     public async Task SyncPrinterStatisticsAsync_MidSyncFailure_RollsBackPrinterAndContinuesBatch()
     {
         string dbName = Guid.NewGuid().ToString("N");

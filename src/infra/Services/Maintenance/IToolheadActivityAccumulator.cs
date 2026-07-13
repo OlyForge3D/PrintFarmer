@@ -48,6 +48,19 @@ public interface IToolheadActivityAccumulator
     void Sample(Guid printerId, int? activeToolIndex, bool isPrinting);
 
     /// <summary>
+    /// Records a point-in-time observation that the printer is CONFIRMED not printing (issue #711,
+    /// round-19 V19-1/H19-1) — a fresh telemetry snapshot showed an idle/paused/complete/cancelled/
+    /// error state, as opposed to <see cref="Sample"/> with <c>isPrinting: false</c>, which represents
+    /// an UNKNOWN-coverage segment (stale telemetry, a restart gap, or printing with an unmapped
+    /// tool). The elapsed time since the previous sample is credited to
+    /// <see cref="ToolheadActivitySnapshot.KnownIdleSeconds"/> so a caller computing coverage can
+    /// exclude confirmed idle time from BOTH the active-seconds numerator and the coverage
+    /// denominator — known idle is not missing telemetry, it is a confirmed absence of print.
+    /// </summary>
+    /// <param name="printerId">The printer being sampled.</param>
+    void SampleKnownIdle(Guid printerId);
+
+    /// <summary>
     /// Atomically captures pending telemetry without removing it. The snapshot includes known
     /// per-tool seconds and the complete monotonic elapsed window since the previous acknowledgment.
     /// </summary>
