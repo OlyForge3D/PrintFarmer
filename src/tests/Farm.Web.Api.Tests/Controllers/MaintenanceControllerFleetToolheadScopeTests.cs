@@ -6,6 +6,7 @@ using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Hubs;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
@@ -29,30 +30,45 @@ public sealed class MaintenanceControllerFleetToolheadScopeTests
     private readonly Mock<IPrinterStatisticsRepository> _statisticsRepository = new(MockBehavior.Loose);
     private readonly Mock<IToolheadStatisticsRepository> _toolheadStatisticsRepository = new(MockBehavior.Loose);
     private readonly Mock<IPrintersService> _printersService = new(MockBehavior.Loose);
+    private readonly Mock<IMaintenanceAlertRepository> _alertRepository = new(MockBehavior.Loose);
+    private readonly Mock<IOperatorFeatureGate> _operatorFeatureGate = new(MockBehavior.Loose);
+    private bool _multiSlotEnabled = true;
+
+    public MaintenanceControllerFleetToolheadScopeTests()
+    {
+        _operatorFeatureGate
+            .Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback))
+            .Returns(() => _multiSlotEnabled);
+    }
 
     private MaintenanceController CreateController()
     {
         return new MaintenanceController(
             logger: Mock.Of<ILogger<MaintenanceController>>(),
-            alertRepository: Mock.Of<IMaintenanceAlertRepository>(),
+            alertRepository: _alertRepository.Object,
             logRepository: _logRepository.Object,
             deploymentRepository: _deploymentRepository.Object,
             statisticsRepository: _statisticsRepository.Object,
             toolheadStatisticsRepository: _toolheadStatisticsRepository.Object,
             alertService: Mock.Of<IMaintenanceAlertService>(),
             printersService: _printersService.Object,
-            operatorFeatureGate: Mock.Of<IOperatorFeatureGate>(),
+            operatorFeatureGate: _operatorFeatureGate.Object,
             maintenanceHub: Mock.Of<IHubContext<MaintenanceHub>>(),
             webhookService: Mock.Of<IWebhookService>(),
             alertResolutionService: Mock.Of<IMaintenanceAlertResolutionService>());
     }
 
-    private static PrinterMaintenanceSchedule BuildSchedule(Guid printerId, Guid taskId, Guid? toolheadId, double intervalHours)
+    private static PrinterMaintenanceSchedule BuildSchedule(
+        Guid printerId,
+        Guid taskId,
+        Guid? toolheadId,
+        double intervalHours,
+        string taskName = "Lubricate rails")
     {
         MaintenanceTask task = new()
         {
             Id = taskId,
-            TaskName = "Lubricate rails",
+            TaskName = taskName,
             IsActive = true,
             IntervalHours = intervalHours,
             Priority = 2
@@ -167,5 +183,146 @@ public sealed class MaintenanceControllerFleetToolheadScopeTests
 
         // Head B: 80h - 70h = 10h remaining → 10/8 = 1.25d → 1 day (most urgent).
         dto.DaysUntilNextMaintenance.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetUpcomingMaintenance_TogglingFeature_HidesAndRestoresToolheadSchedule()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+        var printer = new Printer { Id = printerId, Name = "Printer", ServerUrl = "http://printer.local" };
+        List<PrinterMaintenanceSchedule> schedules =
+        [
+            BuildSchedule(
+                printerId,
+                Guid.NewGuid(),
+                toolheadId,
+                intervalHours: 80,
+                taskName: "Toolhead task"),
+            BuildSchedule(
+                printerId,
+                Guid.NewGuid(),
+                toolheadId: null,
+                intervalHours: 80,
+                taskName: "Printer task"),
+        ];
+        _printersService.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        _statisticsRepository.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new PrinterStatistics { PrinterId = printerId }]);
+        _logRepository.Setup(r => r.GetByPrinterIdsAsync(
+                It.IsAny<IEnumerable<Guid>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _deploymentRepository.Setup(r => r.GetActiveWithTasksAsync(
+                It.IsAny<IEnumerable<Guid>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(schedules);
+        _toolheadStatisticsRepository.Setup(r => r.GetCumulativeHoursByPrintersAsync(
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, double> { [toolheadId] = 0 });
+        MaintenanceController controller = CreateController();
+
+        List<UpcomingMaintenanceTaskDto> enabled = GetUpcomingBody(
+            await controller.GetUpcomingMaintenanceAsync(ct: CancellationToken.None));
+        enabled.Select(t => t.TaskName).Should().BeEquivalentTo("Toolhead task", "Printer task");
+
+        _multiSlotEnabled = false;
+
+        List<UpcomingMaintenanceTaskDto> hidden = GetUpcomingBody(
+            await controller.GetUpcomingMaintenanceAsync(ct: CancellationToken.None));
+        hidden.Should().ContainSingle().Which.TaskName.Should().Be("Printer task");
+
+        _multiSlotEnabled = true;
+
+        GetUpcomingBody(await controller.GetUpcomingMaintenanceAsync(ct: CancellationToken.None))
+            .Select(t => t.TaskName)
+            .Should().BeEquivalentTo("Toolhead task", "Printer task");
+    }
+
+    [Fact]
+    public async Task GetFleetStatistics_FeatureDisabled_ProjectsPrinterWideScheduleOnly()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+        SetupFleet(
+            printerId,
+            printerWideHours: 0,
+            toolheadHours: new Dictionary<Guid, double> { [toolheadId] = 100 },
+            schedules:
+            [
+                BuildSchedule(
+                    printerId,
+                    Guid.NewGuid(),
+                    toolheadId,
+                    intervalHours: 20,
+                    taskName: "Hidden toolhead task"),
+                BuildSchedule(
+                    printerId,
+                    Guid.NewGuid(),
+                    toolheadId: null,
+                    intervalHours: 80,
+                    taskName: "Visible printer task"),
+            ]);
+        _multiSlotEnabled = false;
+
+        ActionResult<List<FleetPrinterStatisticsDto>> result =
+            await CreateController().GetFleetStatisticsAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dtos = Assert.IsType<List<FleetPrinterStatisticsDto>>(ok.Value);
+        dtos.Should().ContainSingle().Which.NextMaintenanceTask.Should().Be("Visible printer task");
+    }
+
+    [Fact]
+    public async Task GetAlertsAndLogs_FeatureDisabled_HidesToolheadScopedRows()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+        MaintenanceAlert printerAlert = new() { Id = Guid.NewGuid(), PrinterId = printerId };
+        MaintenanceAlert toolheadAlert = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            ToolheadId = toolheadId,
+        };
+        MaintenanceLog printerLog = new() { Id = Guid.NewGuid(), PrinterId = printerId };
+        MaintenanceLog toolheadLog = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            ToolheadId = toolheadId,
+        };
+        _alertRepository.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printerAlert, toolheadAlert]);
+        _alertRepository.Setup(r => r.GetByIdAsync(toolheadAlert.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(toolheadAlert);
+        _logRepository.Setup(r => r.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printerLog, toolheadLog]);
+        _multiSlotEnabled = false;
+        MaintenanceController controller = CreateController();
+
+        ActionResult<IEnumerable<MaintenanceAlert>> alertsResult =
+            await controller.GetAllAlertsAsync(CancellationToken.None);
+        OkObjectResult alertsOk = Assert.IsType<OkObjectResult>(alertsResult.Result);
+        Assert.IsType<List<MaintenanceAlert>>(alertsOk.Value)
+            .Should().ContainSingle().Which.Id.Should().Be(printerAlert.Id);
+
+        ActionResult<IEnumerable<MaintenanceLog>> logsResult =
+            await controller.GetPrinterMaintenanceLogsAsync(printerId, CancellationToken.None);
+        OkObjectResult logsOk = Assert.IsType<OkObjectResult>(logsResult.Result);
+        Assert.IsType<List<MaintenanceLog>>(logsOk.Value)
+            .Should().ContainSingle().Which.Id.Should().Be(printerLog.Id);
+
+        (await controller.GetAlertByIdAsync(toolheadAlert.Id, CancellationToken.None)).Result
+            .Should().BeOfType<NotFoundObjectResult>();
+    }
+
+    private static List<UpcomingMaintenanceTaskDto> GetUpcomingBody(
+        ActionResult<IEnumerable<UpcomingMaintenanceTaskDto>> result)
+    {
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        return Assert.IsType<List<UpcomingMaintenanceTaskDto>>(ok.Value);
     }
 }

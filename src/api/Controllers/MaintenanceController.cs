@@ -64,6 +64,11 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceAlert> alerts = await _alertRepository.GetAllActiveAlertsAsync(ct);
+            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                alerts = alerts.Where(a => !a.ToolheadId.HasValue).ToList();
+            }
+
             return Ok(alerts);
         }
         catch (Exception ex)
@@ -84,7 +89,9 @@ public class MaintenanceController(
         try
         {
             MaintenanceAlert? alert = await _alertRepository.GetByIdAsync(id, ct);
-            if (alert == null)
+            if (alert == null
+                || (alert.ToolheadId.HasValue
+                    && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback)))
             {
                 return NotFound($"Alert with ID {id} not found");
             }
@@ -108,6 +115,11 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceAlert> alerts = await _alertRepository.GetActivePrinterAlertsAsync(printerId, ct);
+            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                alerts = alerts.Where(a => !a.ToolheadId.HasValue).ToList();
+            }
+
             return Ok(alerts);
         }
         catch (Exception ex)
@@ -353,6 +365,7 @@ public class MaintenanceController(
     {
         try
         {
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
             DateTime now = DateTime.UtcNow;
 
             List<Printer> printers;
@@ -381,11 +394,16 @@ public class MaintenanceController(
                 .ToDictionary(s => s.PrinterId);
             List<MaintenanceLog> allLogs = await _logRepository.GetByPrinterIdsAsync(printerIds, ct);
             ILookup<Guid, MaintenanceLog> logsByPrinter = allLogs
+                .Where(l => includeToolheadScope || !l.ToolheadId.HasValue)
                 .ToLookup(l => l.PrinterId);
 
             // Load V3 deployments with deep PlanTasks → Tasks in a single batch query
             List<PrinterMaintenanceSchedule> allDeployments = await _deploymentRepository
                 .GetActiveWithTasksAsync(printerIds, ct);
+            if (!includeToolheadScope)
+            {
+                allDeployments = allDeployments.Where(d => !d.ToolheadId.HasValue).ToList();
+            }
 
             ILookup<Guid, PrinterMaintenanceSchedule> deploymentsByPrinter = allDeployments
                 .ToLookup(d => d.PrinterId);
@@ -642,6 +660,11 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceLog> logs = await _logRepository.GetByPrinterIdAsync(printerId, ct);
+            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                logs = logs.Where(l => !l.ToolheadId.HasValue).ToList();
+            }
+
             return Ok(logs);
         }
         catch (Exception ex)
@@ -787,6 +810,8 @@ public class MaintenanceController(
     {
         try
         {
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+
             // Get all statistics with printer info
             var allStats = await _statisticsRepository.GetAllAsync(ct);
 
@@ -796,11 +821,21 @@ public class MaintenanceController(
             // Get recent logs to determine last performed dates (last 2 years)
             var twoYearsAgo = DateTime.UtcNow.AddYears(-2);
             var logs = await _logRepository.GetAllAsync(twoYearsAgo, null, ct);
+            if (!includeToolheadScope)
+            {
+                logs = logs.Where(l => !l.ToolheadId.HasValue).ToList();
+            }
+
             var logsByPrinter = logs.GroupBy(l => l.PrinterId).ToDictionary(g => g.Key, g => g.ToList());
 
             // Batch-load all deployments in one query instead of per-printer
             var allPrinterIds = allPrinters.Select(p => p.Id).ToList();
             var allDeployments = await _deploymentRepository.GetActiveWithTasksAsync(allPrinterIds, ct);
+            if (!includeToolheadScope)
+            {
+                allDeployments = allDeployments.Where(d => !d.ToolheadId.HasValue).ToList();
+            }
+
             var deploymentsByPrinter = allDeployments.ToLookup(d => d.PrinterId);
 
             // Per-toolhead cumulative hours so per-tool schedules project against their own

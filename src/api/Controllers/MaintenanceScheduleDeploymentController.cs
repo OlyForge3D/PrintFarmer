@@ -56,6 +56,11 @@ public class MaintenanceScheduleDeploymentController(
         CancellationToken ct)
     {
         List<PrinterMaintenanceSchedule> schedules = await _scheduleRepository.GetAllAsync(printerId, planId, activeOnly, ct);
+        if (!_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+        {
+            schedules = schedules.Where(s => !s.ToolheadId.HasValue).ToList();
+        }
+
         return Ok(schedules.Select(ToResponse).ToList());
     }
 
@@ -66,7 +71,9 @@ public class MaintenanceScheduleDeploymentController(
     public async Task<ActionResult<PrinterMaintenanceScheduleResponse>> GetByIdAsync(Guid id, CancellationToken ct)
     {
         PrinterMaintenanceSchedule? schedule = await _scheduleRepository.GetByIdAsync(id, ct);
-        if (schedule == null)
+        if (schedule == null
+            || (schedule.ToolheadId.HasValue
+                && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback)))
         {
             return NotFound();
         }

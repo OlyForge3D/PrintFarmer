@@ -89,6 +89,13 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
         return created.Value.Should().BeOfType<PrinterMaintenanceScheduleResponse>().Subject;
     }
 
+    private static List<PrinterMaintenanceScheduleResponse> GetListBody(
+        ActionResult<List<PrinterMaintenanceScheduleResponse>> result)
+    {
+        OkObjectResult ok = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+        return ok.Value.Should().BeOfType<List<PrinterMaintenanceScheduleResponse>>().Subject;
+    }
+
     [Fact]
     public async Task Deploy_WithPhysicalToolhead_PersistsToolheadScope()
     {
@@ -187,6 +194,49 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
             new DeployMaintenancePlanRequest(plan.Id, p.Id, t0.Id), CancellationToken.None);
 
         duplicate.Result.Should().BeOfType<ConflictObjectResult>();
+    }
+
+    [Fact]
+    public async Task GetSchedules_TogglingFeature_HidesAndRestoresToolheadScopeWithoutDeletingData()
+    {
+        (Printer p, Toolhead t0, _, MaintenancePlan plan) = await SeedAsync();
+        bool enabled = true;
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(() => enabled);
+        MaintenanceScheduleDeploymentController controller = new(
+            NullLogger<MaintenanceScheduleDeploymentController>.Instance,
+            _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IMaintenancePlanRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IPrintersRepository>(),
+            gate.Object);
+
+        PrinterMaintenanceScheduleResponse toolScoped = GetCreatedBody(
+            await controller.DeployAsync(
+                new DeployMaintenancePlanRequest(plan.Id, p.Id, t0.Id),
+                CancellationToken.None));
+        await controller.DeployAsync(
+            new DeployMaintenancePlanRequest(plan.Id, p.Id),
+            CancellationToken.None);
+
+        GetListBody(await controller.GetAllAsync(p.Id, null, null, CancellationToken.None))
+            .Should().HaveCount(2);
+
+        enabled = false;
+
+        List<PrinterMaintenanceScheduleResponse> hidden =
+            GetListBody(await controller.GetAllAsync(p.Id, null, null, CancellationToken.None));
+        hidden.Should().ContainSingle().Which.ToolheadId.Should().BeNull();
+        (await controller.GetByIdAsync(toolScoped.Id, CancellationToken.None)).Result
+            .Should().BeOfType<NotFoundResult>();
+        (await _db.Set<PrinterMaintenanceSchedule>().CountAsync(s => s.PrinterId == p.Id))
+            .Should().Be(2);
+
+        enabled = true;
+
+        GetListBody(await controller.GetAllAsync(p.Id, null, null, CancellationToken.None))
+            .Should().HaveCount(2);
+        (await controller.GetByIdAsync(toolScoped.Id, CancellationToken.None)).Result
+            .Should().BeOfType<OkObjectResult>();
     }
 
     [Fact]
