@@ -86,7 +86,104 @@ As of issue #578, PrintFarmer can run **two** OrcaSlicer engine versions concurr
 
 ### Lifecycle policy
 
-We ship **at most two** engine versions in-tree at any time: the current default and one prior. When a new default is promoted, drop the oldest plugin project and its Dockerfile restore stanza. This keeps the arm64 emulation cost, image size, and cache surface bounded, and matches the operational reality that operators rarely need more than one migration window overlap.
+We ship **at most two** engine versions in-tree at any time: the current default and one prior. When a new default is promoted, retire the oldest plugin project and its Dockerfile restore stanza only after completing the drain gate below. This keeps the arm64 emulation cost, image size, and cache surface bounded, and matches the operational reality that operators rarely need more than one migration window overlap.
+
+### Retiring the previous engine safely
+
+> **Drain gate:** Never disable or remove the previous-version worker while jobs
+> remain pinned to it. A pinned job carries only the capability
+> `orcaslicer:<version>`; after the matching worker disappears, no current
+> worker can claim that job.
+
+Use this sequence before retiring a version such as `2.3.1`:
+
+1. **Stop new pins.** Start a slicing maintenance window, or require users to
+   leave **New Slice Job → Engine version** on **Latest**. The page defaults to
+   the `latest` version returned by `GET /api/slicers/engines`; a specific
+   previous version is an explicit user selection. There is currently no
+   admin setting or environment allowlist that hides only the previous
+   version while its worker remains online, so do not allow unrestricted new
+   submissions during the drain. Do **not** set
+   `ENABLE_ORCA_WORKER_PREVIOUS=no` yet.
+2. **Find every pinned queued or in-flight job.** The Jobs view is at
+   **Admin → Manage → Operations → Workers → Jobs**. Use the database as the
+   authoritative version filter because the queue view does not expose the
+   engine-version pin. For PostgreSQL:
+
+   ```sql
+   SELECT
+       "Id",
+       "Status",
+       "SlicerEngineVersion",
+       "RequiredCapabilitiesJson",
+       "LeaseExpiresAt",
+       "QueuedAt"
+   FROM slicer."SliceJobs"
+   WHERE (
+       "SlicerEngineVersion" = '2.3.1'
+       OR "RequiredCapabilitiesJson" LIKE '%"orcaslicer:2.3.1"%'
+   )
+   AND "Status" IN ('Queued', 'Processing')
+   ORDER BY "QueuedAt";
+   ```
+
+   SQL Server deployments use the same columns under
+   `[slicer].[SliceJobs]`. Include all `Processing` rows: an expired lease
+   remains eligible for the retiring worker to reclaim.
+3. **Drain, migrate, or cancel.** Keep the previous worker healthy until the
+   query returns zero rows. Let compatible jobs complete. To migrate a job,
+   cancel it and submit an equivalent replacement from **New Slice Job** with
+   **Latest** or a specific still-supported version after checking its
+   version-scoped profiles and settings. There is no in-place repin API or UI;
+   changing only `SlicerEngineVersion` in the database would leave
+   `RequiredCapabilitiesJson` and the settings snapshot inconsistent. If
+   compatibility is uncertain, cancel the job in the Jobs view and ask its
+   owner to review the settings and resubmit.
+4. **Remove the lane only after the query is empty.** Regenerate the compose
+   file through the deployment script, then reconcile the stack with orphan
+   removal:
+
+   ```bash
+   ENABLE_ORCA_WORKER_PREVIOUS=no \
+     ./scripts/deploy-docker.sh --regenerate-config
+   docker compose --env-file .env -f docker-compose.yml \
+     up -d --remove-orphans
+   ```
+
+   After `orcaslicer-worker-previous` is absent from `docker compose ps`, the
+   retired image and bind-mounted temporary state can be removed:
+
+   ```bash
+   docker image rm printfarmer-orcaslicer-worker-previous
+   rm -rf .volumes/printfarmer-orcaslicer-previous-temp
+   ```
+
+5. **Validate the retirement.** Run the SQL query again and confirm that it
+   returns zero rows. Check the queue view for no stranded `Queued` or
+   `Processing` jobs, then inspect engine discovery:
+
+   ```bash
+   curl -fsS http://localhost:5245/api/slicers/engines | jq .
+   ```
+
+   After deploying the application release that removes the retired plugin,
+   the retired version must no longer appear. An entry that still advertises
+   `2.3.1` with `available: false` means the plugin is loaded but its worker is
+   missing; either restore the lane immediately or finish deploying the
+   release that removes that plugin before reopening submissions.
+
+If the drain was incomplete and orphaned jobs surface, roll back the worker
+removal before changing or cancelling those jobs:
+
+```bash
+ORCASLICER_VERSION_PREVIOUS=2.3.1 \
+  ENABLE_ORCA_WORKER_PREVIOUS=yes \
+  ./scripts/deploy-docker.sh --regenerate-config
+docker compose --env-file .env -f docker-compose.yml up -d --build
+```
+
+Wait for `GET /api/slicers/engines` to report `2.3.1` as
+`available: true`, then resume the drain from step 2.
 
 ### Caveats
 
@@ -987,7 +1084,7 @@ A slice job carries `slicerEngineVersion` in its record. Any future edit/reopen 
 
 ### Deprecation lifecycle
 
-The runtime supports exactly the **current** OrcaSlicer major version and the **immediately previous** major version. When the current engine advances (e.g. 2.5.0 becomes current), the previous 2.3.1 plugin/worker/asset lane is retired: the plugin project, worker Docker layer, and `orca-settings-version-delta.ts` entries for that version are removed together, and the next release notes call out the removal. The delta file is the single audit point for the frontend — refreshing it to match new upstream release notes is the recommended step whenever a new OrcaSlicer major version is added.
+The runtime supports exactly the **current** OrcaSlicer major version and the **immediately previous** major version. When the current engine advances (e.g. 2.5.0 becomes current), operators must complete **Retiring the previous engine safely** before disabling or removing the previous 2.3.1 worker. Only after the pinned-job query is empty are the plugin project, worker Docker layer, and `orca-settings-version-delta.ts` entries for that version removed together; the next release notes call out the removal. The delta file is the single audit point for the frontend — refreshing it to match new upstream release notes is the recommended step whenever a new OrcaSlicer major version is added.
 
 ---
 
