@@ -34,6 +34,8 @@ public class MaintenanceScheduleDeploymentController(
         s.MaintenancePlan?.Name ?? string.Empty,
         s.PrinterId,
         s.Printer?.Name,
+        s.ToolheadId,
+        s.Toolhead?.Name,
         s.IsActive,
         s.DeployedAt,
         s.Notes,
@@ -91,11 +93,31 @@ public class MaintenanceScheduleDeploymentController(
             return NotFound(new { message = "Printer not found." });
         }
 
-        // Check for duplicate deployment
-        bool exists = await _scheduleRepository.ExistsAsync(request.MaintenancePlanId, request.PrinterId, ct);
+        // Validate optional per-toolhead scope (issue #711, F6). Null preserves legacy
+        // printer-wide semantics. When set, the toolhead must belong to the target printer
+        // and be a physical dock — MMU/AMS gates are not eligible for maintenance scope.
+        if (request.ToolheadId.HasValue)
+        {
+            Printer? printerWithToolheads = await _printersRepository.FindByIdWithToolheadsAsync(request.PrinterId, ct);
+            Toolhead? toolhead = printerWithToolheads?.Toolheads
+                .FirstOrDefault(t => t.Id == request.ToolheadId.Value);
+
+            if (toolhead is null)
+            {
+                return BadRequest(new { message = $"Toolhead {request.ToolheadId} does not belong to printer {request.PrinterId}." });
+            }
+
+            if (toolhead.ToolheadType != ToolheadType.Physical)
+            {
+                return BadRequest(new { message = $"Toolhead {request.ToolheadId} is not a physical toolhead and is not eligible for maintenance scope." });
+            }
+        }
+
+        // Check for duplicate deployment within the same toolhead scope (null = printer-wide).
+        bool exists = await _scheduleRepository.ExistsAsync(request.MaintenancePlanId, request.PrinterId, request.ToolheadId, ct);
         if (exists)
         {
-            return Conflict(new { message = "This plan is already deployed to this printer." });
+            return Conflict(new { message = "This plan is already deployed to this printer for the requested scope." });
         }
 
         var schedule = new PrinterMaintenanceSchedule
@@ -103,6 +125,7 @@ public class MaintenanceScheduleDeploymentController(
             Id = Guid.NewGuid(),
             MaintenancePlanId = request.MaintenancePlanId,
             PrinterId = request.PrinterId,
+            ToolheadId = request.ToolheadId,
             IsActive = true,
             DeployedAt = DateTime.UtcNow,
             Notes = request.Notes,
@@ -116,11 +139,18 @@ public class MaintenanceScheduleDeploymentController(
         }
         catch (DbUpdateException)
         {
-            // TOCTOU race: another request deployed the same plan concurrently
-            return Conflict(new { message = "This plan is already deployed to this printer." });
+            // TOCTOU race: another request deployed the same plan/scope concurrently. The
+            // unique indexes (composite for toolhead-scoped, filtered for printer-wide) reject
+            // the duplicate at the database level.
+            return Conflict(new { message = "This plan is already deployed to this printer for the requested scope." });
         }
 
-        _logger.LogInformation("Deployed plan {PlanId} to printer {PrinterId} as schedule {ScheduleId}", request.MaintenancePlanId, request.PrinterId, schedule.Id);
+        _logger.LogInformation(
+            "Deployed plan {PlanId} to printer {PrinterId} (toolhead {ToolheadId}) as schedule {ScheduleId}",
+            request.MaintenancePlanId,
+            request.PrinterId,
+            request.ToolheadId,
+            schedule.Id);
 
         // Reload with navigation properties
         PrinterMaintenanceSchedule? created = await _scheduleRepository.GetByIdAsync(schedule.Id, ct);

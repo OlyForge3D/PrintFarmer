@@ -160,7 +160,7 @@ public sealed class FilamentFallbackGroupService(
         }
 
         _ = db.FilamentFallbackGroups.Add(group);
-        _ = await db.SaveChangesAsync(ct);
+        await SaveChangesTranslatingUniqueViolationsAsync(trimmedName, printerId, ct);
         logger.LogInformation(
             "Created filament fallback group {GroupId} on printer {PrinterId} with {Count} members.",
             group.Id,
@@ -240,7 +240,7 @@ public sealed class FilamentFallbackGroupService(
             });
         }
 
-        _ = await db.SaveChangesAsync(ct);
+        await SaveChangesTranslatingUniqueViolationsAsync(trimmedName, printerId, ct);
         logger.LogInformation(
             "Updated filament fallback group {GroupId} on printer {PrinterId} (members={Count}).",
             group.Id,
@@ -326,6 +326,65 @@ public sealed class FilamentFallbackGroupService(
             .Select(g => (int?)g.DisplayOrder)
             .MaxAsync(ct);
         return (maxOrder ?? -1) + 1;
+    }
+
+    /// <summary>
+    /// Persists pending changes, translating unique-constraint violations that slip past the
+    /// check-then-write guards (concurrent creates/updates racing between the in-memory
+    /// duplicate check and the commit) into <see cref="FilamentFallbackGroupValidationException"/>
+    /// so callers get a 4xx validation error instead of an unhandled 500. The provider-specific
+    /// error text is matched by index name (PostgreSQL/SQL Server) or table+column hints
+    /// (SQLite) so the mapping is portable. Issue #711 (F6 remediation).
+    /// </summary>
+    private async Task SaveChangesTranslatingUniqueViolationsAsync(string groupName, Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            _ = await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (TryTranslateUniqueViolation(ex, groupName) is { } translated)
+        {
+            logger.LogWarning(
+                ex,
+                "Concurrent unique-constraint violation persisting fallback group '{GroupName}' on printer {PrinterId}; surfacing as validation error.",
+                groupName,
+                printerId);
+            throw translated;
+        }
+    }
+
+    private static FilamentFallbackGroupValidationException? TryTranslateUniqueViolation(DbUpdateException ex, string groupName)
+    {
+        string detail = $"{ex.InnerException?.Message} {ex.Message}";
+
+        bool Mentions(params string[] tokens) =>
+            tokens.All(t => detail.Contains(t, StringComparison.OrdinalIgnoreCase));
+
+        // Name collision within the printer.
+        if (detail.Contains("UX_FilamentFallbackGroups_PrinterId_Name", StringComparison.OrdinalIgnoreCase)
+            || Mentions("FilamentFallbackGroups", "Name"))
+        {
+            return new FilamentFallbackGroupValidationException(
+                $"A fallback group named '{groupName}' already exists on this printer.");
+        }
+
+        // Two members claim the same ordered position within the group.
+        if (detail.Contains("UX_FilamentFallbackGroupMembers_GroupId_Position", StringComparison.OrdinalIgnoreCase)
+            || Mentions("FilamentFallbackGroupMembers", "Position"))
+        {
+            return new FilamentFallbackGroupValidationException(
+                "A fallback group member position conflict occurred; please retry.");
+        }
+
+        // The same toolhead is referenced more than once within the group.
+        if (detail.Contains("UX_FilamentFallbackGroupMembers_GroupId_ToolheadId", StringComparison.OrdinalIgnoreCase)
+            || Mentions("FilamentFallbackGroupMembers", "ToolheadId"))
+        {
+            return new FilamentFallbackGroupValidationException(
+                "Fallback group members must reference each toolhead at most once.");
+        }
+
+        return null;
     }
 
     private static void ValidateBasic(string name, string materialType, IReadOnlyList<Guid> toolheadIds)

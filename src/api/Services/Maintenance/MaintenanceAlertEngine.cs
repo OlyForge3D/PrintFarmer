@@ -64,11 +64,14 @@ public class MaintenanceAlertEngine(
         }
 
         // Load maintenance logs once so we can compute baselines efficiently.
-        // Group by MaintenanceTaskId for V3 task-level dedup.
+        // Group by (MaintenanceTaskId, ToolheadId) so per-toolhead-scoped schedules accrue
+        // their intervals independently from printer-wide schedules and from each other
+        // (issue #711, F6). A printer-wide deployment (null toolhead) only consumes logs that
+        // are themselves printer-wide.
         List<MaintenanceLog> logs = await _logRepo.GetByPrinterIdAsync(printerId, cancellationToken);
-        Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logs
+        Dictionary<(Guid TaskId, Guid? ToolheadId), MaintenanceLog> lastLogByTaskAndToolhead = logs
             .Where(l => l.MaintenanceTaskId.HasValue)
-            .GroupBy(l => l.MaintenanceTaskId!.Value)
+            .GroupBy(l => (l.MaintenanceTaskId!.Value, l.ToolheadId))
             .ToDictionary(
                 g => g.Key,
                 g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
@@ -101,7 +104,7 @@ public class MaintenanceAlertEngine(
                     continue;
                 }
 
-                lastLogByTaskId.TryGetValue(task.Id, out MaintenanceLog? lastLog);
+                lastLogByTaskAndToolhead.TryGetValue((task.Id, deployment.ToolheadId), out MaintenanceLog? lastLog);
                 bool shouldAlert = ShouldGenerateAlert(stats, task.TaskName, effectiveHours, effectiveDays, lastLog, deployment.DeployedAt, settings);
 
                 if (shouldAlert)
@@ -217,13 +220,16 @@ public class MaintenanceAlertEngine(
             ? (DateTime.UtcNow - (lastLog?.PerformedAt ?? deployment.DeployedAt)).Days
             : null;
 
-        // Create alert referencing both the deployment and the specific task
+        // Create alert referencing both the deployment and the specific task. The alert
+        // inherits the deployment's optional toolhead scope so per-tool alerts stay
+        // independent and resolution logs can preserve that scope (issue #711, F6).
         MaintenanceAlert alert = new()
         {
             Id = Guid.NewGuid(),
             PrinterId = stats.PrinterId,
             PrinterMaintenanceScheduleId = deployment.Id,
             MaintenanceTaskId = task.Id,
+            ToolheadId = deployment.ToolheadId,
             Title = $"Maintenance Due: {task.TaskName}",
             Message = BuildAlertMessage(stats, task.TaskName, task.Description, effectiveHours, effectiveDays, hoursSinceLast, daysSinceLast),
             Severity = task.Priority,

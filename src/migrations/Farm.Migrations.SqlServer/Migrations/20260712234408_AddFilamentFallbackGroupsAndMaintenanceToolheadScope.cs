@@ -79,13 +79,20 @@ namespace Farm.Migrations.SqlServer.Migrations
                         column: x => x.ToolheadId,
                         principalTable: "Toolheads",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateIndex(
                 name: "IX_PrinterMaintenanceSchedules_ToolheadId",
                 table: "PrinterMaintenanceSchedules",
                 column: "ToolheadId");
+
+            migrationBuilder.CreateIndex(
+                name: "UX_PrinterMaintenanceSchedules_Plan_Printer_NullToolhead",
+                table: "PrinterMaintenanceSchedules",
+                columns: new[] { "MaintenancePlanId", "PrinterId" },
+                unique: true,
+                filter: "\"ToolheadId\" IS NULL");
 
             migrationBuilder.CreateIndex(
                 name: "UX_PrinterMaintenanceSchedules_Plan_Printer_Toolhead",
@@ -185,6 +192,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             migrationBuilder.DropIndex(
                 name: "IX_PrinterMaintenanceSchedules_ToolheadId",
+                table: "PrinterMaintenanceSchedules");
+
+            migrationBuilder.DropIndex(
+                name: "UX_PrinterMaintenanceSchedules_Plan_Printer_NullToolhead",
                 table: "PrinterMaintenanceSchedules");
 
             migrationBuilder.DropIndex(

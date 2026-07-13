@@ -185,6 +185,7 @@ public class MaintenanceController(
                 PrinterId = alert.PrinterId,
                 PrinterMaintenanceScheduleId = alert.PrinterMaintenanceScheduleId,
                 MaintenanceTaskId = alert.MaintenanceTaskId,
+                ToolheadId = alert.ToolheadId,
                 TaskName = alert.Title ?? "Scheduled Maintenance",
                 PerformedAt = DateTime.UtcNow,
                 PerformedBy = request.PerformedBy,
@@ -350,16 +351,19 @@ public class MaintenanceController(
                     continue;
                 }
 
-                // Group last log by task ID for efficient lookup
-                Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logsByPrinter[printer.Id]
+                // Group last log by (task ID, toolhead scope) so per-toolhead logs do not
+                // contaminate printer-wide baselines and vice versa (issue #711, F6).
+                Dictionary<(Guid TaskId, Guid? ToolheadId), MaintenanceLog> lastLogByTaskId = logsByPrinter[printer.Id]
                     .Where(l => l.MaintenanceTaskId.HasValue)
-                    .GroupBy(l => l.MaintenanceTaskId!.Value)
+                    .GroupBy(l => (l.MaintenanceTaskId!.Value, l.ToolheadId))
                     .ToDictionary(
                         g => g.Key,
                         g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
 
-                // Track tasks already processed (avoid duplicates if same task in multiple plans)
-                HashSet<Guid> processedTasks = [];
+                // Track (task, toolhead scope) pairs already processed so per-toolhead
+                // schedules surface as independent upcoming rows without duplicating a task
+                // that appears in multiple plans for the same scope.
+                HashSet<(Guid TaskId, Guid? ToolheadId)> processedTasks = [];
 
                 foreach (PrinterMaintenanceSchedule deployment in deployments)
                 {
@@ -371,7 +375,7 @@ public class MaintenanceController(
                     foreach (PlanTask planTask in deployment.MaintenancePlan.PlanTasks)
                     {
                         MaintenanceTask task = planTask.MaintenanceTask;
-                        if (task == null || !task.IsActive || !processedTasks.Add(task.Id))
+                        if (task == null || !task.IsActive || !processedTasks.Add((task.Id, deployment.ToolheadId)))
                         {
                             continue;
                         }
@@ -385,7 +389,7 @@ public class MaintenanceController(
                             continue;
                         }
 
-                        lastLogByTaskId.TryGetValue(task.Id, out MaintenanceLog? lastLog);
+                        lastLogByTaskId.TryGetValue((task.Id, deployment.ToolheadId), out MaintenanceLog? lastLog);
 
                         // Compute day-based due date (real calendar date)
                         DateTime baselineDate = lastLog?.PerformedAt ?? deployment.DeployedAt;
@@ -482,7 +486,9 @@ public class MaintenanceController(
                             continue;
                         }
 
-                        string taskId = $"{printer.Id}-{task.Id}";
+                        string taskId = deployment.ToolheadId.HasValue
+                            ? $"{printer.Id}-{task.Id}-{deployment.ToolheadId}"
+                            : $"{printer.Id}-{task.Id}";
 
                         tasks.Add(new UpcomingMaintenanceTaskDto(
                             taskId,
@@ -500,7 +506,8 @@ public class MaintenanceController(
                             effectiveHoursUntilDue,
                             isOverdue,
                             isDueToday,
-                            lastLog?.PerformedAt));
+                            lastLog?.PerformedAt,
+                            deployment.ToolheadId));
                     }
                 }
             }
@@ -585,12 +592,31 @@ public class MaintenanceController(
         {
             PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(request.PrinterId, ct);
 
+            // Validate optional per-toolhead scope (issue #711, F6). Null = printer-wide log.
+            // When set, the toolhead must be a physical dock on the target printer; MMU/AMS
+            // gates are not eligible for maintenance scope.
+            if (request.ToolheadId.HasValue)
+            {
+                Printer? printer = await _printersService.FindByIdWithIncludesAsync(request.PrinterId, ct);
+                Toolhead? toolhead = printer?.Toolheads.FirstOrDefault(t => t.Id == request.ToolheadId.Value);
+                if (toolhead is null)
+                {
+                    return BadRequest($"Toolhead {request.ToolheadId} does not belong to printer {request.PrinterId}.");
+                }
+
+                if (toolhead.ToolheadType != ToolheadType.Physical)
+                {
+                    return BadRequest($"Toolhead {request.ToolheadId} is not a physical toolhead and is not eligible for maintenance scope.");
+                }
+            }
+
             var log = new MaintenanceLog
             {
                 Id = Guid.NewGuid(),
                 PrinterId = request.PrinterId,
                 PrinterMaintenanceScheduleId = request.DeploymentId,
                 MaintenanceTaskId = request.TaskId,
+                ToolheadId = request.ToolheadId,
                 TaskName = request.TaskName ?? "Manual Maintenance",
                 Component = request.ComponentName,
                 PerformedAt = request.PerformedAt ?? DateTime.UtcNow,
@@ -993,7 +1019,8 @@ public record CreateMaintenanceLogRequest(
     string? Notes,
     int? DurationMinutes,
     decimal? Cost,
-    string? PartsReplaced);
+    string? PartsReplaced,
+    Guid? ToolheadId = null);
 
 public record UpdateMaintenanceModeRequest(bool InMaintenance);
 

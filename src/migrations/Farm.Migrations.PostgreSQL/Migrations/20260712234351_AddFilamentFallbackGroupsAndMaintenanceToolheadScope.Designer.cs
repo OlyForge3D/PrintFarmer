@@ -3946,6 +3946,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("ToolheadId");
 
+                    b.HasIndex("MaintenancePlanId", "PrinterId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_NullToolhead")
+                        .HasFilter("\"ToolheadId\" IS NULL");
+
                     b.HasIndex("MaintenancePlanId", "PrinterId", "ToolheadId")
                         .IsUnique()
                         .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_Toolhead");
@@ -5491,7 +5496,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
                         .WithMany()
                         .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("FallbackGroup");
