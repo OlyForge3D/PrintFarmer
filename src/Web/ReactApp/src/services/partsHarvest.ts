@@ -12,7 +12,6 @@ import type {
   HarvestJobRequest,
   HarvestJobResponse,
   PartInventoryResponse,
-  PartOutputMappingResponse,
   PartMappingRequiredDetails,
   WrongBinMismatchResponse,
 } from '@/types/parts-inventory';
@@ -128,28 +127,81 @@ function isAxiosLikeError(error: unknown): error is AxiosLikeError {
 }
 
 /**
- * Convert an axios error into a typed `HarvestError`. Exported for tests.
+ * The shared `apiClient` response interceptor rejects with a plain `ApiError`
+ * (`{ message, statusCode, data, isAxiosError }`) rather than a raw axios
+ * error — this is the shape seen in production. Tests that inject a stub via
+ * `configurePartsHarvestClient` still throw raw axios-like errors, so both
+ * forms must be supported.
+ */
+interface ApiErrorLike {
+  message: string;
+  statusCode: number;
+  data?: unknown;
+}
+
+function isApiErrorShape(error: unknown): error is ApiErrorLike {
+  if (error === null || typeof error !== 'object') return false;
+  const candidate = error as { statusCode?: unknown; message?: unknown };
+  return typeof candidate.statusCode === 'number' && typeof candidate.message === 'string';
+}
+
+interface NormalizedHarvestError {
+  message: string;
+  /** Absent for a genuine network failure (no HTTP response received). */
+  response?: { status: number; data?: unknown };
+}
+
+/**
+ * Reduce either supported error shape to a common `{ message, response? }`
+ * view so the ProblemDetails-code-first mapping below can stay shape-agnostic.
+ * Returns null for values that are neither an `ApiError` nor an axios error.
+ */
+function normalizeHarvestError(error: unknown): NormalizedHarvestError | null {
+  // Order matters: an `ApiError` synthesized from a real axios error also
+  // carries `isAxiosError: true`, so the ApiError (statusCode) shape must be
+  // matched first to avoid misclassifying a 4xx/5xx as a network failure.
+  if (isApiErrorShape(error)) {
+    return {
+      message: error.message,
+      response: { status: error.statusCode, data: error.data },
+    };
+  }
+  if (isAxiosLikeError(error)) {
+    return {
+      message: error.message ?? '',
+      response: error.response
+        ? { status: error.response.status, data: error.response.data }
+        : undefined,
+    };
+  }
+  return null;
+}
+
+/**
+ * Convert an error thrown by the harvest client into a typed `HarvestError`.
+ * Accepts both the shared `ApiError` shape (production, via the api.ts
+ * response interceptor) and raw axios-like errors (test stub path). Exported
+ * for tests.
  */
 export function toHarvestError(error: unknown): HarvestError {
-  if (!isAxiosLikeError(error)) {
+  const normalized = normalizeHarvestError(error);
+  if (!normalized) {
     return {
       kind: 'unknown',
       message: error instanceof Error ? error.message : 'Harvest failed',
     };
   }
 
-  const axiosError = error;
-
-  if (!axiosError.response) {
+  if (!normalized.response) {
     return {
       kind: 'network',
-      message: axiosError.message || 'Network error while contacting the API.',
+      message: normalized.message || 'Network error while contacting the API.',
     };
   }
 
-  const status = axiosError.response.status;
-  const body = isProblemDetailsShape(axiosError.response.data)
-    ? axiosError.response.data
+  const status = normalized.response.status;
+  const body = isProblemDetailsShape(normalized.response.data)
+    ? normalized.response.data
     : {};
   const code = readCode(body);
 
@@ -264,24 +316,6 @@ export async function listParts(
       params: { includeInactive: options.includeInactive ?? false },
     });
     return response.data as PartInventoryResponse[];
-  } catch (error) {
-    throw new HarvestServiceError(toHarvestError(error));
-  }
-}
-
-/**
- * Fetch job-output → SKU mappings, optionally filtered to a specific SKU.
- * The web Harvest dialog uses this to preview which SKUs a job produces
- * before mutating stock.
- */
-export async function listMappings(
-  filter: { sku?: string } = {},
-): Promise<PartOutputMappingResponse[]> {
-  try {
-    const response = await getClient().get('/parts-inventory/mappings', {
-      params: filter.sku ? { sku: filter.sku } : undefined,
-    });
-    return response.data as PartOutputMappingResponse[];
   } catch (error) {
     throw new HarvestServiceError(toHarvestError(error));
   }

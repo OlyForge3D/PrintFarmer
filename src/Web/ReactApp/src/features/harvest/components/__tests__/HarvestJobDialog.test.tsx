@@ -79,10 +79,10 @@ describe('HarvestJobDialog', () => {
         binCode: 'BIN-A',
         alreadyHarvested: false,
         adjustments: [
-          { id: 'a1', partInventoryId: 'p1', sku: 'SKU-A', binCode: 'BIN-A', delta: 4, resultingBalance: 24, reason: 'Harvest', createdAt: '2026-01-01T00:00:00Z' },
+          { id: 'a1', partInventoryId: 'p1', sku: 'SKU-A', binCode: 'BIN-A', delta: 4, resultingBalance: 24, reason: 'harvest', createdAt: '2026-01-01T00:00:00Z' },
         ],
         outputs: [
-          { sequence: 1, partInventoryId: 'p1', partSku: 'SKU-A', quantity: 4, actualBinId: 'b1', actualBinCode: 'BIN-A', origin: 'Mapped', overrideApplied: false, createdAt: '2026-01-01T00:00:00Z' },
+          { sequence: 1, partInventoryId: 'p1', partSku: 'SKU-A', quantity: 4, actualBinId: 'b1', actualBinCode: 'BIN-A', origin: 'GcodeMapping', overrideApplied: false, createdAt: '2026-01-01T00:00:00Z' },
         ],
       },
     });
@@ -141,8 +141,13 @@ describe('HarvestJobDialog', () => {
     expect(within(region).getByText(/BIN-1/)).toBeInTheDocument();
     expect(within(region).getByText(/BIN-9/)).toBeInTheDocument();
 
+    // V1/V5: focus moves to the override-reason field after the transition.
+    await waitFor(() => expect(screen.getByLabelText(/override reason/i)).toHaveFocus());
+
     const overrideBtn = screen.getByRole('button', { name: /override & harvest/i });
     expect(overrideBtn).toBeDisabled();
+    // V3: destructive styling (danger variant token) rather than primary.
+    expect(overrideBtn.className).toContain('pf-button-danger-bg');
 
     await user.type(screen.getByLabelText(/override reason/i), 'Bin relabeled today');
     expect(overrideBtn).toBeEnabled();
@@ -190,7 +195,18 @@ describe('HarvestJobDialog', () => {
 
     const rows = screen.getAllByTestId('harvest-manual-row');
     expect(rows).toHaveLength(1);
+    // V1/V5: focus moves to the first SKU input after the transition.
+    await waitFor(() =>
+      expect(within(rows[0]).getByLabelText(/SKU #1/i)).toHaveFocus(),
+    );
     await user.type(within(rows[0]).getByLabelText(/SKU #1/i), 'SKU-Z');
+
+    // H2: explicit outputs require an audit reason — submit stays disabled
+    // until one is provided.
+    const manualSubmit = screen.getByRole('button', { name: /confirm manual harvest/i });
+    expect(manualSubmit).toBeDisabled();
+    await user.type(screen.getByLabelText(/audit reason for manual outputs/i), 'Salvaged from failed plate');
+    expect(manualSubmit).toBeEnabled();
 
     stub.post.mockResolvedValueOnce({
       data: {
@@ -202,11 +218,12 @@ describe('HarvestJobDialog', () => {
       },
     });
 
-    await user.click(screen.getByRole('button', { name: /confirm manual harvest/i }));
+    await user.click(manualSubmit);
 
     await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
     const secondCall = stub.post.mock.calls[1][1];
     expect(secondCall.outputs).toEqual([{ sku: 'SKU-Z', quantity: 1 }]);
+    expect(secondCall.overrideReason).toBe('Salvaged from failed plate');
   });
 
   it('supports adding and removing multiple SKU rows in manual mode', async () => {
@@ -317,7 +334,7 @@ describe('HarvestJobDialog', () => {
     expect(keyA).not.toBe(keyB);
   });
 
-  it('sends binCode and quantityOverride when the user overrides preview defaults', async () => {
+  it('sends binCode, quantityOverride and overrideReason when overriding completed copies', async () => {
     const user = userEvent.setup();
     stub.post.mockResolvedValueOnce({
       data: {
@@ -331,13 +348,99 @@ describe('HarvestJobDialog', () => {
     renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
 
     await user.type(screen.getByLabelText(/destination bin/i), 'BIN-7');
-    await user.click(screen.getByLabelText(/override quantity/i));
-    // Now uniform qty field appears
-    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    // H4: the checkbox is a copy multiplier, relabelled accordingly.
+    await user.click(screen.getByLabelText(/override completed copies/i));
+
+    // Backend requires a reason whenever quantityOverride is supplied, so the
+    // confirm button stays disabled until one is entered.
+    const confirm = screen.getByRole('button', { name: /confirm harvest/i });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByLabelText(/override reason/i), 'Two plates failed mid-run');
+    expect(confirm).toBeEnabled();
+
+    await user.click(confirm);
 
     await waitFor(() => expect(stub.post).toHaveBeenCalled());
     const body = stub.post.mock.calls[0][1];
     expect(body.binCode).toBe('BIN-7');
     expect(body.quantityOverride).toBe(1);
+    expect(body.overrideReason).toBe('Two plates failed mid-run');
+  });
+
+  it('replays the failed override request (not an empty preview) when retrying after an error (#722 B2)', async () => {
+    const user = userEvent.setup();
+    // First submit → wrongBin.
+    stub.post.mockRejectedValueOnce(
+      axiosError(409, {
+        code: 'wrongBin',
+        detail: 'Wrong bin scanned.',
+        mismatches: [{ partSku: 'SKU-A', expectedBinCode: 'BIN-1', scannedBinCode: 'BIN-9' }],
+      }),
+    );
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-wrong-bin')).toBeInTheDocument());
+
+    // Override submit → transient network failure → generic error step.
+    await user.type(screen.getByLabelText(/override reason/i), 'Bin relabeled');
+    stub.post.mockRejectedValueOnce(
+      Object.assign(new Error('Network Error'), { isAxiosError: true }),
+    );
+    await user.click(screen.getByRole('button', { name: /override & harvest/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-error')).toBeInTheDocument());
+
+    // Retry must replay the override request (allowWrongBin + overrideReason),
+    // reusing the same operationKey — not rebuild an empty mapped preview.
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        alreadyHarvested: false,
+        adjustments: [],
+        outputs: [],
+      },
+    });
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+
+    const overrideCall = stub.post.mock.calls[1][1];
+    const retryCall = stub.post.mock.calls[2][1];
+    expect(retryCall.allowWrongBin).toBe(true);
+    expect(retryCall.overrideReason).toBe('Bin relabeled');
+    expect(retryCall.operationKey).toBe(overrideCall.operationKey);
+  });
+
+  it('keeps the success view mounted and defers the parent refresh until close (#722 H5)', async () => {
+    const user = userEvent.setup();
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-02-02T00:00:00Z',
+        alreadyHarvested: false,
+        adjustments: [],
+        outputs: [
+          { sequence: 1, partInventoryId: 'p1', partSku: 'SKU-A', quantity: 4, actualBinId: 'b1', actualBinCode: 'BIN-A', origin: 'JobSnapshot', overrideApplied: false, createdAt: '2026-02-02T00:00:00Z' },
+        ],
+      },
+    });
+    const onHarvested = vi.fn();
+    const onCloseAfterSuccess = vi.fn();
+    const onClose = vi.fn();
+    renderDialog({ isOpen: true, onClose, job: baseJob, onHarvested, onCloseAfterSuccess });
+
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+
+    // Optimistic callback fired, but the expensive refresh is NOT triggered yet
+    // and the success/output details remain on screen for the operator.
+    expect(onHarvested).toHaveBeenCalledTimes(1);
+    expect(onCloseAfterSuccess).not.toHaveBeenCalled();
+    expect(screen.getByTestId('harvest-success')).toBeInTheDocument();
+    expect(within(screen.getByTestId('harvest-success')).getByText(/SKU-A/)).toBeInTheDocument();
+
+    // Only on Done (close) does the deferred refresh run.
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onCloseAfterSuccess).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

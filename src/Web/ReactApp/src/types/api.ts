@@ -1934,6 +1934,10 @@ export interface ApiError {
   message: string;
   details?: string;
   statusCode: number;
+  /** Raw response body (typed as unknown; callers can narrow to ProblemDetails). */
+  data?: unknown;
+  /** True when the underlying error was an axios error. */
+  isAxiosError?: boolean;
 }
 
 // Authentication types

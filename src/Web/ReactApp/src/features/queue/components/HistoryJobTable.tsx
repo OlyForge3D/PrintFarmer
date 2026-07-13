@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { Button } from "@/common/components/ui/Button";
 import { HarvestJobAction } from "@/features/harvest/components/HarvestJobAction";
 import type { HistoryJob } from "@/types/queue";
+import type { HarvestJobResponse } from "@/types/parts-inventory";
 
 /** Collapse repeated/duplicated material tokens (e.g. "PETG;PETG;PETG") to a compact list. */
 function formatMaterial(material?: string | null): string | null {
@@ -19,11 +20,16 @@ interface HistoryJobTableProps {
   onRerun: (jobId: string) => void;
   onViewDetails?: (jobId: string) => void;
   /**
-   * Called after a successful (or replayed) harvest so the parent can
-   * refresh its data source. Optional; the harvest mutation also
-   * invalidates TanStack Query keys for callers using them.
+   * Called after a successful (or replayed) harvest with the server response,
+   * so the parent can optimistically flip the row's harvested badge without a
+   * full reload (which would unmount the open dialog — #722 H5).
    */
-  onHarvested?: () => void;
+  onHarvested?: (response: HarvestJobResponse) => void;
+  /**
+   * Called when the harvest dialog closes after a successful harvest, so the
+   * parent can run its deferred full refresh (#722 H5).
+   */
+  onCloseAfterSuccess?: () => void;
 }
 
 /**
@@ -37,6 +43,7 @@ export default function HistoryJobTable({
   onRerun,
   onViewDetails,
   onHarvested,
+  onCloseAfterSuccess,
 }: HistoryJobTableProps) {
   const formatDuration = useCallback((seconds: number) => {
     const minutes = Math.round(seconds / 60);
@@ -242,6 +249,7 @@ export default function HistoryJobTable({
                           job={{ id: job.id, name: job.name, harvestedAt: job.harvestedAt }}
                           variant="table"
                           onHarvested={onHarvested}
+                          onCloseAfterSuccess={onCloseAfterSuccess}
                         />
                       )}
                       {(job.status === "completed" || job.status === "cancelled") && (

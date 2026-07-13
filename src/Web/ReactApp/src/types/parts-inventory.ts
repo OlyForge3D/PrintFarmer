@@ -7,17 +7,26 @@
  * as integers.
  */
 
-/** Enum values match backend `PartAdjustmentReason` string names. */
+/**
+ * Enum values match the backend `PartAdjustmentReason` wire contract, which
+ * uses a custom `PartAdjustmentReasonConverter` (lowercase-with-dash), NOT the
+ * PascalCase enum member names.
+ */
 export type PartAdjustmentReason =
-  | 'Harvest'
-  | 'QualityReject'
-  | 'Manual';
+  | 'harvest'
+  | 'qc-reject'
+  | 'manual';
 
-/** Enum values match backend `PartHarvestOutputOrigin` string names. */
+/**
+ * Enum values match the backend `PartHarvestOutputOrigin` wire contract. This
+ * enum has no custom converter, so the global `JsonStringEnumConverter`
+ * serializes the PascalCase member names verbatim.
+ */
 export type PartHarvestOutputOrigin =
-  | 'Mapped'
-  | 'Manual'
-  | 'Fallback';
+  | 'ExplicitOutputs'
+  | 'JobSnapshot'
+  | 'ProjectMapping'
+  | 'GcodeMapping';
 
 /** Response DTO for a printed-part SKU. */
 export interface PartInventoryResponse {

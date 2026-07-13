@@ -8,6 +8,7 @@ import HistoryJobTable from "./HistoryJobTable";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { apiClient } from "@/services/api";
 import type { HistoryJob } from "@/types/queue";
+import type { HarvestJobResponse } from "@/types/parts-inventory";
 import type { QueueHistoryTabProps } from "@/types/components";
 
 /**
@@ -155,6 +156,22 @@ export default function QueueHistoryTab({
   }, [loadHistory]);
 
   /**
+   * Optimistically flip a row's harvested badge after a successful harvest,
+   * without triggering a full history reload. The reload (which unmounts the
+   * open dialog) is deferred to dialog close via `onCloseAfterSuccess` so the
+   * operator can finish reading the harvest output details (#722 H5).
+   */
+  const handleHarvested = useCallback((response: HarvestJobResponse) => {
+    setJobs((prev) =>
+      prev.map((job) =>
+        job.id === response.printJobId
+          ? { ...job, harvestedAt: response.harvestedAt }
+          : job,
+      ),
+    );
+  }, []);
+
+  /**
    * Reset to first page when filters change
    */
   useEffect(() => {
@@ -285,7 +302,8 @@ export default function QueueHistoryTab({
               jobs={filteredJobs}
               onRerun={(jobId) => setRerunJobId(jobId)}
               onViewDetails={onViewDetails}
-              onHarvested={loadHistory}
+              onHarvested={handleHarvested}
+              onCloseAfterSuccess={loadHistory}
             />
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -295,7 +313,8 @@ export default function QueueHistoryTab({
                   job={job}
                   onRerun={() => setRerunJobId(job.id)}
                   onViewDetails={onViewDetails}
-                  onHarvested={loadHistory}
+                  onHarvested={handleHarvested}
+                  onCloseAfterSuccess={loadHistory}
                 />
               ))}
             </div>

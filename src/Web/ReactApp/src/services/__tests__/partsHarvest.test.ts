@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   harvestJob,
   listParts,
-  listMappings,
   toHarvestError,
   configurePartsHarvestClient,
   generateHarvestOperationKey,
@@ -40,6 +39,21 @@ function networkAxiosError(message = 'Network Error'): Error {
     response: undefined,
     config: {},
   });
+}
+
+/**
+ * Build the production-shaped `ApiError` that the shared `apiClient` response
+ * interceptor rejects with (see services/api.ts). This is NOT an axios error —
+ * it carries a top-level numeric `statusCode` and the raw body on `data`.
+ */
+function apiClientError(statusCode: number, data: unknown, message = 'Request failed'): unknown {
+  return {
+    message,
+    statusCode,
+    details: undefined,
+    data,
+    isAxiosError: true,
+  };
 }
 
 describe('partsHarvest service', () => {
@@ -144,6 +158,59 @@ describe('partsHarvest service', () => {
       const info = toHarvestError(problemAxiosError(400, {}));
       expect(info.kind).not.toBe('unknown');
     });
+
+    // Production path: the shared apiClient interceptor rejects with an
+    // `ApiError` (statusCode + data), NOT a raw axios error. These assert the
+    // ProblemDetails body survives and each canonical code still maps (#722 B1/H1).
+    describe('ApiError (production interceptor) shape', () => {
+      it('maps wrongBin from an ApiError-shaped rejection', () => {
+        const info = toHarvestError(
+          apiClientError(409, {
+            code: 'wrongBin',
+            detail: 'Scanned bin does not match expected bin.',
+            mismatches: [{ partSku: 'SKU-A', expectedBinCode: 'BIN-1', scannedBinCode: 'BIN-9' }],
+          }),
+        );
+        expect(info.kind).toBe('wrongBin');
+        if (info.kind !== 'wrongBin') return;
+        expect(info.mismatches).toHaveLength(1);
+        expect(info.mismatches[0].partSku).toBe('SKU-A');
+      });
+
+      it('maps partMappingRequired from an ApiError-shaped rejection', () => {
+        const info = toHarvestError(
+          apiClientError(409, {
+            code: 'partMappingRequired',
+            detail: 'This job has no printed-part mapping.',
+            jobId: 'job-abc',
+            projectFileId: null,
+            gcodeFileId: 'g-1',
+            guidance: 'Enter outputs manually.',
+          }),
+        );
+        expect(info.kind).toBe('partMappingRequired');
+        if (info.kind !== 'partMappingRequired') return;
+        expect(info.details.jobId).toBe('job-abc');
+        expect(info.details.gcodeFileId).toBe('g-1');
+      });
+
+      it('maps featureDisabled from an ApiError-shaped rejection', () => {
+        const info = toHarvestError(
+          apiClientError(404, {
+            code: 'operatorFeatureDisabled',
+            detail: 'Printed-parts inventory is not enabled on this server.',
+          }),
+        );
+        expect(info.kind).toBe('featureDisabled');
+      });
+
+      it('carries the status for unmapped ApiError statuses', () => {
+        const info = toHarvestError(apiClientError(500, { detail: 'boom' }));
+        expect(info.kind).toBe('unknown');
+        if (info.kind !== 'unknown') return;
+        expect(info.status).toBe(500);
+      });
+    });
   });
 
   describe('harvestJob', () => {
@@ -188,20 +255,12 @@ describe('partsHarvest service', () => {
     });
   });
 
-  describe('listParts / listMappings', () => {
+  describe('listParts', () => {
     it('lists parts without inactive by default', async () => {
       stub.get.mockResolvedValueOnce({ data: [] });
       await listParts();
       expect(stub.get).toHaveBeenCalledWith('/parts-inventory', {
         params: { includeInactive: false },
-      });
-    });
-
-    it('lists mappings filtered by sku', async () => {
-      stub.get.mockResolvedValueOnce({ data: [] });
-      await listMappings({ sku: 'SKU-A' });
-      expect(stub.get).toHaveBeenCalledWith('/parts-inventory/mappings', {
-        params: { sku: 'SKU-A' },
       });
     });
 

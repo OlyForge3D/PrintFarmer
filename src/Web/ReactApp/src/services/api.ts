@@ -518,10 +518,18 @@ export class ApiClient {
           ? responseData
           : (responseData as { error?: string })?.error ?? undefined;
 
+        // Preserve the raw ProblemDetails body and the axios-error flag so
+        // feature callers (e.g. partsHarvest.toHarvestError) can recover the
+        // canonical `code`/`mismatches`/`details` extensions instead of
+        // collapsing every failure into an opaque error. `message`,
+        // `statusCode`, and `details` semantics are unchanged for existing
+        // callers.
         const apiError: ApiError = {
           message: error.message,
           statusCode: error.response?.status || 500,
           details: detailMessage,
+          data: responseData,
+          isAxiosError: axios.isAxiosError(error),
         };
         return Promise.reject(apiError);
       }

@@ -43,6 +43,14 @@ export interface HarvestJobDialogProps {
   };
   /** Optional callback fired after a successful (or replayed) harvest. */
   onHarvested?: (response: HarvestJobResponse) => void;
+  /**
+   * Optional callback fired when the dialog closes *after* at least one
+   * successful harvest occurred during this session. Parents use this to run
+   * an expensive refresh (e.g. reloading a history list) only once the user
+   * has finished reading the success/output details — the immediate refresh
+   * would otherwise unmount this dialog before it can be read (#722 H5).
+   */
+  onCloseAfterSuccess?: () => void;
 }
 
 type DialogStep =
@@ -60,6 +68,13 @@ interface ManualOutputRow {
   binCode: string;
 }
 
+/** A single per-SKU destination-bin assignment collected in the preview step. */
+interface PreviewBinRow {
+  id: string;
+  sku: string;
+  binCode: string;
+}
+
 function newRowId(): string {
   return `row-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -69,9 +84,16 @@ export function HarvestJobDialog({
   onClose,
   job,
   onHarvested,
+  onCloseAfterSuccess,
 }: HarvestJobDialogProps) {
   return (
-    <HarvestJobDialogShell isOpen={isOpen} onClose={onClose} job={job} onHarvested={onHarvested} />
+    <HarvestJobDialogShell
+      isOpen={isOpen}
+      onClose={onClose}
+      job={job}
+      onHarvested={onHarvested}
+      onCloseAfterSuccess={onCloseAfterSuccess}
+    />
   );
 }
 
@@ -86,6 +108,7 @@ function HarvestJobDialogShell({
   onClose,
   job,
   onHarvested,
+  onCloseAfterSuccess,
 }: HarvestJobDialogProps) {
   if (!isOpen) return null;
   return (
@@ -94,6 +117,7 @@ function HarvestJobDialogShell({
       onClose={onClose}
       job={job}
       onHarvested={onHarvested}
+      onCloseAfterSuccess={onCloseAfterSuccess}
     />
   );
 }
@@ -108,19 +132,31 @@ function HarvestJobDialogInner({
   onClose,
   job,
   onHarvested,
+  onCloseAfterSuccess,
 }: HarvestJobDialogProps) {
   const [step, setStep] = useState<DialogStep>({ kind: 'preview' });
   const [sharedBinCode, setSharedBinCode] = useState<string>('');
   const [uniformQuantity, setUniformQuantity] = useState<number>(1);
   const [useUniformQuantity, setUseUniformQuantity] = useState<boolean>(false);
+  // Audit reason required by the backend when `quantityOverride` is supplied
+  // (PartHarvestService rejects a copies override without one).
+  const [copiesOverrideReason, setCopiesOverrideReason] = useState<string>('');
+  // Optional per-SKU destination bins collected via the preview disclosure.
+  const [assignPerSkuBins, setAssignPerSkuBins] = useState<boolean>(false);
+  const [previewBinRows, setPreviewBinRows] = useState<PreviewBinRow[]>([]);
   const [manualRows, setManualRows] = useState<ManualOutputRow[]>([]);
   const [overrideReason, setOverrideReason] = useState<string>('');
+  // Audit reason required by the backend for explicit manual `outputs[]`.
+  const [manualReason, setManualReason] = useState<string>('');
   const [parts, setParts] = useState<PartInventoryResponse[]>([]);
   const [partsLoadError, setPartsLoadError] = useState<string | null>(null);
   // One operationKey per dialog open — replay of the same key is idempotent
   // server-side so retries from wrong-bin / mapping fallback do not double-count.
   const operationKeyRef = useRef<string>(generateHarvestOperationKey());
   const lastRequestRef = useRef<HarvestJobRequest | null>(null);
+  // True once any harvest in this dialog session has succeeded; drives the
+  // deferred parent refresh on close (#722 H5).
+  const harvestSucceededRef = useRef<boolean>(false);
 
   const mutation = useHarvestJob();
 
@@ -184,6 +220,7 @@ function HarvestJobDialogInner({
         { jobId: job.id, request: augmented },
         {
           onSuccess: (response) => {
+            harvestSucceededRef.current = true;
             setStep({ kind: 'success', response });
             if (!response.alreadyHarvested) {
               toast.success('Harvest complete.');
@@ -223,9 +260,30 @@ function HarvestJobDialogInner({
     const request: HarvestJobRequest = {};
     const bin = sharedBinCode.trim();
     if (bin) request.binCode = bin;
-    if (useUniformQuantity) request.quantityOverride = uniformQuantity;
+    if (useUniformQuantity) {
+      // `quantityOverride` is a copy multiplier, not a per-SKU final quantity.
+      // The backend requires an audit reason whenever it is supplied.
+      request.quantityOverride = uniformQuantity;
+      request.overrideReason = copiesOverrideReason.trim();
+    }
+    // Per-SKU destination bins collected via the "Assign bins per SKU"
+    // disclosure override the shared bin for the listed SKUs.
+    if (assignPerSkuBins) {
+      const outputBins = previewBinRows
+        .filter((r) => r.sku.trim() !== '' && r.binCode.trim() !== '')
+        .map((r) => ({ partSku: r.sku.trim(), binCode: r.binCode.trim() }));
+      if (outputBins.length > 0) request.outputBins = outputBins;
+    }
     runHarvest(request);
-  }, [runHarvest, sharedBinCode, uniformQuantity, useUniformQuantity]);
+  }, [
+    assignPerSkuBins,
+    copiesOverrideReason,
+    previewBinRows,
+    runHarvest,
+    sharedBinCode,
+    uniformQuantity,
+    useUniformQuantity,
+  ]);
 
   const submitWrongBinOverride = useCallback(() => {
     const previous = lastRequestRef.current ?? {};
@@ -244,17 +302,53 @@ function HarvestJobDialogInner({
       .filter((r) => r.sku.trim() !== '' && r.binCode.trim() !== '')
       .map((r) => ({ partSku: r.sku.trim(), binCode: r.binCode.trim() }));
     const bin = sharedBinCode.trim();
-    const request: HarvestJobRequest = { outputs };
+    // Explicit `outputs[]` always require an audit reason server-side.
+    const request: HarvestJobRequest = { outputs, overrideReason: manualReason.trim() };
     if (outputBins.length > 0) request.outputBins = outputBins;
     if (bin) request.binCode = bin;
     runHarvest(request);
-  }, [manualRows, runHarvest, sharedBinCode]);
+  }, [manualReason, manualRows, runHarvest, sharedBinCode]);
+
+  // Retry from the generic error step must replay the exact failed request
+  // (same operationKey) so a transient network failure during a manual or
+  // override submit does not silently drop the user's inputs (#722 B2/H7).
+  const retryLastRequest = useCallback(() => {
+    const previous = lastRequestRef.current;
+    if (previous) {
+      runHarvest(previous);
+    } else {
+      submitPreview();
+    }
+  }, [runHarvest, submitPreview]);
 
   const closeAndReset = useCallback(() => {
+    // Defer the parent's expensive refresh until the dialog is actually
+    // closing, so the success/output details stay readable (#722 H5).
+    if (harvestSucceededRef.current) {
+      onCloseAfterSuccess?.();
+    }
     onClose();
-  }, [onClose]);
+  }, [onClose, onCloseAfterSuccess]);
+
+  // Move focus into each recovery step's primary control after an async step
+  // transition, so keyboard users are not dropped onto <body> (#722 V1).
+  useEffect(() => {
+    if (step.kind === 'wrongBin') {
+      document.getElementById('harvest-override-reason')?.focus();
+    } else if (step.kind === 'partMappingRequired') {
+      const firstSku = document.querySelector<HTMLElement>(
+        '[data-testid="harvest-manual-row"] input',
+      );
+      firstSku?.focus();
+    }
+  }, [step.kind]);
 
   const isBusy = mutation.isPending;
+
+  // Trimmed-reason validity gates (shared by render + footer buttons).
+  const overrideReasonMissing = overrideReason.trim().length === 0;
+  const manualReasonMissing = manualReason.trim().length === 0;
+  const copiesReasonMissing = useUniformQuantity && copiesOverrideReason.trim().length === 0;
 
   // ----- Render helpers --------------------------------------------------
 
@@ -311,21 +405,137 @@ function HarvestJobDialogInner({
         <Checkbox
           checked={useUniformQuantity}
           onChange={(e) => setUseUniformQuantity(e.target.checked)}
-          label="Override quantity for every mapped SKU"
+          label="Override completed copies (default: job copies)"
           id="harvest-uniform-qty-toggle"
         />
         {useUniformQuantity && (
-          <FormField label="Quantity per SKU" htmlFor="harvest-uniform-qty">
-            <NumberStepper
-              id="harvest-uniform-qty"
-              value={uniformQuantity}
-              onChange={setUniformQuantity}
-              min={1}
-              step={1}
-            />
-          </FormField>
+          <div className="space-y-3 rounded-sm border border-pf-border-light p-3">
+            <FormField label="Completed copies" htmlFor="harvest-uniform-qty">
+              <NumberStepper
+                id="harvest-uniform-qty"
+                value={uniformQuantity}
+                onChange={setUniformQuantity}
+                min={1}
+                max={10000}
+                step={1}
+              />
+              <p id="harvest-uniform-qty-help" className="mt-1 text-xs text-pf-text-secondary">
+                Multiplied by each mapped SKU's per-print quantity to compute stock added.
+              </p>
+            </FormField>
+            <FormField label="Override reason (required)" htmlFor="harvest-copies-reason">
+              <Textarea
+                id="harvest-copies-reason"
+                value={copiesOverrideReason}
+                onChange={(e) => setCopiesOverrideReason(e.target.value)}
+                rows={2}
+                placeholder="Explain why the completed copy count differs from the job (audited)."
+                invalid={copiesReasonMissing}
+                aria-invalid={copiesReasonMissing}
+                aria-describedby={copiesReasonMissing ? 'harvest-copies-reason-error' : undefined}
+              />
+              {copiesReasonMissing && (
+                <p id="harvest-copies-reason-error" className="text-xs text-pf-error-text" role="alert">
+                  A reason is required when overriding completed copies.
+                </p>
+              )}
+            </FormField>
+          </div>
         )}
       </div>
+
+      {/*
+        H3: there is no "GET expected outputs for a job" endpoint yet, so the
+        safest UX for multi-SKU plates is an opt-in disclosure that lets the
+        operator list SKU → bin pairs manually (suggested from the inventory
+        roster) rather than always forcing explicit outputs. The shared bin
+        above remains the default; these rows override it per SKU.
+      */}
+      <div className="space-y-2">
+        <Checkbox
+          checked={assignPerSkuBins}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setAssignPerSkuBins(on);
+            if (on && previewBinRows.length === 0) {
+              setPreviewBinRows([{ id: newRowId(), sku: '', binCode: '' }]);
+            }
+          }}
+          label="Assign bins per SKU"
+          id="harvest-assign-bins-toggle"
+        />
+        {assignPerSkuBins && (
+          <div role="group" aria-label="Per-SKU destination bins" className="space-y-2">
+            <p className="text-xs text-pf-text-secondary">
+              Overrides the shared bin for the SKUs listed here. Enter each SKU
+              and its destination bin; the SKU field suggests known parts from
+              the inventory roster.
+            </p>
+            {previewBinRows.map((row, index) => (
+              <div
+                key={row.id}
+                className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+                data-testid="harvest-bin-row"
+              >
+                <FormField label={`SKU #${index + 1}`} htmlFor={`harvest-binrow-sku-${row.id}`}>
+                  <Input
+                    id={`harvest-binrow-sku-${row.id}`}
+                    list={parts.length > 0 ? 'harvest-parts-datalist' : undefined}
+                    value={row.sku}
+                    onChange={(e) =>
+                      setPreviewBinRows((rows) =>
+                        rows.map((r) => (r.id === row.id ? { ...r, sku: e.target.value } : r)),
+                      )
+                    }
+                    placeholder="SKU code"
+                  />
+                </FormField>
+                <FormField label={`Bin #${index + 1}`} htmlFor={`harvest-binrow-bin-${row.id}`}>
+                  <Input
+                    id={`harvest-binrow-bin-${row.id}`}
+                    value={row.binCode}
+                    onChange={(e) =>
+                      setPreviewBinRows((rows) =>
+                        rows.map((r) => (r.id === row.id ? { ...r, binCode: e.target.value } : r)),
+                      )
+                    }
+                    placeholder="Bin code"
+                  />
+                </FormField>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setPreviewBinRows((rows) => rows.filter((r) => r.id !== row.id))
+                  }
+                  aria-label={`Remove bin assignment ${index + 1}`}
+                  disabled={previewBinRows.length === 1}
+                >
+                  ✕
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setPreviewBinRows((rows) => [...rows, { id: newRowId(), sku: '', binCode: '' }])
+              }
+            >
+              + Add SKU bin
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {parts.length > 0 && (
+        <datalist id="harvest-parts-datalist">
+          {parts.map((p) => (
+            <option key={p.id} value={p.sku}>
+              {p.name}
+            </option>
+          ))}
+        </datalist>
+      )}
     </div>
   );
 
@@ -351,22 +561,22 @@ function HarvestJobDialogInner({
             </li>
           ))}
         </ul>
-        <FormField
-          label="Override reason (required)"
-          htmlFor="harvest-override-reason"
-          error={
-            overrideReason.trim().length === 0
-              ? 'A reason is required to override the wrong-bin check.'
-              : undefined
-          }
-        >
+        <FormField label="Override reason (required)" htmlFor="harvest-override-reason">
           <Textarea
             id="harvest-override-reason"
             value={overrideReason}
             onChange={(e) => setOverrideReason(e.target.value)}
             rows={3}
             placeholder="Explain why the scanned bin is acceptable (audited)."
+            invalid={overrideReasonMissing}
+            aria-invalid={overrideReasonMissing}
+            aria-describedby={overrideReasonMissing ? 'harvest-override-reason-error' : undefined}
           />
+          {overrideReasonMissing && (
+            <p id="harvest-override-reason-error" className="text-xs text-pf-error-text" role="alert">
+              A reason is required to override the wrong-bin check.
+            </p>
+          )}
         </FormField>
       </div>
     );
@@ -394,7 +604,7 @@ function HarvestJobDialogInner({
           {manualRows.map((row, index) => (
             <div
               key={row.id}
-              className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-end"
+              className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_auto_auto] sm:gap-2 sm:items-end"
               data-testid="harvest-manual-row"
             >
               <FormField label={`SKU #${index + 1}`} htmlFor={`harvest-sku-${row.id}`}>
@@ -456,6 +666,24 @@ function HarvestJobDialogInner({
             placeholder="Applied when a row has no bin"
           />
         </FormField>
+
+        <FormField label="Audit reason for manual outputs (required)" htmlFor="harvest-manual-reason">
+          <Textarea
+            id="harvest-manual-reason"
+            value={manualReason}
+            onChange={(e) => setManualReason(e.target.value)}
+            rows={2}
+            placeholder="Explain why outputs are being entered manually (audited)."
+            invalid={manualReasonMissing}
+            aria-invalid={manualReasonMissing}
+            aria-describedby={manualReasonMissing ? 'harvest-manual-reason-error' : undefined}
+          />
+          {manualReasonMissing && (
+            <p id="harvest-manual-reason-error" className="text-xs text-pf-error-text" role="alert">
+              A reason is required when entering outputs manually.
+            </p>
+          )}
+        </FormField>
       </div>
     );
   };
@@ -483,10 +711,7 @@ function HarvestJobDialogInner({
     const { response } = step;
     return (
       <div className="space-y-4" data-testid="harvest-success">
-        <Alert
-          type={response.alreadyHarvested ? 'info' : 'success'}
-         
-        >
+        <Alert type={response.alreadyHarvested ? 'info' : 'success'}>
           <div className="space-y-1">
             <p className="font-medium">
               {response.alreadyHarvested
@@ -567,7 +792,7 @@ function HarvestJobDialogInner({
             <Button variant="secondary" onClick={closeAndReset} disabled={isBusy}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={submitPreview} disabled={isBusy}>
+            <Button variant="primary" onClick={submitPreview} disabled={isBusy || copiesReasonMissing}>
               {isBusy ? 'Harvesting…' : 'Confirm harvest'}
             </Button>
           </div>
@@ -579,10 +804,11 @@ function HarvestJobDialogInner({
               Cancel
             </Button>
             <Button
-              variant="primary"
+              variant="danger"
               onClick={submitWrongBinOverride}
-              disabled={isBusy || overrideReason.trim().length === 0}
+              disabled={isBusy || overrideReasonMissing}
             >
+              <span aria-hidden className="mr-1">⚠</span>
               {isBusy ? 'Retrying…' : 'Override & harvest'}
             </Button>
           </div>
@@ -598,6 +824,7 @@ function HarvestJobDialogInner({
               onClick={submitManualOutputs}
               disabled={
                 isBusy ||
+                manualReasonMissing ||
                 manualRows.filter((r) => r.sku.trim() !== '' && r.quantity > 0).length === 0
               }
             >
@@ -621,7 +848,7 @@ function HarvestJobDialogInner({
         return (
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={closeAndReset}>Close</Button>
-            <Button variant="primary" onClick={submitPreview} disabled={isBusy}>
+            <Button variant="primary" onClick={retryLastRequest} disabled={isBusy}>
               {isBusy ? 'Retrying…' : 'Retry'}
             </Button>
           </div>

@@ -23,6 +23,11 @@ export interface HarvestJobActionProps {
   variant?: 'table' | 'card';
   /** Fired after a successful (or replayed) harvest, so parents can refresh. */
   onHarvested?: (response: HarvestJobResponse) => void;
+  /**
+   * Fired when the dialog closes after a successful harvest, so parents can
+   * defer an expensive refresh until the user has read the details (#722 H5).
+   */
+  onCloseAfterSuccess?: () => void;
   /** Optional wrapper className. */
   className?: string;
 }
@@ -31,6 +36,7 @@ export function HarvestJobAction({
   job,
   variant = 'table',
   onHarvested,
+  onCloseAfterSuccess,
   className,
 }: HarvestJobActionProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -59,6 +65,7 @@ export function HarvestJobAction({
           onClose={() => setIsOpen(false)}
           job={job}
           onHarvested={onHarvested}
+          onCloseAfterSuccess={onCloseAfterSuccess}
         />
       </>
     );
@@ -97,6 +104,7 @@ export function HarvestJobAction({
         onClose={() => setIsOpen(false)}
         job={job}
         onHarvested={onHarvested}
+        onCloseAfterSuccess={onCloseAfterSuccess}
       />
     </>
   );
