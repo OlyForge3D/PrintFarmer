@@ -38,20 +38,14 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
     private static readonly SemaphoreSlim CompileGate = new(1, 1);
 
     /// <summary>
-    /// Fix F: how long a user-cleared (Skipped/Dismissed) compiler task suppresses
-    /// re-creation of the same source key. One hour balances honoring the user's
-    /// dismissal against eventually resurfacing a still-valid condition.
+    /// Fix F / Fix R3-6: fallback lookback used to bootstrap suppression continuity
+    /// only on the very first compile pass after process start (before any
+    /// <see cref="ShiftPlanSuppressionState.LastPassAtUtc"/> exists). Every pass after
+    /// that, suppression continuity is tracked precisely via
+    /// <see cref="ShiftPlanSuppressionState"/> rather than a flat rolling window — see
+    /// that type's remarks for why a fixed window over- and under-suppresses.
     /// </summary>
-    private static readonly TimeSpan SuppressionWindow = TimeSpan.FromHours(1);
-
-    /// <summary>
-    /// Fix G: idle-window starts drift by seconds each tick (IdleWindowService anchors
-    /// them to DateTime.UtcNow). Drift under this tolerance is treated as no change so
-    /// a steady-state idle maintenance task is not rewritten every pass. Idle windows
-    /// are advisory and (for open-ended windows) have no end, so a start that lags by a
-    /// few minutes is immaterial to operators.
-    /// </summary>
-    private static readonly TimeSpan WindowStartDriftTolerance = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan SuppressionBootstrapLookback = TimeSpan.FromHours(24);
 
     private readonly IEnumerable<IShiftPlanTaskSource> _sources;
     private readonly IUserTaskRepository _tasks;
@@ -70,14 +64,14 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         _clock = clock ?? TimeProvider.System;
     }
 
-    public async Task<ShiftPlanCompileResult> CompileAsync(CancellationToken ct = default)
+    public async Task<ShiftPlanCompileResult> CompileAsync(ShiftPlanSuppressionState? suppressionState = null, CancellationToken ct = default)
     {
         // Fix E: serialize passes within the process to prevent overlapping ticks from
         // both observing "no open task" and inserting duplicates.
         await CompileGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await CompileCoreAsync(ct).ConfigureAwait(false);
+            return await CompileCoreAsync(suppressionState, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -85,7 +79,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         }
     }
 
-    private async Task<ShiftPlanCompileResult> CompileCoreAsync(CancellationToken ct)
+    private async Task<ShiftPlanCompileResult> CompileCoreAsync(ShiftPlanSuppressionState? suppressionState, CancellationToken ct)
     {
         DateTime now = _clock.GetUtcNow().UtcDateTime;
         int sourceFailures = 0;
@@ -142,13 +136,38 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             .GroupBy(t => (t.SourceKind, t.SourceId!))
             .ToDictionary(g => g.Key, g => g.First());
 
-        // Fix F: source keys a user recently Skipped/Dismissed. The compiler must not
-        // resurrect a fresh Pending clone for these until the suppression window lapses.
-        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? suppressedRaw =
-            await _tasks.GetSuppressedSourceKeysAsync(now - SuppressionWindow, ct).ConfigureAwait(false);
-        HashSet<(UserTaskSourceKind, string)> suppressed = suppressedRaw is null
-            ? new()
-            : [.. suppressedRaw.Select(k => (k.SourceKind, k.SourceId))];
+        // Fix F / Fix R3-6: source-episode-aware suppression. A flat rolling window
+        // either resurfaces a still-active source's task an hour after the user
+        // dismissed it, or wrongly re-suppresses a source that cleared and then
+        // genuinely re-triggered within the window. When a caller supplies a
+        // <see cref="ShiftPlanSuppressionState"/> (the hosted service always does —
+        // see that type's remarks) suppression is tracked precisely across passes.
+        // Without one (e.g. an ad hoc/manual compile trigger with no ongoing pass
+        // sequence to track), fall back to a single bootstrap query.
+        HashSet<(UserTaskSourceKind, string)> suppressed;
+        if (suppressionState is not null)
+        {
+            DateTime bootstrapSinceUtc = suppressionState.LastPassAtUtc ?? now - SuppressionBootstrapLookback;
+            IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? bootstrapped =
+                await _tasks.GetSuppressedSourceKeysAsync(bootstrapSinceUtc, ct).ConfigureAwait(false);
+            if (bootstrapped is not null)
+            {
+                foreach ((UserTaskSourceKind SourceKind, string SourceId) key in bootstrapped)
+                {
+                    _ = suppressionState.SuppressedKeys.Add((key.SourceKind, key.SourceId));
+                }
+            }
+
+            suppressed = suppressionState.SuppressedKeys;
+        }
+        else
+        {
+            IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? suppressedRaw =
+                await _tasks.GetSuppressedSourceKeysAsync(now - SuppressionBootstrapLookback, ct).ConfigureAwait(false);
+            suppressed = suppressedRaw is null
+                ? new()
+                : [.. suppressedRaw.Select(k => (k.SourceKind, k.SourceId))];
+        }
 
         int created = 0, updated = 0, autoCompleted = 0;
 
@@ -209,26 +228,64 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             }
 
             UserTask stale = kv.Value;
+
+            // Fix R3-5: complete only if the row is still Pending/InProgress at the
+            // moment of the write. An unconditional overwrite here would clobber a
+            // terminal state (Skipped/Dismissed) a user set concurrently — the DB-level
+            // conditional update lets the user's action win the race instead of the
+            // compiler blindly stomping it on the next batched SaveChanges.
+            bool completedInDb = await _tasks.TryAutoCompleteAsync(stale.Id, now, ct).ConfigureAwait(false);
+            if (!completedInDb)
+            {
+                _logger.LogDebug(
+                    "Skipping auto-complete for task {TaskId}: status changed concurrently (a user action won the race)",
+                    stale.Id);
+                continue;
+            }
+
             stale.Status = UserTaskStatus.Completed;
             stale.CompletedAt = now;
             stale.UpdatedAt = now;
-            await _tasks.TrackUpdateAsync(stale, ct).ConfigureAwait(false);
+
+            // The row was already written directly above — detach the tracked entity
+            // so the batched SaveChangesAsync below does not redundantly (and
+            // unconditionally) re-write the same task, reopening the exact race this
+            // fix closes.
+            await _tasks.DetachTrackedAsync([stale], ct).ConfigureAwait(false);
             autoCompleted++;
         }
 
-        // Fix E: a concurrent tick on another instance may have inserted the same
-        // (SourceKind, SourceId) first, tripping the unique filtered index. Recover
-        // gracefully — the next idempotent pass reconciles — instead of crashing the
-        // hosted-service tick.
+        // Fix R3-6: drop suppression for any key this pass's sources stopped
+        // producing (for a source that itself succeeded this pass) — the user's
+        // dismissal was honored for that condition's episode; if it recurs later it
+        // is a new occurrence, not a resurrection suppressed by a stale rolling window.
+        if (suppressionState is not null)
+        {
+            _ = suppressionState.SuppressedKeys.RemoveWhere(
+                key => !specs.ContainsKey(key) && successfulKinds.Contains(key.SourceKind));
+            suppressionState.LastPassAtUtc = now;
+        }
+
+        // Fix E / Fix R3-2: a concurrent tick on another instance may have inserted the
+        // same (SourceKind, SourceId) first, tripping the unique filtered index.
+        // Recover gracefully — the next idempotent pass reconciles — instead of
+        // crashing the hosted-service tick. Any OTHER DbUpdateException (foreign-key
+        // violation, connection reset, etc.) is a genuine failure and must propagate;
+        // swallowing it unconditionally (as before) would silently lose data.
         try
         {
             await _tasks.SaveChangesAsync(ct).ConfigureAwait(false);
         }
-        catch (DbUpdateException ex)
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
             _logger.LogWarning(
                 ex,
-                "Shift-plan compile save hit a concurrency conflict (likely a racing tick); reconciling next pass");
+                "Shift-plan compile save hit a unique-index conflict (likely a racing tick); detaching affected tasks and reconciling next pass");
+
+            IEnumerable<UserTask> affected = ex.Entries
+                .Select(entry => entry.Entity)
+                .OfType<UserTask>();
+            await _tasks.DetachTrackedAsync(affected, ct).ConfigureAwait(false);
         }
 
         _logger.LogInformation(
@@ -253,7 +310,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             || task.Priority != spec.Priority
             || task.AnchorKind != spec.AnchorKind
             || task.AnchorAtUtc != spec.AnchorAtUtc
-            || WindowStartMateriallyChanged(task.WindowStartUtc, spec.WindowStartUtc)
+            || WindowStartMateriallyChanged(task, spec)
             || task.WindowEndUtc != spec.WindowEndUtc
             || task.DueAt != spec.DueAt
             || (spec.MetadataJson is not null && task.MetadataJson != spec.MetadataJson)
@@ -275,11 +332,10 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         task.AnchorKind = spec.AnchorKind;
         task.AnchorAtUtc = spec.AnchorAtUtc;
 
-        // Fix G: only rewrite the window start when it is new or drifted past the
-        // tolerance, so sub-threshold jitter on an otherwise-unchanged task does not
-        // cause a write. Preserving the earlier value also keeps the displayed start
-        // stable across ticks.
-        if (isNew || WindowStartMateriallyChanged(task.WindowStartUtc, spec.WindowStartUtc))
+        // Fix R3-7: only rewrite the window start on a genuine episode boundary
+        // change, so a continuously-idle printer's start is preserved indefinitely
+        // regardless of accumulated wall-clock drift (see WindowStartMateriallyChanged).
+        if (isNew || WindowStartMateriallyChanged(task, spec))
         {
             task.WindowStartUtc = spec.WindowStartUtc;
         }
@@ -308,11 +364,23 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
     }
 
     /// <summary>
-    /// Fix G: treats window-start differences under <see cref="WindowStartDriftTolerance"/>
-    /// as no change. Null transitions are always material.
+    /// Fix R3-7: reports a genuine idle-window episode boundary change rather than
+    /// wall-clock drift. <see cref="IdleWindowService"/> always anchors an incoming
+    /// window's start to a fresh <see cref="DateTime.UtcNow"/>, so a naive drift-
+    /// tolerance comparison (the original Fix G) caused the persisted start to be
+    /// rewritten every few minutes for a continuously-idle printer, resetting the
+    /// displayed episode indefinitely. Instead, the stored start is preserved unless
+    /// the window's end boundary itself materially changed (e.g. an open-ended
+    /// window became bounded, or vice versa — a real transition, not drift) or the
+    /// incoming start is earlier than the stored one (defensive; should not occur
+    /// since sources anchor to an advancing clock, but an earlier start can only mean
+    /// a genuinely new episode).
     /// </summary>
-    private static bool WindowStartMateriallyChanged(DateTime? existing, DateTime? incoming)
+    private static bool WindowStartMateriallyChanged(UserTask task, ShiftPlanTaskSpec spec)
     {
+        DateTime? existing = task.WindowStartUtc;
+        DateTime? incoming = spec.WindowStartUtc;
+
         if (existing is null && incoming is null)
         {
             return false;
@@ -323,6 +391,59 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             return true;
         }
 
-        return (existing.Value - incoming.Value).Duration() > WindowStartDriftTolerance;
+        if (task.WindowEndUtc != spec.WindowEndUtc)
+        {
+            return true;
+        }
+
+        return incoming.Value < existing.Value;
+    }
+
+    /// <summary>
+    /// Fix R3-2: distinguishes a unique-index race (safe to swallow and reconcile
+    /// next pass) from any other <see cref="DbUpdateException"/> — foreign-key
+    /// violation, connection reset, etc. — which must propagate so it is never
+    /// silently lost. <c>Farm.Infrastructure</c> does not reference Npgsql or
+    /// Microsoft.Data.SqlClient directly (only the SQLite EF provider), so
+    /// provider-specific exception types are detected by name/property via
+    /// reflection instead of a hard package dependency, with a message-substring
+    /// fallback for providers/tests without a typed exception available.
+    /// </summary>
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        Exception? inner = ex.InnerException;
+        if (inner is null)
+        {
+            return false;
+        }
+
+        if (inner is Microsoft.Data.Sqlite.SqliteException sqliteEx)
+        {
+            // SQLite's primary result code 19 (SQLITE_CONSTRAINT) covers EVERY
+            // constraint type — unique, foreign-key, check, not-null. Only the
+            // extended code distinguishes a unique-index violation from the
+            // others, so checking the primary code alone would misclassify a
+            // genuine foreign-key violation as a safe-to-swallow race.
+            return sqliteEx.SqliteExtendedErrorCode == 2067; // SQLITE_CONSTRAINT_UNIQUE
+        }
+
+        Type innerType = inner.GetType();
+        if (innerType.FullName == "Npgsql.PostgresException")
+        {
+            string? sqlState = innerType.GetProperty("SqlState")?.GetValue(inner) as string;
+            return sqlState == "23505"; // unique_violation
+        }
+
+        if (innerType.FullName is "Microsoft.Data.SqlClient.SqlException" or "System.Data.SqlClient.SqlException")
+        {
+            object? numberValue = innerType.GetProperty("Number")?.GetValue(inner);
+            return numberValue is int number && number is 2601 or 2627;
+        }
+
+        string message = inner.Message;
+        return message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("duplicate key value violates unique constraint", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Cannot insert duplicate key", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Violation of UNIQUE KEY constraint", StringComparison.OrdinalIgnoreCase);
     }
 }

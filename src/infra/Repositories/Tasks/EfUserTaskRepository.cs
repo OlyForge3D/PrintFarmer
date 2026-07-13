@@ -187,6 +187,59 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
+    public Task UpdateFieldsAsync(UserTask task, IReadOnlyCollection<string> propertyNames, CancellationToken ct = default)
+    {
+        // Fix R3-5: unlike UpdateAsync/TrackUpdateAsync (which mark the whole entity
+        // modified), this only writes the properties the caller names, so a detached
+        // caller (loaded via a no-tracking query) cannot clobber columns another
+        // writer changed concurrently on the same row.
+        task.UpdatedAt = DateTime.UtcNow;
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<UserTask> entry = _db.Entry(task);
+        if (entry.State == EntityState.Detached)
+        {
+            _ = _db.UserTasks.Attach(task);
+        }
+
+        entry.Property(nameof(UserTask.UpdatedAt)).IsModified = true;
+        foreach (string propertyName in propertyNames)
+        {
+            entry.Property(propertyName).IsModified = true;
+        }
+
+        return _db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryAutoCompleteAsync(Guid taskId, DateTime completedAtUtc, CancellationToken ct = default)
+    {
+        // Fix R3-5: conditional, immediate write — succeeds only if the row is still
+        // Pending/InProgress at the moment of the update. A concurrent Skip/Dismiss
+        // that already committed wins the race instead of being silently overwritten
+        // by the compiler's batched SaveChangesAsync.
+        int rows = await _db.UserTasks
+            .Where(t => t.Id == taskId && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(t => t.Status, UserTaskStatus.Completed)
+                    .SetProperty(t => t.CompletedAt, completedAtUtc)
+                    .SetProperty(t => t.UpdatedAt, completedAtUtc),
+                ct);
+
+        return rows > 0;
+    }
+
+    /// <inheritdoc />
+    public Task DetachTrackedAsync(IEnumerable<UserTask> tasks, CancellationToken ct = default)
+    {
+        foreach (UserTask task in tasks)
+        {
+            _db.Entry(task).State = EntityState.Detached;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public async Task DeleteAsync(UserTask task, CancellationToken ct = default)
     {
         _ = _db.UserTasks.Remove(task);

@@ -82,5 +82,15 @@ public sealed record ShiftPlanCompileResult(
 /// </summary>
 public interface IShiftPlanCompiler
 {
-    Task<ShiftPlanCompileResult> CompileAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Runs a single compile pass.
+    /// </summary>
+    /// <param name="suppressionState">
+    /// Optional cross-pass suppression-continuity state (Fix R3-6). The hosted
+    /// service always supplies its owned singleton instance; ad hoc/manual callers
+    /// may omit it, in which case suppression falls back to a single bootstrap
+    /// query per call. See <see cref="ShiftPlanSuppressionState"/>.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<ShiftPlanCompileResult> CompileAsync(ShiftPlanSuppressionState? suppressionState = null, CancellationToken ct = default);
 }

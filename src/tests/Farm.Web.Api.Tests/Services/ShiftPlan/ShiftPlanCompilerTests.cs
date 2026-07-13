@@ -1,6 +1,8 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Diagnostics.CodeAnalysis;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Tasks;
 using Farm.Infrastructure.Services.ShiftPlan;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -13,6 +15,8 @@ namespace Farm.Web.Api.Tests.Services.ShiftPlan;
 /// resolution, source-failure isolation (Fix 4), and conditional-write
 /// optimization (Fix 3).
 /// </summary>
+[SuppressMessage("Design", "CA2201:Do not raise reserved exception types",
+    Justification = "Tests intentionally construct plain Exception instances to simulate provider-agnostic DbUpdateException inner exceptions (Fix R3-2).")]
 public class ShiftPlanCompilerTests
 {
     private static readonly Guid PrinterId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -34,6 +38,12 @@ public class ShiftPlanCompilerTests
         // Fix F: default to no suppressed source keys so existing tests behave as before.
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
+        // Fix R3-5: default auto-complete to "won the race" so existing auto-complete
+        // tests behave as before unless a test explicitly overrides this.
+        _tasks.Setup(r => r.TryAutoCompleteAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _tasks.Setup(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
     }
 
     [Fact]
@@ -220,6 +230,271 @@ public class ShiftPlanCompilerTests
         Assert.Empty(_tracked);
     }
 
+    /// <summary>
+    /// Fix R3-6: a source that keeps producing the same key across passes must stay
+    /// suppressed for the whole episode via <see cref="ShiftPlanSuppressionState"/>,
+    /// even if a flat rolling-window DB query would say "no longer suppressed" on a
+    /// later pass (simulated here by the mocked repository only reporting the
+    /// skip once, on the pass immediately after it happened).
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SuppressionState_SkippedKeyStaysSuppressed_WhileSourceKeepsProducingIt()
+    {
+        ShiftPlanSuppressionState state = new();
+        ShiftPlanTaskSpec spec = Spec("failure:1");
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        int bootstrapCall = 0;
+        IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
+        [
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 1: not suppressed yet
+            [(UserTaskSourceKind.FailureIncident, "failure:1")], // pass 2: DB reflects the user's skip
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 3: DB query for "since last pass" finds nothing new
+        ];
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(bootstrapResponses[Math.Min(bootstrapCall++, bootstrapResponses.Length - 1)]));
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], spec));
+
+        ShiftPlanCompileResult r1 = await compiler.CompileAsync(state);
+        Assert.Equal(1, r1.Created);
+
+        // Pass 2: source still produces the exact same spec, but it was just skipped.
+        ShiftPlanCompileResult r2 = await compiler.CompileAsync(state);
+        Assert.Equal(0, r2.Created);
+
+        // Pass 3: the source is still actively producing the key — episode continuity
+        // must keep it suppressed even though this pass's incremental DB query alone
+        // would no longer report it.
+        ShiftPlanCompileResult r3 = await compiler.CompileAsync(state);
+        Assert.Equal(0, r3.Created);
+    }
+
+    /// <summary>
+    /// Fix R3-6: once a source stops producing a suppressed key for a full
+    /// successful pass (its underlying condition cleared), suppression for that key
+    /// is dropped — so if the source resumes producing it later, it is treated as a
+    /// new occurrence and a fresh task materializes.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SuppressionState_SourceStopsThenResumes_NewTaskMaterializes()
+    {
+        ShiftPlanSuppressionState state = new();
+        ShiftPlanTaskSpec spec = Spec("failure:1");
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        int bootstrapCall = 0;
+        IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
+        [
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 1: not suppressed yet
+            [(UserTaskSourceKind.FailureIncident, "failure:1")], // pass 2: DB reflects the user's skip
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 3
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 4
+        ];
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(bootstrapResponses[Math.Min(bootstrapCall++, bootstrapResponses.Length - 1)]));
+
+        // Pass 1: created.
+        ShiftPlanCompiler compilerWithSpec = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], spec));
+        ShiftPlanCompileResult r1 = await compilerWithSpec.CompileAsync(state);
+        Assert.Equal(1, r1.Created);
+
+        // Pass 2: user skipped it; source still producing the same spec -> suppressed.
+        ShiftPlanCompileResult r2 = await compilerWithSpec.CompileAsync(state);
+        Assert.Equal(0, r2.Created);
+
+        // Pass 3: the underlying condition clears — the source succeeds but produces
+        // NO specs this pass, so suppression for the now-absent key is dropped.
+        ShiftPlanCompiler compilerNoSpec = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident]));
+        ShiftPlanCompileResult r3 = await compilerNoSpec.CompileAsync(state);
+        Assert.Equal(0, r3.Created);
+
+        // Pass 4: the condition recurs — this is a new occurrence, not suppressed.
+        ShiftPlanCompiler compilerResumed = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], spec));
+        ShiftPlanCompileResult r4 = await compilerResumed.CompileAsync(state);
+        Assert.Equal(1, r4.Created);
+    }
+
+    /// <summary>
+    /// Fix R3-6: same episode-continuity semantics applied to a maintenance/idle-window
+    /// task — dismissing it must not resurrect the identical window an hour later, but
+    /// once the idle window ends (the source stops producing that key) and a genuinely
+    /// new window later starts under the same source id, a new task is allowed.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SuppressionState_MaintenanceWindowEpisode_PersistsThenAllowsNewWindow()
+    {
+        ShiftPlanSuppressionState state = new();
+        ShiftPlanTaskSpec spec = WindowSpec(DateTime.UtcNow.AddMinutes(-30), sourceId: "idle:printer:1");
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        int bootstrapCall = 0;
+        IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
+        [
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 1: not suppressed yet
+            [(UserTaskSourceKind.Maintenance, "idle:printer:1")], // pass 2: user dismissed it
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 3: idle window ends (no specs)
+            Array.Empty<(UserTaskSourceKind, string)>(), // pass 4: a new idle window starts
+        ];
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(bootstrapResponses[Math.Min(bootstrapCall++, bootstrapResponses.Length - 1)]));
+
+        // Pass 1: idle window task created.
+        ShiftPlanCompiler compilerIdle = BuildCompiler(new StubSource("maint",
+            [UserTaskSourceKind.Maintenance], spec));
+        ShiftPlanCompileResult r1 = await compilerIdle.CompileAsync(state);
+        Assert.Equal(1, r1.Created);
+
+        // Pass 2: user dismissed it; the printer is still idle (same window persists) -> suppressed.
+        ShiftPlanCompileResult r2 = await compilerIdle.CompileAsync(state);
+        Assert.Equal(0, r2.Created);
+
+        // Pass 3: the printer becomes busy — the idle window ends, source produces nothing.
+        ShiftPlanCompiler compilerBusy = BuildCompiler(new StubSource("maint",
+            [UserTaskSourceKind.Maintenance]));
+        ShiftPlanCompileResult r3 = await compilerBusy.CompileAsync(state);
+        Assert.Equal(0, r3.Created);
+
+        // Pass 4: the printer goes idle again — a new window under the same source id
+        // is a new episode, not suppressed.
+        ShiftPlanCompiler compilerNewWindow = BuildCompiler(new StubSource("maint",
+            [UserTaskSourceKind.Maintenance], spec));
+        ShiftPlanCompileResult r4 = await compilerNewWindow.CompileAsync(state);
+        Assert.Equal(1, r4.Created);
+    }
+
+    /// <summary>
+    /// Fix R3-2: a <see cref="DbUpdateException"/> whose inner exception is a genuine
+    /// foreign-key/constraint failure (NOT a unique-index race) must propagate rather
+    /// than being silently swallowed — losing that failure would hide real data-
+    /// integrity problems from the hosted service and operators.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SaveChangesThrowsForeignKeyViolation_Propagates()
+    {
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        Microsoft.Data.Sqlite.SqliteException fkViolation = new(
+            "FOREIGN KEY constraint failed", 19, 787); // SQLITE_CONSTRAINT_FOREIGNKEY
+        _tasks.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("insert failed", fkViolation));
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], Spec("failure:1")));
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => compiler.CompileAsync());
+    }
+
+    /// <summary>
+    /// Fix R3-2: a generic (non-SQLite-typed) <see cref="DbUpdateException"/> whose
+    /// message does not match any known unique-violation pattern for any provider
+    /// must also propagate — the classifier must not over-match.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SaveChangesThrowsUnrelatedDbFailure_Propagates()
+    {
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        _tasks.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("connection failed", new Exception("connection was reset by peer")));
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], Spec("failure:1")));
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => compiler.CompileAsync());
+    }
+
+    /// <summary>
+    /// Fix R3-2: a <see cref="DbUpdateException"/> that IS a unique-index race
+    /// (SQLite extended code 2067 here; Npgsql 23505 / SqlClient 2601/2627 in
+    /// production) must be swallowed and recovered from — the affected tracked
+    /// entities are detached so the next pass reconciles cleanly — instead of
+    /// crashing the hosted-service tick.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SaveChangesThrowsUniqueViolation_RecoversWithoutThrowing()
+    {
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        Microsoft.Data.Sqlite.SqliteException uniqueViolation = new(
+            "UNIQUE constraint failed: UserTasks.SourceKind, UserTasks.SourceId", 19, 2067);
+        _tasks.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("insert failed", uniqueViolation));
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], Spec("failure:1")));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(1, result.Created);
+        _tasks.Verify(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Fix R3-2: same as above but via the message-substring fallback (simulating a
+    /// provider without a typed/reflectable exception available), confirming the
+    /// Postgres-style message pattern is recognized too.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SaveChangesThrowsPostgresStyleUniqueViolationMessage_RecoversWithoutThrowing()
+    {
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        _tasks.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("insert failed",
+                new Exception("23505: duplicate key value violates unique constraint \"IX_UserTasks_SourceKind_SourceId\"")));
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], Spec("failure:1")));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(1, result.Created);
+        _tasks.Verify(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Fix R3-5: if a concurrent user action (Skip/Dismiss) wins the race — reflected
+    /// by <see cref="IUserTaskRepository.TryAutoCompleteAsync"/> returning
+    /// <see langword="false"/> because the row is no longer Pending/InProgress in the
+    /// DB — the compiler must NOT locally overwrite the task to Completed.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_AutoComplete_ConcurrentUserAction_DoesNotOverwriteStatus()
+    {
+        UserTask stale = new()
+        {
+            Id = Guid.NewGuid(),
+            SourceKind = UserTaskSourceKind.FailureIncident,
+            SourceId = "failure:gone",
+            Status = UserTaskStatus.Pending,
+            Title = "resolved elsewhere",
+        };
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { stale });
+        _tasks.Setup(r => r.TryAutoCompleteAsync(stale.Id, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn", [UserTaskSourceKind.FailureIncident]));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(0, result.AutoCompleted);
+        Assert.Equal(UserTaskStatus.Pending, stale.Status);
+        Assert.Null(stale.CompletedAt);
+        _tasks.Verify(r => r.DetachTrackedAsync(It.Is<IEnumerable<UserTask>>(e => e.Contains(stale)), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     /// <summary>Fix G: sub-tolerance window-start drift on an otherwise-identical task is not written.</summary>
     [Fact]
     public async Task CompileAsync_WindowStartDriftWithinTolerance_DoesNotUpdate()
@@ -242,14 +517,50 @@ public class ShiftPlanCompilerTests
         Assert.Equal(windowStart.AddMinutes(-2), existing.WindowStartUtc);
     }
 
-    /// <summary>Fix G: window-start drift beyond tolerance is written.</summary>
+    /// <summary>
+    /// Fix R3-7 (supersedes Fix G): <see cref="IdleWindowService"/> always anchors an
+    /// incoming window's start to a fresh <c>UtcNow</c>, so ANY amount of wall-clock
+    /// drift on an otherwise-unchanged window (same <c>WindowEndUtc</c>) must NOT
+    /// rewrite the stored start — otherwise a continuously-idle printer's displayed
+    /// episode start resets indefinitely every pass. This replaces the old Fix G
+    /// "beyond tolerance → update" assertion, which is no longer correct.
+    /// </summary>
     [Fact]
-    public async Task CompileAsync_WindowStartDriftBeyondTolerance_Updates()
+    public async Task CompileAsync_WindowStartDriftAnyAmount_PreservesStoredStart_WhenWindowEndUnchanged()
     {
         DateTime windowStart = DateTime.UtcNow.AddHours(2);
         ShiftPlanTaskSpec spec = WindowSpec(windowStart);
-        // Existing task's window-start lags by 10 minutes (> 5 min tolerance).
+        // Existing task's window-start lags by 10 minutes — well beyond the old 5-min
+        // tolerance — but WindowEndUtc is unchanged (null on both sides), so under
+        // Fix R3-7 this is wall-clock drift, not a genuine episode boundary change.
         UserTask existing = ExistingFromSpec(spec, windowStart.AddMinutes(-10));
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { existing });
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("maint",
+            [UserTaskSourceKind.Maintenance], spec));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(0, result.Updated);
+        Assert.Empty(_trackedUpdated);
+        Assert.Equal(windowStart.AddMinutes(-10), existing.WindowStartUtc);
+    }
+
+    /// <summary>
+    /// Fix R3-7: a genuine boundary change (the window's end materially changes —
+    /// e.g. an open-ended window becomes bounded) IS a real episode transition, so
+    /// the window start is rewritten to the incoming value along with the end.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_WindowEndBoundaryChanges_RewritesWindowStartAndEnd()
+    {
+        DateTime windowStart = DateTime.UtcNow.AddHours(2);
+        DateTime newWindowEnd = windowStart.AddHours(4);
+        ShiftPlanTaskSpec spec = WindowSpec(windowStart) with { WindowEndUtc = newWindowEnd };
+        // Existing task has a materially earlier stored start AND a null (open-ended) end —
+        // the incoming spec now bounds the window, a genuine transition.
+        UserTask existing = ExistingFromSpec(WindowSpec(windowStart.AddMinutes(-10)), windowStart.AddMinutes(-10));
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { existing });
 
@@ -261,6 +572,35 @@ public class ShiftPlanCompilerTests
         Assert.Equal(1, result.Updated);
         Assert.Single(_trackedUpdated);
         Assert.Equal(windowStart, existing.WindowStartUtc);
+        Assert.Equal(newWindowEnd, existing.WindowEndUtc);
+    }
+
+    /// <summary>
+    /// Fix R3-7: simulates a continuously-idle printer being compiled every tick
+    /// (each producing a fresh <c>WindowStartUtc</c> anchored to "now" at that
+    /// instant, same as the real <see cref="IdleWindowService"/>) over many passes.
+    /// The persisted window start must never change once the episode has begun.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_ContinuouslyIdlePrinter_WindowStartNeverRewritten_AcrossManyPasses()
+    {
+        DateTime episodeStart = DateTime.UtcNow.AddHours(-1);
+        UserTask existing = ExistingFromSpec(WindowSpec(episodeStart), episodeStart);
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new[] { existing });
+
+        for (int tick = 0; tick < 240; tick++)
+        {
+            // Each tick, IdleWindowService would report a fresh "now" as the start —
+            // never the originally-persisted value.
+            ShiftPlanTaskSpec tickSpec = WindowSpec(DateTime.UtcNow.AddSeconds(tick));
+            ShiftPlanCompiler compiler = BuildCompiler(new StubSource("maint",
+                [UserTaskSourceKind.Maintenance], tickSpec));
+
+            await compiler.CompileAsync();
+        }
+
+        Assert.Equal(episodeStart, existing.WindowStartUtc);
     }
 
     private ShiftPlanCompiler BuildCompiler(params IShiftPlanTaskSource[] sources) =>

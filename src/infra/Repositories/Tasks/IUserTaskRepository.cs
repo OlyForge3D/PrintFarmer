@@ -97,6 +97,38 @@ public interface IUserTaskRepository
     Task TrackUpdateAsync(UserTask task, CancellationToken ct = default);
 
     /// <summary>
+    /// Updates only the named properties of a task, without requiring the caller to
+    /// hold a tracked entity. User-driven mutations (complete/dismiss/skip) load via
+    /// <see cref="GetByIdAsync"/> (no-tracking), so a blind full-entity
+    /// <see cref="UpdateAsync"/> can clobber columns changed concurrently by another
+    /// writer (e.g. the shift-plan compiler) that the caller never touched. Always
+    /// stamps <see cref="UserTask.UpdatedAt"/> in addition to the named properties
+    /// (issue #713 Fix R3-5).
+    /// </summary>
+    Task UpdateFieldsAsync(UserTask task, IReadOnlyCollection<string> propertyNames, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically completes the task with <paramref name="taskId"/> only if its
+    /// current database status is still <see cref="UserTaskStatus.Pending"/> or
+    /// <see cref="UserTaskStatus.InProgress"/>. Returns <c>false</c> (without making
+    /// any change) if a concurrent user action already moved the task to a terminal
+    /// state (Skipped/Dismissed/Completed) — that state wins the race instead of
+    /// being silently overwritten by the shift-plan compiler's auto-complete pass
+    /// (issue #713 Fix R3-5).
+    /// </summary>
+    Task<bool> TryAutoCompleteAsync(Guid taskId, DateTime completedAtUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Detaches the given tasks from the change tracker without saving. Used after a
+    /// direct/conditional write (e.g. <see cref="TryAutoCompleteAsync"/>) or after a
+    /// caught <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/> so a
+    /// subsequent <see cref="SaveChangesAsync"/> does not redundantly (or
+    /// incorrectly) attempt to persist the same entities again (issue #713 Fix R3-2,
+    /// Fix R3-5).
+    /// </summary>
+    Task DetachTrackedAsync(IEnumerable<UserTask> tasks, CancellationToken ct = default);
+
+    /// <summary>
     /// Deletes a task.
     /// </summary>
     Task DeleteAsync(UserTask task, CancellationToken ct = default);

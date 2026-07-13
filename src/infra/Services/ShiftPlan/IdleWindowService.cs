@@ -140,12 +140,25 @@ public sealed class IdleWindowService : IIdleWindowService
 
             dispatchStates.TryGetValue(printer.Id, out PrinterDispatchState? printerDispatchState);
 
-            bool dispatchEligibleNow = await IsDispatchEligibleAsync(
+            // Fix R3-1: a null result means scoring failed for every candidate we
+            // evaluated, so dispatch eligibility is genuinely unknown for this printer
+            // this pass — exclude it from the idle-window set entirely rather than
+            // default to "not eligible" (which would let a maintenance source schedule
+            // work into a window that may in fact be dispatch-eligible).
+            bool? dispatchEligibleNow = await IsDispatchEligibleAsync(
                     printer, printerDispatchState, globalDispatchEnabled,
                     globalCandidates, assigned, minScore, ct)
                 .ConfigureAwait(false);
 
-            results.Add(new IdleWindow(printer.Id, printer.Name, windowStart, windowEnd, dispatchEligibleNow));
+            if (dispatchEligibleNow is null)
+            {
+                _logger.LogWarning(
+                    "Idle window: dispatch eligibility unknown for printer {PrinterId} ({PrinterName}) — scoring failed for every evaluated candidate; excluding from idle-window set this pass",
+                    printer.Id, printer.Name);
+                continue;
+            }
+
+            results.Add(new IdleWindow(printer.Id, printer.Name, windowStart, windowEnd, dispatchEligibleNow.Value));
         }
 
         return results;
@@ -170,7 +183,15 @@ public sealed class IdleWindowService : IIdleWindowService
         return now;
     }
 
-    private async Task<bool> IsDispatchEligibleAsync(
+    /// <returns>
+    /// <c>true</c>/<c>false</c> when eligibility could be conclusively determined;
+    /// <c>null</c> when scoring failed for every candidate evaluated, meaning dispatch
+    /// state is unknown (Fix R3-1). Callers must treat <c>null</c> as "exclude this
+    /// printer from the idle-window set", never as "not eligible" — a scorer outage
+    /// must not fail open into scheduling maintenance during a window that may in
+    /// fact be dispatch-eligible.
+    /// </returns>
+    private async Task<bool?> IsDispatchEligibleAsync(
         Printer printer,
         PrinterDispatchState? dispatchState,
         bool globalDispatchEnabled,
@@ -220,6 +241,13 @@ public sealed class IdleWindowService : IIdleWindowService
             return false;
         }
 
+        // Fix R3-1: a scorer exception used to be swallowed unconditionally, so if
+        // every candidate threw, the loop fell through to "return false" — reporting
+        // conclusive non-eligibility when in truth nothing was ever successfully
+        // scored. Track whether any candidate failed so we can report "unknown"
+        // instead of a false negative.
+        bool anyScorerFailed = false;
+
         foreach (PrintJob job in candidates)
         {
             ct.ThrowIfCancellationRequested();
@@ -232,6 +260,7 @@ public sealed class IdleWindowService : IIdleWindowService
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex, "Idle window: dispatch scoring failed for job {JobId}", job.Id);
+                anyScorerFailed = true;
                 continue;
             }
 
@@ -243,10 +272,13 @@ public sealed class IdleWindowService : IIdleWindowService
 
             if (printerScore.TotalScore >= minScore)
             {
+                // A conclusive positive match short-circuits regardless of any
+                // earlier scorer failure — we do not need certainty about every
+                // remaining candidate once one has confirmed eligibility.
                 return true;
             }
         }
 
-        return false;
+        return anyScorerFailed ? null : false;
     }
 }

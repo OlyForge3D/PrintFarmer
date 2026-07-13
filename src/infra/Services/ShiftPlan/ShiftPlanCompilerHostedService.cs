@@ -19,6 +19,11 @@ public sealed class ShiftPlanCompilerHostedService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ShiftPlanCompilerHostedService> _logger;
 
+    // Fix R3-6: owned once for the process lifetime and threaded through every
+    // compile pass so suppression continuity survives across per-tick scopes (each
+    // tick gets a fresh IShiftPlanCompiler/AppDbContext — see CompileAsync call below).
+    private readonly ShiftPlanSuppressionState _suppressionState = new();
+
     public ShiftPlanCompilerHostedService(
         IServiceScopeFactory scopeFactory,
         ILogger<ShiftPlanCompilerHostedService> logger)
@@ -59,7 +64,7 @@ public sealed class ShiftPlanCompilerHostedService : BackgroundService
                     intervalSeconds = Math.Max(15, settings.CompileIntervalSeconds);
 
                     IShiftPlanCompiler compiler = scope.ServiceProvider.GetRequiredService<IShiftPlanCompiler>();
-                    await compiler.CompileAsync(stoppingToken).ConfigureAwait(false);
+                    await compiler.CompileAsync(_suppressionState, stoppingToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)

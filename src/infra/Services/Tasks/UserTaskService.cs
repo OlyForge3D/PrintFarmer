@@ -130,9 +130,12 @@ public class UserTaskService(
 
         task.Status = UserTaskStatus.Completed;
         task.CompletedAt = DateTime.UtcNow;
-        task.UpdatedAt = DateTime.UtcNow;
 
-        await _taskRepository.UpdateAsync(task, ct);
+        // Fix R3-5: task was loaded no-tracking, so only write the columns this
+        // action intends to change instead of a blind full-entity Update() that
+        // would clobber any field a concurrent writer (e.g. the shift-plan
+        // compiler) changed on the same row in the meantime.
+        await _taskRepository.UpdateFieldsAsync(task, [nameof(UserTask.Status), nameof(UserTask.CompletedAt)], ct);
         _logger.LogInformation("[UserTaskService] Completed task: {TaskTitle}", task.Title);
 
         await BroadcastTaskUpdatedAsync(MapToDto(task), ct);
@@ -151,9 +154,12 @@ public class UserTaskService(
         task.Status = UserTaskStatus.Dismissed;
         task.DismissedAt = DateTime.UtcNow;
         task.DismissedByUserId = userId;
-        task.UpdatedAt = DateTime.UtcNow;
 
-        await _taskRepository.UpdateAsync(task, ct);
+        // Fix R3-5: see CompleteTaskAsync — write only the named columns.
+        await _taskRepository.UpdateFieldsAsync(
+            task,
+            [nameof(UserTask.Status), nameof(UserTask.DismissedAt), nameof(UserTask.DismissedByUserId)],
+            ct);
         _logger.LogInformation("[UserTaskService] Dismissed task: {TaskTitle}", task.Title);
 
         await BroadcastTaskUpdatedAsync(MapToDto(task), ct);
@@ -170,9 +176,9 @@ public class UserTaskService(
         }
 
         task.Status = UserTaskStatus.Skipped;
-        task.UpdatedAt = DateTime.UtcNow;
 
-        await _taskRepository.UpdateAsync(task, ct);
+        // Fix R3-5: see CompleteTaskAsync — write only the named columns.
+        await _taskRepository.UpdateFieldsAsync(task, [nameof(UserTask.Status)], ct);
         _logger.LogInformation("[UserTaskService] Skipped task: {TaskTitle}", task.Title);
 
         await BroadcastTaskUpdatedAsync(MapToDto(task), ct);
@@ -348,7 +354,12 @@ public class UserTaskService(
         try
         {
             await _broadcaster.BroadcastTaskCreatedAsync(task, ct);
-            int pendingCount = await _taskRepository.GetPendingCountAsync(null, ct);
+
+            // Fix R3-4: broadcast the non-maintenance-filtered count so it always
+            // agrees with the non-admin REST count (GET /api/tasks/count). The prior
+            // maintenance-inclusive count over-reported to every connected client,
+            // most of whom cannot see maintenance tasks at all.
+            int pendingCount = await _taskRepository.GetPendingCountAsync(null, includeMaintenance: false, ct);
             await _broadcaster.BroadcastPendingTaskCountAsync(pendingCount, ct);
         }
         catch (Exception ex)
@@ -367,7 +378,9 @@ public class UserTaskService(
         try
         {
             await _broadcaster.BroadcastTaskUpdatedAsync(task, ct);
-            int pendingCount = await _taskRepository.GetPendingCountAsync(null, ct);
+
+            // Fix R3-4: see BroadcastTaskCreatedAsync.
+            int pendingCount = await _taskRepository.GetPendingCountAsync(null, includeMaintenance: false, ct);
             await _broadcaster.BroadcastPendingTaskCountAsync(pendingCount, ct);
         }
         catch (Exception ex)

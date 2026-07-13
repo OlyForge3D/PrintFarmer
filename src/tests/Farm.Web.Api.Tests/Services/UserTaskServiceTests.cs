@@ -255,7 +255,12 @@ public class UserTaskServiceTests
         Assert.Equal(UserTaskStatus.Completed, task.Status);
         Assert.NotNull(task.CompletedAt);
 
-        _repositoryMock.Verify(r => r.UpdateAsync(task, It.IsAny<CancellationToken>()), Times.Once);
+        _repositoryMock.Verify(
+            r => r.UpdateFieldsAsync(
+                task,
+                It.Is<IReadOnlyCollection<string>>(p => p.Contains(nameof(UserTask.Status)) && p.Contains(nameof(UserTask.CompletedAt))),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
         _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -300,7 +305,14 @@ public class UserTaskServiceTests
         Assert.NotNull(task.DismissedAt);
         Assert.Equal(userId, task.DismissedByUserId);
 
-        _repositoryMock.Verify(r => r.UpdateAsync(task, It.IsAny<CancellationToken>()), Times.Once);
+        _repositoryMock.Verify(
+            r => r.UpdateFieldsAsync(
+                task,
+                It.Is<IReadOnlyCollection<string>>(p => p.Contains(nameof(UserTask.Status))
+                    && p.Contains(nameof(UserTask.DismissedAt))
+                    && p.Contains(nameof(UserTask.DismissedByUserId))),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -340,7 +352,12 @@ public class UserTaskServiceTests
         Assert.True(result);
         Assert.Equal(UserTaskStatus.Skipped, task.Status);
 
-        _repositoryMock.Verify(r => r.UpdateAsync(task, It.IsAny<CancellationToken>()), Times.Once);
+        _repositoryMock.Verify(
+            r => r.UpdateFieldsAsync(
+                task,
+                It.Is<IReadOnlyCollection<string>>(p => p.Contains(nameof(UserTask.Status))),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

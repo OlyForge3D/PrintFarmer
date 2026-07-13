@@ -184,6 +184,68 @@ public class IdleWindowServiceTests
     }
 
     // -------------------------------------------------------------------------
+    // Fix R3-1: scorer failure must not fail open into "not eligible"
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fix R3-1: when the sole candidate's scoring throws, dispatch eligibility is
+    /// unknown — the printer must be excluded from the idle-window set entirely
+    /// (not reported with IsDispatchEligibleNow = false, which would let a
+    /// maintenance source schedule work into a window that might actually be
+    /// dispatch-eligible).
+    /// </summary>
+    [Fact]
+    public async Task GetIdleWindowsAsync_ScorerThrowsForSoleCandidate_PrinterExcludedFromWindows()
+    {
+        Printer printer = BuildPrinter(autoDispatch: true);
+        PrintJob candidate = BuildJob(null, PrintJobStatus.Queued);
+
+        SetupQueueData([printer], []);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, [candidate], printerReady: true);
+
+        _scorer.Setup(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("scorer boom"));
+
+        IdleWindowService svc = BuildService();
+        IReadOnlyList<IdleWindow> windows = await svc.GetIdleWindowsAsync(TimeSpan.Zero);
+
+        Assert.Empty(windows);
+    }
+
+    /// <summary>
+    /// Fix R3-1: a scorer failure on one candidate does not tank the whole pass —
+    /// if a later candidate scores conclusively above threshold, eligibility is
+    /// still reported as true.
+    /// </summary>
+    [Fact]
+    public async Task GetIdleWindowsAsync_ScorerThrowsForOneCandidateButAnotherScoresHigh_IsDispatchEligibleTrue()
+    {
+        Printer printer = BuildPrinter(autoDispatch: true);
+        PrintJob failingCandidate = BuildJob(null, PrintJobStatus.Queued);
+        failingCandidate.Priority = 0;
+        PrintJob scoringCandidate = BuildJob(null, PrintJobStatus.Queued);
+        scoringCandidate.Priority = 1;
+
+        SetupQueueData([printer], []);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, [failingCandidate, scoringCandidate], printerReady: true);
+
+        _scorer.Setup(s => s.ScorePrintersForJobAsync(failingCandidate.Id, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("scorer boom"));
+        _scorer.Setup(s => s.ScorePrintersForJobAsync(scoringCandidate.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DispatchScore>
+            {
+                new(PrinterId, "TestPrinter", TotalScore: 80.0, new Dictionary<string, FactorScore>(),
+                    Eliminated: false, []),
+            });
+
+        IdleWindowService svc = BuildService();
+        IReadOnlyList<IdleWindow> windows = await svc.GetIdleWindowsAsync(TimeSpan.Zero);
+
+        Assert.Single(windows);
+        Assert.True(windows[0].IsDispatchEligibleNow);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
