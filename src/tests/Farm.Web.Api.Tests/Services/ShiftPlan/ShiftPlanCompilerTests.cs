@@ -2,9 +2,9 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Tasks;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.ShiftPlan;
 using Farm.Infrastructure.Services.ShiftPlan.Sources;
-using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
