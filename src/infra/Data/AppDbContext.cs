@@ -107,6 +107,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
+    // Native push device tokens (iOS APNs today; Android/FCM reserved) — see #708.
+    public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
+
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
 

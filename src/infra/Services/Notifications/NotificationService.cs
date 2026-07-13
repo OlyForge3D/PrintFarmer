@@ -492,6 +492,33 @@ public class NotificationService(
             existing.TelegramOnJobPaused = preferences.TelegramOnJobPaused;
             existing.Frequency = preferences.Frequency;
             existing.RetentionDays = preferences.RetentionDays;
+
+            // Issue #708: persist attention-row preferences alongside the job
+            // rows. Without this the controller's ApplyEventChannelPreferences
+            // sets the values on the transient DTO but they never reach the
+            // database because the service copies the ORIGINAL entity's
+            // fields back onto itself (Hicks v3 blocker 4).
+            existing.InAppOnPrinterFailure = preferences.InAppOnPrinterFailure;
+            existing.EmailOnPrinterFailure = preferences.EmailOnPrinterFailure;
+            existing.PushOnPrinterFailure = preferences.PushOnPrinterFailure;
+            existing.TelegramOnPrinterFailure = preferences.TelegramOnPrinterFailure;
+            existing.InAppOnFilamentRunout = preferences.InAppOnFilamentRunout;
+            existing.EmailOnFilamentRunout = preferences.EmailOnFilamentRunout;
+            existing.PushOnFilamentRunout = preferences.PushOnFilamentRunout;
+            existing.TelegramOnFilamentRunout = preferences.TelegramOnFilamentRunout;
+            existing.InAppOnHarvestReady = preferences.InAppOnHarvestReady;
+            existing.EmailOnHarvestReady = preferences.EmailOnHarvestReady;
+            existing.PushOnHarvestReady = preferences.PushOnHarvestReady;
+            existing.TelegramOnHarvestReady = preferences.TelegramOnHarvestReady;
+            existing.InAppOnMaintenanceDue = preferences.InAppOnMaintenanceDue;
+            existing.EmailOnMaintenanceDue = preferences.EmailOnMaintenanceDue;
+            existing.PushOnMaintenanceDue = preferences.PushOnMaintenanceDue;
+            existing.TelegramOnMaintenanceDue = preferences.TelegramOnMaintenanceDue;
+            existing.InAppOnPrinterOffline = preferences.InAppOnPrinterOffline;
+            existing.EmailOnPrinterOffline = preferences.EmailOnPrinterOffline;
+            existing.PushOnPrinterOffline = preferences.PushOnPrinterOffline;
+            existing.TelegramOnPrinterOffline = preferences.TelegramOnPrinterOffline;
+
             existing.UpdatedAt = DateTime.UtcNow;
         }
 

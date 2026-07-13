@@ -27,6 +27,35 @@ public class NotificationPreferencesConfiguration : IEntityTypeConfiguration<Not
         _ = builder.Property(np => np.PushOnJobFailed).IsRequired().HasDefaultValue(true);
         _ = builder.Property(np => np.PushOnJobPaused).IsRequired().HasDefaultValue(true);
 
+        // Attention-row per-channel toggles (issue #708 shared preference contract).
+        _ = builder.Property(np => np.InAppOnPrinterFailure).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnPrinterFailure).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.PushOnPrinterFailure).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.TelegramOnPrinterFailure).IsRequired().HasDefaultValue(false);
+
+        _ = builder.Property(np => np.InAppOnFilamentRunout).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnFilamentRunout).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.PushOnFilamentRunout).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.TelegramOnFilamentRunout).IsRequired().HasDefaultValue(false);
+
+        _ = builder.Property(np => np.InAppOnHarvestReady).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnHarvestReady).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.PushOnHarvestReady).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.TelegramOnHarvestReady).IsRequired().HasDefaultValue(false);
+
+        _ = builder.Property(np => np.InAppOnMaintenanceDue).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnMaintenanceDue).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.PushOnMaintenanceDue).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.TelegramOnMaintenanceDue).IsRequired().HasDefaultValue(false);
+
+        _ = builder.Property(np => np.InAppOnPrinterOffline).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnPrinterOffline).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.PushOnPrinterOffline).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.TelegramOnPrinterOffline).IsRequired().HasDefaultValue(false);
+
+        _ = builder.Property(np => np.AttentionPushCategoryPreferencesJson)
+            .IsRequired(false);
+
         // Foreign Key - one-to-one relationship with User
         _ = builder.HasOne(np => np.User)
             .WithOne()

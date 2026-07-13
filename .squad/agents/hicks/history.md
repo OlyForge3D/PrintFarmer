@@ -100,3 +100,22 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+### 2026-07-13 — Issue #708 Backend v3 Review (Double-Attempt, gpt-5.6-sol/max)
+
+**Context:** First attempt on live worktree aborted when branch advanced mid-review (SHA `1d803b930c797aec69ade5d9a98d9635c0cdabb4` → `971e804456327248b084c402a2984e85d84900ff`). Coordinator isolated worktree; second attempt completed on immutable copy.
+
+**Verdict:** ❌ REQUEST_CHANGES (5 blockers)
+
+**Blockers:**
+1. APNs token redaction incomplete — slash/query chars escape masking
+2. JWT invalidation regression test missing — second signing not proven to invalidate prior token
+3. Rate-bucket prune race + hard-coded 5m expiry — concurrent scenarios unvetted; duration not configurable
+4. Attention preferences inconsistency — partial reset + toggle mismatch indicates incomplete persistence
+5. Capabilities JSON casing mismatch — non-production serializer options cause camelCase/PascalCase divergence
+
+**Verified:** B3 auth ✓, migrations ✓, build ✓, 75 focused tests ✓, full suite 3251/3253 (2 unrelated failures)
+
+**Handoff:** Revision assigned to Lambert. Jeff Papiez locked out for this cycle.
+
+**Lesson — Immutable-review contract:** When live branch changes mid-review, abort immediately and isolate at exact SHA. The review verdict is only valid for the exact commit SHA reviewed.
