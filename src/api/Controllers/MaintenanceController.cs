@@ -1070,7 +1070,8 @@ public class MaintenanceController(
             DateTime start = startDate ?? DateTime.UtcNow.AddMonths(-6);
             DateTime end = endDate ?? DateTime.UtcNow;
 
-            var trends = await _logRepository.GetTrendsAsync(start, end, ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var trends = await _logRepository.GetTrendsAsync(start, end, includeToolheadScope, ct);
 
             var response = trends.Select(t => new MaintenanceTrendResponse(
                 t.Date,
@@ -1097,7 +1098,8 @@ public class MaintenanceController(
     {
         try
         {
-            var lifespans = await _logRepository.GetComponentLifespanAsync(ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var lifespans = await _logRepository.GetComponentLifespanAsync(includeToolheadScope, ct);
 
             var response = lifespans.Select(l => new ComponentLifespanResponse(
                 l.Component,
@@ -1124,7 +1126,8 @@ public class MaintenanceController(
     {
         try
         {
-            var costs = await _logRepository.GetCostAnalysisAsync(months, ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var costs = await _logRepository.GetCostAnalysisAsync(months, includeToolheadScope, ct);
 
             var response = costs.Select(c => new MaintenanceCostResponse(
                 c.Month,
@@ -1148,7 +1151,8 @@ public class MaintenanceController(
     {
         try
         {
-            var uptimes = await _logRepository.GetPrinterUptimeAsync(ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var uptimes = await _logRepository.GetPrinterUptimeAsync(includeToolheadScope, ct);
 
             var response = uptimes.Select(u => new PrinterUptimeResponse(
                 u.PrinterName,

@@ -4,6 +4,7 @@ using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Tasks;
 using Farm.Infrastructure.Services.ShiftPlan;
 using Farm.Infrastructure.Services.ShiftPlan.Sources;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -251,10 +252,14 @@ public class ShiftPlanCompilerTests
         Mock<ISettingsService> settings = new();
         settings.Setup(s => s.Get<ShiftPlanSettings>()).Returns(new ShiftPlanSettings());
 
+        Mock<IOperatorFeatureGate> featureGate = new();
+        featureGate.Setup(g => g.IsEnabled(It.IsAny<OperatorFeature>())).Returns(true);
+
         MaintenanceIdleWindowShiftPlanTaskSource maintenanceSource = new(
             alerts.Object,
             idle.Object,
             settings.Object,
+            featureGate.Object,
             NullLogger<MaintenanceIdleWindowShiftPlanTaskSource>.Instance);
 
         ShiftPlanCompiler compiler = BuildCompiler(maintenanceSource);
