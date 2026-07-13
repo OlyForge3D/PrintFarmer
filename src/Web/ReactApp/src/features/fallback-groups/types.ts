@@ -43,8 +43,11 @@ export interface FilamentFallbackGroup {
 export interface CreateFilamentFallbackGroupRequest {
   name: string;
   materialType: string;
-  /** Optional — backend will append at end when omitted. */
-  displayOrder?: number;
+  /**
+   * Optional / nullable — backend column is `int?`. When omitted or `null`
+   * the backend appends the new group at the end of the printer's list.
+   */
+  displayOrder?: number | null;
   /** Ordered — position 0 is the primary/active member. */
   toolheadIds: string[];
 }

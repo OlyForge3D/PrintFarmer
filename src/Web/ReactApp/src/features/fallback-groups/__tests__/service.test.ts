@@ -101,4 +101,20 @@ describe("fallbackGroupsService", () => {
       fallbackGroupsService.create("p", { name: "dup", materialType: "PLA", toolheadIds: ["t1"] }),
     ).rejects.toBe(err);
   });
+
+  it("passes an explicit null displayOrder through unchanged (backend accepts int?)", async () => {
+    hoisted.apiPost.mockResolvedValueOnce({ data: { id: "g", members: [] } });
+    await fallbackGroupsService.create("p", {
+      name: "PLA",
+      materialType: "PLA",
+      displayOrder: null,
+      toolheadIds: ["t1"],
+    });
+    expect(hoisted.apiPost).toHaveBeenCalledWith("/printers/p/fallback-groups", {
+      name: "PLA",
+      materialType: "PLA",
+      displayOrder: null,
+      toolheadIds: ["t1"],
+    });
+  });
 });
