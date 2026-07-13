@@ -892,6 +892,59 @@ dotnet test --filter "FullyQualifiedName~OrcaSlicer"
 
 ---
 
+## Schema Version Awareness (#578)
+
+PrintFarmer runs two OrcaSlicer engine versions side by side (current 2.4.1 and previous 2.3.1). Settings that a user edits on the Slice Job page must match the engine that will actually process the job — fields added in 2.4.x must not appear when the job is pinned to 2.3.1, fields retired in 2.4.x must not appear when the job is pinned to 2.4.1, and fields that were renamed between versions must resolve to the correct key for the pinned engine.
+
+### API surface
+
+Four profile-schema endpoints on `ProfilesController` accept an optional `engineVersion` query parameter:
+
+- `GET /api/slicer/profiles/schemas?engineVersion={version}`
+- `GET /api/slicer/profiles/schemas/process?engineVersion={version}`
+- `GET /api/slicer/profiles/schemas/machine?engineVersion={version}`
+- `GET /api/slicer/profiles/schemas/filament?engineVersion={version}`
+
+The response is cached with `VaryByQueryKeys = ["engineVersion"]` so upstream/CDN caches key by version. Omitting `engineVersion` (or passing an unparsable string) returns the full unfiltered schema — this is the safe fallback for legacy callers and engine-agnostic surfaces such as the Profile Management pages.
+
+### Field-metadata model
+
+`ProfileFieldMetadata` carries four optional version-aware attributes:
+
+| Property | Meaning |
+|---|---|
+| `minEngineVersion` | Field is included only when the requested version ≥ this value. Used for fields added in a newer engine (e.g. `wallGenerator`, `enableArcFitting` added in 2.4.0). |
+| `maxEngineVersion` | Field is included only when the requested version ≤ this value. Used for retired settings (e.g. `legacyPreviewSetting` retired in 2.4.0). |
+| `renamedFromKey` + `renamedInVersion` | Field is emitted under `renamedFromKey` when the requested version < `renamedInVersion`, otherwise under `key`. Preserves all other metadata across the rename. |
+
+Version filtering uses `System.Version` semantic comparison. Unparsable requests fall through to unfiltered (safe fallback).
+
+### Runtime data delivery
+
+The 2.3.1 backend plugin ships `NullProfilesProvider` with an empty assets manifest **by design**: the version-correct profile/asset content is delivered at runtime from the version-matched OrcaSlicer worker's `/opt/orcaslicer/resources` tree, not from the plugin binary. This avoids data drift between the plugin and the actual engine and lets the workers upgrade profiles independently of the .NET deployment.
+
+### React consumers
+
+`useProfileSchema(profileType, engineVersion?)` includes `engineVersion` in its TanStack Query `queryKey` (`['profile-schema', profileType, engineVersion ?? null]`), so:
+
+- Switching the pinned engine invalidates the cache and re-fetches.
+- Two schema instances for two versions coexist in the cache without cross-contamination.
+- Passing `undefined` returns the unfiltered schema (engine-agnostic pages).
+
+The live New Slice Job page inherits this behaviour: profile queries include `selectedEngineVersion` in their query keys, and the `advancedProcessSettings` state is re-seeded from the version-scoped profile JSON when the query returns, so payloads submitted to the slicer never include stale keys from a previously-selected engine.
+
+### Testing
+
+- `Farm.Slicer.Module.Tests/Services/ProfileSchemaProviderTests` — added/removed/renamed field mechanic and edge cases (null, unparsable version).
+- `Farm.Slicer.Module.Tests/Controllers/ProfilesControllerSchemaVersionTests` — controller-level pass-through and `VaryByQueryKeys` behaviour.
+- `ReactApp/src/features/slicer/components/settings/schema/__tests__/useProfileSchema.test.tsx` — hook contract, per-version queryKey isolation, undefined-version fallback.
+
+### Follow-up
+
+The example version-scoped fields (`wallGenerator`, `enableArcFitting`, `legacyPreviewSetting`, `bedAdhesionOverride`/`firstLayerAdhesion`) illustrate the plumbing but are not an authoritative OrcaSlicer 2.3 → 2.4 delta. The exact field windows should be refined against upstream OrcaSlicer release notes before consumers depend on the specific field set.
+
+---
+
 ## Conclusion
 
 OrcaSlicer integration has substantial infrastructure built but is **NOT production ready**:

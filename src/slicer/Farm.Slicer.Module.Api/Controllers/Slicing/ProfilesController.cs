@@ -1392,59 +1392,65 @@ public class ProfilesController(
         }
     }
 
-    // ── Schema metadata endpoints (static, public, cached) ─────────
+    // ── Schema metadata endpoints (engine-version-aware, public, cached) ─────
 
     /// <summary>
     /// Returns combined schema metadata for all profile types (process, machine, filament),
-    /// powering schema-driven settings editors in the UI.
+    /// powering schema-driven settings editors in the UI. When <paramref name="engineVersion"/>
+    /// is provided (e.g. "2.3.1", "2.4.1"), fields are filtered to those applicable to that
+    /// OrcaSlicer engine version and renamed to that engine's key convention where needed
+    /// (issue #578). Null / unparsable version returns all fields unfiltered.
     /// </summary>
     [HttpGet("schemas")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileSchemasResponseDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetAllSchemas()
+    public IActionResult GetAllSchemas([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetAllSchemas());
+        return Ok(ProfileSchemaProvider.GetAllSchemas(engineVersion));
     }
 
     /// <summary>
-    /// Returns schema metadata for process profile fields.
+    /// Returns schema metadata for process profile fields, optionally filtered to the
+    /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/process")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetProcessSchema()
+    public IActionResult GetProcessSchema([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetProcessSchema());
+        return Ok(ProfileSchemaProvider.GetProcessSchema(engineVersion));
     }
 
     /// <summary>
-    /// Returns schema metadata for machine profile fields.
+    /// Returns schema metadata for machine profile fields, optionally filtered to the
+    /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/machine")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetMachineSchema()
+    public IActionResult GetMachineSchema([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetMachineSchema());
+        return Ok(ProfileSchemaProvider.GetMachineSchema(engineVersion));
     }
 
     /// <summary>
-    /// Returns schema metadata for filament profile fields.
+    /// Returns schema metadata for filament profile fields, optionally filtered to the
+    /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/filament")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetFilamentSchema()
+    public IActionResult GetFilamentSchema([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetFilamentSchema());
+        return Ok(ProfileSchemaProvider.GetFilamentSchema(engineVersion));
     }
 
     /// <summary>
