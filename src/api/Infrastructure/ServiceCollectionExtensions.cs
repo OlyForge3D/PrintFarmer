@@ -718,6 +718,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageAttentionSource>(sp =>
             sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Attention.Sources.IFilamentRunoutSwitchEvaluator,
+            Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutSwitchEvaluator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
             Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutAttentionSource>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster, Farm.Infrastructure.Services.Spoolman.FilamentCoverageBroadcaster>();

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Spoolman;
 
 namespace Farm.Infrastructure.Services.Attention.Sources;
@@ -14,9 +15,18 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// Coverage remains the source of truth for threshold, feature-gate, progress, queue,
 /// and source-aware Spoolman semantics. This adapter only translates warnings into the
 /// #707 feed contract and intentionally does not advertise the #710 guided-swap action.
+/// <para>
+/// When the multi-slot-fallback feature is enabled and a switch evaluator is supplied
+/// (issue #711, F6, Finding 2), an active runout's <c>Critical</c> severity is downgraded
+/// only on real mitigation evidence: telemetry-confirmed switch → <c>Info</c>; a configured,
+/// loaded, compatible backup → <c>Warning</c>. Configuration existence alone never downgrades
+/// below <c>Warning</c>, and a disabled feature keeps the legacy <c>Critical</c> behaviour.
+/// </para>
 /// </remarks>
 public sealed class FilamentRunoutAttentionSource(
-    IFilamentCoverageAttentionSource coverageSource) : IAttentionSource
+    IFilamentCoverageAttentionSource coverageSource,
+    IFilamentRunoutSwitchEvaluator? switchEvaluator = null,
+    IOperatorFeatureGate? operatorFeatureGate = null) : IAttentionSource
 {
     /// <summary>
     /// Stable timestamp for a continuously-computed runout condition. The same
@@ -29,6 +39,10 @@ public sealed class FilamentRunoutAttentionSource(
     private readonly IFilamentCoverageAttentionSource _coverageSource =
         coverageSource ?? throw new ArgumentNullException(nameof(coverageSource));
 
+    private readonly IFilamentRunoutSwitchEvaluator? _switchEvaluator = switchEvaluator;
+
+    private readonly IOperatorFeatureGate? _operatorFeatureGate = operatorFeatureGate;
+
     /// <inheritdoc />
     public string SourceName => AttentionIdPrefixes.Runout;
 
@@ -39,9 +53,15 @@ public sealed class FilamentRunoutAttentionSource(
             await _coverageSource.GetRunoutWarningsAsync(cancellationToken).ConfigureAwait(false);
         List<AttentionItemDto> items = new(warnings.Count);
 
+        // The downgrade path is gated behind the multi-slot-fallback feature AND the presence of a
+        // switch evaluator; otherwise every active runout retains its legacy Critical severity.
+        bool downgradeEnabled = _switchEvaluator is not null
+            && (_operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true);
+
         foreach (FilamentRunoutWarningDto warning in warnings)
         {
-            AttentionItemDto? item = MapWarning(warning);
+            AttentionItemDto? item = await MapWarningAsync(warning, downgradeEnabled, cancellationToken)
+                .ConfigureAwait(false);
             if (item is not null)
             {
                 items.Add(item);
@@ -51,7 +71,10 @@ public sealed class FilamentRunoutAttentionSource(
         return items;
     }
 
-    private static AttentionItemDto? MapWarning(FilamentRunoutWarningDto warning)
+    private async Task<AttentionItemDto?> MapWarningAsync(
+        FilamentRunoutWarningDto warning,
+        bool downgradeEnabled,
+        CancellationToken cancellationToken)
     {
         bool activeRunout = warning.Reason == "runout-during-active-job";
         bool queuedShortage = warning.Reason == "insufficient-for-assigned-queue";
@@ -74,11 +97,37 @@ public sealed class FilamentRunoutAttentionSource(
         if (activeRunout)
         {
             DateTime runoutAt = warning.PredictedRunoutAt!.Value.ToUniversalTime();
-            title = "Filament runout predicted";
-            detail = $"{warning.PrinterName} tool {displayTool} has {remaining} of {material} and is predicted to run out at "
-                + $"{runoutAt:yyyy-MM-dd HH:mm} UTC. Action: load sufficient filament before the deadline.";
-            severity = AttentionSeverity.Critical;
-            deadline = runoutAt;
+            string runoutBase =
+                $"{warning.PrinterName} tool {displayTool} has {remaining} of {material} and is predicted to run out at "
+                + $"{runoutAt:yyyy-MM-dd HH:mm} UTC.";
+
+            RunoutSwitchAssessment assessment = downgradeEnabled
+                ? await _switchEvaluator!.AssessAsync(warning, cancellationToken).ConfigureAwait(false)
+                : RunoutSwitchAssessment.NoBackup;
+
+            switch (assessment)
+            {
+                case RunoutSwitchAssessment.SwitchConfirmed:
+                    title = "Filament auto-switch confirmed";
+                    detail = $"{runoutBase} Telemetry confirms printing continued from a configured backup spool of {material}. "
+                        + "No action required unless the backup also runs low.";
+                    severity = AttentionSeverity.Info;
+                    deadline = null;
+                    break;
+                case RunoutSwitchAssessment.BackupAvailable:
+                    title = "Filament runout predicted";
+                    detail = $"{runoutBase} A configured backup spool of {material} is available but no switch has been confirmed yet. "
+                        + "Action: verify the auto-switch or load sufficient filament before the deadline.";
+                    severity = AttentionSeverity.Warning;
+                    deadline = runoutAt;
+                    break;
+                default:
+                    title = "Filament runout predicted";
+                    detail = $"{runoutBase} Action: load sufficient filament before the deadline.";
+                    severity = AttentionSeverity.Critical;
+                    deadline = runoutAt;
+                    break;
+            }
         }
         else
         {
