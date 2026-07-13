@@ -322,7 +322,8 @@ public class PrintStatsSyncHostedService(
                 toolheadStatsRepo,
                 ct,
                 _logger,
-                serviceProvider.GetService<IPrinterStatusCacheReader>());
+                serviceProvider.GetService<IPrinterStatusCacheReader>(),
+                serviceProvider.GetService<IToolheadActivityAccumulator>());
             if (credited.Count > 0)
             {
                 _logger.LogDebug(
@@ -359,8 +360,16 @@ public class PrintStatsSyncHostedService(
         IToolheadStatisticsRepository toolheadStatsRepo,
         CancellationToken ct,
         ILogger? logger = null,
-        IPrinterStatusCacheReader? statusCache = null)
+        IPrinterStatusCacheReader? statusCache = null,
+        IToolheadActivityAccumulator? activityAccumulator = null)
     {
+        // Always drain the interval accumulator (when present) so its in-memory rolling window stays
+        // bounded to ~one sync cycle even when this cycle ultimately attributes nothing (feature off,
+        // no delta, or an incapable backend). Only real telemetry-backed seconds are ever
+        // accumulated, so discarding an unused drain fabricates nothing.
+        IReadOnlyDictionary<int, double> intervalActiveSeconds =
+            activityAccumulator?.DrainActiveSeconds(printerId) ?? EmptyIntervalSeconds;
+
         if (!statsExisted
             || !externalSyncSuccess
             || !perToolMaintenanceEnabled
@@ -391,6 +400,42 @@ public class PrintStatsSyncHostedService(
             return [];
         }
 
+        // Primary path (issue #711, round-14): distribute the external-history delta across physical
+        // toolheads in proportion to the per-tool active time the backend actually observed over this
+        // sync interval. Unlike the single-snapshot fallback below, this correctly represents tool
+        // switches that happened within the interval — the head that printed most gets the most wear.
+        Dictionary<Guid, double> perToolheadSeconds = new();
+        foreach ((int toolIndex, double seconds) in intervalActiveSeconds)
+        {
+            if (seconds > 0 && physicalToolheads.TryGetValue(toolIndex, out Guid toolheadId))
+            {
+                perToolheadSeconds[toolheadId] = perToolheadSeconds.TryGetValue(toolheadId, out double existing)
+                    ? existing + seconds
+                    : seconds;
+            }
+        }
+
+        if (perToolheadSeconds.Count > 0)
+        {
+            double totalSeconds = perToolheadSeconds.Values.Sum();
+            Dictionary<Guid, double> weights = perToolheadSeconds.ToDictionary(
+                static kvp => kvp.Key,
+                kvp => kvp.Value / totalSeconds);
+            ToolheadHourAttribution intervalAttribution = ToolheadHourAttribution.FromWeights(weights, externalDelta);
+            IReadOnlyList<Guid> intervalCredited = await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, intervalAttribution, ct);
+            logger?.LogDebug(
+                "Printer {PrinterId} attributed {Delta:F2}h across {ToolheadCount} physical toolhead(s) " +
+                "from interval-aware active-tool telemetry (issue #711).",
+                printerId,
+                externalDelta,
+                intervalCredited.Count);
+            return intervalCredited;
+        }
+
+        // Fallback: no interval telemetry accrued this cycle (the accumulator is unavailable, or a
+        // print started too near the end of the interval to record a segment) but the live status
+        // cache still shows a fresh active tool. Credit the whole delta to that single tool. This is
+        // the pre-round-14 single-sample approximation; it cannot represent mid-interval switches.
         PrinterStatusCacheSnapshot? snapshot = statusCache?.GetSnapshot(printerId);
         MmuStatusDto? mmuStatus = PrinterStatusFreshness.IsFreshOnline(snapshot, DateTime.UtcNow)
             ? snapshot!.Status.MmuStatus
@@ -404,27 +449,25 @@ public class PrintStatsSyncHostedService(
         if (activeToolIndex.HasValue
             && physicalToolheads.TryGetValue(activeToolIndex.Value, out Guid activeToolheadId))
         {
-            // NOTE (issue #711, round-10 Finding 1): this credits the whole interval delta to the
-            // latest-known active tool. It is an approximation — it cannot represent tool switches
-            // that happened within the sync interval — and is only reachable for backends that opt
-            // in via Printer.SupportsPerToolAttribution. Accumulating per-tool weights over the
-            // interval is tracked as future work behind the same capability flag.
             ToolheadHourAttribution attribution = ToolheadHourAttribution.FromWeights(
                 new Dictionary<Guid, double> { [activeToolheadId] = 1.0 },
                 externalDelta);
             return await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, attribution, ct);
         }
 
-        // Capable backend but no fresh active-tool telemetry this cycle: leave the delta
-        // unattributed for per-toolhead wear rather than fabricate an equal split (Finding 1).
+        // Capable backend but no telemetry at all this cycle: leave the delta unattributed for
+        // per-toolhead wear rather than fabricate an equal split (Finding 1).
         logger?.LogInformation(
-            "Printer {PrinterId} supports per-tool attribution but produced no fresh active-tool " +
+            "Printer {PrinterId} supports per-tool attribution but produced no active-tool " +
             "telemetry this cycle; per-toolhead wear is unattributed for the {Delta:F2}h external " +
             "history delta (issue #711).",
             printerId,
             externalDelta);
         return [];
     }
+
+    /// <summary>Shared empty result so a no-op accumulator drain allocates nothing.</summary>
+    private static readonly IReadOnlyDictionary<int, double> EmptyIntervalSeconds = new Dictionary<int, double>();
 
     private async Task<ExternalSyncOutcome> SyncExternalPrinterStatisticsAsync(
         Printer printer,
