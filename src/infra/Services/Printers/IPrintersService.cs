@@ -570,12 +570,18 @@ public interface IPrintersService
     /// <summary>
     /// Synchronizes MMU virtual toolheads on an already-loaded Printer entity after
     /// the MultiMaterial property changes. Creates MmuGate toolheads when toggled on,
-    /// removes them when toggled off. Does NOT save changes — caller must call SaveChangesAsync.
+    /// removes them and their fallback memberships when toggled off. Does NOT save changes —
+    /// caller must call SaveChangesAsync.
     /// </summary>
     /// <param name="printer">The loaded Printer entity (with Toolheads navigation populated)</param>
     /// <param name="wasMultiMaterial">The previous value of MultiMaterial before the edit</param>
     /// <param name="mmuGateCount">Number of MMU gate slots (default 4)</param>
-    void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4);
+    /// <param name="ct">Cancellation token.</param>
+    Task SyncMmuToolheadsOnEntityAsync(
+        Printer printer,
+        bool wasMultiMaterial,
+        int mmuGateCount = 4,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Synchronizes the Buddy camera entity when BuddyCameraIp is set, changed, or cleared.

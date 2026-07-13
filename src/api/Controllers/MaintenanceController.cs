@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Controllers.Responses;
@@ -29,10 +30,13 @@ public class MaintenanceController(
     IMaintenanceLogRepository logRepository,
     IPrinterMaintenanceScheduleRepository deploymentRepository,
     IPrinterStatisticsRepository statisticsRepository,
+    IToolheadStatisticsRepository toolheadStatisticsRepository,
     IMaintenanceAlertService alertService,
     IPrintersService printersService,
+    IOperatorFeatureGate operatorFeatureGate,
     IHubContext<MaintenanceHub> maintenanceHub,
-    IWebhookService webhookService)
+    IWebhookService webhookService,
+    IMaintenanceAlertResolutionService alertResolutionService)
     : ControllerBase
 {
     private readonly ILogger<MaintenanceController> _logger = logger;
@@ -40,10 +44,13 @@ public class MaintenanceController(
     private readonly IMaintenanceLogRepository _logRepository = logRepository;
     private readonly IPrinterMaintenanceScheduleRepository _deploymentRepository = deploymentRepository;
     private readonly IPrinterStatisticsRepository _statisticsRepository = statisticsRepository;
+    private readonly IToolheadStatisticsRepository _toolheadStatisticsRepository = toolheadStatisticsRepository;
     private readonly IMaintenanceAlertService _alertService = alertService;
     private readonly IPrintersService _printersService = printersService;
+    private readonly IOperatorFeatureGate _operatorFeatureGate = operatorFeatureGate;
     private readonly IHubContext<MaintenanceHub> _maintenanceHub = maintenanceHub;
     private readonly IWebhookService _webhookService = webhookService;
+    private readonly IMaintenanceAlertResolutionService _alertResolutionService = alertResolutionService;
 
     #region Maintenance Alerts
 
@@ -57,6 +64,11 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceAlert> alerts = await _alertRepository.GetAllActiveAlertsAsync(ct);
+            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                alerts = alerts.Where(a => !a.ToolheadId.HasValue).ToList();
+            }
+
             return Ok(alerts);
         }
         catch (Exception ex)
@@ -77,7 +89,9 @@ public class MaintenanceController(
         try
         {
             MaintenanceAlert? alert = await _alertRepository.GetByIdAsync(id, ct);
-            if (alert == null)
+            if (alert == null
+                || (alert.ToolheadId.HasValue
+                    && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback)))
             {
                 return NotFound($"Alert with ID {id} not found");
             }
@@ -101,6 +115,11 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceAlert> alerts = await _alertRepository.GetActivePrinterAlertsAsync(printerId, ct);
+            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                alerts = alerts.Where(a => !a.ToolheadId.HasValue).ToList();
+            }
+
             return Ok(alerts);
         }
         catch (Exception ex)
@@ -115,6 +134,7 @@ public class MaintenanceController(
     /// </summary>
     [HttpPost("alerts/{id:guid}/acknowledge")]
     [ProducesResponseType(typeof(MaintenanceAlert), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<MaintenanceAlert>> AcknowledgeAlertAsync(
         Guid id,
@@ -148,6 +168,10 @@ public class MaintenanceController(
 
             return Ok(alert);
         }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return BadRequest(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[MaintenanceController] Error acknowledging alert {Id}", id);
@@ -160,6 +184,8 @@ public class MaintenanceController(
     /// </summary>
     [HttpPost("alerts/{id:guid}/resolve")]
     [ProducesResponseType(typeof(ResolveAlertResponse), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ResolveAlertResponse>> ResolveAlertAsync(
         Guid id,
@@ -175,8 +201,24 @@ public class MaintenanceController(
                 return NotFound($"Alert with ID {id} not found");
             }
 
+            // Per-tool maintenance gate (issue #711, round-5 FIX 2). A toolhead-scoped alert must
+            // not be resolved into a per-tool maintenance log while MultiSlotFallback is disabled,
+            // mirroring CreateMaintenanceLogAsync. Reject rather than silently strip the scope so
+            // the resolution log never misrepresents which head was serviced.
+            if (alert.ToolheadId.HasValue
+                && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                return BadRequest("Per-tool maintenance is disabled.");
+            }
+
             // Capture current printer hours for accurate hour-based maintenance baselines.
             PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(alert.PrinterId, ct);
+
+            // For per-toolhead-scoped alerts, also capture the toolhead's cumulative hours so
+            // the next accrual measures from this point (issue #711, FIX B).
+            double? toolheadHoursAtMaintenance = alert.ToolheadId.HasValue
+                ? await _toolheadStatisticsRepository.GetCumulativeHoursAsync(alert.ToolheadId.Value, ct)
+                : null;
 
             // Create maintenance log
             var maintenanceLog = new MaintenanceLog
@@ -185,6 +227,7 @@ public class MaintenanceController(
                 PrinterId = alert.PrinterId,
                 PrinterMaintenanceScheduleId = alert.PrinterMaintenanceScheduleId,
                 MaintenanceTaskId = alert.MaintenanceTaskId,
+                ToolheadId = alert.ToolheadId,
                 TaskName = alert.Title ?? "Scheduled Maintenance",
                 PerformedAt = DateTime.UtcNow,
                 PerformedBy = request.PerformedBy,
@@ -192,46 +235,37 @@ public class MaintenanceController(
                 DurationMinutes = request.DurationMinutes,
                 Cost = request.Cost,
                 PartsReplaced = request.PartsReplaced,
-                PrinterHoursAtMaintenance = stats?.TotalPrintHours
+                PrinterHoursAtMaintenance = stats?.TotalPrintHours,
+                ToolheadHoursAtMaintenance = toolheadHoursAtMaintenance
             };
 
-            MaintenanceLog createdLog = await _logRepository.AddAsync(maintenanceLog, ct);
-
-            // Resolve the alert
-            await _alertService.ResolveAlertAsync(id, request.PerformedBy, ct);
-
-            // Reload to get updated state
-            alert = await _alertRepository.GetByIdAsync(id, ct);
-
-            // Broadcast status change
-            await _maintenanceHub.Clients.All.SendAsync("alertstatuschanged", new
+            // Atomically resolve the alert and persist its completion log in a single transaction so
+            // a per-tool gate that flips after the pre-check above cannot leave an orphaned log with
+            // an unresolved alert (issue #711, round-7 Finding 5). The service re-checks the gate,
+            // stages the log, mutates the alert, and commits — or rolls back on any failure.
+            MaintenanceAlertResolutionResult? resolution = await _alertResolutionService.ResolveWithLogAsync(
+                id,
+                maintenanceLog,
+                request.PerformedBy,
+                ct);
+            if (resolution == null)
             {
-                id = alert!.Id,
-                printerId = alert.PrinterId,
-                status = alert.Status.ToString(),
-                resolvedAt = alert.ResolvedAt,
-                resolvedBy = alert.ResolvedBy
-            }, ct);
+                return NotFound($"Alert with ID {id} not found");
+            }
 
-            // Broadcast maintenance completed
-            await _maintenanceHub.Clients.All.SendAsync("maintenancecompleted", new
-            {
-                logId = createdLog.Id,
-                printerId = createdLog.PrinterId,
-                deploymentId = createdLog.PrinterMaintenanceScheduleId,
-                performedAt = createdLog.PerformedAt,
-                performedBy = createdLog.PerformedBy
-            }, ct);
-
-            _webhookService.Enqueue("maintenance.completed", new
-            {
-                logId = createdLog.Id,
-                printerId = createdLog.PrinterId,
-                performedAt = createdLog.PerformedAt,
-                performedBy = createdLog.PerformedBy
-            });
-
-            return Ok(new ResolveAlertResponse(alert, createdLog));
+            alert = resolution.Alert;
+            return Ok(new ResolveAlertResponse(
+                alert,
+                resolution.Log,
+                resolution.Created));
+        }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (MaintenanceAlertNotResolvableException ex)
+        {
+            return Conflict(ex.Message);
         }
         catch (Exception ex)
         {
@@ -245,6 +279,7 @@ public class MaintenanceController(
     /// </summary>
     [HttpPost("alerts/{id:guid}/dismiss")]
     [ProducesResponseType(typeof(MaintenanceAlert), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<MaintenanceAlert>> DismissAlertAsync(
         Guid id,
@@ -279,6 +314,10 @@ public class MaintenanceController(
 
             return Ok(alert);
         }
+        catch (PerToolMaintenanceDisabledException ex)
+        {
+            return BadRequest(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[MaintenanceController] Error dismissing alert {Id}", id);
@@ -304,6 +343,7 @@ public class MaintenanceController(
     {
         try
         {
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
             DateTime now = DateTime.UtcNow;
 
             List<Printer> printers;
@@ -332,14 +372,25 @@ public class MaintenanceController(
                 .ToDictionary(s => s.PrinterId);
             List<MaintenanceLog> allLogs = await _logRepository.GetByPrinterIdsAsync(printerIds, ct);
             ILookup<Guid, MaintenanceLog> logsByPrinter = allLogs
+                .Where(l => includeToolheadScope || !l.ToolheadId.HasValue)
                 .ToLookup(l => l.PrinterId);
 
             // Load V3 deployments with deep PlanTasks → Tasks in a single batch query
             List<PrinterMaintenanceSchedule> allDeployments = await _deploymentRepository
                 .GetActiveWithTasksAsync(printerIds, ct);
+            if (!includeToolheadScope)
+            {
+                allDeployments = allDeployments.Where(d => !d.ToolheadId.HasValue).ToList();
+            }
 
             ILookup<Guid, PrinterMaintenanceSchedule> deploymentsByPrinter = allDeployments
                 .ToLookup(d => d.PrinterId);
+
+            // Per-toolhead cumulative hours (toolhead ID → hours) so per-tool schedules project
+            // their remaining time against their own toolhead, not the printer-wide counter
+            // (issue #711, FIX B).
+            IReadOnlyDictionary<Guid, double> toolheadHours = await _toolheadStatisticsRepository
+                .GetCumulativeHoursByPrintersAsync(printerIds, ct);
 
             foreach (Printer printer in printers)
             {
@@ -350,16 +401,19 @@ public class MaintenanceController(
                     continue;
                 }
 
-                // Group last log by task ID for efficient lookup
-                Dictionary<Guid, MaintenanceLog> lastLogByTaskId = logsByPrinter[printer.Id]
+                // Group last log by (task ID, toolhead scope) so per-toolhead logs do not
+                // contaminate printer-wide baselines and vice versa (issue #711, F6).
+                Dictionary<(Guid TaskId, Guid? ToolheadId), MaintenanceLog> lastLogByTaskId = logsByPrinter[printer.Id]
                     .Where(l => l.MaintenanceTaskId.HasValue)
-                    .GroupBy(l => l.MaintenanceTaskId!.Value)
+                    .GroupBy(l => (l.MaintenanceTaskId!.Value, l.ToolheadId))
                     .ToDictionary(
                         g => g.Key,
                         g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
 
-                // Track tasks already processed (avoid duplicates if same task in multiple plans)
-                HashSet<Guid> processedTasks = [];
+                // Track (task, toolhead scope) pairs already processed so per-toolhead
+                // schedules surface as independent upcoming rows without duplicating a task
+                // that appears in multiple plans for the same scope.
+                HashSet<(Guid TaskId, Guid? ToolheadId)> processedTasks = [];
 
                 foreach (PrinterMaintenanceSchedule deployment in deployments)
                 {
@@ -371,7 +425,7 @@ public class MaintenanceController(
                     foreach (PlanTask planTask in deployment.MaintenancePlan.PlanTasks)
                     {
                         MaintenanceTask task = planTask.MaintenanceTask;
-                        if (task == null || !task.IsActive || !processedTasks.Add(task.Id))
+                        if (task == null || !task.IsActive || !processedTasks.Add((task.Id, deployment.ToolheadId)))
                         {
                             continue;
                         }
@@ -385,7 +439,7 @@ public class MaintenanceController(
                             continue;
                         }
 
-                        lastLogByTaskId.TryGetValue(task.Id, out MaintenanceLog? lastLog);
+                        lastLogByTaskId.TryGetValue((task.Id, deployment.ToolheadId), out MaintenanceLog? lastLog);
 
                         // Compute day-based due date (real calendar date)
                         DateTime baselineDate = lastLog?.PerformedAt ?? deployment.DeployedAt;
@@ -396,21 +450,37 @@ public class MaintenanceController(
                             ? (int)(dueDate.Value.Date - now.Date).TotalDays
                             : null;
 
-                        // Compute hour-based remaining time (no synthetic date)
+                        // Compute hour-based remaining time (no synthetic date). Per-tool
+                        // schedules accrue against their own toolhead's cumulative hours
+                        // (issue #711, FIX B); printer-wide schedules use TotalPrintHours.
                         double? hoursUntilDue = null;
                         if (effectiveHours.HasValue)
                         {
-                            if (stats == null && !effectiveDays.HasValue)
+                            bool perToolScope = deployment.ToolheadId.HasValue
+                                && toolheadHours.ContainsKey(deployment.ToolheadId.Value);
+
+                            if (stats == null && !effectiveDays.HasValue && !perToolScope)
                             {
                                 continue;
                             }
 
-                            if (stats != null)
+                            double? hoursSinceLast = null;
+                            if (perToolScope)
                             {
-                                double hoursSinceLast = lastLog?.PrinterHoursAtMaintenance is double baselineHours
+                                double currentToolheadHours = toolheadHours[deployment.ToolheadId!.Value];
+                                double toolheadBaseline = lastLog?.ToolheadHoursAtMaintenance ?? 0;
+                                hoursSinceLast = Math.Max(0, currentToolheadHours - toolheadBaseline);
+                            }
+                            else if (stats != null)
+                            {
+                                hoursSinceLast = lastLog?.PrinterHoursAtMaintenance is double baselineHours
                                     ? Math.Max(0, stats.TotalPrintHours - baselineHours)
                                     : stats.TotalPrintHours;
-                                hoursUntilDue = effectiveHours.Value - hoursSinceLast;
+                            }
+
+                            if (hoursSinceLast.HasValue)
+                            {
+                                hoursUntilDue = effectiveHours.Value - hoursSinceLast.Value;
                             }
                         }
 
@@ -482,7 +552,9 @@ public class MaintenanceController(
                             continue;
                         }
 
-                        string taskId = $"{printer.Id}-{task.Id}";
+                        string taskId = deployment.ToolheadId.HasValue
+                            ? $"{printer.Id}-{task.Id}-{deployment.ToolheadId}"
+                            : $"{printer.Id}-{task.Id}";
 
                         tasks.Add(new UpcomingMaintenanceTaskDto(
                             taskId,
@@ -500,7 +572,8 @@ public class MaintenanceController(
                             effectiveHoursUntilDue,
                             isOverdue,
                             isDueToday,
-                            lastLog?.PerformedAt));
+                            lastLog?.PerformedAt,
+                            deployment.ToolheadId));
                     }
                 }
             }
@@ -565,6 +638,11 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceLog> logs = await _logRepository.GetByPrinterIdAsync(printerId, ct);
+            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                logs = logs.Where(l => !l.ToolheadId.HasValue).ToList();
+            }
+
             return Ok(logs);
         }
         catch (Exception ex)
@@ -585,12 +663,73 @@ public class MaintenanceController(
         {
             PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(request.PrinterId, ct);
 
+            // Resolve the authoritative toolhead scope (issue #711, FIX C). When a deployment
+            // (schedule) is referenced, its ToolheadId is authoritative: load it, verify it
+            // belongs to the same printer, and reject a client-supplied ToolheadId that
+            // contradicts the deployment's scope. This prevents a log that claims one toolhead
+            // while pointing at a schedule scoped to another.
+            Guid? effectiveToolheadId = request.ToolheadId;
+            if (request.DeploymentId.HasValue)
+            {
+                PrinterMaintenanceSchedule? deployment = await _deploymentRepository.GetByIdAsync(request.DeploymentId.Value, ct);
+                if (deployment is null)
+                {
+                    return BadRequest($"Deployment {request.DeploymentId} was not found.");
+                }
+
+                if (deployment.PrinterId != request.PrinterId)
+                {
+                    return BadRequest($"Deployment {request.DeploymentId} belongs to printer {deployment.PrinterId}, not {request.PrinterId}.");
+                }
+
+                if (request.ToolheadId.HasValue && request.ToolheadId != deployment.ToolheadId)
+                {
+                    return BadRequest(
+                        $"Toolhead {request.ToolheadId} contradicts deployment {request.DeploymentId} " +
+                        $"(scope: {deployment.ToolheadId?.ToString() ?? "printer-wide"}).");
+                }
+
+                // Deployment scope wins so the log is always consistent with its schedule.
+                effectiveToolheadId = deployment.ToolheadId;
+            }
+
+            if (effectiveToolheadId.HasValue
+                && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                return BadRequest("Per-tool maintenance is disabled.");
+            }
+
+            // Validate the (resolved) per-toolhead scope (issue #711, F6). Null = printer-wide
+            // log. When set, the toolhead must be a physical dock on the target printer;
+            // MMU/AMS gates are not eligible for maintenance scope.
+            if (effectiveToolheadId.HasValue)
+            {
+                Printer? printer = await _printersService.FindByIdWithIncludesAsync(request.PrinterId, ct);
+                Toolhead? toolhead = printer?.Toolheads.FirstOrDefault(t => t.Id == effectiveToolheadId.Value);
+                if (toolhead is null)
+                {
+                    return BadRequest($"Toolhead {effectiveToolheadId} does not belong to printer {request.PrinterId}.");
+                }
+
+                if (toolhead.ToolheadType != ToolheadType.Physical)
+                {
+                    return BadRequest($"Toolhead {effectiveToolheadId} is not a physical toolhead and is not eligible for maintenance scope.");
+                }
+            }
+
+            // For per-toolhead-scoped logs, capture the toolhead's cumulative hours so the next
+            // accrual measures from this point (issue #711, FIX B).
+            double? toolheadHoursAtMaintenance = effectiveToolheadId.HasValue
+                ? await _toolheadStatisticsRepository.GetCumulativeHoursAsync(effectiveToolheadId.Value, ct)
+                : null;
+
             var log = new MaintenanceLog
             {
                 Id = Guid.NewGuid(),
                 PrinterId = request.PrinterId,
                 PrinterMaintenanceScheduleId = request.DeploymentId,
                 MaintenanceTaskId = request.TaskId,
+                ToolheadId = effectiveToolheadId,
                 TaskName = request.TaskName ?? "Manual Maintenance",
                 Component = request.ComponentName,
                 PerformedAt = request.PerformedAt ?? DateTime.UtcNow,
@@ -599,7 +738,8 @@ public class MaintenanceController(
                 DurationMinutes = request.DurationMinutes,
                 Cost = request.Cost,
                 PartsReplaced = request.PartsReplaced,
-                PrinterHoursAtMaintenance = stats?.TotalPrintHours
+                PrinterHoursAtMaintenance = stats?.TotalPrintHours,
+                ToolheadHoursAtMaintenance = toolheadHoursAtMaintenance
             };
 
             MaintenanceLog createdLog = await _logRepository.AddAsync(log, ct);
@@ -648,6 +788,8 @@ public class MaintenanceController(
     {
         try
         {
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+
             // Get all statistics with printer info
             var allStats = await _statisticsRepository.GetAllAsync(ct);
 
@@ -657,12 +799,27 @@ public class MaintenanceController(
             // Get recent logs to determine last performed dates (last 2 years)
             var twoYearsAgo = DateTime.UtcNow.AddYears(-2);
             var logs = await _logRepository.GetAllAsync(twoYearsAgo, null, ct);
+            if (!includeToolheadScope)
+            {
+                logs = logs.Where(l => !l.ToolheadId.HasValue).ToList();
+            }
+
             var logsByPrinter = logs.GroupBy(l => l.PrinterId).ToDictionary(g => g.Key, g => g.ToList());
 
             // Batch-load all deployments in one query instead of per-printer
             var allPrinterIds = allPrinters.Select(p => p.Id).ToList();
             var allDeployments = await _deploymentRepository.GetActiveWithTasksAsync(allPrinterIds, ct);
+            if (!includeToolheadScope)
+            {
+                allDeployments = allDeployments.Where(d => !d.ToolheadId.HasValue).ToList();
+            }
+
             var deploymentsByPrinter = allDeployments.ToLookup(d => d.PrinterId);
+
+            // Per-toolhead cumulative hours so per-tool schedules project against their own
+            // toolhead's hours, not the printer-wide counter (issue #711, round-5 FIX 3).
+            IReadOnlyDictionary<Guid, double> toolheadHours =
+                await _toolheadStatisticsRepository.GetCumulativeHoursByPrintersAsync(allPrinterIds, ct);
 
             var result = new List<FleetPrinterStatisticsDto>();
 
@@ -677,8 +834,19 @@ public class MaintenanceController(
                 int? daysUntilNextMaintenance = null;
                 string? nextMaintenanceTask = null;
 
-                // Track tasks already evaluated (avoid duplicates from multiple plans)
-                HashSet<Guid> processedTasks = [];
+                // Last log per (task, toolhead scope) so per-toolhead logs do not contaminate
+                // printer-wide baselines and vice versa (issue #711, round-5 FIX 3).
+                Dictionary<(Guid TaskId, Guid? ToolheadId), MaintenanceLog> lastLogByTaskAndScope = printerLogs
+                    .Where(l => l.MaintenanceTaskId.HasValue)
+                    .GroupBy(l => (l.MaintenanceTaskId!.Value, l.ToolheadId))
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
+
+                // Track (task, toolhead scope) pairs already evaluated so a per-tool schedule on
+                // each head is projected independently instead of collapsing to a single task
+                // (issue #711, round-5 FIX 3). The aggregate below keeps the most-urgent result.
+                HashSet<(Guid TaskId, Guid? ToolheadId)> processedTasks = [];
 
                 foreach (var deployment in deployments)
                 {
@@ -690,7 +858,7 @@ public class MaintenanceController(
                     foreach (var planTask in deployment.MaintenancePlan.PlanTasks)
                     {
                         var task = planTask.MaintenanceTask;
-                        if (task == null || !task.IsActive || !processedTasks.Add(task.Id))
+                        if (task == null || !task.IsActive || !processedTasks.Add((task.Id, deployment.ToolheadId)))
                         {
                             continue;
                         }
@@ -699,18 +867,32 @@ public class MaintenanceController(
                         double? effectiveHours = planTask.IntervalHoursOverride ?? task.IntervalHours;
                         int? effectiveDays = planTask.IntervalDaysOverride ?? task.IntervalDays;
 
-                        // Find the last log for this task
-                        var lastLog = printerLogs
-                            .Where(l => l.MaintenanceTaskId == task.Id)
-                            .OrderByDescending(l => l.PerformedAt)
-                            .FirstOrDefault();
+                        // Last log for this exact (task, toolhead scope) pair.
+                        lastLogByTaskAndScope.TryGetValue((task.Id, deployment.ToolheadId), out MaintenanceLog? lastLog);
 
                         DateTime lastPerformed = lastLog?.PerformedAt ?? deployment.DeployedAt;
                         DateTime nextDue;
 
                         if (effectiveHours.HasValue)
                         {
-                            double hoursSinceLastMaintenance = stats?.TotalPrintHours ?? 0;
+                            // Per-tool schedules accrue against their own toolhead's cumulative
+                            // hours; printer-wide schedules use TotalPrintHours. Each measures from
+                            // its own captured baseline (issue #711, round-5 FIX 3).
+                            double hoursSinceLastMaintenance;
+                            if (deployment.ToolheadId.HasValue
+                                && toolheadHours.TryGetValue(deployment.ToolheadId.Value, out double currentToolheadHours))
+                            {
+                                double toolheadBaseline = lastLog?.ToolheadHoursAtMaintenance ?? 0;
+                                hoursSinceLastMaintenance = Math.Max(0, currentToolheadHours - toolheadBaseline);
+                            }
+                            else
+                            {
+                                double totalHours = stats?.TotalPrintHours ?? 0;
+                                hoursSinceLastMaintenance = lastLog?.PrinterHoursAtMaintenance is double baselineHours
+                                    ? Math.Max(0, totalHours - baselineHours)
+                                    : totalHours;
+                            }
+
                             double hoursRemaining = effectiveHours.Value - hoursSinceLastMaintenance;
                             nextDue = DateTime.UtcNow.AddDays(hoursRemaining / 8.0);
                         }
@@ -866,7 +1048,8 @@ public class MaintenanceController(
             DateTime start = startDate ?? DateTime.UtcNow.AddMonths(-6);
             DateTime end = endDate ?? DateTime.UtcNow;
 
-            var trends = await _logRepository.GetTrendsAsync(start, end, ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var trends = await _logRepository.GetTrendsAsync(start, end, includeToolheadScope, ct);
 
             var response = trends.Select(t => new MaintenanceTrendResponse(
                 t.Date,
@@ -893,7 +1076,8 @@ public class MaintenanceController(
     {
         try
         {
-            var lifespans = await _logRepository.GetComponentLifespanAsync(ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var lifespans = await _logRepository.GetComponentLifespanAsync(includeToolheadScope, ct);
 
             var response = lifespans.Select(l => new ComponentLifespanResponse(
                 l.Component,
@@ -920,7 +1104,8 @@ public class MaintenanceController(
     {
         try
         {
-            var costs = await _logRepository.GetCostAnalysisAsync(months, ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var costs = await _logRepository.GetCostAnalysisAsync(months, includeToolheadScope, ct);
 
             var response = costs.Select(c => new MaintenanceCostResponse(
                 c.Month,
@@ -944,7 +1129,8 @@ public class MaintenanceController(
     {
         try
         {
-            var uptimes = await _logRepository.GetPrinterUptimeAsync(ct);
+            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            var uptimes = await _logRepository.GetPrinterUptimeAsync(includeToolheadScope, ct);
 
             var response = uptimes.Select(u => new PrinterUptimeResponse(
                 u.PrinterName,
@@ -980,7 +1166,8 @@ public record ResolveAlertRequest(
 
 public record ResolveAlertResponse(
     MaintenanceAlert Alert,
-    MaintenanceLog MaintenanceLog);
+    MaintenanceLog? MaintenanceLog,
+    bool Created = true);
 
 public record CreateMaintenanceLogRequest(
     Guid PrinterId,
@@ -993,7 +1180,8 @@ public record CreateMaintenanceLogRequest(
     string? Notes,
     int? DurationMinutes,
     decimal? Cost,
-    string? PartsReplaced);
+    string? PartsReplaced,
+    Guid? ToolheadId = null);
 
 public record UpdateMaintenanceModeRequest(bool InMaintenance);
 

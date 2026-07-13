@@ -63,7 +63,9 @@ public sealed class FilamentCoverageSpoolResolver(
         foreach (Printer printer in printers)
         {
             HashSet<int> spoolIds = printer.Toolheads
-                .Where(t => t.CurrentSpoolId.HasValue)
+                .Where(t =>
+                    ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads)
+                    && t.CurrentSpoolId.HasValue)
                 .Select(t => t.CurrentSpoolId!.Value)
                 .ToHashSet();
             if (printer.CurrentSpoolId.HasValue)

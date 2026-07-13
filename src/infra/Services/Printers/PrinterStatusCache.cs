@@ -21,9 +21,45 @@ public interface IPrinterStatusCacheReader
     PrinterStatusDto? GetStatus(Guid printerId);
 
     /// <summary>
+    /// Gets the cached status together with the UTC time at which the cache last received it.
+    /// Consumers that make safety-sensitive decisions must validate freshness before trusting
+    /// live-only fields such as MMU active tool/gate telemetry.
+    /// </summary>
+    PrinterStatusCacheSnapshot? GetSnapshot(Guid printerId);
+
+    /// <summary>
     /// Get all cached printer statuses.
     /// </summary>
     IReadOnlyDictionary<Guid, PrinterStatusDto> GetAllStatuses();
+}
+
+/// <summary>
+/// A printer status and the UTC time at which it entered the in-memory cache.
+/// </summary>
+public sealed record PrinterStatusCacheSnapshot(PrinterStatusDto Status, DateTime UpdatedAtUtc);
+
+/// <summary>
+/// Shared freshness policy for decisions that require live printer telemetry.
+/// </summary>
+public static class PrinterStatusFreshness
+{
+    /// <summary>
+    /// Maximum accepted age for a cached live status. Backend polling normally refreshes in
+    /// seconds; two minutes tolerates transient reconnects without treating old state as live.
+    /// </summary>
+    public static TimeSpan MaximumAge { get; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Returns whether a snapshot is online, not future-dated, and within
+    /// <see cref="MaximumAge"/> of <paramref name="utcNow"/>.
+    /// </summary>
+    public static bool IsFreshOnline(PrinterStatusCacheSnapshot? snapshot, DateTime utcNow)
+    {
+        return snapshot is not null
+            && snapshot.Status.IsOnline
+            && snapshot.UpdatedAtUtc <= utcNow
+            && utcNow - snapshot.UpdatedAtUtc <= MaximumAge;
+    }
 }
 
 /// <summary>
@@ -36,6 +72,7 @@ public interface IPrinterStatusCacheReader
 public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCacheWriter
 {
     private readonly Dictionary<Guid, PrinterStatusDto> _cache = new();
+    private readonly Dictionary<Guid, DateTime> _updatedAtUtc = new();
     private readonly Lock _lockObj = new();
     private readonly ILogger<PrinterStatusCache> _logger;
     private readonly IDiagnosticChannelService _diagnostics;
@@ -63,6 +100,17 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         }
     }
 
+    public PrinterStatusCacheSnapshot? GetSnapshot(Guid printerId)
+    {
+        lock (_lockObj)
+        {
+            return _cache.TryGetValue(printerId, out PrinterStatusDto? status)
+                && _updatedAtUtc.TryGetValue(printerId, out DateTime updatedAtUtc)
+                    ? new PrinterStatusCacheSnapshot(status, updatedAtUtc)
+                    : null;
+        }
+    }
+
     public IReadOnlyDictionary<Guid, PrinterStatusDto> GetAllStatuses()
     {
         lock (_lockObj)
@@ -78,6 +126,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         {
             _cache.TryGetValue(status.Id, out PrinterStatusDto? existing);
             _cache[status.Id] = status.WithNormalizedFileName();
+            _updatedAtUtc[status.Id] = DateTime.UtcNow;
             LogTransitionIfChanged(status.Id, existing, status);
             transition = DetectOfflineTransition(existing, status);
         }
@@ -99,6 +148,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
             {
                 _cache.TryGetValue(status.Id, out PrinterStatusDto? existing);
                 _cache[status.Id] = status.WithNormalizedFileName();
+                _updatedAtUtc[status.Id] = DateTime.UtcNow;
                 LogTransitionIfChanged(status.Id, existing, status);
                 if (DetectOfflineTransition(existing, status) is AttentionChangeKind kind)
                 {
@@ -125,6 +175,11 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
                 with
             { SpoolInfo = spoolInfo };
             _cache[printerId] = updated;
+            if (!_updatedAtUtc.ContainsKey(printerId))
+            {
+                _updatedAtUtc[printerId] = DateTime.UtcNow;
+            }
+
             return updated;
         }
     }
@@ -134,6 +189,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         lock (_lockObj)
         {
             _cache.Remove(printerId);
+            _updatedAtUtc.Remove(printerId);
         }
     }
 
@@ -142,6 +198,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         lock (_lockObj)
         {
             _cache.Clear();
+            _updatedAtUtc.Clear();
         }
     }
 

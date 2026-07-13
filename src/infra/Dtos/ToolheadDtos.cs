@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 
@@ -108,4 +109,14 @@ public record ToolheadDto(
     ToolheadType ToolheadType = ToolheadType.Physical,
     int? CurrentSpoolId = null,
     string? CurrentMaterial = null,
-    string? CurrentFilamentColor = null);
+    string? CurrentFilamentColor = null,
+
+    // Cumulative print-hours accrued to this specific toolhead (issue #711, F6 backend).
+    // The API's global JsonSerializerOptions has DefaultIgnoreCondition = WhenWritingNull,
+    // so this attribute overrides that to force emission — the property is always present
+    // in the JSON payload with either a numeric value (including 0.0 for supported printers
+    // that have accrued no hours yet) or explicit null (feature disabled, or printer does
+    // not support per-tool attribution). #719 UI consumers rely on the deterministic shape
+    // to distinguish "not applicable" from "zero hours".
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    double? CumulativePrintHours = null);

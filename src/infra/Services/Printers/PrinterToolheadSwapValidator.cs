@@ -275,17 +275,18 @@ public class PrinterToolheadSwapValidator(
         Toolhead? toolhead = printer.Toolheads?.FirstOrDefault(t => t.Index == toolheadIndex);
         if (toolhead is not null)
         {
-            // Materialized row: MmuGate → Index-1 (null for the shared hotend at index 0),
-            // Physical → identity.
-            return ToolheadIndexMapper.ToGcodeToolIndex(toolhead);
+            return ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(
+                toolhead,
+                printer.Toolheads ?? []);
         }
 
         // No materialized row. Synthesize a descriptor from the printer's capability so a
         // valid-but-unmaterialized lane is still validated instead of blindly bound.
         if (toolheadIndex == 0)
         {
-            // Legacy single-tool physical hotend (T0): identity mapping to G-code tool 0.
-            return 0;
+            // Index 0 is a filament source only on non-MMU printers. On an MMU printer it is the
+            // shared physical hotend and gate 1 owns G-code T0.
+            return IsMmuCapable(printer) ? null : 0;
         }
 
         // A gate index (> 0) is only meaningful on an MMU / multi-material printer, where the
