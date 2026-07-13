@@ -124,7 +124,7 @@ describe('Navigation rail sections', () => {
     const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(15);
+      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(16);
     });
 
     const hrefs = Array.from(desktopNav.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.getAttribute('href'));
