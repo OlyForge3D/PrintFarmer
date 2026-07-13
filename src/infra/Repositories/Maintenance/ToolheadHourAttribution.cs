@@ -7,10 +7,10 @@
 /// <para>
 /// Before this type, external-history print-hour deltas were split equally across every physical
 /// toolhead, which silently advanced the wear of idle toolheads (for example T1 while only T0 was
-/// printing) and under-credited the toolhead that actually did the work. Callers that DO have
-/// per-tool consumption telemetry can now build a weighted attribution via <c>FromWeights</c>;
-/// callers that do not fall back to <see cref="EqualSplit"/>, which flags the result as
-/// <see cref="IsApproximated"/> so the sync pipeline can emit an operator-visible diagnostic.
+/// printing) and under-credited the toolhead that actually did the work. Attributions are now built
+/// only from real per-tool telemetry (per-tool consumption or G-code tool activity) via
+/// <c>FromWeights</c>. When no such telemetry exists the caller leaves the delta unattributed rather
+/// than fabricating an equal split (issue #711, round-10 Finding 1).
 /// </para>
 /// </summary>
 public sealed class ToolheadHourAttribution
@@ -46,9 +46,10 @@ public sealed class ToolheadHourAttribution
     public double SourceHours { get; }
 
     /// <summary>
-    /// <c>true</c> when the distribution is an equal-split estimate rather than derived from
-    /// real per-tool consumption. Approximated attributions should be logged so operators know the
-    /// per-toolhead wear for the covered job is only an estimate.
+    /// <c>true</c> when the distribution is an estimate rather than derived from real per-tool
+    /// consumption. Retained for telemetry/back-compat; every attribution built today is derived
+    /// from real weights via <see cref="FromWeights(IReadOnlyDictionary{Guid, double})"/> and is
+    /// therefore non-approximated (issue #711, round-10 Finding 1 removed the equal-split path).
     /// </summary>
     public bool IsApproximated { get; }
 
@@ -98,37 +99,5 @@ public sealed class ToolheadHourAttribution
             kvp => kvp.Key,
             kvp => kvp.Value * sourceHours);
         return new ToolheadHourAttribution(hours, weights, sourceHours, isApproximated: false);
-    }
-
-    /// <summary>
-    /// Distributes <paramref name="totalHours"/> equally across <paramref name="toolheadIds"/>. This
-    /// is the conservative fallback used when no per-tool consumption telemetry is available; the
-    /// result is flagged <see cref="IsApproximated"/>. Returns an empty attribution when there are no
-    /// toolheads or the total is not positive.
-    /// </summary>
-    public static ToolheadHourAttribution EqualSplit(IReadOnlyCollection<Guid> toolheadIds, double totalHours)
-    {
-        ArgumentNullException.ThrowIfNull(toolheadIds);
-
-        if (toolheadIds.Count == 0 || totalHours <= 0)
-        {
-            return new ToolheadHourAttribution(
-                new Dictionary<Guid, double>(),
-                new Dictionary<Guid, double>(),
-                Math.Max(0, totalHours),
-                isApproximated: true);
-        }
-
-        double perToolhead = totalHours / toolheadIds.Count;
-        double perToolheadWeight = 1.0 / toolheadIds.Count;
-        Dictionary<Guid, double> hours = new(toolheadIds.Count);
-        Dictionary<Guid, double> weights = new(toolheadIds.Count);
-        foreach (Guid id in toolheadIds)
-        {
-            hours[id] = perToolhead;
-            weights[id] = perToolheadWeight;
-        }
-
-        return new ToolheadHourAttribution(hours, weights, totalHours, isApproximated: true);
     }
 }

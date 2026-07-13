@@ -1288,6 +1288,11 @@ public sealed class MoonrakerSubscriptionService(
 
         if (mmu.TryGetProperty("tool", out JsonElement tool) && tool.ValueKind == JsonValueKind.Number)
         {
+            // TODO(#711): Happy Hare exposes the live active tool here, but per-toolhead wear
+            // attribution (Printer.SupportsPerToolAttribution) needs per-tool weights accumulated
+            // over the whole statistics-sync interval, not just the latest snapshot. Until this
+            // backend records active-tool dwell/consumption history, the printer stays
+            // SupportsPerToolAttribution=false and external-history hours remain unattributed.
             state.MmuActiveTool = tool.GetInt32();
         }
 

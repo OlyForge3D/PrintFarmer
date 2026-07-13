@@ -24,6 +24,7 @@ public class PrintStatsToolheadAttributionTests
             statsExisted: true,
             externalSyncSuccess: false,
             perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
             externalDelta: 12,
             repository.Object,
             CancellationToken.None);
@@ -50,6 +51,7 @@ public class PrintStatsToolheadAttributionTests
                 statsExisted: true,
                 externalSyncSuccess: true,
                 perToolMaintenanceEnabled: true,
+                supportsPerToolAttribution: true,
                 externalDelta: 0,
                 repository.Object,
                 CancellationToken.None);
@@ -75,6 +77,7 @@ public class PrintStatsToolheadAttributionTests
             statsExisted: true,
             externalSyncSuccess: true,
             perToolMaintenanceEnabled: false,
+            supportsPerToolAttribution: true,
             externalDelta: 4,
             repository.Object,
             CancellationToken.None);
@@ -86,33 +89,6 @@ public class PrintStatsToolheadAttributionTests
                 It.IsAny<ToolheadHourAttribution>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
-    }
-
-    [Fact]
-    public async Task IncrementActiveToolheadHoursAsync_MultiplePhysicalToolheads_SplitsDeltaEqually()
-    {
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
-            .Options;
-        await using var db = new AppDbContext(options);
-        Guid printerId = Guid.NewGuid();
-        Toolhead primary = CreateToolhead(printerId, ToolheadType.Physical, index: 0, cumulativeHours: 10);
-        Toolhead secondary = CreateToolhead(printerId, ToolheadType.Physical, index: 1, cumulativeHours: 4);
-        Toolhead mmuGate = CreateToolhead(printerId, ToolheadType.MmuGate, index: 2, cumulativeHours: 7);
-        db.Toolheads.AddRange(primary, secondary, mmuGate);
-        await db.SaveChangesAsync();
-        var repository = new EfToolheadStatisticsRepository(db);
-
-        IReadOnlyList<Guid> credited = await repository.IncrementActiveToolheadHoursAsync(
-            printerId,
-            deltaHours: 6,
-            CancellationToken.None);
-        await db.SaveChangesAsync();
-
-        credited.Should().BeEquivalentTo([primary.Id, secondary.Id]);
-        primary.CumulativePrintHours.Should().Be(13);
-        secondary.CumulativePrintHours.Should().Be(7);
-        mmuGate.CumulativePrintHours.Should().Be(7);
     }
 
     [Fact]
@@ -177,43 +153,86 @@ public class PrintStatsToolheadAttributionTests
     }
 
     [Fact]
-    public async Task AttributeExternalToolheadHoursAsync_NoTelemetry_EqualSplitEmitsApproximationDiagnostic()
+    public async Task AttributeExternalToolheadHoursAsync_CapabilityOff_NoTelemetry_LeavesUnattributedWithDiagnostic()
     {
-        // Issue #711 round-7 Finding 3: when no per-tool consumption telemetry is available the
-        // external delta is split equally, but an operator-visible diagnostic must be emitted so it
-        // is clear the per-toolhead wear is only an estimate.
+        // Issue #711 round-10 Finding 1: a backend without per-tool attribution capability must NOT
+        // fabricate per-toolhead wear by equal-splitting the external delta across idle heads. No
+        // wear is credited and an operator-visible diagnostic is emitted.
+        Mock<IToolheadStatisticsRepository> repository = new(MockBehavior.Strict);
+        Mock<ILogger> logger = new();
+
+        IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
+            Guid.NewGuid(),
+            statsExisted: true,
+            externalSyncSuccess: true,
+            perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: false,
+            externalDelta: 8,
+            repository.Object,
+            CancellationToken.None,
+            logger.Object);
+
+        credited.Should().BeEmpty();
+
+        // No repository access at all: the capability short-circuit must return before any query or
+        // mutation (strict mock would throw on any unexpected call).
+        repository.Verify(
+            candidate => candidate.ApplyToolheadHoursAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<ToolheadHourAttribution>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("unattributed")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task AttributeExternalToolheadHoursAsync_CapabilityOn_NoTelemetry_LeavesUnattributedWithDiagnostic()
+    {
+        // Issue #711 round-10 Finding 1: even a capable backend that produces no fresh active-tool
+        // telemetry this cycle must leave the delta unattributed rather than equal-split it. Idle
+        // heads keep their hours and a diagnostic is emitted.
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         await using var db = new AppDbContext(options);
         Guid printerId = Guid.NewGuid();
-        Toolhead t0 = CreateToolhead(printerId, ToolheadType.Physical, index: 0, cumulativeHours: 0);
-        Toolhead t1 = CreateToolhead(printerId, ToolheadType.Physical, index: 1, cumulativeHours: 0);
+        Toolhead t0 = CreateToolhead(printerId, ToolheadType.Physical, index: 0, cumulativeHours: 5);
+        Toolhead t1 = CreateToolhead(printerId, ToolheadType.Physical, index: 1, cumulativeHours: 3);
         db.Toolheads.AddRange(t0, t1);
         await db.SaveChangesAsync();
         var repository = new EfToolheadStatisticsRepository(db);
         Mock<ILogger> logger = new();
 
+        // No status cache supplied → no fresh active-tool telemetry available.
         IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
             printerId,
             statsExisted: true,
             externalSyncSuccess: true,
             perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
             externalDelta: 8,
             repository,
             CancellationToken.None,
             logger.Object);
         await db.SaveChangesAsync();
 
-        credited.Should().BeEquivalentTo([t0.Id, t1.Id]);
-        t0.CumulativePrintHours.Should().BeApproximately(4.0, 0.0001);
-        t1.CumulativePrintHours.Should().BeApproximately(4.0, 0.0001);
+        credited.Should().BeEmpty();
+        t0.CumulativePrintHours.Should().Be(5, "no telemetry means no fabricated wear");
+        t1.CumulativePrintHours.Should().Be(3, "no telemetry means no fabricated wear");
 
         logger.Verify(
             l => l.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("approximated")),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("unattributed")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -258,6 +277,7 @@ public class PrintStatsToolheadAttributionTests
             statsExisted: true,
             externalSyncSuccess: true,
             perToolMaintenanceEnabled: true,
+            supportsPerToolAttribution: true,
             externalDelta: 8,
             repository,
             CancellationToken.None,

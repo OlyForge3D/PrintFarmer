@@ -317,6 +317,7 @@ public class PrintStatsSyncHostedService(
                 statsExisted,
                 attributionEligible,
                 featureGate.IsEnabled(OperatorFeature.MultiSlotFallback),
+                printer.SupportsPerToolAttribution,
                 externalDelta,
                 toolheadStatsRepo,
                 ct,
@@ -353,6 +354,7 @@ public class PrintStatsSyncHostedService(
         bool statsExisted,
         bool externalSyncSuccess,
         bool perToolMaintenanceEnabled,
+        bool supportsPerToolAttribution,
         double externalDelta,
         IToolheadStatisticsRepository toolheadStatsRepo,
         CancellationToken ct,
@@ -367,6 +369,21 @@ public class PrintStatsSyncHostedService(
             return [];
         }
 
+        // Per-toolhead wear must be backed by real per-tool telemetry. When the backend cannot
+        // attribute the external-history delta to specific toolheads (issue #711, round-10
+        // Finding 1) we must NOT fabricate wear by equal-splitting the delta across idle heads.
+        // Leave the delta unattributed for per-toolhead wear; the caller has already advanced the
+        // printer-wide totals and the ExternalPrintHours baseline for this cycle.
+        if (!supportsPerToolAttribution)
+        {
+            logger?.LogInformation(
+                "Printer {PrinterId} has no per-tool attribution capability; per-toolhead wear is " +
+                "unattributed for this cycle ({Delta:F2}h external history delta) (issue #711).",
+                printerId,
+                externalDelta);
+            return [];
+        }
+
         IReadOnlyDictionary<int, Guid> physicalToolheads =
             await toolheadStatsRepo.GetPhysicalToolheadIdsByIndexAsync(printerId, ct);
         if (physicalToolheads.Count == 0)
@@ -374,7 +391,6 @@ public class PrintStatsSyncHostedService(
             return [];
         }
 
-        ToolheadHourAttribution attribution;
         PrinterStatusCacheSnapshot? snapshot = statusCache?.GetSnapshot(printerId);
         MmuStatusDto? mmuStatus = PrinterStatusFreshness.IsFreshOnline(snapshot, DateTime.UtcNow)
             ? snapshot!.Status.MmuStatus
@@ -388,26 +404,26 @@ public class PrintStatsSyncHostedService(
         if (activeToolIndex.HasValue
             && physicalToolheads.TryGetValue(activeToolIndex.Value, out Guid activeToolheadId))
         {
-            attribution = ToolheadHourAttribution.FromWeights(
+            // NOTE (issue #711, round-10 Finding 1): this credits the whole interval delta to the
+            // latest-known active tool. It is an approximation — it cannot represent tool switches
+            // that happened within the sync interval — and is only reachable for backends that opt
+            // in via Printer.SupportsPerToolAttribution. Accumulating per-tool weights over the
+            // interval is tracked as future work behind the same capability flag.
+            ToolheadHourAttribution attribution = ToolheadHourAttribution.FromWeights(
                 new Dictionary<Guid, double> { [activeToolheadId] = 1.0 },
                 externalDelta);
-        }
-        else
-        {
-            // TODO(#711): derive Moonraker external-history deltas from accumulated per-tool
-            // activity rather than a last-known status snapshot.
-            // TODO(#711): add equivalent per-tool activity telemetry for OctoPrint history.
-            attribution = ToolheadHourAttribution.EqualSplit(
-                [.. physicalToolheads.Values],
-                externalDelta);
-            logger?.LogInformation(
-                "Per-toolhead wear for printer {PrinterId} is approximated by equal split: no fresh " +
-                "active-tool telemetry maps the {Delta:F2}h external history delta (issue #711).",
-                printerId,
-                externalDelta);
+            return await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, attribution, ct);
         }
 
-        return await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, attribution, ct);
+        // Capable backend but no fresh active-tool telemetry this cycle: leave the delta
+        // unattributed for per-toolhead wear rather than fabricate an equal split (Finding 1).
+        logger?.LogInformation(
+            "Printer {PrinterId} supports per-tool attribution but produced no fresh active-tool " +
+            "telemetry this cycle; per-toolhead wear is unattributed for the {Delta:F2}h external " +
+            "history delta (issue #711).",
+            printerId,
+            externalDelta);
+        return [];
     }
 
     private async Task<ExternalSyncOutcome> SyncExternalPrinterStatisticsAsync(

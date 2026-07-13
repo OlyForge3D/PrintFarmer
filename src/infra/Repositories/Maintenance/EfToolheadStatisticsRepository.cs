@@ -60,29 +60,6 @@ public class EfToolheadStatisticsRepository : IToolheadStatisticsRepository
             .ToDictionaryAsync(t => t.Index, t => t.Id, ct);
     }
 
-    public async Task<IReadOnlyList<Guid>> IncrementActiveToolheadHoursAsync(Guid printerId, double deltaHours, CancellationToken ct = default)
-    {
-        // Load the printer's physical toolheads TRACKED so mutations are captured by the
-        // shared scoped context's next SaveChanges. MMU/AMS gates are not eligible spool
-        // sources for wear attribution.
-        List<Toolhead> toolheads = await _context.Toolheads
-            .Where(t => t.PrinterId == printerId && t.ToolheadType == ToolheadType.Physical)
-            .ToListAsync(ct);
-
-        if (toolheads.Count == 0 || deltaHours <= 0)
-        {
-            return [];
-        }
-
-        // Until per-job tool telemetry is available, equal utilization is the conservative
-        // estimate: secondary physical heads accrue wear instead of being permanently ignored,
-        // while the printer-wide delta is not multiplied across the toolheads.
-        ToolheadHourAttribution attribution = ToolheadHourAttribution.EqualSplit(
-            [.. toolheads.Select(t => t.Id)],
-            deltaHours);
-        return ApplyToAll(toolheads, attribution);
-    }
-
     public async Task<IReadOnlyList<Guid>> ApplyToolheadHoursAsync(Guid printerId, ToolheadHourAttribution attribution, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(attribution);

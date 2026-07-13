@@ -1641,6 +1641,13 @@ public class PrintersService(
             HasEnclosure = modelTemplate?.HasEnclosure ?? false,
             MultiMaterial = modelTemplate?.MultiMaterial ?? false,
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
+
+            // TODO(#711): SupportsPerToolAttribution stays false until a backend can attribute the
+            // external print-history delta to specific toolheads over a sync interval. Outstanding
+            // per-backend work: Moonraker (derive per-tool weights from Happy Hare active-tool
+            // history in MoonrakerSubscriptionService), OctoPrint (per-tool activity from history);
+            // PrusaLink/Sdcp/FlashForge/Core/TestEmulator expose no per-tool telemetry today. Until
+            // then the statistics sync leaves per-toolhead wear unattributed (round-10 Finding 1).
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
