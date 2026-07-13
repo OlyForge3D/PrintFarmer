@@ -4,6 +4,8 @@ import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import { Download, GripVertical, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
+import { useFleetFilamentCoverage } from "@/features/filament-coverage/hooks";
+import { FilamentCoverageBadge } from "@/features/filament-coverage/components/FilamentCoverageBadge";
 
 const DUE_SOON_HOURS = 24;
 
@@ -98,6 +100,10 @@ export function QueueJobsTable({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const dragCounter = useRef(0);
+  const { data: fleetCoverage } = useFleetFilamentCoverage();
+  const coverageByPrinterId = new Map(
+    (fleetCoverage?.printers ?? []).map((p) => [p.printerId, p]),
+  );
 
   const handleDragStart = useCallback((e: React.DragEvent<HTMLTableSectionElement>, index: number) => {
     setDragIndex(index);
@@ -402,8 +408,23 @@ export function QueueJobsTable({
 
               {/* Printer */}
               <td className="px-2 py-1 align-middle text-pf-text-secondary">
-                <div className="truncate" title={printerName}>
-                  {printerName}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="truncate" title={printerName}>
+                    {printerName}
+                  </span>
+                  {(() => {
+                    const printerId = jobWrapper.assignedPrinter?.id;
+                    if (!printerId) return null;
+                    const cov = coverageByPrinterId.get(printerId);
+                    if (cov?.status !== "runout") return null;
+                    return (
+                      <FilamentCoverageBadge
+                        status={cov.status}
+                        ariaContext={printerName}
+                        compact
+                      />
+                    );
+                  })()}
                 </div>
               </td>
 
