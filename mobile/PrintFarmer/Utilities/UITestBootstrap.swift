@@ -43,12 +43,27 @@ enum UITestBootstrap {
     /// authenticated operator shell as before.
     static let unauthenticatedLaunchArgument = "--uitesting-unauthenticated"
 
+    /// Additional launch argument that forces the shared operator feature
+    /// gate (#725) to resolve with `attentionEnabled == false` under the
+    /// authenticated bootstrap. When present alongside `launchArgument`,
+    /// the bootstrap wires the demo services but overrides
+    /// `capabilitiesService` with a `StubSystemCapabilitiesService` seeded
+    /// to a disabled snapshot, so `AttentionView` renders its
+    /// feature-disabled fallback and exposes the legacy Notifications /
+    /// Dashboard / Maintenance sheets. Required by issue #727 UI tests
+    /// which need deterministic access to the fallback Notifications sheet.
+    static let attentionDisabledLaunchArgument = "--uitesting-attention-disabled"
+
     /// Deterministic launch modes selectable from the UI-test harness.
     enum Mode: Equatable {
         /// Pre-authenticated demo operator shell (default).
         case authenticated
         /// Signed-out state so login-flow tests see `LoginView`.
         case unauthenticated
+        /// Pre-authenticated demo operator shell with the operator
+        /// feature gate forced to disabled — `AttentionView` renders the
+        /// fallback so the legacy Notifications sheet is reachable.
+        case authenticatedAttentionDisabled
     }
 
     /// Dedicated `UserDefaults` suite. Isolated from `.standard` so a
@@ -85,7 +100,10 @@ enum UITestBootstrap {
     /// Pure overload: resolves the launch mode from an explicit argument
     /// list so unit tests can exercise it without `CommandLine`.
     static func mode(in arguments: [String]) -> Mode {
-        arguments.contains(unauthenticatedLaunchArgument) ? .unauthenticated : .authenticated
+        if arguments.contains(attentionDisabledLaunchArgument) {
+            return .authenticatedAttentionDisabled
+        }
+        return arguments.contains(unauthenticatedLaunchArgument) ? .unauthenticated : .authenticated
     }
 
     /// Builds the deterministic UI-test environment for `mode`.
@@ -133,8 +151,19 @@ enum UITestBootstrap {
         // sign-in path off the network (DemoAuthService).
         let services = ServiceContainer.demo()
 
+        // #727: `.authenticatedAttentionDisabled` swaps the demo
+        // capabilities service for one whose resolved snapshot has
+        // `attentionEnabled == false`. `AttentionView.task` then reads
+        // that snapshot and renders `disabledFallback`, which is the
+        // only surface that exposes the legacy Notifications sheet.
+        if mode == .authenticatedAttentionDisabled {
+            var disabled = ResolvedSystemCapabilities.defaults
+            disabled.attentionEnabled = false
+            services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
+        }
+
         let auth = AuthViewModel(services: services)
-        if mode == .authenticated {
+        if mode == .authenticated || mode == .authenticatedAttentionDisabled {
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         }
 

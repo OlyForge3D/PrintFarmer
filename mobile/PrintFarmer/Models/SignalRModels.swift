@@ -42,6 +42,42 @@ struct JobQueueUpdateEntry: Codable, Identifiable, Sendable {
     let actualEndTime: Date?
 }
 
+/// Kind of change carried by an `attentionchanged` invalidation event
+/// (issue #707). Wire values are lowercase (`created`, `updated`,
+/// `resolved`). Unknown values decode to ``AttentionChangeKind/unknown`` so
+/// a rolling backend update never breaks the SignalR consumer.
+enum AttentionChangeKind: String, Codable, Sendable, Equatable {
+    case created
+    case updated
+    case resolved
+    /// Forward-compatibility bucket for change kinds the client does not
+    /// recognise. Callers must still treat it as an invalidation signal.
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AttentionChangeKind(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Invalidation payload for the lowercase `attentionchanged` SignalR event.
+///
+/// This is an invalidation hint, not a second source of item truth: the
+/// client always refetches `GET /api/attention`. The typed payload lets
+/// consumers coalesce per-item, log deterministic timings, and drop
+/// obviously malformed frames.
+///
+/// - `itemId` is the stable computed attention id (for example
+///   `"failure:{incidentId}"`).
+/// - `changeKind` is exactly `created`, `updated`, or `resolved`.
+/// - `occurredAt` is the authoritative source-transition/commit timestamp
+///   used by the 1s dispatch / 5s visible-refresh SLOs.
+struct AttentionChangedEvent: Codable, Sendable, Equatable {
+    let itemId: String
+    let changeKind: AttentionChangeKind
+    let occurredAt: Date
+}
+
 // MARK: - SignalR Connection State
 
 enum SignalRConnectionState: String, Sendable {
