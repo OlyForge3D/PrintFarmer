@@ -72,8 +72,19 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
                     .ToArray();
 
                 string[] allVersions = versionEntries.Select(v => v.version).ToArray();
-                string? latestAvailable = versionEntries.FirstOrDefault(v => v.available)?.version
-                                          ?? allVersions.FirstOrDefault();
+
+                // Legacy-safe latest resolution: when NO SlicerService rows
+                // exist (fresh install / legacy single-worker deployment), we
+                // return `null` so the frontend leaves jobs unpinned and the
+                // legacy worker's generic "orcaslicer" capability can still
+                // claim them. Once at least one row exists, we prefer the
+                // newest AVAILABLE version, falling back to the newest
+                // installed version only when everything is offline (so the
+                // UI still shows something in the Latest label).
+                string? latestAvailable = !anyServiceRows
+                    ? null
+                    : versionEntries.FirstOrDefault(v => v.available)?.version
+                      ?? allVersions.FirstOrDefault();
 
                 return new
                 {

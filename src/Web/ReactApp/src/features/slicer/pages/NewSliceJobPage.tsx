@@ -247,15 +247,15 @@ export const NewSliceJobPage: React.FC = () => {
   );
   const versionsForEngine = useMemo(() => engineInfo?.versions ?? [], [engineInfo]);
   const versionEntriesForEngine = useMemo(() => engineInfo?.versionEntries ?? [], [engineInfo]);
-  const availableVersionsForEngine = useMemo(
-    () => versionEntriesForEngine.filter(v => v.available).map(v => v.version),
-    [versionEntriesForEngine],
-  );
-  // Backend-computed "newest available" — prefer this over versions[0]; only
-  // falls back to versions[0] when the backend didn't return a latest (defensive).
+  // Backend-computed "newest online-available" version. The backend returns
+  // `null` in the legacy-single-worker case (no SlicerService rows registered
+  // at all), which is the signal to LEAVE JOBS UNPINNED so the legacy worker's
+  // generic "orcaslicer" capability can still claim them. Do NOT synthesize a
+  // fallback from availableVersionsForEngine here — that would defeat the null
+  // signal and force a pin that breaks legacy deployments (Vasquez R3).
   const latestAvailableForEngine = useMemo(
-    () => engineInfo?.latest ?? availableVersionsForEngine[0] ?? undefined,
-    [engineInfo, availableVersionsForEngine],
+    () => engineInfo?.latest ?? undefined,
+    [engineInfo],
   );
   useEffect(() => {
     // Reset the pin whenever engine changes so a stale pin doesn't survive.
