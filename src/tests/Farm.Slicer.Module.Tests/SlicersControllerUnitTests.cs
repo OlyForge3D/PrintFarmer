@@ -193,8 +193,8 @@ public class SlicersControllerUnitTests
         _ = json.Should().Contain("\"latest\":\"2.3.1\"");
     }
 
-    [Fact(DisplayName = "GET /api/slicers/engines with all workers offline marks unavailable but keeps latest for display (issue #578)")]
-    public async Task ListEngines_AllOffline_ReturnsUnavailableWithFallbackLatest()
+    [Fact(DisplayName = "GET /api/slicers/engines with all workers offline marks unavailable and returns null latest (issue #578, Hicks H#1)")]
+    public async Task ListEngines_AllOffline_ReturnsUnavailableWithNullLatest()
     {
         Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca24 =
             new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
@@ -225,13 +225,12 @@ public class SlicersControllerUnitTests
         IActionResult result = await controller.ListEnginesAsync();
         string json = System.Text.Json.JsonSerializer.Serialize((result as OkObjectResult)!.Value);
 
-        // Row exists but worker is offline → NOT available (H3/V2 fix — the
-        // pre-r2 bug marked everything available in this state).
+        // Row exists but worker is offline → NOT available.
         _ = json.Should().Contain("\"available\":false");
-        // No versions are available, but rows exist, so fall back to newest
-        // installed version so the UI still has a label to show. The version
-        // dropdown will render every entry as "(offline)" and disabled.
-        _ = json.Should().Contain("\"latest\":\"2.4.1\"");
+        // No versions are available AND service rows exist → latest is null
+        // (Hicks H#1: pinning to any offline version would hang unclaimable).
+        // Frontend must render dropdown from versionEntries but block submission.
+        _ = json.Should().Contain("\"latest\":null");
     }
 }
 

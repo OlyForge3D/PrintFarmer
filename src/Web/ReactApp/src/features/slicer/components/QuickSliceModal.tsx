@@ -97,10 +97,21 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
 
   const printerModelId = printerDetails?.modelId ?? null;
 
+  // Issue #578: profile queries must route to the same version QuickSlice will
+  // pin the job to, otherwise we would show 2.4.1 profile shapes while dispatching
+  // to a 2.3.1 worker (or vice versa). `effectiveEngineVersion` mirrors the
+  // pinnedVersion computed at submit-time.
+  const effectiveEngineVersion = useMemo(() => {
+    const orca = registeredEngines?.find(
+      e => e.engine.toLowerCase() === 'orcaslicer',
+    );
+    return orca?.latest ?? undefined;
+  }, [registeredEngines]);
+
   // Fetch machine profiles for selected printer's model
   const { data: machineProfiles = [] } = useQuery<OrcaMachineProfile[]>({
-    queryKey: ['machineProfilesForModel', printerModelId],
-    queryFn: () => slicerProfilesService.getMachineProfilesForModel(printerModelId!),
+    queryKey: ['machineProfilesForModel', printerModelId, effectiveEngineVersion ?? null],
+    queryFn: () => slicerProfilesService.getMachineProfilesForModel(printerModelId!, effectiveEngineVersion),
     enabled: !!printerModelId,
     staleTime: 30_000,
   });
@@ -115,16 +126,16 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
 
   // Fetch filament profiles
   const { data: filamentProfiles = [] } = useQuery<OrcaFilamentProfile[]>({
-    queryKey: ['filamentProfilesForMachines', machineNames],
-    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(machineNames),
+    queryKey: ['filamentProfilesForMachines', machineNames, effectiveEngineVersion ?? null],
+    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(machineNames, effectiveEngineVersion),
     enabled: machineNames.length > 0,
     staleTime: 30_000,
   });
 
   // Fetch process profiles
   const { data: processProfiles = [] } = useQuery<OrcaProcessProfile[]>({
-    queryKey: ['processProfilesForMachines', machineNames],
-    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(machineNames),
+    queryKey: ['processProfilesForMachines', machineNames, effectiveEngineVersion ?? null],
+    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(machineNames, effectiveEngineVersion),
     enabled: machineNames.length > 0,
     staleTime: 30_000,
   });
@@ -180,18 +191,39 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       return;
     }
 
-    const apiBase = getApiBaseUrl();
-    const modelFileUrl = `${apiBase}/3d-models/file/${model.id}`;
-
-    // Issue #578 dual-engine: pin QuickSlice to the newest AVAILABLE OrcaSlicer
-    // version reported by the registry. Without a pin the job could be picked
-    // up by any registered OrcaSlicer worker (including an older engine that
-    // may not understand this profile bundle). Falls back to unpinned when the
-    // engines endpoint hasn't populated yet or nothing is available.
-    const orcaEngine = registeredEngines?.find(
+    // Issue #578 dual-engine (Hicks R3): the engines registry query MUST have
+    // populated before we submit. Without it we would fall through to an
+    // unpinned Orca job that any registered version could claim — including
+    // the specific race condition Hicks flagged where the older engine grabs
+    // work built against newer profiles. If the query is still pending or
+    // failed we tell the user to retry rather than submit blind. The
+    // exception is a legacy deployment where the backend returns an empty
+    // engines list (no plugins loaded on this API instance yet) — that
+    // predates dual-engine entirely and is handled by leaving `latest` null.
+    if (registeredEngines === undefined) {
+      setError('Slicer registry not yet loaded. Please retry in a moment.');
+      return;
+    }
+    const orcaEngine = registeredEngines.find(
       e => (e?.engine ?? '').toLowerCase() === 'orcaslicer',
     );
+    // Backend returns latest=null in the legacy fallback (no SlicerService
+    // rows registered) — we intentionally leave the job UNPINNED so the
+    // legacy generic-capability worker can claim it. Any non-null latest
+    // is a firm signal to pin.
     const pinnedVersion = orcaEngine?.latest ?? undefined;
+    // Hard-block submission when Orca is a registered engine (versions
+    // exist) but no version is currently available — the job would sit
+    // unclaimable in the queue. Fresh install has orcaEngine === undefined,
+    // which is fine because latest=null there is also OK to submit
+    // unpinned via the legacy path.
+    if (orcaEngine && orcaEngine.versions.length > 0 && !pinnedVersion) {
+      setError('No online OrcaSlicer worker is available to accept this job.');
+      return;
+    }
+
+    const apiBase = getApiBaseUrl();
+    const modelFileUrl = `${apiBase}/3d-models/file/${model.id}`;
 
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',

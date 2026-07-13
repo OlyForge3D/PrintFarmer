@@ -809,6 +809,7 @@ public class ProfilesController(
     /// <param name="manufacturer">Manufacturer name.</param>
     /// <param name="model">Model name.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpGet("machine/{manufacturer}/{model}")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
@@ -817,11 +818,12 @@ public class ProfilesController(
         [FromServices] HttpClient httpClient,
         string manufacturer,
         string model,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
-            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct);
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct, slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -842,6 +844,7 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="modelId">The printer model ID from the catalog.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpGet("machine/for-model/{modelId:guid}")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
@@ -850,7 +853,8 @@ public class ProfilesController(
     public async Task<IActionResult> GetMachineProfilesForModelIdAsync(
         [FromServices] HttpClient httpClient,
         Guid modelId,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
@@ -882,7 +886,8 @@ public class ProfilesController(
             IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForCatalogModelAsync(
                 httpClient,
                 orcaAliases,
-                ct);
+                ct,
+                slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -903,6 +908,7 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="request">Request containing list of machine profile names.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpPost("process/for-machines")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
@@ -910,11 +916,12 @@ public class ProfilesController(
     public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
         [FromBody] ForMachinesRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
-            IReadOnlyList<ProcessProfileDto> profiles = await _profilesService.GetProcessProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            IReadOnlyList<ProcessProfileDto> profiles = await _profilesService.GetProcessProfilesForMachinesAsync(httpClient, request.MachineNames, ct, slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -935,6 +942,7 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="request">Request containing list of machine profile names.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpPost("filament/for-machines")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
@@ -942,11 +950,12 @@ public class ProfilesController(
     public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
         [FromBody] ForMachinesRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
-            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentProfilesForMachinesAsync(httpClient, request.MachineNames, ct, slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)

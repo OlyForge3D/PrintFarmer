@@ -45,9 +45,18 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
         IReadOnlyList<ISlicerLibrary> libraries = _registry.ListAllLibraries().ToList();
         IReadOnlyList<SlicerService> services = await _service.ListAsync(HttpContext.RequestAborted);
 
+        // Freshness gate for the "Online" status: an abruptly killed worker
+        // can leave its row Status='Online' in the DB until the health monitor
+        // sweeps it. Consumers of this endpoint use `available` to pin jobs,
+        // so if a crashed worker looked "Online" for another 60s+ we would
+        // dispatch jobs into a black hole. Require the row to have heartbeated
+        // recently (twice the default health-monitor interval, 60s).
+        const int OnlineFreshnessSeconds = 60;
+        DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-OnlineFreshnessSeconds);
         HashSet<(string Engine, string Version)> online = services
             .Where(s => string.Equals(s.Status, "Online", StringComparison.OrdinalIgnoreCase)
-                        && !string.IsNullOrWhiteSpace(s.Version))
+                        && !string.IsNullOrWhiteSpace(s.Version)
+                        && s.LastSeen >= freshnessCutoff)
             .Select(s => (Engine: SlicerTypeToEngineName(s.SlicerType), Version: s.Version!.Trim()))
             .Where(t => !string.IsNullOrEmpty(t.Engine))
             .ToHashSet();
@@ -73,18 +82,24 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
 
                 string[] allVersions = versionEntries.Select(v => v.version).ToArray();
 
-                // Legacy-safe latest resolution: when NO SlicerService rows
-                // exist (fresh install / legacy single-worker deployment), we
-                // return `null` so the frontend leaves jobs unpinned and the
-                // legacy worker's generic "orcaslicer" capability can still
-                // claim them. Once at least one row exists, we prefer the
-                // newest AVAILABLE version, falling back to the newest
-                // installed version only when everything is offline (so the
-                // UI still shows something in the Latest label).
+                // `latest` is the SIGNAL the frontend uses to decide whether
+                // to pin a slice job (Hicks/Vasquez R3). Emit non-null only
+                // when at least one version is currently available to claim
+                // a job AND at least one service row exists. Three branches
+                // produce null:
+                //   1. No service rows exist (fresh install / legacy) — leave
+                //      jobs unpinned so a generic "orcaslicer" worker can claim.
+                //      In this branch `available` is true for every entry so
+                //      the selector is usable, but we must not pin.
+                //   2. Rows exist but ALL are offline/stale — a pinned job
+                //      would sit in the queue with no worker willing to touch
+                //      it. The UI shows every entry as "(offline)" disabled
+                //      and blocks Latest-mode submission.
+                //   3. Registry knows about a version but no worker of that
+                //      version is fresh/Online — again, no pin target.
                 string? latestAvailable = !anyServiceRows
                     ? null
-                    : versionEntries.FirstOrDefault(v => v.available)?.version
-                      ?? allVersions.FirstOrDefault();
+                    : versionEntries.FirstOrDefault(v => v.available)?.version;
 
                 return new
                 {

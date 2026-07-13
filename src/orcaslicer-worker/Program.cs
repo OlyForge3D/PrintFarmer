@@ -230,11 +230,16 @@ public static class Program
         {
             OrcaBinaryHealthCheck versionCheck = ActivatorUtilities.CreateInstance<OrcaBinaryHealthCheck>(app.Services);
             HealthCheckResult probe = await versionCheck.CheckHealthAsync(new HealthCheckContext());
-            if (probe.Status == HealthStatus.Unhealthy)
+            if (probe.Status != HealthStatus.Healthy)
             {
-                app.Logger.LogCritical("OrcaBinaryHealthCheck refused startup: {Description}", probe.Description);
+                app.Logger.LogCritical(
+                    "OrcaBinaryHealthCheck refused startup with status {Status}: {Description}",
+                    probe.Status,
+                    probe.Description);
                 throw new InvalidOperationException(
-                    $"Refusing to start worker: {probe.Description}. Set WORKER_RELAXED_READINESS=true to bypass in dev.");
+                    $"Refusing to start worker: OrcaBinaryHealthCheck returned {probe.Status}. {probe.Description}. " +
+                    "The advertised engine version could not be verified against the binary. " +
+                    "Set WORKER_RELAXED_READINESS=true to bypass in dev.");
             }
         }
 

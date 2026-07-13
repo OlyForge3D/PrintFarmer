@@ -883,8 +883,8 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Fetch machine profiles for the selected printer's model
   const { data: machineProfilesData = [], isLoading: isMachineProfilesLoading } = useQuery<OrcaMachineProfile[]>({
-    queryKey: ['machineProfilesForModel', selectedPrinterModelId],
-    queryFn: () => slicerProfilesService.getMachineProfilesForModel(selectedPrinterModelId!),
+    queryKey: ['machineProfilesForModel', selectedPrinterModelId, selectedEngineVersion ?? latestAvailableForEngine ?? null],
+    queryFn: () => slicerProfilesService.getMachineProfilesForModel(selectedPrinterModelId!, selectedEngineVersion ?? latestAvailableForEngine),
     enabled: !!selectedPrinterModelId,
     staleTime: 30_000
   });
@@ -932,16 +932,16 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Fetch filament profiles compatible with selected machine
   const { data: filamentProfilesData = [], isLoading: isFilamentProfilesLoading } = useQuery<OrcaFilamentProfile[]>({
-    queryKey: ['filamentProfilesForMachines', selectedMachineNames],
-    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(selectedMachineNames),
+    queryKey: ['filamentProfilesForMachines', selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine ?? null],
+    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine),
     enabled: selectedMachineNames.length > 0,
     staleTime: 30_000
   });
 
   // Fetch process profiles compatible with selected machine
   const { data: processProfilesData = [], isLoading: isProcessProfilesLoading } = useQuery<OrcaProcessProfile[]>({
-    queryKey: ['processProfilesForMachines', selectedMachineNames],
-    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(selectedMachineNames),
+    queryKey: ['processProfilesForMachines', selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine ?? null],
+    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine),
     enabled: selectedMachineNames.length > 0,
     staleTime: 30_000
   });
@@ -1646,6 +1646,25 @@ export const NewSliceJobPage: React.FC = () => {
   const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
 
+    // Issue #578 dual-engine (Hicks R3): guard against submitting a job for
+    // an engine that has NO online worker available. `engineInfo` describes
+    // this engine as seen by the registry. If it's registered (has any
+    // installed versions) but the backend didn't return a `latest`, that
+    // means every version is offline/stale — the job would sit unclaimable
+    // in the queue. When the user has manually pinned a version we let
+    // the availability decision fall to the entry the dropdown already
+    // rendered disabled; the guard here catches "Latest" mode where the UI
+    // has no per-option affordance to prevent submission.
+    if (
+      selectedEngineVersion === undefined
+      && engineInfo
+      && engineInfo.versions.length > 0
+      && !engineInfo.latest
+    ) {
+      setError(`No online ${engineName} worker is available to accept this job.`);
+      return;
+    }
+
     // Plate-aware slicing: only the ACTIVE plate's models are sliced. The IDs
     // are passed synchronously from the workspace's Slice button so we never
     // depend on a (potentially stale) copy of plate state.
@@ -1807,6 +1826,8 @@ export const NewSliceJobPage: React.FC = () => {
     selectedProcessPresetId,
     selectedEngineVersion,
     latestAvailableForEngine,
+    engineInfo,
+    engineName,
     slicerInfo.engine,
     slicerSettings,
     submitMutation,
