@@ -281,6 +281,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 break;
         }
 
+        // Profile-import tasks are globally aggregated by printer model; UserTask has no
+        // per-task UserId. This filtered unique index prevents concurrent recovery of the
+        // same open PrinterModel ProfileImport task while retaining terminal task history
+        // and leaving legacy/generic ProfileImport rows unaffected.
+        Microsoft.EntityFrameworkCore.Metadata.Builders.IndexBuilder<UserTask> profileImportRecoveryIndex =
+            modelBuilder.Entity<UserTask>()
+                .HasIndex(t => new { t.TaskType, t.EntityType, t.EntityId })
+                .HasDatabaseName("IX_UserTasks_OpenProfileImport");
+
+        switch (Database.ProviderName)
+        {
+            case "Npgsql.EntityFrameworkCore.PostgreSQL":
+            case "Microsoft.EntityFrameworkCore.Sqlite":
+                _ = profileImportRecoveryIndex.IsUnique().HasFilter(
+                    "\"TaskType\" = 1 AND \"EntityType\" = 'PrinterModel' AND \"Status\" IN (0, 1)");
+                break;
+            case "Microsoft.EntityFrameworkCore.SqlServer":
+                _ = profileImportRecoveryIndex.IsUnique().HasFilter(
+                    "[TaskType] = 1 AND [EntityType] = 'PrinterModel' AND [Status] IN (0, 1)");
+                break;
+            default:
+                // MySQL / InMemory / others: no filtered-index support — leave non-unique.
+                break;
+        }
+
         // SQLite does not support DateTimeOffset natively in ORDER BY / WHERE clauses.
         // Apply a transparent UTC DateTime conversion so all DateTimeOffset properties
         // on LoginAuditEntry round-trip correctly through the SQLite text store.

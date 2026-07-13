@@ -422,7 +422,83 @@ public class EfUserTaskRepositoryTests : IDisposable
 
     #endregion
 
+    #region GetOpenSuppressedByKeysAsync Tests
+
+    /// <summary>
+    /// Fix R6-2: bootstrap ignores terminal suppression rows outside the 30-day
+    /// maximum age so stale historical episodes cannot be rehydrated forever.
+    /// </summary>
+    [Fact]
+    public async Task GetOpenSuppressedByKeysAsync_RowOlderThanMaximumAge_IsExcluded()
+    {
+        DateTime now = DateTime.UtcNow;
+        UserTask recent = CreateUserTask("Recent", UserTaskType.MaintenanceDue, UserTaskStatus.Skipped);
+        recent.SourceKind = UserTaskSourceKind.Maintenance;
+        recent.SourceId = "maintenancealert:recent";
+        recent.UpdatedAt = now.AddDays(-29);
+
+        UserTask stale = CreateUserTask("Stale", UserTaskType.MaintenanceDue, UserTaskStatus.Dismissed);
+        stale.SourceKind = UserTaskSourceKind.Maintenance;
+        stale.SourceId = "maintenancealert:stale";
+        stale.UpdatedAt = now.AddDays(-31);
+
+        _context.UserTasks.AddRange(recent, stale);
+        _ = await _context.SaveChangesAsync();
+
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> result =
+            await _repository.GetOpenSuppressedByKeysAsync(
+                [
+                    (UserTaskSourceKind.Maintenance, "maintenancealert:recent"),
+                    (UserTaskSourceKind.Maintenance, "maintenancealert:stale"),
+                ],
+                maxAgeUtc: now.AddDays(-30));
+
+        result.Should().ContainSingle();
+        result.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:recent"));
+    }
+
+    /// <summary>
+    /// Fix R6-4: source-kind and source-id predicates must remain paired instead of
+    /// retrieving the Cartesian combinations formed by independent IN filters.
+    /// </summary>
+    [Fact]
+    public async Task GetOpenSuppressedByKeysAsync_CrossedSourcePairs_ReturnsOnlyExactPairs()
+    {
+        DateTime now = DateTime.UtcNow;
+        UserTask first = CreateSuppressedTask(UserTaskSourceKind.Maintenance, "maintenancealert:one", now);
+        UserTask second = CreateSuppressedTask(UserTaskSourceKind.FailureIncident, "failure:two", now);
+        UserTask crossedFirst = CreateSuppressedTask(UserTaskSourceKind.Maintenance, "failure:two", now);
+        UserTask crossedSecond = CreateSuppressedTask(UserTaskSourceKind.FailureIncident, "maintenancealert:one", now);
+        _context.UserTasks.AddRange(first, second, crossedFirst, crossedSecond);
+        _ = await _context.SaveChangesAsync();
+
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> result =
+            await _repository.GetOpenSuppressedByKeysAsync(
+                [
+                    (UserTaskSourceKind.Maintenance, "maintenancealert:one"),
+                    (UserTaskSourceKind.FailureIncident, "failure:two"),
+                ],
+                maxAgeUtc: now.AddDays(-1));
+
+        result.Should().HaveCount(2);
+        result.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:one"));
+        result.Should().Contain((UserTaskSourceKind.FailureIncident, "failure:two"));
+        result.Should().NotContain((UserTaskSourceKind.Maintenance, "failure:two"));
+        result.Should().NotContain((UserTaskSourceKind.FailureIncident, "maintenancealert:one"));
+    }
+
+    #endregion
+
     #region Helper Methods
+
+    private static UserTask CreateSuppressedTask(UserTaskSourceKind sourceKind, string sourceId, DateTime updatedAt)
+    {
+        UserTask task = CreateUserTask("Suppressed", UserTaskType.MaintenanceDue, UserTaskStatus.Skipped);
+        task.SourceKind = sourceKind;
+        task.SourceId = sourceId;
+        task.UpdatedAt = updatedAt;
+        return task;
+    }
 
     private static UserTask CreateUserTask(
         string title,

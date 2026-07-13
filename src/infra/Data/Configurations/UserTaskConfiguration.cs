@@ -28,6 +28,9 @@ namespace Farm.Infrastructure.Data.Configurations;
 ///   <c>GetOpenBySourceAsync</c> lookup (Fix I).</description></item>
 ///   <item><description><c>IX_UserTasks_Status_AnchorKind_AnchorAtUtc</c> — supports the shift-plan grouped/ordered query.</description></item>
 ///   <item><description><c>IX_UserTasks_Status_UpdatedAt</c> — supports suppressed-key bootstrap and recently-updated task lookbacks.</description></item>
+///   <item><description><c>IX_UserTasks_Status_SourceKind_SourceId</c> — starts with the
+///   suppressed-row status filter, then narrows exact source key lookups without relying
+///   on the open-only dedupe index.</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -68,6 +71,11 @@ public sealed class UserTaskConfiguration : IEntityTypeConfiguration<UserTask>
         // Supports suppression lookbacks and other recent-by-status task queries.
         _ = builder.HasIndex(t => new { t.Status, t.UpdatedAt })
             .HasDatabaseName("IX_UserTasks_Status_UpdatedAt");
+
+        // Suppression queries always constrain terminal Status before exact source pairs,
+        // so this unfiltered index serves historical rows the open-only dedupe index cannot.
+        _ = builder.HasIndex(t => new { t.Status, t.SourceKind, t.SourceId })
+            .HasDatabaseName("IX_UserTasks_Status_SourceKind_SourceId");
     }
 
     // Canonical wire values. Delegates to the domain converters so EF and JSON stay in lockstep.

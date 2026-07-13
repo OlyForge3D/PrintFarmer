@@ -76,12 +76,13 @@ public interface IUserTaskRepository
 
     /// <summary>
     /// Returns suppressed compiler task source keys that match the currently-active
-    /// source keys without applying a time cutoff. Used once on shift-plan compiler
-    /// bootstrap so a continuously-active episode skipped before process start stays
-    /// suppressed until its source clears.
+    /// source keys. By default, rows older than 30 days are excluded so ancient terminal
+    /// rows cannot be rehydrated as current episodes. Used for each source kind until
+    /// that source successfully evaluates after compiler process start.
     /// </summary>
     Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetOpenSuppressedByKeysAsync(
         IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys,
+        DateTime? maxAgeUtc = null,
         CancellationToken ct = default);
 
     /// <summary>

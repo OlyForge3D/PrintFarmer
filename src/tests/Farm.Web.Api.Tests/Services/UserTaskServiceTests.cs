@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Tasks;
 using Farm.Infrastructure.Services.Tasks;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -277,6 +279,138 @@ public class UserTaskServiceTests
             b => b.BroadcastTaskCreatedAsync(
                 It.Is<UserTaskDto>(task => task.Id == added.Id && task.Status == UserTaskStatus.Pending),
                 It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Fix R6-3: two workers that both observed a terminal transition can race to
+    /// recover the profile-import task. The unique index allows one insert; the loser
+    /// refreshes that open task and emits an update rather than another created event.
+    /// </summary>
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_ConcurrentRecoveryInserts_CreatesOneOpenTaskAndOneCreatedBroadcast()
+    {
+        Guid printerModelId = Guid.NewGuid();
+        Guid existingPrinterId = Guid.NewGuid();
+        Guid importedPrinterId = Guid.NewGuid();
+        UserTask terminalTask = CreateUserTask("Import slicer profiles for Prusa MK4S", UserTaskType.ProfileImport);
+        terminalTask.EntityType = "PrinterModel";
+        terminalTask.EntityId = printerModelId;
+        terminalTask.RelatedEntityIdsJson = $"[\"{existingPrinterId}\"]";
+
+        CreateProfileImportTaskDto dto = new(
+            PrinterModelId: printerModelId,
+            PrinterModelName: "MK4S",
+            ManufacturerName: "Prusa",
+            PrinterId: importedPrinterId);
+        List<UserTask> openTasks = [];
+        object sync = new();
+        int lookupCount = 0;
+        TaskCompletionSource<bool> initialLookups = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        UserTask CreateTerminalRead() => new()
+        {
+            Id = terminalTask.Id,
+            TaskType = terminalTask.TaskType,
+            EntityType = terminalTask.EntityType,
+            EntityId = terminalTask.EntityId,
+            Title = terminalTask.Title,
+            Description = terminalTask.Description,
+            Status = terminalTask.Status,
+            Priority = terminalTask.Priority,
+            CreatedAt = terminalTask.CreatedAt,
+            UpdatedAt = terminalTask.UpdatedAt,
+            RelatedEntityIdsJson = terminalTask.RelatedEntityIdsJson,
+            SourceKind = terminalTask.SourceKind,
+            SourceId = terminalTask.SourceId,
+        };
+
+        async Task<UserTask?> GetTaskForRaceAsync()
+        {
+            int lookup = Interlocked.Increment(ref lookupCount);
+            if (lookup <= 2)
+            {
+                if (lookup == 2)
+                {
+                    _ = initialLookups.TrySetResult(true);
+                }
+
+                await initialLookups.Task.ConfigureAwait(false);
+                return CreateTerminalRead();
+            }
+
+            lock (sync)
+            {
+                return openTasks.SingleOrDefault();
+            }
+        }
+
+        _repositoryMock.Setup(r => r.GetByEntityAsync(
+                UserTaskType.ProfileImport,
+                "PrinterModel",
+                printerModelId,
+                It.IsAny<CancellationToken>()))
+            .Returns((UserTaskType _, string _, Guid _, CancellationToken _) => GetTaskForRaceAsync());
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+                It.IsAny<UserTask>(),
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((UserTask task, IReadOnlyCollection<string> _, CancellationToken _) =>
+                Task.FromResult(task.Id != terminalTask.Id));
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Returns((UserTask task, CancellationToken _) =>
+            {
+                lock (sync)
+                {
+                    if (openTasks.Count > 0)
+                    {
+                        return Task.FromException(new DbUpdateException(
+                            "insert failed",
+                            new SqliteException("UNIQUE constraint failed: UserTasks.TaskType, UserTasks.EntityType, UserTasks.EntityId", 19, 2067)));
+                    }
+
+                    openTasks.Add(task);
+                    return Task.CompletedTask;
+                }
+            });
+        _repositoryMock.Setup(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid id, CancellationToken _) =>
+            {
+                lock (sync)
+                {
+                    return Task.FromResult<UserTask?>(openTasks.SingleOrDefault(task => task.Id == id));
+                }
+            });
+        _repositoryMock.Setup(r => r.GetPendingCountAsync(null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _broadcasterMock.Setup(b => b.BroadcastTaskCreatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _broadcasterMock.Setup(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        UserTaskService concurrentService = new(
+            _repositoryMock.Object,
+            _loggerMock.Object,
+            _broadcasterMock.Object);
+
+        UserTaskDto[] result = await Task.WhenAll(
+            _service.CreateOrUpdateProfileImportTaskAsync(dto),
+            concurrentService.CreateOrUpdateProfileImportTaskAsync(dto));
+
+        lock (sync)
+        {
+            Assert.Single(openTasks);
+            Assert.All(result, task => Assert.Equal(openTasks[0].Id, task.Id));
+        }
+
+        Assert.Equal(2, result.Length);
+        _broadcasterMock.Verify(
+            b => b.BroadcastTaskCreatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _broadcasterMock.Verify(
+            b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

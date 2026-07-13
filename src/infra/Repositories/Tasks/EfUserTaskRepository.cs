@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Linq.Expressions;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,6 +10,7 @@ namespace Farm.Infrastructure.Repositories.Tasks;
 /// </summary>
 public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
 {
+    private const int SuppressedSourceKeyBatchSize = 100;
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <inheritdoc />
@@ -148,6 +150,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetOpenSuppressedByKeysAsync(
         IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys,
+        DateTime? maxAgeUtc = null,
         CancellationToken ct = default)
     {
         HashSet<(UserTaskSourceKind SourceKind, string SourceId)> keySet = activeKeys
@@ -158,21 +161,87 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
             return Array.Empty<(UserTaskSourceKind, string)>();
         }
 
-        HashSet<UserTaskSourceKind> sourceKinds = [.. keySet.Select(k => k.SourceKind)];
-        HashSet<string> sourceIds = [.. keySet.Select(k => k.SourceId)];
-
-        List<UserTask> rows = await _db.UserTasks.AsNoTracking()
-            .Where(t =>
-                (t.Status == UserTaskStatus.Skipped || t.Status == UserTaskStatus.Dismissed) &&
-                t.SourceId != null &&
-                sourceKinds.Contains(t.SourceKind) &&
-                sourceIds.Contains(t.SourceId))
-            .ToListAsync(ct);
+        // A bounded bootstrap avoids treating ancient terminal rows as current
+        // suppression episodes after process restart.
+        DateTime effectiveMaxAgeUtc = maxAgeUtc ?? DateTime.UtcNow.AddDays(-30);
+        List<UserTask> rows = [];
+        foreach ((UserTaskSourceKind SourceKind, string SourceId)[] keyBatch in keySet.Chunk(SuppressedSourceKeyBatchSize))
+        {
+            Expression<Func<UserTask, bool>> exactPairs = BuildExactSourceKeyPredicate(keyBatch);
+            List<UserTask> batchRows = await _db.UserTasks.AsNoTracking()
+                .Where(t =>
+                    (t.Status == UserTaskStatus.Skipped || t.Status == UserTaskStatus.Dismissed) &&
+                    t.SourceId != null &&
+                    t.UpdatedAt >= effectiveMaxAgeUtc)
+                .Where(exactPairs)
+                .ToListAsync(ct);
+            rows.AddRange(batchRows);
+        }
 
         return rows
             .Where(t => t.SourceId is not null && keySet.Contains((t.SourceKind, t.SourceId)))
             .Select(t => (t.SourceKind, t.SourceId!))
             .ToHashSet();
+    }
+
+    /// <summary>
+    /// Creates a provider-translatable disjunction over exact source key pairs, avoiding
+    /// the unrelated Cartesian combinations produced by independent IN predicates.
+    /// </summary>
+    private static Expression<Func<UserTask, bool>> BuildExactSourceKeyPredicate(
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> keys)
+    {
+        ParameterExpression task = Expression.Parameter(typeof(UserTask), "task");
+        Expression predicate = Expression.Constant(false);
+        foreach ((UserTaskSourceKind sourceKind, string sourceId) in keys)
+        {
+            Expression sourceKindMatches = Expression.Equal(
+                Expression.Property(task, nameof(UserTask.SourceKind)),
+                Expression.Constant(sourceKind));
+            Expression sourceIdMatches = Expression.Equal(
+                Expression.Property(task, nameof(UserTask.SourceId)),
+                Expression.Constant(sourceId));
+            predicate = Expression.OrElse(predicate, Expression.AndAlso(sourceKindMatches, sourceIdMatches));
+        }
+
+        return Expression.Lambda<Func<UserTask, bool>>(predicate, task);
+    }
+
+    /// <summary>
+    /// Identifies provider-specific unique-constraint violations without taking direct
+    /// dependencies on PostgreSQL or SQL Server provider exception types.
+    /// </summary>
+    internal static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        Exception? inner = ex.InnerException;
+        if (inner is null)
+        {
+            return false;
+        }
+
+        if (inner is Microsoft.Data.Sqlite.SqliteException sqliteEx)
+        {
+            return sqliteEx.SqliteExtendedErrorCode == 2067;
+        }
+
+        Type innerType = inner.GetType();
+        if (innerType.FullName == "Npgsql.PostgresException")
+        {
+            string? sqlState = innerType.GetProperty("SqlState")?.GetValue(inner) as string;
+            return sqlState == "23505";
+        }
+
+        if (innerType.FullName is "Microsoft.Data.SqlClient.SqlException" or "System.Data.SqlClient.SqlException")
+        {
+            object? numberValue = innerType.GetProperty("Number")?.GetValue(inner);
+            return numberValue is int number && number is 2601 or 2627;
+        }
+
+        string message = inner.Message;
+        return message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("duplicate key value violates unique constraint", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Cannot insert duplicate key", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Violation of UNIQUE KEY constraint", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />

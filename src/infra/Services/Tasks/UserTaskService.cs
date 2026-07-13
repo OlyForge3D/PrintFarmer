@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Tasks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Tasks;
@@ -99,7 +100,51 @@ public class UserTaskService(
                     UserTask recoveredTask = CreateProfileImportTask(dto);
                     recoveredTask.SourceKind = existingTask.SourceKind;
                     recoveredTask.SourceId = existingTask.SourceId;
-                    await _taskRepository.AddAsync(recoveredTask, ct);
+
+                    try
+                    {
+                        await _taskRepository.AddAsync(recoveredTask, ct);
+                    }
+                    catch (DbUpdateException ex) when (EfUserTaskRepository.IsUniqueConstraintViolation(ex))
+                    {
+                        // A concurrent recovery inserted the open profile-import task
+                        // first. Detach the failed insert before updating that winner.
+                        await _taskRepository.DetachTrackedAsync([recoveredTask], ct);
+                        UserTask? concurrentTask = await _taskRepository.GetByEntityAsync(
+                            UserTaskType.ProfileImport,
+                            "PrinterModel",
+                            dto.PrinterModelId,
+                            ct);
+                        if (concurrentTask is null)
+                        {
+                            throw;
+                        }
+
+                        List<Guid> concurrentRelatedPrinterIds = ParseRelatedEntityIds(concurrentTask.RelatedEntityIdsJson);
+                        if (!concurrentRelatedPrinterIds.Contains(dto.PrinterId))
+                        {
+                            concurrentRelatedPrinterIds.Add(dto.PrinterId);
+                        }
+
+                        concurrentTask.RelatedEntityIdsJson = JsonSerializer.Serialize(concurrentRelatedPrinterIds);
+                        int concurrentCount = concurrentRelatedPrinterIds.Count;
+                        concurrentTask.Description =
+                            $"{concurrentCount} printer{(concurrentCount == 1 ? string.Empty : "s")} waiting for slicer profiles";
+                        bool updatedConcurrentTask = await _taskRepository.TryUpdateFieldsIfOpenAsync(
+                            concurrentTask,
+                            [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)],
+                            ct);
+                        if (!updatedConcurrentTask)
+                        {
+                            throw;
+                        }
+
+                        UserTask persistedConcurrentTask =
+                            await _taskRepository.GetByIdAsync(concurrentTask.Id, ct) ?? concurrentTask;
+                        UserTaskDto concurrentDto = MapToDto(persistedConcurrentTask);
+                        await BroadcastTaskUpdatedAsync(concurrentDto, ct);
+                        return concurrentDto;
+                    }
 
                     UserTaskDto recoveredDto = MapToDto(recoveredTask);
                     await BroadcastTaskCreatedAsync(recoveredDto, ct);

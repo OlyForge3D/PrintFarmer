@@ -46,6 +46,13 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
     private static readonly TimeSpan SuppressionBootstrapLookback = TimeSpan.FromDays(7);
 
     /// <summary>
+    /// Durable terminal rows older than this are treated as prior episodes rather than
+    /// current suppression. Per-source bootstrap prevents a failed source from losing
+    /// recent suppression before it can successfully evaluate.
+    /// </summary>
+    private static readonly TimeSpan SuppressionBootstrapMaximumAge = TimeSpan.FromDays(30);
+
+    /// <summary>
     /// Fix R4-3: safety overlap subtracted from <c>now</c> when advancing
     /// <see cref="ShiftPlanSuppressionState.LastPassAtUtc"/> at the end of a pass. The
     /// next pass queries suppressed source-keys with <c>UpdatedAt &gt;= LastPassAtUtc</c>;
@@ -161,23 +168,36 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         HashSet<(UserTaskSourceKind, string)> suppressed;
         if (suppressionState is not null)
         {
-            IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? bootstrapped;
-            if (suppressionState.LastPassAtUtc is null)
+            if (suppressionState.LastPassAtUtc is not null)
             {
-                // Fix R5-E: first live pass doubles as the bootstrap probe. Query only
-                // currently-active keys and apply no UpdatedAt cutoff, so a source that
-                // stayed active for more than seven days remains suppressed after restart
-                // until a successful pass observes the source clear.
-                bootstrapped = await _tasks.GetOpenSuppressedByKeysAsync(specs.Keys.ToList(), ct).ConfigureAwait(false);
-            }
-            else
-            {
-                bootstrapped = await _tasks.GetSuppressedSourceKeysAsync(suppressionState.LastPassAtUtc.Value, ct)
+                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> changedSinceLastPass =
+                    await _tasks.GetSuppressedSourceKeysAsync(suppressionState.LastPassAtUtc.Value, ct)
                     .ConfigureAwait(false);
+                foreach ((UserTaskSourceKind SourceKind, string SourceId) key in changedSinceLastPass)
+                {
+                    _ = suppressionState.SuppressedKeys.Add((key.SourceKind, key.SourceId));
+                }
             }
 
-            if (bootstrapped is not null)
+            // A source that failed before its first successful pass has no active keys to
+            // seed, but must remain unbootstrapped. When it recovers, this exact-key query
+            // restores a recent pre-restart Skip/Dismiss before the upsert can recreate it.
+            List<UserTaskSourceKind> unbootstrappedKinds = specs.Keys
+                .Select(key => key.Item1)
+                .Distinct()
+                .Where(kind => !suppressionState.IsBootstrapped(kind))
+                .ToList();
+            foreach (UserTaskSourceKind sourceKind in unbootstrappedKinds)
             {
+                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys = specs.Keys
+                    .Where(key => key.Item1 == sourceKind)
+                    .Select(key => (key.Item1, key.Item2))
+                    .ToList();
+                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> bootstrapped =
+                    await _tasks.GetOpenSuppressedByKeysAsync(
+                        activeKeys,
+                        maxAgeUtc: now - SuppressionBootstrapMaximumAge,
+                        ct: ct).ConfigureAwait(false);
                 foreach ((UserTaskSourceKind SourceKind, string SourceId) key in bootstrapped)
                 {
                     _ = suppressionState.SuppressedKeys.Add((key.SourceKind, key.SourceId));
@@ -290,6 +310,14 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             _ = suppressionState.SuppressedKeys.RemoveWhere(
                 key => !specs.ContainsKey(key) && successfulKinds.Contains(key.SourceKind));
 
+            // A successful source with no current keys confirms any old episode cleared,
+            // while a successful source with active keys was seeded above. Failed sources
+            // deliberately remain unbootstrapped for their eventual recovery pass.
+            foreach (UserTaskSourceKind successfulKind in successfulKinds)
+            {
+                suppressionState.MarkBootstrapped(successfulKind);
+            }
+
             // Fix R4-3: advance the watermark to now MINUS a safety overlap rather than
             // exactly now, so a user Skip/Dismiss committed just after this pass's
             // suppression query (but stamped just before now) is still caught next pass.
@@ -306,7 +334,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         {
             await _tasks.SaveChangesAsync(ct).ConfigureAwait(false);
         }
-        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        catch (DbUpdateException ex) when (EfUserTaskRepository.IsUniqueConstraintViolation(ex))
         {
             _logger.LogWarning(
                 ex,
@@ -427,53 +455,5 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         }
 
         return incoming.Value < existing.Value;
-    }
-
-    /// <summary>
-    /// Fix R3-2: distinguishes a unique-index race (safe to swallow and reconcile
-    /// next pass) from any other <see cref="DbUpdateException"/> — foreign-key
-    /// violation, connection reset, etc. — which must propagate so it is never
-    /// silently lost. <c>Farm.Infrastructure</c> does not reference Npgsql or
-    /// Microsoft.Data.SqlClient directly (only the SQLite EF provider), so
-    /// provider-specific exception types are detected by name/property via
-    /// reflection instead of a hard package dependency, with a message-substring
-    /// fallback for providers/tests without a typed exception available.
-    /// </summary>
-    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
-    {
-        Exception? inner = ex.InnerException;
-        if (inner is null)
-        {
-            return false;
-        }
-
-        if (inner is Microsoft.Data.Sqlite.SqliteException sqliteEx)
-        {
-            // SQLite's primary result code 19 (SQLITE_CONSTRAINT) covers EVERY
-            // constraint type — unique, foreign-key, check, not-null. Only the
-            // extended code distinguishes a unique-index violation from the
-            // others, so checking the primary code alone would misclassify a
-            // genuine foreign-key violation as a safe-to-swallow race.
-            return sqliteEx.SqliteExtendedErrorCode == 2067; // SQLITE_CONSTRAINT_UNIQUE
-        }
-
-        Type innerType = inner.GetType();
-        if (innerType.FullName == "Npgsql.PostgresException")
-        {
-            string? sqlState = innerType.GetProperty("SqlState")?.GetValue(inner) as string;
-            return sqlState == "23505"; // unique_violation
-        }
-
-        if (innerType.FullName is "Microsoft.Data.SqlClient.SqlException" or "System.Data.SqlClient.SqlException")
-        {
-            object? numberValue = innerType.GetProperty("Number")?.GetValue(inner);
-            return numberValue is int number && number is 2601 or 2627;
-        }
-
-        string message = inner.Message;
-        return message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("duplicate key value violates unique constraint", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Cannot insert duplicate key", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Violation of UNIQUE KEY constraint", StringComparison.OrdinalIgnoreCase);
     }
 }

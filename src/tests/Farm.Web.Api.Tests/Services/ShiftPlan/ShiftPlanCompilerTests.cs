@@ -43,6 +43,7 @@ public class ShiftPlanCompilerTests
             .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
         _tasks.Setup(r => r.GetOpenSuppressedByKeysAsync(
                 It.IsAny<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
         // Fix R3-5: default auto-complete to "won the race" so existing auto-complete
@@ -333,6 +334,51 @@ public class ShiftPlanCompilerTests
         clock.Advance(TimeSpan.FromSeconds(15));
         ShiftPlanCompileResult r2 = await compiler.CompileAsync(state);
         Assert.Equal(0, r2.Created);
+    }
+
+    /// <summary>
+    /// Fix R6-1: a source that failed before it could bootstrap remains unbootstrapped
+    /// even though the global delta watermark advances. When that source later recovers,
+    /// its active-key query must still recover the pre-restart dismissal before upsert.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_SourceFailsBeforeBootstrapThenRecovers_PreservesPreRestartDismissal()
+    {
+        ShiftPlanSuppressionState state = new();
+        ShiftPlanTaskSpec spec = Spec("failure:pre-restart");
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
+        _tasks.Setup(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Any(key => key.SourceKind == UserTaskSourceKind.FailureIncident
+                        && key.SourceId == "failure:pre-restart")),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, "failure:pre-restart")]);
+
+        ShiftPlanCompiler failingCompiler = BuildCompiler(
+            new ThrowingSource([UserTaskSourceKind.FailureIncident]));
+        ShiftPlanCompileResult failedPass = await failingCompiler.CompileAsync(state);
+
+        Assert.Equal(1, failedPass.SourceFailures);
+        Assert.False(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+
+        ShiftPlanCompiler recoveredCompiler = BuildCompiler(
+            new StubSource("attn", [UserTaskSourceKind.FailureIncident], spec));
+        ShiftPlanCompileResult recoveredPass = await recoveredCompiler.CompileAsync(state);
+
+        Assert.Equal(0, recoveredPass.Created);
+        Assert.Empty(_tracked);
+        Assert.True(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Any(key => key.SourceKind == UserTaskSourceKind.FailureIncident
+                        && key.SourceId == "failure:pre-restart")),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

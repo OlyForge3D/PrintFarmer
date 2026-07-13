@@ -107,6 +107,32 @@ public class EfUserTaskRepositoryConcurrencyTests
     }
 
     /// <summary>
+    /// Fix R6-3: profile-import recovery tasks do not have source keys, so one open
+    /// task per printer model is enforced by their own filtered unique index.
+    /// </summary>
+    [Fact]
+    public async Task UniqueProfileImportIndex_TwoOpenTasksSameModel_ThrowsOnInsert()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        await using AppDbContext ctx = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true);
+        Guid printerModelId = Guid.NewGuid();
+
+        UserTask first = NewOpenTask(UserTaskSourceKind.Unspecified, null, UserTaskStatus.Pending);
+        first.TaskType = UserTaskType.ProfileImport;
+        first.EntityType = "PrinterModel";
+        first.EntityId = printerModelId;
+        UserTask second = NewOpenTask(UserTaskSourceKind.Unspecified, null, UserTaskStatus.InProgress);
+        second.TaskType = UserTaskType.ProfileImport;
+        second.EntityType = "PrinterModel";
+        second.EntityId = printerModelId;
+        ctx.UserTasks.AddRange(first, second);
+
+        Func<Task> act = async () => await ctx.SaveChangesAsync();
+
+        _ = await act.Should().ThrowAsync<DbUpdateException>();
+    }
+
+    /// <summary>
     /// Fix E: two compile passes for the same source spec produce exactly one open row.
     /// The in-process gate serializes them, and the unique index is the cross-process backstop.
     /// </summary>
@@ -210,12 +236,11 @@ public class EfUserTaskRepositoryConcurrencyTests
     }
 
     /// <summary>
-    /// Fix R5-E: on process restart, bootstrap suppression is episode-aware instead of
-    /// time-window based. A source key the user skipped 30 days ago is still suppressed
-    /// when the first live pass proves that exact source key is currently active.
+    /// Fix R6-2: durable bootstrap is bounded to a 30-day maximum age so a terminal
+    /// row from an ancient source episode does not suppress a genuinely new occurrence.
     /// </summary>
     [Fact]
-    public async Task CompileAsync_Bootstrap_ActiveSuppressedSourceOlderThanSevenDays_DoesNotRecreate()
+    public async Task CompileAsync_Bootstrap_ActiveSuppressedSourceOlderThanMaximumAge_RecreatesTask()
     {
         using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
         DateTime now = DateTime.UtcNow;
@@ -223,7 +248,7 @@ public class EfUserTaskRepositoryConcurrencyTests
         await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
         {
             UserTask old = NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:old", UserTaskStatus.Skipped);
-            old.UpdatedAt = now.AddDays(-30);
+            old.UpdatedAt = now.AddDays(-31);
             _ = seed.UserTasks.Add(old);
             _ = await seed.SaveChangesAsync();
         }
@@ -254,14 +279,14 @@ public class EfUserTaskRepositoryConcurrencyTests
         ShiftPlanCompileResult first = await compiler.CompileAsync(state);
         ShiftPlanCompileResult second = await compiler.CompileAsync(state);
 
-        first.Created.Should().Be(0);
+        first.Created.Should().Be(1);
         second.Created.Should().Be(0);
-        state.SuppressedKeys.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:old"));
+        state.SuppressedKeys.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:old"));
         int openRows = await ctx.UserTasks.CountAsync(t =>
             t.SourceKind == UserTaskSourceKind.Maintenance &&
             t.SourceId == "maintenancealert:old" &&
             (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress));
-        openRows.Should().Be(0);
+        openRows.Should().Be(1);
     }
 
     private static UserTask NewOpenTask(

@@ -5547,6 +5547,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Status", "AnchorKind", "AnchorAtUtc")
                         .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
 
+                    b.HasIndex("Status", "SourceKind", "SourceId")
+                        .HasDatabaseName("IX_UserTasks_Status_SourceKind_SourceId");
+
+                    b.HasIndex("TaskType", "EntityType", "EntityId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserTasks_OpenProfileImport")
+                        .HasFilter("[TaskType] = 1 AND [EntityType] = 'PrinterModel' AND [Status] IN (0, 1)");
+
                     b.ToTable("UserTasks");
                 });
 

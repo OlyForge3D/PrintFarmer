@@ -35,4 +35,23 @@ public sealed class ShiftPlanSuppressionState
     /// Mutated in place by the compiler each pass.
     /// </summary>
     public HashSet<(UserTaskSourceKind SourceKind, string SourceId)> SuppressedKeys { get; } = [];
+
+    /// <summary>
+    /// Source kinds whose currently-active keys have been seeded from durable
+    /// suppression rows since this process started.
+    /// </summary>
+    private HashSet<UserTaskSourceKind> BootstrappedKinds { get; } = [];
+
+    /// <summary>
+    /// Returns whether durable suppression has been seeded for the source kind.
+    /// </summary>
+    public bool IsBootstrapped(UserTaskSourceKind sourceKind) => BootstrappedKinds.Contains(sourceKind);
+
+    /// <summary>
+    /// Marks a source kind as durably seeded after it successfully evaluates.
+    /// </summary>
+    public void MarkBootstrapped(UserTaskSourceKind sourceKind)
+    {
+        _ = BootstrappedKinds.Add(sourceKind);
+    }
 }
