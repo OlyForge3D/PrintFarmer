@@ -66,7 +66,7 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
             Name = $"Printer-{suffix}",
             ManufacturerId = mfg.Id,
             ModelId = model.Id,
-            ServerUrl = $"http://10.0.1.{(Math.Abs(suffix.GetHashCode(StringComparison.Ordinal)) % 240) + 2}",
+            ServerUrl = $"http://printer-{Guid.NewGuid():N}.local",
             IsEnabled = true,
         };
         Toolhead t0 = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 0, Name = "T0", ToolheadType = ToolheadType.Physical };

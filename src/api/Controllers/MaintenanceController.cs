@@ -180,6 +180,16 @@ public class MaintenanceController(
                 return NotFound($"Alert with ID {id} not found");
             }
 
+            // Per-tool maintenance gate (issue #711, round-5 FIX 2). A toolhead-scoped alert must
+            // not be resolved into a per-tool maintenance log while MultiSlotFallback is disabled,
+            // mirroring CreateMaintenanceLogAsync. Reject rather than silently strip the scope so
+            // the resolution log never misrepresents which head was serviced.
+            if (alert.ToolheadId.HasValue
+                && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                return BadRequest("Per-tool maintenance is disabled.");
+            }
+
             // Capture current printer hours for accurate hour-based maintenance baselines.
             PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(alert.PrinterId, ct);
 
@@ -767,6 +777,11 @@ public class MaintenanceController(
             var allDeployments = await _deploymentRepository.GetActiveWithTasksAsync(allPrinterIds, ct);
             var deploymentsByPrinter = allDeployments.ToLookup(d => d.PrinterId);
 
+            // Per-toolhead cumulative hours so per-tool schedules project against their own
+            // toolhead's hours, not the printer-wide counter (issue #711, round-5 FIX 3).
+            IReadOnlyDictionary<Guid, double> toolheadHours =
+                await _toolheadStatisticsRepository.GetCumulativeHoursByPrintersAsync(allPrinterIds, ct);
+
             var result = new List<FleetPrinterStatisticsDto>();
 
             foreach (var printer in allPrinters)
@@ -780,8 +795,19 @@ public class MaintenanceController(
                 int? daysUntilNextMaintenance = null;
                 string? nextMaintenanceTask = null;
 
-                // Track tasks already evaluated (avoid duplicates from multiple plans)
-                HashSet<Guid> processedTasks = [];
+                // Last log per (task, toolhead scope) so per-toolhead logs do not contaminate
+                // printer-wide baselines and vice versa (issue #711, round-5 FIX 3).
+                Dictionary<(Guid TaskId, Guid? ToolheadId), MaintenanceLog> lastLogByTaskAndScope = printerLogs
+                    .Where(l => l.MaintenanceTaskId.HasValue)
+                    .GroupBy(l => (l.MaintenanceTaskId!.Value, l.ToolheadId))
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
+
+                // Track (task, toolhead scope) pairs already evaluated so a per-tool schedule on
+                // each head is projected independently instead of collapsing to a single task
+                // (issue #711, round-5 FIX 3). The aggregate below keeps the most-urgent result.
+                HashSet<(Guid TaskId, Guid? ToolheadId)> processedTasks = [];
 
                 foreach (var deployment in deployments)
                 {
@@ -793,7 +819,7 @@ public class MaintenanceController(
                     foreach (var planTask in deployment.MaintenancePlan.PlanTasks)
                     {
                         var task = planTask.MaintenanceTask;
-                        if (task == null || !task.IsActive || !processedTasks.Add(task.Id))
+                        if (task == null || !task.IsActive || !processedTasks.Add((task.Id, deployment.ToolheadId)))
                         {
                             continue;
                         }
@@ -802,18 +828,32 @@ public class MaintenanceController(
                         double? effectiveHours = planTask.IntervalHoursOverride ?? task.IntervalHours;
                         int? effectiveDays = planTask.IntervalDaysOverride ?? task.IntervalDays;
 
-                        // Find the last log for this task
-                        var lastLog = printerLogs
-                            .Where(l => l.MaintenanceTaskId == task.Id)
-                            .OrderByDescending(l => l.PerformedAt)
-                            .FirstOrDefault();
+                        // Last log for this exact (task, toolhead scope) pair.
+                        lastLogByTaskAndScope.TryGetValue((task.Id, deployment.ToolheadId), out MaintenanceLog? lastLog);
 
                         DateTime lastPerformed = lastLog?.PerformedAt ?? deployment.DeployedAt;
                         DateTime nextDue;
 
                         if (effectiveHours.HasValue)
                         {
-                            double hoursSinceLastMaintenance = stats?.TotalPrintHours ?? 0;
+                            // Per-tool schedules accrue against their own toolhead's cumulative
+                            // hours; printer-wide schedules use TotalPrintHours. Each measures from
+                            // its own captured baseline (issue #711, round-5 FIX 3).
+                            double hoursSinceLastMaintenance;
+                            if (deployment.ToolheadId.HasValue
+                                && toolheadHours.TryGetValue(deployment.ToolheadId.Value, out double currentToolheadHours))
+                            {
+                                double toolheadBaseline = lastLog?.ToolheadHoursAtMaintenance ?? 0;
+                                hoursSinceLastMaintenance = Math.Max(0, currentToolheadHours - toolheadBaseline);
+                            }
+                            else
+                            {
+                                double totalHours = stats?.TotalPrintHours ?? 0;
+                                hoursSinceLastMaintenance = lastLog?.PrinterHoursAtMaintenance is double baselineHours
+                                    ? Math.Max(0, totalHours - baselineHours)
+                                    : totalHours;
+                            }
+
                             double hoursRemaining = effectiveHours.Value - hoursSinceLastMaintenance;
                             nextDue = DateTime.UtcNow.AddDays(hoursRemaining / 8.0);
                         }

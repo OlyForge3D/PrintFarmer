@@ -3,6 +3,7 @@ using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -24,7 +25,8 @@ public class MaintenanceAlertEngine(
     IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor,
     ILogger<MaintenanceAlertEngine> logger,
     IAttentionBroadcaster? attentionBroadcaster = null,
-    IToolheadStatisticsRepository? toolheadStatsRepo = null) : IMaintenanceAlertService
+    IToolheadStatisticsRepository? toolheadStatsRepo = null,
+    IOperatorFeatureGate? operatorFeatureGate = null) : IMaintenanceAlertService
 {
     private readonly IPrinterStatisticsRepository _statsRepo = statsRepo ?? throw new ArgumentNullException(nameof(statsRepo));
     private readonly IPrinterMaintenanceScheduleRepository _deploymentRepo = deploymentRepo ?? throw new ArgumentNullException(nameof(deploymentRepo));
@@ -41,6 +43,12 @@ public class MaintenanceAlertEngine(
     // Optional to preserve existing test constructors; when null, per-tool schedules fall
     // back to printer-wide hours (previous behavior).
     private readonly IToolheadStatisticsRepository? _toolheadStatsRepo = toolheadStatsRepo;
+
+    // Per-tool maintenance feature gate (issue #711, round-5 FIX 2). Optional to preserve
+    // existing test constructors; when null the gate is treated as enabled (previous behavior),
+    // matching DispatchScorer. When wired and disabled, toolhead-scoped deployments do not
+    // generate new per-tool alerts; printer-wide deployments continue normally.
+    private readonly IOperatorFeatureGate? _operatorFeatureGate = operatorFeatureGate;
 
     public async Task<int> EvaluatePrinterMaintenanceAsync(
         Guid printerId,
@@ -93,11 +101,25 @@ public class MaintenanceAlertEngine(
         int alertsGenerated = 0;
         List<MaintenanceAlert> createdAlerts = new();
 
+        // When the per-tool maintenance feature is disabled, toolhead-scoped deployments must not
+        // generate new per-tool alerts (issue #711, round-5 FIX 2). Printer-wide deployments
+        // (null toolhead) are unaffected. A null gate (test constructors) is treated as enabled.
+        bool perToolMaintenanceEnabled = _operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
+
         // Evaluate each deployment → plan → tasks
         foreach (PrinterMaintenanceSchedule deployment in deployments)
         {
             if (deployment.MaintenancePlan?.PlanTasks == null)
             {
+                continue;
+            }
+
+            if (deployment.ToolheadId.HasValue && !perToolMaintenanceEnabled)
+            {
+                _logger.LogDebug(
+                    "Skipping per-tool deployment {DeploymentId} on printer {PrinterId}: MultiSlotFallback disabled",
+                    deployment.Id,
+                    printerId);
                 continue;
             }
 

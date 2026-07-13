@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -27,6 +27,14 @@ public class PrinterStatistics
     /// Total cumulative print hours (from both PrintFarmer jobs and external prints)
     /// </summary>
     public double TotalPrintHours { get; set; }
+
+    /// <summary>
+    /// Cumulative print hours attributed ONLY to the external printer backend (Moonraker/OctoPrint
+    /// history totals), snapshotted before PrintFarmer job aggregation inflates
+    /// <see cref="TotalPrintHours"/>. Used as the cross-cycle baseline for per-toolhead wear
+    /// attribution so PrintFarmer-job inflation cannot zero out the external delta (issue #711).
+    /// </summary>
+    public double ExternalPrintHours { get; set; }
 
     /// <summary>
     /// Total number of completed print jobs

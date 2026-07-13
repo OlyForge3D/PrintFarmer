@@ -37,6 +37,7 @@ public class EfPrinterStatisticsRepository : IPrinterStatisticsRepository
         {
             // Update existing record
             existing.TotalPrintHours = statistics.TotalPrintHours;
+            existing.ExternalPrintHours = statistics.ExternalPrintHours;
             existing.TotalJobsCompleted = statistics.TotalJobsCompleted;
             existing.TotalJobsFailed = statistics.TotalJobsFailed;
             existing.TotalFilamentUsedGrams = statistics.TotalFilamentUsedGrams;

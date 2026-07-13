@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
@@ -19,6 +19,10 @@ namespace Farm.Web.Api.Controllers;
 /// feature. When the operator has switched multi-slot fallback off, all endpoints return
 /// 404 (mirroring <c>FilamentCoverageController</c>) and no <c>fallbackgroupsupdated</c>
 /// SignalR event is emitted (issue #711, FIX E).
+///
+/// Read endpoints require any authenticated user; configuration mutations
+/// (create/update/delete) additionally require the <c>farm_admin</c> role, matching
+/// <c>PrintersController</c> and <c>MaintenanceController</c> (issue #711, round-5 FIX 4).
 /// </remarks>
 [ApiController]
 [Route("api/printers/{printerId:guid}/fallback-groups")]
@@ -93,8 +97,10 @@ public class FilamentFallbackGroupsController(
     }
 
     [HttpPost]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(FilamentFallbackGroupDto), 201)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(403)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<FilamentFallbackGroupDto>> CreateAsync(
         Guid printerId,
@@ -124,8 +130,10 @@ public class FilamentFallbackGroupsController(
     }
 
     [HttpPut("{groupId:guid}")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(FilamentFallbackGroupDto), 200)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(403)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<FilamentFallbackGroupDto>> UpdateAsync(
         Guid printerId,
@@ -156,7 +164,9 @@ public class FilamentFallbackGroupsController(
     }
 
     [HttpDelete("{groupId:guid}")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(204)]
+    [ProducesResponseType(403)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteAsync(Guid printerId, Guid groupId, CancellationToken ct)
     {

@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Maintenance;
@@ -234,5 +235,61 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
         generated.Should().Be(1);
         captured.Should().ContainSingle();
         captured[0].ToolheadId.Should().Be(toolheadA);
+    }
+
+    [Fact]
+    public async Task EvaluatePrinter_GateDisabled_SkipsPerToolButKeepsPrinterWideAlert()
+    {
+        // Issue #711, round-5 FIX 2: when the MultiSlotFallback feature gate is OFF, toolhead-scoped
+        // deployments must not generate per-tool alerts, while printer-wide deployments continue to
+        // fire normally. Both schedules below would trip the 10h interval at 100 printer-wide hours.
+        Guid printerId = Guid.NewGuid();
+        Guid perToolTaskId = Guid.NewGuid();
+        Guid printerWideTaskId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+
+        _stats.Setup(s => s.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new PrinterStatistics { PrinterId = printerId, TotalPrintHours = 100 });
+        _deployment.Setup(d => d.GetActiveWithTasksAsync(printerId, It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new List<PrinterMaintenanceSchedule>
+                   {
+                       BuildSchedule(printerId, perToolTaskId, toolheadId),
+                       BuildSchedule(printerId, printerWideTaskId, toolheadId: null)
+                   });
+        _logs.Setup(l => l.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+             .ReturnsAsync(new List<MaintenanceLog>());
+        _alerts.Setup(a => a.HasActiveAlertAsync(printerId, It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+               .ReturnsAsync(false);
+
+        List<MaintenanceAlert> captured = new();
+        _alerts.Setup(a => a.AddAsync(It.IsAny<MaintenanceAlert>(), It.IsAny<CancellationToken>()))
+               .Callback<MaintenanceAlert, CancellationToken>((alert, _) => captured.Add(alert))
+               .Returns(Task.CompletedTask);
+
+        _settings.SetupGet(s => s.CurrentValue)
+                 .Returns(new MaintenanceAlertSettings { EnableSignalRNotifications = false });
+        _broadcaster.Setup(b => b.NotifyChangedAsync(It.IsAny<AttentionChangedPayload>(), It.IsAny<CancellationToken>()))
+                    .Returns(Task.CompletedTask);
+
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Loose);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+
+        MaintenanceAlertEngine engine = new(
+            _stats.Object,
+            _deployment.Object,
+            _alerts.Object,
+            _logs.Object,
+            _hub.Object,
+            _settings.Object,
+            NullLogger<MaintenanceAlertEngine>.Instance,
+            _broadcaster.Object,
+            toolheadStatsRepo: null,
+            operatorFeatureGate: gate.Object);
+
+        int generated = await engine.EvaluatePrinterMaintenanceAsync(printerId, CancellationToken.None);
+
+        generated.Should().Be(1, "only the printer-wide schedule may alert while per-tool maintenance is disabled");
+        captured.Should().ContainSingle();
+        captured[0].ToolheadId.Should().BeNull();
     }
 }

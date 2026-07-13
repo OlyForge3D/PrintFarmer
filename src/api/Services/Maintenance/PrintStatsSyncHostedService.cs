@@ -163,7 +163,7 @@ public class PrintStatsSyncHostedService(
         }
     }
 
-    private async Task SyncPrinterStatisticsAsync(
+    internal async Task SyncPrinterStatisticsAsync(
         Printer printer,
         PrintStatsSyncSettings settings,
         IPrinterStatisticsRepository statsRepo,
@@ -182,13 +182,19 @@ public class PrintStatsSyncHostedService(
         // Get or create printer statistics
         PrinterStatistics? stats = await statsRepo.GetByPrinterIdAsync(printer.Id, ct);
 
-        // Capture whether this printer already had a statistics row and its prior total hours.
-        // Per-toolhead attribution (issue #711, FIX B) only credits INCREMENTAL hours to a
-        // toolhead once a baseline exists. A brand-new statistics row dumps the full backend
-        // history into the printer-wide counter but NOT onto any toolhead, so per-tool tracking
-        // effectively "starts fresh" from the next sync forward.
+        // Capture whether this printer already had a statistics row and its prior EXTERNAL-only
+        // hours. Per-toolhead attribution (issue #711, FIX B) only credits INCREMENTAL external
+        // hours to a toolhead once a baseline exists. A brand-new statistics row dumps the full
+        // backend history into the printer-wide counter but NOT onto any toolhead, so per-tool
+        // tracking effectively "starts fresh" from the next sync forward.
+        //
+        // The baseline is read from the dedicated ExternalPrintHours counter, NOT TotalPrintHours
+        // (issue #711, round-5 BLOCKER). TotalPrintHours is inflated at the end of every cycle by
+        // SyncPrintFarmerJobStatisticsAsync; reading the baseline from it made the external delta
+        // collapse to 0 forever after the first cycle. ExternalPrintHours snapshots only the
+        // external backend total, so cross-cycle delta math stays isolated from PF-job inflation.
         bool statsExisted = stats != null;
-        double previousTotalPrintHours = stats?.TotalPrintHours ?? 0;
+        double previousExternalHours = stats?.ExternalPrintHours ?? 0;
 
         if (stats == null)
         {
@@ -206,10 +212,19 @@ public class PrintStatsSyncHostedService(
             settings,
             serviceProvider,
             ct);
-        double externalTotalPrintHours = stats.TotalPrintHours;
-        double externalDelta = Math.Max(0, externalTotalPrintHours - previousTotalPrintHours);
 
-        // Sync from PrintFarmer job history
+        double externalDelta = 0;
+        if (externalSyncSuccess)
+        {
+            // Snapshot the external-only total BEFORE PrintFarmer job aggregation inflates
+            // TotalPrintHours. From this point forward ExternalPrintHours tracks only external
+            // growth, so the next cycle's baseline is uncontaminated (issue #711, round-5).
+            stats.ExternalPrintHours = stats.TotalPrintHours;
+            externalDelta = Math.Max(0, stats.ExternalPrintHours - previousExternalHours);
+        }
+
+        // Sync from PrintFarmer job history. This mutates TotalPrintHours but not
+        // ExternalPrintHours, so per-toolhead attribution (already computed above) is unaffected.
         if (settings.IncludePrintFarmerJobs)
         {
             await SyncPrintFarmerJobStatisticsAsync(printer, stats, jobStatsRepo, ct);
@@ -222,7 +237,7 @@ public class PrintStatsSyncHostedService(
             await statsRepo.UpsertAsync(stats, ct);
 
             // Attribute only the successful external backend's per-cycle delta. PrintFarmer job
-            // aggregation below is mutable and model-wide, so it is not a reliable wear source.
+            // aggregation above is mutable and model-wide, so it is not a reliable wear source.
             // The increment remains uncommitted until the outer scoped SaveChangesAsync.
             IReadOnlyList<Guid> credited = await AttributeExternalToolheadHoursAsync(
                 printer.Id,

@@ -4648,6 +4648,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<double>("ExternalPrintHours")
+                        .HasColumnType("float");
+
                     b.Property<DateTime>("LastSyncTime")
                         .HasColumnType("datetime2");
 
