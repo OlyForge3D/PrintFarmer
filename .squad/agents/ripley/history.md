@@ -29,6 +29,21 @@ Participated in multi-round trio review cycle with strict three-reviewer consens
 
 Older entries (pre-2026-05-26) archived to history-archive.md for size management.
 
+### Review Gate Decisions & Assignment (2026-07-12)
+
+#### PR #709 v3 Final Cycle: Assignment (Escalation Rule Active)
+
+- **Assignment:** Ripley assigned as final-cycle owner for PR #709 v3
+- **Issue:** #709 — iOS: SignalR reconnection + recovery state ordering
+- **Prior History:** v1 REJECT (Gorman), v2 REJECT (Hudson); both authors locked out
+- **Blockers to Resolve:** Timestamp-clear generation gating, VM registration collision during reconnect, weak callback append-only debt (localized mitigation only)
+- **Escalation Rule Active:** Further valid rejection on v3 escalates decision to user/team lead (hard gate reached)
+- **Scope:** Resolve reconciled blockers while respecting deferred unsubscribe redesign boundary
+
+#### Durable Lesson
+
+Final-cycle assignment carries escalation rule: two prior rejections (v1, v2) + valid blockers → v3 owner becomes decision gatekeeper. If v3 rejection is valid, escalate to user rather than spawn v4.
+
 ## Team Coordination (2026-06-02)
 
 **Scribe Session 17:44:47Z**

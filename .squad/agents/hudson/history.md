@@ -123,3 +123,26 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 **Orchestration Log:** .squad/orchestration-log/2026-05-31T225752-hudson.md
 
 Status: Backlog item cleared. No blockers for review.
+
+### Review Gate Decisions (2026-07-12)
+
+#### PR #709 v2 Review: REJECT (Lockout Applied)
+
+- **Verdict:** ❌ REJECT (residual blockers sustained by Vasquez; Bishop/Hicks split)
+- **Issue:** #709 — iOS: SignalR reconnection + recovery state ordering
+- **Blockers:** Timestamp-clear race (generation gating after clear), VM registration collision during reconnect
+- **Status:** Hudson locked out from #709 (v1, v2, all further iterations) — artifact-specific
+- **Escalation:** Ripley assigned v3 as final-cycle; any further valid rejection escalates to user
+
+#### PR #707 v1 Review: REJECT (Hudson Locked Out)
+
+- **Verdict:** ❌ Unanimous REJECT
+- **Issue:** #707 — iOS printer detail UI polish: loading state, pagination, refresh
+- **Status:** Hudson locked out from #707 (all iterations)
+- **Escalation:** Gorman assigned v2; Gorman's #709 lockout is artifact-specific and does not bar #707 work
+
+#### Durable Lockout Rule (2026-07-12)
+
+- **Artifact-specific boundaries:** Lockout applies to the specific PR (#709 or #707), not to agent globally
+- **Final-cycle escalation:** Two rejections (v1, v2) + valid blockers → v3 final cycle; further rejection escalates to user
+- **Cross-PR independence:** Gorman locked out of #709 but open to #707; Hudson locked out of both but from different cycles

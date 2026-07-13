@@ -48,6 +48,21 @@
 
 ### Testing Infrastructure (2026-07-18 → 2026-03-08)
 - **Unit tests:** `MockURLProtocol` for in-process mocking; `MockServices` for all protocols; 145+ test cases validating MVP endpoint coverage; 61 test cases for parser contracts (QR/NFC)
+
+### Review Gate Decisions (2026-07-12)
+
+#### PR #709 v1 Review: REJECT (Artifact-Specific Lockout Applied)
+
+- **Verdict:** ❌ REJECT (initial gate failure)
+- **Blockers:** Out-of-order snapshot overwrite; missed reconnect/foreground recovery
+- **Status:** Gorman locked out from #709 (v1, v2, all further iterations) — artifact-specific, does not apply to other PRs
+- **Escalation:** Hudson assigned v2; final cycle (v3+) escalates to user
+
+#### PR #707 v2 Assignment (Not Locked Out — Artifact Boundary)
+
+- **Assignment:** Assigned to address unanimous REJECT of #707 v1
+- **V2 Scope:** Loading-state wedge cleanup, cursor pagination, refresh-capable empty/error state, failure snapshot identity, cross-form iPad UI tests
+- **Precedent:** Gorman's #709 lockout is artifact-specific; #707 remains open. Artifact boundaries prevent lockout bleed.
 - **XCUITest infrastructure:** `MockAPIServer` (NWListener-based TCP server); environment variable injection; wildcard route matching; canned JSON responses; Spoolman test fixtures
 - **Build verification:** 33 new files added to `Xcode.pbxproj`
 

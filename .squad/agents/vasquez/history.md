@@ -126,3 +126,40 @@ Vasquez withdrew the REJECT, acknowledged the initial characterization was wrong
 **Durable lesson:** Scope drift objections must verify the alleged drift is a forbidden production change (path hoisting, shared routing refactoring), not legitimate test infrastructure. Distinguish between inert test seams and production refactoring to prevent false-positive scope creep objections. When first voice raises scope concern, second/third voices must independently trace the change through production code before sustaining the objection.
 
 **Outcome:** Strict lockout released. Candidate ready for merge.
+
+### 2026-07-12 — PR #709 v2 Review: REJECT (Valid Blockers Sustained)
+
+- **Verdict:** ❌ REJECT
+- **Issue:** #709 — iOS: SignalR reconnection + recovery state ordering
+- **Candidate:** ad88472e0 (Hudson v2 revision, 103 focused tests)
+- **Blockers sustained:**
+  1. **Timestamp-clear generation gating:** Success state can overwrite newer featureDisabled because generation counter not gated after timestamp clear; race condition persists
+  2. **VM registration collision:** VM registering during active SignalR reconnect drops first connected recovery path; re-subscribe misses initial state
+- **Disputed out-of-scope debt:** Weak callback append-only issue; broad unsubscribe redesign is prior deferred decision. Final-cycle owner applies only localized dead-task mitigation.
+- **Gate status:** Bishop APPROVE + Hicks APPROVE; Vasquez REJECT (three-vote consensus required)
+- **Final outcome:** ❌ REJECT (lack of unanimity); Gorman (v1) and Hudson (v2) both locked out; Ripley assigned v3 final-cycle with escalation rule active
+- **Durable lesson:** Valid blocker from one voice overrides APPROVE from other two. Three-vote consensus is absolute gate; no carve-outs for "2-of-3 good enough." When all three voices are engaged, unanimity or REJECT is the only valid final verdict.
+
+### 2026-07-12 — PR #707 v1 Review: REJECT (Unanimous)
+
+- **Verdict:** ❌ Unanimous REJECT
+- **Issue:** #707 — iOS printer detail UI polish: loading state, pagination, refresh
+- **Candidate:** ec42c9e88 (initial revision, logical author Hudson; git metadata Kane)
+- **Gaps (all three reviewers agreed):**
+  1. Loading-state wedge: ambiguous transition between initial load, refresh, error
+  2. Cursor pagination: lacks cursor support for reliable refresh resume
+  3. Refresh-capable empty/error state: no refresh action on empty/error displays
+  4. Failure snapshot identity: snapshot identity lost during failure; stale displays persist
+  5. Cross-form iPad UI tests: multi-form layouts lack non-vacuous coverage
+- **Out-of-scope:** SignalR unsubscribe redesign (prior deferred decision)
+- **Final outcome:** ❌ Unanimous REJECT; Hudson locked out; Gorman assigned v2 with reconciled scope
+- **V2 Scope Reconciled:** (1) loading-state wedge cleanup, (2) cursor pagination, (3) refresh-capable empty/error, (4) snapshot identity + completion marker, (5) cross-form iPad UI tests
+- **Durable rule:** Artifact-specific lockout boundaries hold: Gorman's #709 lockout does not bar #707 v2 work. Lockout is PR-specific, not agent-global.
+
+### Durable Escalation Rule (2026-07-12)
+
+Final-cycle assignment (v3+) gates escalation:
+- If v3 is REJECT due to valid blockers, escalate to user/team lead rather than spawn v4
+- If v3 is APPROVE, merge
+- If v3 is REJECT without valid blockers, return to author for v4 (no escalation)
+This rule prevents infinite rejection cycles while respecting technical due diligence.

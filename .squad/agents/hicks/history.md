@@ -124,3 +124,13 @@ Participated in multi-round trio review cycle. Key learnings:
 **Durable lesson:** Extended reasoning (max effort) effective for verifying test non-tautology and mutation litmus. Scope boundary verification requires tracing identifier usage end-to-end (test file only vs. production routing) to distinguish inert test seams from forbidden production refactoring.
 
 **Outcome:** Gate complete. Candidate ready for merge.
+
+### 2026-07-12 — PR #709 v2 Review: APPROVE (Gate REJECT Due to Vasquez)
+
+- **Verdict:** ✅ APPROVE
+- **Issue:** #709 — iOS: SignalR reconnection + recovery state ordering
+- **Candidate:** ad88472e0 (Hudson v2 revision, 103 focused tests)
+- **Findings:** Tests effectively cover ordering and recovery paths; common scenarios validated
+- **Gate status:** Bishop APPROVE + Hicks APPROVE split; Vasquez REJECT (sustained blockers)
+- **Final outcome:** ❌ REJECT (lack of unanimity); Gorman and Hudson both locked out; Ripley assigned v3 final-cycle
+- **Durable lesson:** Valid third-voice blockers override majority APPROVE votes. Consensus requirement (3-of-3) is non-negotiable even when two reviewers have validated the work. Final-cycle (v3+) rejection escalates to user.

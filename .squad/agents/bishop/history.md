@@ -125,3 +125,13 @@ Participated in multi-round trio review cycle. Key learnings:
 **Durable lesson:** Distinguish inert test seams (accessibility identifiers, test markers) from forbidden production refactoring (path hoisting, shared routing changes). Test scope drift objections must verify that the alleged drift is production-code refactoring, not test infrastructure required for coverage compliance. Settings accessibility identifier ≠ Settings path hoisting.
 
 **Outcome:** Gate complete. Strict lockout released. Candidate ready for merge.
+
+### 2026-07-12 — PR #709 v2 Review: APPROVE (Gate REJECT Due to Vasquez)
+
+- **Verdict:** ✅ APPROVE
+- **Issue:** #709 — iOS: SignalR reconnection + recovery state ordering
+- **Candidate:** ad88472e0 (Hudson v2 revision, 103 focused tests added)
+- **Finding:** Common ordering and recovery paths improved; test coverage expanded significantly
+- **Gate status:** Bishop APPROVE + Hicks APPROVE split; Vasquez REJECT (residual blockers sustained)
+- **Final outcome:** ❌ REJECT (lack of unanimity); both v1 and v2 authors locked out; Ripley assigned v3 final-cycle
+- **Durable lesson:** Two APPROVE voices insufficient when third voice sustains valid technical blockers. Unanimity rule enforced; split verdicts → gate REJECT regardless of majority approval.
