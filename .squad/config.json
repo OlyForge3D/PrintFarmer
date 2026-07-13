@@ -11,6 +11,13 @@
     "vasquez": "gemini-3.1-pro-preview"
   },
   "agentReasoningEffortOverrides": {
-    "hicks": "max"
+    "lambert": "max",
+    "ripley": "max",
+    "hudson": "max",
+    "gorman": "max",
+    "parker": "max",
+    "bishop": "max",
+    "hicks": "max",
+    "vasquez": "high"
   }
 }

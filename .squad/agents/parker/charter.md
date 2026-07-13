@@ -64,6 +64,10 @@
 - **Preferred:** auto
 - **Rationale:** Coordinator selects — infrastructure work is mostly configuration and scripting
 
+## Machine-Local Execution Policy (this worktree)
+
+On this machine, Parker uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
+
 ## Collaboration
 
 Before starting work, run `git rev-parse --show-toplevel` to find the repo root, or use the `TEAM ROOT` provided in the spawn prompt. All `.squad/` paths must be resolved relative to this root — do not assume CWD is the repo root (you may be in a worktree or subdirectory).
