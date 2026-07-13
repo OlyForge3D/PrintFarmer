@@ -145,8 +145,15 @@ public class PrintStatsExternalBaselineTests
         await using (var verify = new AppDbContext(options))
         {
             Toolhead toolhead = await verify.Toolheads.FirstAsync(t => t.Id == toolheadId);
-            toolhead.CumulativePrintHours.Should().BeApproximately(10.0, 0.0001,
-                "the 10h external growth on the second cycle must be attributed despite PrintFarmer-job inflation");
+
+            // Issue #711 Finding H1: per-toolhead wear is only attributed when the printer advertises
+            // SupportsPerToolAttribution AND real per-tool telemetry is available. This Moonraker
+            // printer leaves the capability flag at its default (false), so the external delta must
+            // advance the printer-wide ExternalPrintHours / TotalPrintHours baselines below WITHOUT
+            // being fabricated onto the toolhead (the old equal-split of idle-head wear is removed).
+            // The capability + telemetry attribution path is covered by PrintStatsToolheadAttributionTests.
+            toolhead.CumulativePrintHours.Should().BeApproximately(0.0, 0.0001,
+                "without SupportsPerToolAttribution the external delta must not be attributed to toolheads");
 
             PrinterStatistics stats = await verify.PrinterStatisticsSet.FirstAsync(s => s.PrinterId == printerId);
             stats.ExternalPrintHours.Should().BeApproximately(110.0, 0.0001,
@@ -540,7 +547,13 @@ public class PrintStatsExternalBaselineTests
         failingToolhead.CumulativePrintHours.Should().Be(0);
         healthyStats.ExternalPrintHours.Should().Be(210,
             "a later printer must still complete in its independent scope");
-        healthyToolhead.CumulativePrintHours.Should().Be(10);
+
+        // Issue #711 Finding H1: the healthy printer's external delta advances its printer-wide
+        // baseline (ExternalPrintHours 200 -> 210) but is NOT attributed to the toolhead, because
+        // the printer does not advertise SupportsPerToolAttribution. The removed equal-split would
+        // previously have credited the single physical head with the full 10h.
+        healthyToolhead.CumulativePrintHours.Should().Be(0,
+            "without SupportsPerToolAttribution per-toolhead wear stays unattributed");
         jobStats.Verify(repository => repository.GetByPrinterModelAsync(
             healthyModelId,
             true,
