@@ -38,7 +38,7 @@ public class MaintenanceAlertConfiguration : IEntityTypeConfiguration<Maintenanc
         _ = builder.HasOne(a => a.Toolhead)
             .WithMany()
             .HasForeignKey(a => a.ToolheadId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         // Indexes for efficient queries
         _ = builder.HasIndex(a => a.PrinterId);

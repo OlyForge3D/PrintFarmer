@@ -43,7 +43,7 @@ public class MaintenanceLogConfiguration : IEntityTypeConfiguration<MaintenanceL
         _ = builder.HasOne(l => l.Toolhead)
             .WithMany()
             .HasForeignKey(l => l.ToolheadId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         // Indexes for efficient queries
         _ = builder.HasIndex(l => l.PrinterId);

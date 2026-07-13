@@ -6087,7 +6087,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
                         .WithMany()
                         .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("MaintenanceTask");
 
@@ -6124,7 +6124,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
                         .WithMany()
                         .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("MaintenanceTask");
 
@@ -6666,7 +6666,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
                         .WithMany()
                         .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("MaintenancePlan");
 

@@ -150,7 +150,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "ToolheadId",
                 principalTable: "Toolheads",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_MaintenanceLogs_Toolheads_ToolheadId",
@@ -158,7 +158,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "ToolheadId",
                 principalTable: "Toolheads",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_PrinterMaintenanceSchedules_Toolheads_ToolheadId",
@@ -166,7 +166,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "ToolheadId",
                 principalTable: "Toolheads",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />

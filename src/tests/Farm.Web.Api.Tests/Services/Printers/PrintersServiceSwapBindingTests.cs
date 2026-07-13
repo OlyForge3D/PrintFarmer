@@ -682,10 +682,9 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         index.IsUnique.Should().BeTrue();
         index.GetDatabaseName().Should().Be("UX_Toolheads_PrinterId_Index");
 
-        // Referencing FKs are allowed only for the F6 (issue #711) additions: the fallback
-        // group member (Cascade) and the three optional maintenance-scope references
-        // (SetNull) on schedules, alerts, and logs. Anything else here would risk breaking
-        // canonical toolhead swap semantics and should be reviewed.
+        // Referencing FKs are allowed only for the F6 (issue #711) additions. All use Restrict
+        // to avoid SQL Server multiple-cascade-path violations. Physical toolheads have no
+        // standalone deletion path, and MMU gates are not eligible for maintenance scope.
         HashSet<string> allowedReferencingTypes =
         [
             nameof(Farm.Infrastructure.Domain.FilamentFallbackGroupMember),
@@ -693,10 +692,13 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
             nameof(Farm.Infrastructure.Domain.MaintenanceLog),
             nameof(Farm.Infrastructure.Domain.PrinterMaintenanceSchedule),
         ];
-        IEnumerable<string> actualReferencingTypes = toolheadEntity
+        List<Microsoft.EntityFrameworkCore.Metadata.IForeignKey> referencingForeignKeys = toolheadEntity
             .GetReferencingForeignKeys()
+            .ToList();
+        IEnumerable<string> actualReferencingTypes = referencingForeignKeys
             .Select(fk => fk.DeclaringEntityType.ClrType.Name);
         actualReferencingTypes.Should().BeSubsetOf(allowedReferencingTypes);
+        referencingForeignKeys.Should().OnlyContain(fk => fk.DeleteBehavior == DeleteBehavior.Restrict);
     }
 
     [Fact]

@@ -26,7 +26,7 @@ public class PrinterMaintenanceScheduleConfiguration : IEntityTypeConfiguration<
         _ = builder.HasOne(s => s.Toolhead)
             .WithMany()
             .HasForeignKey(s => s.ToolheadId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         // Uniqueness across (Plan, Printer, Toolhead) for toolhead-scoped schedules. The
         // nullable Toolhead column has provider-specific null semantics: SQL Server auto-adds
