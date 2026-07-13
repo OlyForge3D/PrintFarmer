@@ -40,7 +40,8 @@ public sealed class MaintenanceAlertResolutionService(
     IAttentionBroadcaster? attentionBroadcaster = null,
     IPrinterStatisticsRepository? printerStatisticsRepository = null,
     IToolheadStatisticsRepository? toolheadStatisticsRepository = null,
-    ILogger<MaintenanceAlertResolutionService>? logger = null) : IMaintenanceAlertResolutionService
+    ILogger<MaintenanceAlertResolutionService>? logger = null,
+    IMaintenanceResolutionNotifier? resolutionNotifier = null) : IMaintenanceAlertResolutionService
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
@@ -59,6 +60,7 @@ public sealed class MaintenanceAlertResolutionService(
     private readonly IToolheadStatisticsRepository? _toolheadStatisticsRepository = toolheadStatisticsRepository;
 
     private readonly ILogger<MaintenanceAlertResolutionService>? _logger = logger;
+    private readonly IMaintenanceResolutionNotifier? _resolutionNotifier = resolutionNotifier;
 
     /// <inheritdoc />
     public async Task<MaintenanceAlertResolutionResult?> ResolveWithLogAsync(
@@ -70,54 +72,87 @@ public sealed class MaintenanceAlertResolutionService(
         ArgumentNullException.ThrowIfNull(log);
 
         MaintenanceAlert? alert = await _dbContext.MaintenanceAlerts
+            .AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == alertId, cancellationToken);
-        if (alert == null)
+        if (alert is null)
         {
             return null;
         }
 
-        // Finding H7 idempotency: a resolve on an already-terminal alert must not insert a second
-        // completion log. Return the existing alert-linked log (latest by PerformedAt) so a retry
-        // after a broadcast failure or a duplicate client submission is a no-op success.
-        if (alert.Status is MaintenanceAlertStatus.Resolved or MaintenanceAlertStatus.Dismissed)
+        MaintenanceAlertResolutionResult? terminalResult =
+            await EvaluateTerminalStatusAsync(alert, cancellationToken);
+        if (terminalResult is not null)
         {
-            MaintenanceLog? existing = await FindLatestLinkedLogAsync(alertId, cancellationToken);
-            if (existing != null)
-            {
-                return new MaintenanceAlertResolutionResult(alert, existing);
-            }
+            return terminalResult;
         }
 
-        // Link the completion log to the alert so it participates in the filtered-unique index
-        // (one completion log per alert) and the idempotency lookup above.
         log.ResolvedAlertId = alertId;
 
-        // InMemory has no transaction support; a single SaveChanges is already atomic there. For
-        // relational providers open an explicit transaction so the staged log rolls back with the
-        // alert mutation if the gate re-check throws.
         bool useTransaction = _dbContext.Database.IsRelational();
         IDbContextTransaction? transaction = useTransaction
             ? await _dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
+        DateTime resolvedAt = DateTime.UtcNow;
 
         try
         {
-            // Stage the log WITHOUT saving so a gate rejection discards it atomically.
-            _dbContext.MaintenanceLogs.Add(log);
-
-            // Re-check the gate immediately before mutating — inside the transaction — so a gate
-            // that flipped after the controller pre-check cannot persist the log with an
-            // unresolved alert.
             EnsureAlertMutationEnabled(alert);
 
-            alert.Status = MaintenanceAlertStatus.Resolved;
-            alert.ResolvedAt = DateTime.UtcNow;
-            alert.ResolvedBy = resolvedBy;
+            if (useTransaction)
+            {
+                int transitioned = await _dbContext.MaintenanceAlerts
+                    .Where(candidate =>
+                        candidate.Id == alertId
+                        && (candidate.Status == MaintenanceAlertStatus.Active
+                            || candidate.Status == MaintenanceAlertStatus.Acknowledged))
+                    .ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(
+                                candidate => candidate.Status,
+                                MaintenanceAlertStatus.Resolved)
+                            .SetProperty(candidate => candidate.ResolvedAt, resolvedAt)
+                            .SetProperty(candidate => candidate.ResolvedBy, resolvedBy)
+                            .SetProperty(candidate => candidate.UpdatedAt, resolvedAt),
+                        cancellationToken);
 
-            // Single SaveChanges commits the log insert and the alert transition together.
+                if (transitioned == 0)
+                {
+                    await transaction!.RollbackAsync(cancellationToken);
+                    _dbContext.ChangeTracker.Clear();
+                    return await ReloadAfterConcurrentTransitionAsync(
+                        alertId,
+                        cancellationToken);
+                }
+            }
+            else
+            {
+                MaintenanceAlert? trackedAlert = await _dbContext.MaintenanceAlerts
+                    .FirstOrDefaultAsync(candidate => candidate.Id == alertId, cancellationToken);
+                if (trackedAlert is null)
+                {
+                    return null;
+                }
+
+                terminalResult = await EvaluateTerminalStatusAsync(
+                    trackedAlert,
+                    cancellationToken);
+                if (terminalResult is not null)
+                {
+                    return terminalResult;
+                }
+
+                EnsureAlertMutationEnabled(trackedAlert);
+                trackedAlert.Status = MaintenanceAlertStatus.Resolved;
+                trackedAlert.ResolvedAt = resolvedAt;
+                trackedAlert.ResolvedBy = resolvedBy;
+                trackedAlert.UpdatedAt = resolvedAt;
+                alert = trackedAlert;
+            }
+
+            _dbContext.MaintenanceLogs.Add(log);
             await _dbContext.SaveChangesAsync(cancellationToken);
 
-            if (transaction != null)
+            if (transaction is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
             }
@@ -127,7 +162,7 @@ public sealed class MaintenanceAlertResolutionService(
             // Finding H7: the filtered-unique index on ResolvedAlertId caught a concurrent duplicate
             // completion. Roll back, discard the losing tracked entities, and return the winner so
             // the racing caller still observes an idempotent success rather than an error.
-            if (transaction != null)
+            if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
@@ -135,13 +170,17 @@ public sealed class MaintenanceAlertResolutionService(
             _dbContext.ChangeTracker.Clear();
 
             MaintenanceLog? winner = await FindLatestLinkedLogAsync(alertId, cancellationToken);
-            if (winner != null)
+            if (winner is not null)
             {
                 MaintenanceAlert? committedAlert = await _dbContext.MaintenanceAlerts
+                    .AsNoTracking()
                     .FirstOrDefaultAsync(a => a.Id == alertId, cancellationToken);
-                if (committedAlert != null)
+                if (committedAlert is not null)
                 {
-                    return new MaintenanceAlertResolutionResult(committedAlert, winner);
+                    return new MaintenanceAlertResolutionResult(
+                        committedAlert,
+                        winner,
+                        Created: false);
                 }
             }
 
@@ -149,7 +188,7 @@ public sealed class MaintenanceAlertResolutionService(
         }
         catch
         {
-            if (transaction != null)
+            if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
@@ -158,15 +197,21 @@ public sealed class MaintenanceAlertResolutionService(
         }
         finally
         {
-            if (transaction != null)
+            if (transaction is not null)
             {
                 await transaction.DisposeAsync();
             }
         }
 
-        await PublishResolvedAttentionAsync(alert);
+        alert.Status = MaintenanceAlertStatus.Resolved;
+        alert.ResolvedAt = resolvedAt;
+        alert.ResolvedBy = resolvedBy;
+        alert.UpdatedAt = resolvedAt;
 
-        return new MaintenanceAlertResolutionResult(alert, log);
+        await PublishResolvedAttentionAsync(alert);
+        await PublishResolutionCreatedAsync(alert, log, cancellationToken);
+
+        return new MaintenanceAlertResolutionResult(alert, log, Created: true);
     }
 
     /// <inheritdoc />
@@ -182,6 +227,13 @@ public sealed class MaintenanceAlertResolutionService(
         if (alert == null)
         {
             return null;
+        }
+
+        MaintenanceAlertResolutionResult? terminalResult =
+            await EvaluateTerminalStatusAsync(alert, cancellationToken);
+        if (terminalResult is not null)
+        {
+            return terminalResult;
         }
 
         // Baselines are mandatory: the alert engine derives "due" from the latest completion log's
@@ -220,8 +272,55 @@ public sealed class MaintenanceAlertResolutionService(
         return await ResolveWithLogAsync(alertId, log, resolvedBy, cancellationToken);
     }
 
+    private async Task<MaintenanceAlertResolutionResult?> EvaluateTerminalStatusAsync(
+        MaintenanceAlert alert,
+        CancellationToken cancellationToken)
+    {
+        if (alert.Status == MaintenanceAlertStatus.Dismissed)
+        {
+            throw new MaintenanceAlertNotResolvableException(alert.Id, alert.Status);
+        }
+
+        if (alert.Status != MaintenanceAlertStatus.Resolved)
+        {
+            return null;
+        }
+
+        MaintenanceLog? existing = await FindLatestLinkedLogAsync(
+            alert.Id,
+            cancellationToken);
+        return new MaintenanceAlertResolutionResult(
+            alert,
+            existing,
+            Created: false);
+    }
+
+    private async Task<MaintenanceAlertResolutionResult?> ReloadAfterConcurrentTransitionAsync(
+        Guid alertId,
+        CancellationToken cancellationToken)
+    {
+        MaintenanceAlert? current = await _dbContext.MaintenanceAlerts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(alert => alert.Id == alertId, cancellationToken);
+        if (current is null)
+        {
+            return null;
+        }
+
+        MaintenanceAlertResolutionResult? terminalResult =
+            await EvaluateTerminalStatusAsync(current, cancellationToken);
+        if (terminalResult is not null)
+        {
+            return terminalResult;
+        }
+
+        throw new DbUpdateConcurrencyException(
+            $"Maintenance alert {alertId} changed while it was being resolved.");
+    }
+
     private Task<MaintenanceLog?> FindLatestLinkedLogAsync(Guid alertId, CancellationToken cancellationToken) =>
         _dbContext.MaintenanceLogs
+            .AsNoTracking()
             .Where(l => l.ResolvedAlertId == alertId)
             .OrderByDescending(l => l.PerformedAt)
             .FirstOrDefaultAsync(cancellationToken);
@@ -259,6 +358,32 @@ public sealed class MaintenanceAlertResolutionService(
             _logger?.LogWarning(
                 ex,
                 "[MaintenanceAlertResolutionService] Resolved alert {AlertId} but attention broadcast failed; resolution is committed.",
+                alert.Id);
+        }
+    }
+
+    private async Task PublishResolutionCreatedAsync(
+        MaintenanceAlert alert,
+        MaintenanceLog log,
+        CancellationToken cancellationToken)
+    {
+        if (_resolutionNotifier is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _resolutionNotifier.NotifyCreatedAsync(
+                alert,
+                log,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(
+                ex,
+                "[MaintenanceAlertResolutionService] Resolved alert {AlertId} but completion notification failed; resolution is committed.",
                 alert.Id);
         }
     }

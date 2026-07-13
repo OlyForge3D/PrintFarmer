@@ -31,7 +31,7 @@ public class MaintenanceLogConfiguration : IEntityTypeConfiguration<MaintenanceL
         _ = builder.HasOne(l => l.ResolvedAlert)
             .WithMany()
             .HasForeignKey(l => l.ResolvedAlertId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         // Relationship with MaintenanceTask (optional)
         _ = builder.HasOne(l => l.MaintenanceTask)

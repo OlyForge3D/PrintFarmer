@@ -28,6 +28,8 @@ public interface IMaintenanceAlertResolutionService
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>
     /// The committed alert and log, or <see langword="null"/> when the alert no longer exists.
+    /// A resolved legacy alert without a linked log returns an idempotent result whose
+    /// <see cref="MaintenanceAlertResolutionResult.Log"/> is <see langword="null"/>.
     /// </returns>
     /// <exception cref="PerToolMaintenanceDisabledException">
     /// Thrown when the alert is toolhead-scoped and per-tool maintenance is disabled at commit time.
@@ -52,8 +54,8 @@ public interface IMaintenanceAlertResolutionService
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>
     /// The committed alert and log, or <see langword="null"/> when the alert no longer exists. When
-    /// the alert is already resolved, the existing linked completion log is returned without
-    /// inserting a duplicate (Finding H7).
+    /// the alert is already resolved, the existing linked completion log (when present) is
+    /// returned without inserting a duplicate (Finding H7).
     /// </returns>
     /// <exception cref="PerToolMaintenanceDisabledException">
     /// Thrown when the alert is toolhead-scoped and per-tool maintenance is disabled at commit time.
@@ -70,5 +72,9 @@ public interface IMaintenanceAlertResolutionService
 /// Result of an atomic resolve-with-log operation.
 /// </summary>
 /// <param name="Alert">The resolved alert in its committed state.</param>
-/// <param name="Log">The persisted completion log.</param>
-public sealed record MaintenanceAlertResolutionResult(MaintenanceAlert Alert, MaintenanceLog Log);
+/// <param name="Log">The persisted completion log, or null for a resolved legacy alert without one.</param>
+/// <param name="Created">True only when this call created the completion log and transitioned the alert.</param>
+public sealed record MaintenanceAlertResolutionResult(
+    MaintenanceAlert Alert,
+    MaintenanceLog? Log,
+    bool Created = true);

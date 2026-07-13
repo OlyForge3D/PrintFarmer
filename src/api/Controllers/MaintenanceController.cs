@@ -185,6 +185,7 @@ public class MaintenanceController(
     [HttpPost("alerts/{id:guid}/resolve")]
     [ProducesResponseType(typeof(ResolveAlertResponse), 200)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ResolveAlertResponse>> ResolveAlertAsync(
         Guid id,
@@ -253,41 +254,18 @@ public class MaintenanceController(
             }
 
             alert = resolution.Alert;
-            MaintenanceLog createdLog = resolution.Log;
-
-            // Broadcast status change
-            await _maintenanceHub.Clients.All.SendAsync("alertstatuschanged", new
-            {
-                id = alert.Id,
-                printerId = alert.PrinterId,
-                status = alert.Status.ToString(),
-                resolvedAt = alert.ResolvedAt,
-                resolvedBy = alert.ResolvedBy
-            }, ct);
-
-            // Broadcast maintenance completed
-            await _maintenanceHub.Clients.All.SendAsync("maintenancecompleted", new
-            {
-                logId = createdLog.Id,
-                printerId = createdLog.PrinterId,
-                deploymentId = createdLog.PrinterMaintenanceScheduleId,
-                performedAt = createdLog.PerformedAt,
-                performedBy = createdLog.PerformedBy
-            }, ct);
-
-            _webhookService.Enqueue("maintenance.completed", new
-            {
-                logId = createdLog.Id,
-                printerId = createdLog.PrinterId,
-                performedAt = createdLog.PerformedAt,
-                performedBy = createdLog.PerformedBy
-            });
-
-            return Ok(new ResolveAlertResponse(alert, createdLog));
+            return Ok(new ResolveAlertResponse(
+                alert,
+                resolution.Log,
+                resolution.Created));
         }
         catch (PerToolMaintenanceDisabledException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (MaintenanceAlertNotResolvableException ex)
+        {
+            return Conflict(ex.Message);
         }
         catch (Exception ex)
         {
@@ -1188,7 +1166,8 @@ public record ResolveAlertRequest(
 
 public record ResolveAlertResponse(
     MaintenanceAlert Alert,
-    MaintenanceLog MaintenanceLog);
+    MaintenanceLog? MaintenanceLog,
+    bool Created = true);
 
 public record CreateMaintenanceLogRequest(
     Guid PrinterId,

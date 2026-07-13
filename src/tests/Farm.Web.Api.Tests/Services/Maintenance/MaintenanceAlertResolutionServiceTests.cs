@@ -287,21 +287,39 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
-        var service = new MaintenanceAlertResolutionService(_context, gate.Object);
+        var notifier = new Mock<IMaintenanceResolutionNotifier>(MockBehavior.Strict);
+        notifier
+            .Setup(n => n.NotifyCreatedAsync(
+                It.IsAny<MaintenanceAlert>(),
+                It.IsAny<MaintenanceLog>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new MaintenanceAlertResolutionService(
+            _context,
+            gate.Object,
+            resolutionNotifier: notifier.Object);
 
         MaintenanceAlertResolutionResult? first =
             await service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
         first.Should().NotBeNull();
-        Guid firstLogId = first!.Log.Id;
+        first!.Created.Should().BeTrue();
+        Guid firstLogId = first.Log!.Id;
 
         MaintenanceAlertResolutionResult? second =
             await service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
         second.Should().NotBeNull();
-        second!.Log.Id.Should().Be(firstLogId);
+        second!.Created.Should().BeFalse();
+        second.Log!.Id.Should().Be(firstLogId);
         second.Alert.Status.Should().Be(MaintenanceAlertStatus.Resolved);
 
         await using AppDbContext verify = NewContext();
         (await verify.MaintenanceLogs.CountAsync()).Should().Be(1);
+        notifier.Verify(
+            n => n.NotifyCreatedAsync(
+                It.IsAny<MaintenanceAlert>(),
+                It.IsAny<MaintenanceLog>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -362,9 +380,204 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
             await service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
 
         result.Should().NotBeNull();
-        result!.Log.Id.Should().Be(winner.Id);
+        result!.Log!.Id.Should().Be(winner.Id);
+        result.Created.Should().BeFalse();
 
         await using AppDbContext verify = NewContext();
         (await verify.MaintenanceLogs.CountAsync(l => l.ResolvedAlertId == alert.Id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ResolveWithLog_DismissedAlert_ThrowsConflictAndDoesNotCreateLog()
+    {
+        MaintenanceAlert alert = SeedToolheadAlert();
+        alert.Status = MaintenanceAlertStatus.Dismissed;
+        alert.DismissedAt = DateTime.UtcNow;
+        alert.DismissedBy = "operator";
+        await _context.SaveChangesAsync();
+
+        var service = new MaintenanceAlertResolutionService(_context);
+
+        Func<Task> act = () =>
+            service.ResolveWithLogAsync(alert.Id, BuildLog(alert), "operator");
+
+        await act.Should().ThrowAsync<MaintenanceAlertNotResolvableException>()
+            .WithMessage("*Dismissed*cannot be resolved*");
+        await using AppDbContext verify = NewContext();
+        (await verify.MaintenanceLogs.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ResolveWithLog_ResolvedLegacyAlertWithoutLog_ReturnsIdempotentResult()
+    {
+        MaintenanceAlert alert = SeedToolheadAlert();
+        alert.Status = MaintenanceAlertStatus.Resolved;
+        alert.ResolvedAt = DateTime.UtcNow;
+        alert.ResolvedBy = "legacy";
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        var service = new MaintenanceAlertResolutionService(_context);
+
+        MaintenanceAlertResolutionResult? result =
+            await service.ResolveWithLogAsync(
+                alert.Id,
+                BuildLog(alert),
+                "operator");
+
+        result.Should().NotBeNull();
+        result!.Created.Should().BeFalse();
+        result.Log.Should().BeNull();
+        result.Alert.Status.Should().Be(MaintenanceAlertStatus.Resolved);
+        await using AppDbContext verify = NewContext();
+        (await verify.MaintenanceLogs.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ResolveWithLog_ResolutionNotifierThrows_ReturnsSuccessAfterCommit()
+    {
+        MaintenanceAlert alert = SeedToolheadAlert();
+        var notifier = new Mock<IMaintenanceResolutionNotifier>(MockBehavior.Strict);
+        notifier
+            .Setup(n => n.NotifyCreatedAsync(
+                It.IsAny<MaintenanceAlert>(),
+                It.IsAny<MaintenanceLog>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("webhook unavailable"));
+        var service = new MaintenanceAlertResolutionService(
+            _context,
+            resolutionNotifier: notifier.Object);
+
+        MaintenanceAlertResolutionResult? result =
+            await service.ResolveWithLogAsync(
+                alert.Id,
+                BuildLog(alert),
+                "operator");
+
+        result.Should().NotBeNull();
+        result!.Created.Should().BeTrue();
+        await using AppDbContext verify = NewContext();
+        (await verify.MaintenanceLogs.CountAsync()).Should().Be(1);
+        (await verify.MaintenanceAlerts.SingleAsync(a => a.Id == alert.Id))
+            .Status.Should().Be(MaintenanceAlertStatus.Resolved);
+    }
+
+    [Fact]
+    public async Task DeleteAlert_LinkedCompletionLog_RejectsDeleteAndPreservesLink()
+    {
+        MaintenanceAlert alert = SeedToolheadAlert();
+        var service = new MaintenanceAlertResolutionService(_context);
+        _ = await service.ResolveWithLogAsync(
+            alert.Id,
+            BuildLog(alert),
+            "operator");
+        _context.ChangeTracker.Clear();
+
+        MaintenanceAlert persistedAlert =
+            await _context.MaintenanceAlerts.SingleAsync(a => a.Id == alert.Id);
+        _context.MaintenanceAlerts.Remove(persistedAlert);
+
+        Func<Task> act = () => _context.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        _context.ChangeTracker.Clear();
+        await using AppDbContext verify = NewContext();
+        (await verify.MaintenanceAlerts.CountAsync(a => a.Id == alert.Id)).Should().Be(1);
+        (await verify.MaintenanceLogs.CountAsync(l => l.ResolvedAlertId == alert.Id))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ResolveWithLog_ConcurrentCalls_CreatesSingleCompletionLog()
+    {
+        string databasePath = Path.Combine(
+            AppContext.BaseDirectory,
+            $"maintenance-resolution-{Guid.NewGuid():N}.db");
+        string connectionString =
+            $"Data Source={databasePath};Pooling=False;Default Timeout=30";
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connectionString)
+                .Options;
+
+        try
+        {
+            MaintenanceAlert alert;
+            await using (var setup = new AppDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                string suffix = Guid.NewGuid().ToString("N")[..8];
+                Manufacturer manufacturer = new()
+                {
+                    Id = Guid.NewGuid(),
+                    Name = $"Concurrent Mfg {suffix}"
+                };
+                PrinterModel model = new()
+                {
+                    Id = Guid.NewGuid(),
+                    ManufacturerId = manufacturer.Id,
+                    Name = $"Concurrent Model {suffix}"
+                };
+                Printer printer = new PrinterBuilder().Build();
+                printer.ManufacturerId = manufacturer.Id;
+                printer.ModelId = model.Id;
+                printer.ServerUrl = $"http://concurrent-{suffix}.local";
+                alert = new MaintenanceAlert
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = printer.Id,
+                    Title = "Concurrent resolution",
+                    Status = MaintenanceAlertStatus.Active
+                };
+
+                setup.Manufacturers.Add(manufacturer);
+                setup.PrinterModels.Add(model);
+                setup.Printers.Add(printer);
+                setup.MaintenanceAlerts.Add(alert);
+                await setup.SaveChangesAsync();
+            }
+
+            var start = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async Task<MaintenanceAlertResolutionResult?> ResolveAsync(
+                string resolvedBy)
+            {
+                await start.Task;
+                await using var context = new AppDbContext(options);
+                var service = new MaintenanceAlertResolutionService(context);
+                return await service.ResolveWithLogAsync(
+                    alert.Id,
+                    BuildLog(alert),
+                    resolvedBy);
+            }
+
+            Task<MaintenanceAlertResolutionResult?> first =
+                ResolveAsync("operator-a");
+            Task<MaintenanceAlertResolutionResult?> second =
+                ResolveAsync("operator-b");
+            start.SetResult();
+
+            MaintenanceAlertResolutionResult?[] results =
+                await Task.WhenAll(first, second);
+
+            results.Should().NotContainNulls();
+            results.Should().ContainSingle(result => result!.Created);
+            results.Should().ContainSingle(result => !result!.Created);
+
+            await using var verify = new AppDbContext(options);
+            (await verify.MaintenanceLogs.CountAsync(
+                log => log.ResolvedAlertId == alert.Id)).Should().Be(1);
+            (await verify.MaintenanceAlerts.SingleAsync(
+                candidate => candidate.Id == alert.Id))
+                .Status.Should().Be(MaintenanceAlertStatus.Resolved);
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
     }
 }

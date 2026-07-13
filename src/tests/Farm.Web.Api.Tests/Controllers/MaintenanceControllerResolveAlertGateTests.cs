@@ -152,6 +152,82 @@ public sealed class MaintenanceControllerResolveAlertGateTests
     }
 
     [Fact]
+    public async Task ResolveAlert_DismissedAlert_ReturnsConflictWithoutCreatingLog()
+    {
+        Guid alertId = Guid.NewGuid();
+        MaintenanceAlert alert = new()
+        {
+            Id = alertId,
+            PrinterId = Guid.NewGuid(),
+            Title = "Lubricate rails",
+            Status = MaintenanceAlertStatus.Dismissed
+        };
+        _alertRepository
+            .Setup(repository => repository.GetByIdAsync(
+                alertId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(alert);
+        MaintenanceController controller = CreateController();
+        _alertResolutionService
+            .Setup(service => service.ResolveWithLogAsync(
+                alertId,
+                It.IsAny<MaintenanceLog>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new MaintenanceAlertNotResolvableException(
+                alertId,
+                MaintenanceAlertStatus.Dismissed));
+
+        ActionResult<ResolveAlertResponse> result = await controller.ResolveAlertAsync(
+            alertId,
+            Request(),
+            CancellationToken.None);
+
+        ConflictObjectResult conflict =
+            Assert.IsType<ConflictObjectResult>(result.Result);
+        conflict.Value.Should().Be(
+            $"Maintenance alert {alertId} is Dismissed and cannot be resolved as completed maintenance.");
+        _logRepository.Verify(
+            repository => repository.AddAsync(
+                It.IsAny<MaintenanceLog>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveAlert_PostCommitHubThrows_ReturnsOkWithCreatedLog()
+    {
+        Guid alertId = Guid.NewGuid();
+        MaintenanceAlert alert = new()
+        {
+            Id = alertId,
+            PrinterId = Guid.NewGuid(),
+            Title = "Lubricate rails",
+            Status = MaintenanceAlertStatus.Active
+        };
+        _alertRepository
+            .Setup(repository => repository.GetByIdAsync(
+                alertId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(alert);
+        MaintenanceController controller = CreateController();
+        _maintenanceHub
+            .SetupGet(context => context.Clients)
+            .Throws(new InvalidOperationException("hub unavailable"));
+
+        ActionResult<ResolveAlertResponse> result = await controller.ResolveAlertAsync(
+            alertId,
+            Request(),
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        ResolveAlertResponse response =
+            Assert.IsType<ResolveAlertResponse>(ok.Value);
+        response.Created.Should().BeTrue();
+        response.MaintenanceLog.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task AcknowledgeAlert_ToolheadScopedAlert_GateDisabled_ReturnsBadRequest()
     {
         Guid alertId = Guid.NewGuid();

@@ -98,6 +98,8 @@ public static class FeatureServicesStartup
         // Maintenance Module - Services
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceResolutionNotifier,
+            Farm.Web.Api.Services.Maintenance.MaintenanceResolutionNotifier>();
 
         // Atomic resolve-with-log to close the resolve TOCTOU (issue #711, round-7 Finding 5).
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertResolutionService, Farm.Infrastructure.Services.Maintenance.MaintenanceAlertResolutionService>();
