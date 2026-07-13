@@ -814,6 +814,8 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         }
         finally
         {
+            SqliteConnection.ClearAllPools();
+
             if (File.Exists(databasePath))
             {
                 File.Delete(databasePath);
