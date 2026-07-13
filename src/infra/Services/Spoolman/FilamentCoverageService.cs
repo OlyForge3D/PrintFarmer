@@ -400,6 +400,14 @@ public class FilamentCoverageService(
                 loadedMaterial,
                 requiredActiveMaterial,
                 requiredQueuedMaterials);
+            double? availableForNewDemand = spool is not null
+                && remainingGrams.HasValue
+                && totalDemand.HasValue
+                && !queuedUnknownForThisSlot
+                && materialCompatible
+                && (activeJob is null || activeHasKnownMetadata)
+                    ? Math.Max(0.0, remainingGrams.Value - settings.ReserveGrams - totalDemand.Value)
+                    : null;
 
             // Determine status + reason.
             FilamentCoverageStatus status;
@@ -480,7 +488,11 @@ public class FilamentCoverageService(
                 status,
                 reason,
                 runoutAt,
-                runoutLayer));
+                runoutLayer)
+            {
+                ToolheadId = th.Id,
+                AvailableForNewDemandGrams = availableForNewDemand,
+            });
         }
 
         HashSet<int> physicalIndices = toolheads.Select(t => t.Index).ToHashSet();

@@ -276,4 +276,47 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         result!.ToolheadId.Should().Be(mmu.Id);
         result.LoadedSpoolId.Should().Be(7);
     }
+
+    [Fact]
+    public async Task GetAvailableFallbacksAsync_BatchesPrintersAndPreservesForwardChainOrder()
+    {
+        (Printer first, Toolhead firstT0, Toolhead firstT1, Toolhead firstMmu) =
+            await SeedPrinterWithToolheadsAsync("First");
+        (Printer second, Toolhead secondT0, Toolhead secondT1, _) =
+            await SeedPrinterWithToolheadsAsync("Second");
+        firstT1.CurrentMaterial = "PLA";
+        firstMmu.CurrentMaterial = "PLA";
+        secondT1.CurrentMaterial = "PLA";
+        await _db.SaveChangesAsync();
+
+        await _service.CreateAsync(
+            first.Id,
+            new CreateFilamentFallbackGroupRequest(
+                "First chain",
+                "PLA",
+                null,
+                [firstT0.Id, firstT1.Id, firstMmu.Id]),
+            CancellationToken.None);
+        await _service.CreateAsync(
+            second.Id,
+            new CreateFilamentFallbackGroupRequest(
+                "Second chain",
+                "PLA",
+                null,
+                [secondT0.Id, secondT1.Id]),
+            CancellationToken.None);
+
+        IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> results =
+            await _service.GetAvailableFallbacksAsync(
+                [first.Id, second.Id],
+                CancellationToken.None);
+
+        results[FilamentFallbackLookupKey.Create(first.Id, firstT0.Id, "pla")]
+            .Members.Select(member => member.ToolheadId)
+            .Should().ContainInOrder(firstT1.Id, firstMmu.Id);
+        results[FilamentFallbackLookupKey.Create(first.Id, firstT1.Id, "PLA")]
+            .Members.Should().ContainSingle(member => member.ToolheadId == firstMmu.Id);
+        results[FilamentFallbackLookupKey.Create(second.Id, secondT0.Id, "PLA")]
+            .Members.Should().ContainSingle(member => member.ToolheadId == secondT1.Id);
+    }
 }

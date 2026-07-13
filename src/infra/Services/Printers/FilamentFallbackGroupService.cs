@@ -55,7 +55,49 @@ public interface IFilamentFallbackGroupService
         Guid sourceToolheadId,
         string materialType,
         CancellationToken ct);
+
+    /// <summary>
+    /// Loads configured fallback chains for all candidate printers in one database query.
+    /// Results are keyed by printer, source toolhead, and normalized material so dispatch
+    /// scoring can reuse the same ordered chain without issuing per-printer/per-tool queries.
+    /// </summary>
+    Task<IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>>
+        GetAvailableFallbacksAsync(IEnumerable<Guid> printerIds, CancellationToken ct);
 }
+
+/// <summary>
+/// Normalized lookup key for one source toolhead's fallback chain.
+/// </summary>
+public readonly record struct FilamentFallbackLookupKey(
+    Guid PrinterId,
+    Guid SourceToolheadId,
+    string Material)
+{
+    public static FilamentFallbackLookupKey Create(
+        Guid printerId,
+        Guid sourceToolheadId,
+        string material) =>
+        new(printerId, sourceToolheadId, material.Trim().ToUpperInvariant());
+}
+
+/// <summary>
+/// Configured members after a source toolhead in one ordered fallback chain.
+/// </summary>
+public sealed record FilamentFallbackResolution(
+    Guid GroupId,
+    IReadOnlyList<FilamentFallbackChainMember> Members);
+
+/// <summary>
+/// One configured member in an ordered fallback chain. Persisted loadout fields are included as
+/// backup-configuration evidence only; live switch confirmation must come from backend telemetry.
+/// </summary>
+public sealed record FilamentFallbackChainMember(
+    Guid GroupId,
+    Guid MemberId,
+    Guid ToolheadId,
+    int Position,
+    string? LoadedMaterial,
+    int? LoadedSpoolId);
 
 /// <summary>
 /// A concrete configured fallback toolhead that currently has a spool loaded matching
@@ -293,50 +335,94 @@ public sealed class FilamentFallbackGroupService(
             return null;
         }
 
-        string materialLower = materialType.ToLowerInvariant();
-#pragma warning disable CA1862 // EF Core translates ToLower to SQL LOWER for case-insensitive comparison.
+        IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> resolutions =
+            await GetAvailableFallbacksAsync([printerId], ct).ConfigureAwait(false);
+        FilamentFallbackLookupKey key =
+            FilamentFallbackLookupKey.Create(printerId, sourceToolheadId, materialType);
+        _ = resolutions.TryGetValue(key, out FilamentFallbackResolution? resolution);
+        FilamentFallbackChainMember? member = resolution?.Members.FirstOrDefault(candidate =>
+                !string.IsNullOrWhiteSpace(candidate.LoadedMaterial)
+                && string.Equals(
+                    candidate.LoadedMaterial,
+                    materialType,
+                    StringComparison.OrdinalIgnoreCase));
+        return member is null
+            ? null
+            : new AvailableFallbackMember(
+                member.GroupId,
+                member.MemberId,
+                member.ToolheadId,
+                member.Position,
+                member.LoadedMaterial!,
+                member.LoadedSpoolId);
+    }
+
+    public async Task<IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>>
+        GetAvailableFallbacksAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printerIds);
+
+        Guid[] candidateIds = [.. printerIds.Distinct()];
+        if (candidateIds.Length == 0)
+        {
+            return new Dictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>();
+        }
+
         List<FilamentFallbackGroup> groups = await db.FilamentFallbackGroups
             .AsNoTracking()
-            .Where(g => g.PrinterId == printerId
-                && g.MaterialType.ToLower() == materialLower
-                && g.Members.Any(m => m.ToolheadId == sourceToolheadId))
+            .Where(g => candidateIds.Contains(g.PrinterId))
             .Include(g => g.Members.OrderBy(m => m.Position))
                 .ThenInclude(m => m.Toolhead)
+            .AsSingleQuery()
             .ToListAsync(ct);
-#pragma warning restore CA1862
 
-        foreach (FilamentFallbackGroup g in groups.OrderBy(g => g.DisplayOrder))
+        Dictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> resolutions = [];
+        foreach (FilamentFallbackGroup group in groups
+            .OrderBy(g => g.PrinterId)
+            .ThenBy(g => g.DisplayOrder)
+            .ThenBy(g => g.CreatedAt)
+            .ThenBy(g => g.Id))
         {
-            foreach (FilamentFallbackGroupMember member in g.Members.OrderBy(m => m.Position))
+            List<FilamentFallbackGroupMember> orderedMembers =
+                [.. group.Members.OrderBy(m => m.Position)];
+            for (int sourceIndex = 0; sourceIndex < orderedMembers.Count - 1; sourceIndex++)
             {
-                if (member.ToolheadId == sourceToolheadId)
+                FilamentFallbackGroupMember source = orderedMembers[sourceIndex];
+                FilamentFallbackLookupKey key = FilamentFallbackLookupKey.Create(
+                    group.PrinterId,
+                    source.ToolheadId,
+                    group.MaterialType);
+                if (resolutions.ContainsKey(key))
                 {
                     continue;
                 }
 
-                Toolhead? th = member.Toolhead;
-                if (th is null)
+                List<FilamentFallbackChainMember> chain = [];
+                foreach (FilamentFallbackGroupMember member in orderedMembers.Skip(sourceIndex + 1))
                 {
-                    // Physical docks and MMU/AMS gates are both valid fallback spool sources
-                    // (issue #711, FIX D); only skip members whose toolhead failed to load.
-                    continue;
-                }
+                    Toolhead? toolhead = member.Toolhead;
+                    if (toolhead is null)
+                    {
+                        continue;
+                    }
 
-                if (!string.IsNullOrWhiteSpace(th.CurrentMaterial)
-                    && string.Equals(th.CurrentMaterial, materialType, StringComparison.OrdinalIgnoreCase))
-                {
-                    return new AvailableFallbackMember(
-                        g.Id,
+                    chain.Add(new FilamentFallbackChainMember(
+                        group.Id,
                         member.Id,
                         member.ToolheadId,
                         member.Position,
-                        th.CurrentMaterial!,
-                        th.CurrentSpoolId);
+                        toolhead.CurrentMaterial,
+                        toolhead.CurrentSpoolId));
+                }
+
+                if (chain.Count > 0)
+                {
+                    resolutions[key] = new FilamentFallbackResolution(group.Id, chain);
                 }
             }
         }
 
-        return null;
+        return resolutions;
     }
 
     private async Task<int> NextDisplayOrderAsync(Guid printerId, CancellationToken ct)

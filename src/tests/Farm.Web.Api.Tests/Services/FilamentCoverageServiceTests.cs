@@ -557,6 +557,9 @@ public class FilamentCoverageServiceTests
 
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
         cov!.Status.Should().Be(FilamentCoverageStatus.Runout);
+        cov.Toolheads.Single().AvailableForNewDemandGrams.Should().Be(
+            0,
+            "existing demand and the configured reserve consume all capacity for a newly dispatched job");
     }
 
     [Fact]

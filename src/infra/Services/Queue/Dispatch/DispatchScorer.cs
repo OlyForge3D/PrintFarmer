@@ -109,26 +109,22 @@ public class DispatchScorer(
         List<DispatchScore> results = [];
         bool multiSlotEnabled = featureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
 
-        // Batch-load per-tool loaded-spool grams coverage (issue #711, F6, Finding 4). Only when
-        // the feature is on, a coverage service is available, and the job actually carries gram
-        // estimates — single-material jobs and callers without coverage keep the material-only path.
+        // Batch-load per-tool usable coverage and fallback chains only when the feature is on and
+        // the job carries gram estimates. Missing/failed coverage remains material-only with an
+        // explicit "coverage unknown" explanation.
         IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
-        Dictionary<Guid, IReadOnlyDictionary<int, double?>>? gramsByPrinter = null;
-        HashSet<(Guid PrinterId, int Tool)> fallbackCoveredTools = [];
-        if (multiSlotEnabled
-            && coverageService is not null
+        bool gramsAware = multiSlotEnabled
             && perToolReqs is { Count: > 0 }
-            && perToolReqs.Any(r => r.EstimatedGrams is > 0))
+            && perToolReqs.Any(r => r.EstimatedGrams is > 0);
+        Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts = null;
+        if (gramsAware && coverageService is not null)
         {
-            (gramsByPrinter, fallbackCoveredTools) =
-                await BuildPerToolGramsContextAsync(printers, perToolReqs, ct).ConfigureAwait(false);
+            gramsContexts =
+                await BuildPerToolGramsContextAsync(printers, perToolReqs!, ct).ConfigureAwait(false);
         }
 
         foreach (Printer printer in printers)
         {
-            IReadOnlyDictionary<int, double?>? printerGrams = null;
-            gramsByPrinter?.TryGetValue(printer.Id, out printerGrams);
-
             DispatchScore score = ScorePrinter(
                 job,
                 printer,
@@ -136,9 +132,8 @@ public class DispatchScorer(
                 queueDepths,
                 clusterMateNames,
                 multiSlotEnabled,
-                gramsByPrinter is not null,
-                printerGrams,
-                fallbackCoveredTools);
+                gramsAware,
+                gramsContexts);
             results.Add(score);
         }
 
@@ -168,8 +163,7 @@ public class DispatchScorer(
         HashSet<string> clusterMateNames,
         bool multiSlotEnabled,
         bool gramsAware,
-        IReadOnlyDictionary<int, double?>? remainingGramsByToolheadIndex,
-        HashSet<(Guid PrinterId, int Tool)> fallbackCoveredTools)
+        IReadOnlyDictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts)
     {
         Dictionary<string, FactorScore> breakdown = [];
         List<string> eliminationReasons = [];
@@ -211,13 +205,13 @@ public class DispatchScorer(
         {
             foreach (PrintJobToolMaterialRequirement req in perToolReqs)
             {
-                bool fallbackCovers = fallbackCoveredTools.Contains((printer.Id, req.Tool));
+                PerToolGramsContext? gramsContext = null;
+                gramsContexts?.TryGetValue((printer.Id, req.Tool), out gramsContext);
                 FactorScore toolFactor = ScorePerToolLoadout(
                     printer,
                     req,
                     gramsAware,
-                    remainingGramsByToolheadIndex,
-                    fallbackCovers);
+                    gramsContext);
                 breakdown[$"PerToolLoadout.T{req.Tool}"] = toolFactor;
             }
         }
@@ -353,14 +347,13 @@ public class DispatchScorer(
         return new FactorScore("Availability", 100, 0, 0, true);
     }
 
-    private async Task<(Dictionary<Guid, IReadOnlyDictionary<int, double?>> GramsByPrinter, HashSet<(Guid PrinterId, int Tool)> FallbackCovered)>
+    private async Task<Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext>>
         BuildPerToolGramsContextAsync(
             List<Printer> printers,
             IReadOnlyList<PrintJobToolMaterialRequirement> perToolReqs,
             CancellationToken ct)
     {
-        Dictionary<Guid, IReadOnlyDictionary<int, double?>> gramsByPrinter = [];
-        HashSet<(Guid PrinterId, int Tool)> fallbackCovered = [];
+        Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext> contexts = [];
 
         FleetFilamentCoverageDto fleet;
         try
@@ -370,11 +363,28 @@ public class DispatchScorer(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Dispatch scorer: fleet coverage load failed; per-tool grams checks skipped");
-            return (gramsByPrinter, fallbackCovered);
+            return contexts;
         }
 
         Dictionary<Guid, PrinterFilamentCoverageDto> coverageByPrinter =
             fleet.Printers.ToDictionary(p => p.PrinterId);
+        IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> fallbacks =
+            new Dictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>();
+        if (fallbackService is not null)
+        {
+            try
+            {
+                fallbacks = await fallbackService
+                    .GetAvailableFallbacksAsync(printers.Select(p => p.Id), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Dispatch scorer: fallback-chain batch load failed; source usable coverage retained");
+            }
+        }
 
         foreach (Printer printer in printers)
         {
@@ -383,18 +393,12 @@ public class DispatchScorer(
                 continue; // coverage unknown for this printer → material-only path
             }
 
-            Dictionary<int, double?> remainingByIndex = [];
-            foreach (ToolheadCoverageDto th in coverage.Toolheads)
-            {
-                remainingByIndex[th.ToolheadIndex] = th.RemainingGrams;
-            }
-
-            gramsByPrinter[printer.Id] = remainingByIndex;
-
-            if (fallbackService is null)
-            {
-                continue;
-            }
+            Dictionary<int, ToolheadCoverageDto> coverageByIndex = coverage.Toolheads
+                .GroupBy(t => t.ToolheadIndex)
+                .ToDictionary(g => g.Key, g => g.First());
+            Dictionary<Guid, ToolheadCoverageDto> coverageByToolheadId = coverage.Toolheads
+                .Where(t => t.ToolheadId.HasValue)
+                .ToDictionary(t => t.ToolheadId!.Value);
 
             foreach (PrintJobToolMaterialRequirement req in perToolReqs)
             {
@@ -405,43 +409,81 @@ public class DispatchScorer(
                     continue;
                 }
 
-                // Only the exact-index slot participates in fallback-group crediting; a different
-                // toolhead already scores as partial credit and does not consume the fallback path.
                 Toolhead? indexed = MatchIndexedToolhead(printer, req.Tool);
-                if (indexed is null
-                    || string.IsNullOrWhiteSpace(indexed.CurrentMaterial)
-                    || !string.Equals(indexed.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase))
+                bool exactMatch = indexed is not null
+                    && !string.IsNullOrWhiteSpace(indexed.CurrentMaterial)
+                    && string.Equals(
+                        indexed.CurrentMaterial,
+                        req.MaterialType,
+                        StringComparison.OrdinalIgnoreCase);
+                Toolhead? matched = exactMatch
+                    ? indexed
+                    : FindLoadedMaterialToolhead(printer, req.MaterialType);
+                if (matched is null)
                 {
                     continue;
                 }
 
-                if (!remainingByIndex.TryGetValue(indexed.Index, out double? indexedRemaining)
-                    || indexedRemaining is not double remaining
-                    || remaining >= estimated)
+                double? sourceUsable = TryGetUsableGrams(
+                    coverageByToolheadId,
+                    coverageByIndex,
+                    matched,
+                    req.MaterialType);
+                List<FallbackGramsMember> fallbackMembers = [];
+
+                // Only an exact-index source consumes its configured ordered fallback chain.
+                if (exactMatch
+                    && indexed is not null
+                    && fallbacks.TryGetValue(
+                        FilamentFallbackLookupKey.Create(printer.Id, indexed.Id, req.MaterialType),
+                        out FilamentFallbackResolution? resolution))
                 {
-                    continue; // not short (or grams unknown) → no fallback needed
+                    foreach (FilamentFallbackChainMember member in resolution.Members)
+                    {
+                        Toolhead? memberToolhead =
+                            printer.Toolheads.FirstOrDefault(t => t.Id == member.ToolheadId);
+                        if (memberToolhead is null)
+                        {
+                            continue;
+                        }
+
+                        fallbackMembers.Add(new FallbackGramsMember(
+                            memberToolhead.Name,
+                            TryGetUsableGrams(
+                                coverageByToolheadId,
+                                coverageByIndex,
+                                memberToolhead,
+                                req.MaterialType)));
+                    }
                 }
 
-                AvailableFallbackMember? member = await fallbackService
-                    .FindAvailableFallbackAsync(printer.Id, indexed.Id, req.MaterialType!, ct)
-                    .ConfigureAwait(false);
-                if (member is null)
-                {
-                    continue;
-                }
-
-                Toolhead? memberToolhead = printer.Toolheads.FirstOrDefault(t => t.Id == member.ToolheadId);
-                if (memberToolhead is not null
-                    && remainingByIndex.TryGetValue(memberToolhead.Index, out double? memberRemaining)
-                    && memberRemaining is double mr
-                    && mr >= estimated)
-                {
-                    fallbackCovered.Add((printer.Id, req.Tool));
-                }
+                contexts[(printer.Id, req.Tool)] =
+                    new PerToolGramsContext(sourceUsable, fallbackMembers);
             }
         }
 
-        return (gramsByPrinter, fallbackCovered);
+        return contexts;
+    }
+
+    private static double? TryGetUsableGrams(
+        IReadOnlyDictionary<Guid, ToolheadCoverageDto> coverageByToolheadId,
+        IReadOnlyDictionary<int, ToolheadCoverageDto> coverageByIndex,
+        Toolhead toolhead,
+        string requiredMaterial)
+    {
+        ToolheadCoverageDto? coverage = coverageByToolheadId.GetValueOrDefault(toolhead.Id)
+            ?? coverageByIndex.GetValueOrDefault(toolhead.Index);
+        if (coverage is null || string.IsNullOrWhiteSpace(coverage.Material))
+        {
+            return null;
+        }
+
+        if (!string.Equals(coverage.Material, requiredMaterial, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        return coverage.AvailableForNewDemandGrams;
     }
 
     private static Toolhead? MatchIndexedToolhead(Printer printer, int tool) =>
@@ -451,12 +493,17 @@ public class DispatchScorer(
             .ThenBy(t => t.Index)
             .FirstOrDefault();
 
+    private static Toolhead? FindLoadedMaterialToolhead(Printer printer, string material) =>
+        printer.Toolheads.FirstOrDefault(t =>
+            (t.ToolheadType == ToolheadType.Physical || t.ToolheadType == ToolheadType.MmuGate)
+            && !string.IsNullOrWhiteSpace(t.CurrentMaterial)
+            && string.Equals(t.CurrentMaterial, material, StringComparison.OrdinalIgnoreCase));
+
     private static FactorScore ScorePerToolLoadout(
         Printer printer,
         PrintJobToolMaterialRequirement req,
         bool gramsAware,
-        IReadOnlyDictionary<int, double?>? remainingGramsByToolheadIndex,
-        bool fallbackCovers)
+        PerToolGramsContext? gramsContext)
     {
         string factorName = $"PerToolLoadout.T{req.Tool}";
 
@@ -475,20 +522,17 @@ public class DispatchScorer(
             && string.Equals(indexed.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase))
         {
             return ApplyGramsOverlay(
-                factorName, 100, indexed, req, gramsAware, remainingGramsByToolheadIndex, fallbackCovers);
+                factorName, 100, req, gramsAware, gramsContext);
         }
 
         // Fall back: any physical toolhead or MMU gate currently loaded with the material.
-        Toolhead? loadedElsewhere = printer.Toolheads.FirstOrDefault(t =>
-            (t.ToolheadType == ToolheadType.Physical || t.ToolheadType == ToolheadType.MmuGate)
-            && !string.IsNullOrWhiteSpace(t.CurrentMaterial)
-            && string.Equals(t.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase));
+        Toolhead? loadedElsewhere = FindLoadedMaterialToolhead(printer, req.MaterialType);
         if (loadedElsewhere is not null)
         {
             // A different-toolhead match is already partial credit, so it never consumes the
             // fallback-group path — only the proportional grams penalty applies here.
             return ApplyGramsOverlay(
-                factorName, 75, loadedElsewhere, req, gramsAware, remainingGramsByToolheadIndex, fallbackCovers: false);
+                factorName, 75, req, gramsAware, gramsContext);
         }
 
         // No toolhead has this material loaded — soft penalty, still non-hard so the operator
@@ -508,11 +552,9 @@ public class DispatchScorer(
     private static FactorScore ApplyGramsOverlay(
         string factorName,
         double baseScore,
-        Toolhead matched,
         PrintJobToolMaterialRequirement req,
         bool gramsAware,
-        IReadOnlyDictionary<int, double?>? remainingGramsByToolheadIndex,
-        bool fallbackCovers)
+        PerToolGramsContext? gramsContext)
     {
         double baseWeighted = baseScore * WeightPerToolLoadout;
 
@@ -524,9 +566,7 @@ public class DispatchScorer(
 
         // Coverage unknown for this printer, or this slot's remaining grams unavailable → keep the
         // material-only score but surface that grams could not be verified (Finding 4d).
-        if (remainingGramsByToolheadIndex is null
-            || !remainingGramsByToolheadIndex.TryGetValue(matched.Index, out double? remainingNullable)
-            || remainingNullable is not double remaining)
+        if (gramsContext?.SourceUsableGrams is not double sourceUsable)
         {
             return new FactorScore(
                 factorName,
@@ -537,45 +577,77 @@ public class DispatchScorer(
                 $"T{req.Tool} coverage unknown (need {FormatGrams(estimated)}g)");
         }
 
-        if (remaining >= estimated)
+        double sourceConsumed = Math.Min(Math.Max(0, sourceUsable), estimated);
+        double shortfallRemaining = estimated - sourceConsumed;
+        if (shortfallRemaining <= 1e-6)
         {
+            string sufficientCoverage =
+                $"T{req.Tool} source usable {FormatGrams(sourceUsable)}g covers " +
+                $"{FormatGrams(estimated)}g; shortfall remaining 0g; fallback closed gap: not needed";
             return new FactorScore(
                 factorName,
                 baseScore,
                 WeightPerToolLoadout,
                 baseWeighted,
                 false,
-                $"T{req.Tool} {FormatGrams(remaining)}g covers {FormatGrams(estimated)}g");
+                sufficientCoverage);
         }
 
-        double gap = estimated - remaining;
-        string shortfall =
-            $"T{req.Tool} short by {FormatGrams(gap)}g (need {FormatGrams(estimated)}g, have {FormatGrams(remaining)}g)";
-
-        // A configured fallback member with enough grams keeps the tool viable via auto-switch —
-        // credited below a full match because the switch is a dependency, never zeroed.
-        if (fallbackCovers)
+        double fallbackConsumed = 0;
+        List<string> memberDetails = [];
+        foreach (FallbackGramsMember member in gramsContext.FallbackMembers)
         {
-            double credited = Math.Round(baseScore * FallbackGramsDiscount, 2);
-            return new FactorScore(
-                factorName,
-                credited,
-                WeightPerToolLoadout,
-                credited * WeightPerToolLoadout,
-                false,
-                $"{shortfall}; covered by configured fallback spool");
+            if (member.UsableGrams is not double memberUsable)
+            {
+                memberDetails.Add($"{member.Name} usable unknown, consumed 0g");
+                continue;
+            }
+
+            double consumed = Math.Min(Math.Max(0, memberUsable), shortfallRemaining);
+            fallbackConsumed += consumed;
+            shortfallRemaining -= consumed;
+            memberDetails.Add(
+                $"{member.Name} usable {FormatGrams(memberUsable)}g, consumed {FormatGrams(consumed)}g");
+            if (shortfallRemaining <= 1e-6)
+            {
+                shortfallRemaining = 0;
+                break;
+            }
         }
 
-        double ratio = Math.Clamp(remaining / estimated, 0, 1);
-        double reduced = Math.Round(baseScore * ratio, 2);
+        double creditedRatio = Math.Clamp(
+            (sourceConsumed + (fallbackConsumed * FallbackGramsDiscount)) / estimated,
+            0,
+            1);
+        double reduced = Math.Round(baseScore * creditedRatio, 2);
+        bool fallbackClosedGap = fallbackConsumed > 0 && shortfallRemaining <= 1e-6;
+        string fallbackDetails = memberDetails.Count == 0
+            ? "no usable configured fallback members"
+            : string.Join("; ", memberDetails);
+        string explanation =
+            $"T{req.Tool} source usable {FormatGrams(sourceUsable)}g, consumed " +
+            $"{FormatGrams(sourceConsumed)}g; {fallbackDetails}; shortfall remaining " +
+            $"{FormatGrams(shortfallRemaining)}g; fallback closed gap: " +
+            $"{(fallbackClosedGap ? "yes" : "no")}";
+        if (shortfallRemaining > 1e-6)
+        {
+            explanation += "; insufficient usable coverage";
+        }
+
         return new FactorScore(
             factorName,
             reduced,
             WeightPerToolLoadout,
             reduced * WeightPerToolLoadout,
             false,
-            shortfall);
+            explanation);
     }
+
+    private sealed record PerToolGramsContext(
+        double? SourceUsableGrams,
+        IReadOnlyList<FallbackGramsMember> FallbackMembers);
+
+    private sealed record FallbackGramsMember(string Name, double? UsableGrams);
 
     private static string FormatGrams(double grams) =>
         grams.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
