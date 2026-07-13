@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { Button } from "@/common/components/ui/Button";
+import { HarvestJobAction } from "@/features/harvest/components/HarvestJobAction";
 import type { HistoryJob } from "@/types/queue";
 
 /** Collapse repeated/duplicated material tokens (e.g. "PETG;PETG;PETG") to a compact list. */
@@ -17,6 +18,12 @@ interface HistoryJobTableProps {
   jobs: HistoryJob[];
   onRerun: (jobId: string) => void;
   onViewDetails?: (jobId: string) => void;
+  /**
+   * Called after a successful (or replayed) harvest so the parent can
+   * refresh its data source. Optional; the harvest mutation also
+   * invalidates TanStack Query keys for callers using them.
+   */
+  onHarvested?: () => void;
 }
 
 /**
@@ -29,6 +36,7 @@ export default function HistoryJobTable({
   jobs,
   onRerun,
   onViewDetails,
+  onHarvested,
 }: HistoryJobTableProps) {
   const formatDuration = useCallback((seconds: number) => {
     const minutes = Math.round(seconds / 60);
@@ -229,6 +237,13 @@ export default function HistoryJobTable({
                   {/* Actions */}
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
+                      {job.status === "completed" && (
+                        <HarvestJobAction
+                          job={{ id: job.id, name: job.name, harvestedAt: job.harvestedAt }}
+                          variant="table"
+                          onHarvested={onHarvested}
+                        />
+                      )}
                       {(job.status === "completed" || job.status === "cancelled") && (
                         <Button
                           onClick={() => onRerun(job.id)}
@@ -236,6 +251,7 @@ export default function HistoryJobTable({
                           size="sm"
                           className="px-2 py-1 text-xs"
                           title="Rerun this job"
+                          aria-label={`Rerun ${job.name}`}
                         >
                           ↻
                         </Button>

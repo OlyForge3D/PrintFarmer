@@ -2425,6 +2425,11 @@ export interface QueueHistoryEntryDto {
   actualPrintTimeSeconds: number;
   failureReason?: string;
   toolheadUsages?: PrintJobToolheadUsage[];
+  /**
+   * UTC timestamp when the completed job was harvested into printed-part stock
+   * (#722/#741). Null when unharvested.
+   */
+  harvestedAt?: string | null;
 }
 
 export interface TimelineEventDto {

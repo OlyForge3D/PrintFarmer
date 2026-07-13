@@ -1,0 +1,343 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, within, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+import { HarvestJobDialog } from '../HarvestJobDialog';
+import { configurePartsHarvestClient } from '@/services/partsHarvest';
+
+interface StubClient {
+  get: ReturnType<typeof vi.fn>;
+  post: ReturnType<typeof vi.fn>;
+}
+
+function makeStub(): StubClient {
+  return { get: vi.fn().mockResolvedValue({ data: [] }), post: vi.fn() };
+}
+
+function renderDialog(props: React.ComponentProps<typeof HarvestJobDialog>) {
+  const qc = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  return { qc, ...render(<HarvestJobDialog {...props} />, { wrapper }) };
+}
+
+function axiosError(status: number, data: unknown): Error {
+  return Object.assign(new Error('AxiosError'), {
+    isAxiosError: true,
+    response: { status, data, headers: {}, statusText: '', config: {} },
+    config: {},
+  });
+}
+
+const baseJob = { id: 'job-1', name: 'Cool Bracket ×4' } as const;
+
+describe('HarvestJobDialog', () => {
+  let stub: StubClient;
+
+  beforeEach(() => {
+    stub = makeStub();
+    configurePartsHarvestClient(stub);
+  });
+
+  afterEach(() => {
+    configurePartsHarvestClient(null);
+  });
+
+  it('is a labelled dialog when opened', () => {
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('aria-labelledby');
+  });
+
+  it('renders already-harvested view when the job carries harvestedAt', () => {
+    renderDialog({
+      isOpen: true,
+      onClose: vi.fn(),
+      job: { ...baseJob, harvestedAt: '2026-01-01T12:00:00Z' },
+    });
+    expect(screen.getByTestId('harvest-already-harvested')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /confirm harvest/i })).not.toBeInTheDocument();
+    // Footer close button — scope by exact name to avoid the modal's own
+    // top-right "Close modal" button.
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+
+  it('submits a mapped harvest and shows the success view with outputs', async () => {
+    const user = userEvent.setup();
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        binCode: 'BIN-A',
+        alreadyHarvested: false,
+        adjustments: [
+          { id: 'a1', partInventoryId: 'p1', sku: 'SKU-A', binCode: 'BIN-A', delta: 4, resultingBalance: 24, reason: 'Harvest', createdAt: '2026-01-01T00:00:00Z' },
+        ],
+        outputs: [
+          { sequence: 1, partInventoryId: 'p1', partSku: 'SKU-A', quantity: 4, actualBinId: 'b1', actualBinCode: 'BIN-A', origin: 'Mapped', overrideApplied: false, createdAt: '2026-01-01T00:00:00Z' },
+        ],
+      },
+    });
+
+    const onHarvested = vi.fn();
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob, onHarvested });
+
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+    expect(stub.post).toHaveBeenCalledWith(
+      '/job-queue/job-1/harvest',
+      expect.objectContaining({ operationKey: expect.any(String) }),
+    );
+    // SKU-A appears in both outputs and adjustments lists; both are fine.
+    const success = screen.getByTestId('harvest-success');
+    expect(within(success).getAllByText(/SKU-A/).length).toBeGreaterThan(0);
+    expect(onHarvested).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows already-harvested style when the server returns alreadyHarvested=true', async () => {
+    const user = userEvent.setup();
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        alreadyHarvested: true,
+        adjustments: [],
+        outputs: [],
+      },
+    });
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+    const success = screen.getByTestId('harvest-success');
+    expect(within(success).getByText(/already harvested/i)).toBeInTheDocument();
+  });
+
+  it('renders the wrong-bin step with non-color-only warning and requires an override reason', async () => {
+    const user = userEvent.setup();
+    stub.post.mockRejectedValueOnce(
+      axiosError(409, {
+        code: 'wrongBin',
+        detail: 'Wrong bin scanned.',
+        mismatches: [{ partSku: 'SKU-A', expectedBinCode: 'BIN-1', scannedBinCode: 'BIN-9' }],
+      }),
+    );
+
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+
+    await waitFor(() => expect(screen.getByTestId('harvest-wrong-bin')).toBeInTheDocument());
+    const region = screen.getByTestId('harvest-wrong-bin');
+    // Non-color-only: text describing mismatch
+    expect(within(region).getByText(/SKU-A/)).toBeInTheDocument();
+    expect(within(region).getByText(/BIN-1/)).toBeInTheDocument();
+    expect(within(region).getByText(/BIN-9/)).toBeInTheDocument();
+
+    const overrideBtn = screen.getByRole('button', { name: /override & harvest/i });
+    expect(overrideBtn).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/override reason/i), 'Bin relabeled today');
+    expect(overrideBtn).toBeEnabled();
+
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        alreadyHarvested: false,
+        adjustments: [],
+        outputs: [],
+      },
+    });
+
+    await user.click(overrideBtn);
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+
+    // Second call must carry allowWrongBin + overrideReason and reuse operationKey.
+    const first = stub.post.mock.calls[0][1];
+    const second = stub.post.mock.calls[1][1];
+    expect(second.allowWrongBin).toBe(true);
+    expect(second.overrideReason).toBe('Bin relabeled today');
+    expect(second.operationKey).toBe(first.operationKey);
+  });
+
+  it('switches to the manual outputs form on partMappingRequired and posts explicit outputs', async () => {
+    const user = userEvent.setup();
+    stub.post.mockRejectedValueOnce(
+      axiosError(409, {
+        code: 'partMappingRequired',
+        detail: 'No mapping.',
+        jobId: 'job-1',
+        gcodeFileId: null,
+        projectFileId: null,
+        guidance: 'Enter outputs manually.',
+      }),
+    );
+
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('harvest-mapping-required')).toBeInTheDocument(),
+    );
+
+    const rows = screen.getAllByTestId('harvest-manual-row');
+    expect(rows).toHaveLength(1);
+    await user.type(within(rows[0]).getByLabelText(/SKU #1/i), 'SKU-Z');
+
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        alreadyHarvested: false,
+        adjustments: [],
+        outputs: [],
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: /confirm manual harvest/i }));
+
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+    const secondCall = stub.post.mock.calls[1][1];
+    expect(secondCall.outputs).toEqual([{ sku: 'SKU-Z', quantity: 1 }]);
+  });
+
+  it('supports adding and removing multiple SKU rows in manual mode', async () => {
+    const user = userEvent.setup();
+    stub.post.mockRejectedValueOnce(
+      axiosError(409, {
+        code: 'partMappingRequired',
+        detail: 'No mapping.',
+        jobId: 'job-1',
+        guidance: 'Enter outputs manually.',
+      }),
+    );
+
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('harvest-mapping-required')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('button', { name: /add another sku/i }));
+    let rows = screen.getAllByTestId('harvest-manual-row');
+    expect(rows).toHaveLength(2);
+
+    await user.type(within(rows[0]).getByLabelText(/SKU #1/i), 'A');
+    await user.type(within(rows[1]).getByLabelText(/SKU #2/i), 'B');
+
+    // Remove row 2
+    await user.click(within(rows[1]).getByRole('button', { name: /remove row 2/i }));
+    rows = screen.getAllByTestId('harvest-manual-row');
+    expect(rows).toHaveLength(1);
+  });
+
+  it('shows feature-disabled empty state and offers only a close action', async () => {
+    const user = userEvent.setup();
+    stub.post.mockRejectedValueOnce(
+      axiosError(404, {
+        code: 'featureDisabled',
+        detail: 'Printed-parts inventory is not enabled.',
+      }),
+    );
+    const onClose = vi.fn();
+    renderDialog({ isOpen: true, onClose, job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId('harvest-feature-disabled')).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('shows a generic error step for network failures and reuses the same operationKey on retry', async () => {
+    const user = userEvent.setup();
+    stub.post.mockRejectedValueOnce(
+      Object.assign(new Error('Network Error'), { isAxiosError: true }),
+    );
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+
+    await waitFor(() => expect(screen.getByTestId('harvest-error')).toBeInTheDocument());
+    const errorBox = screen.getByTestId('harvest-error');
+    expect(within(errorBox).getByText(/Harvest failed/i)).toBeInTheDocument();
+
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        alreadyHarvested: false,
+        adjustments: [],
+        outputs: [],
+      },
+    });
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+
+    const first = stub.post.mock.calls[0][1];
+    const second = stub.post.mock.calls[1][1];
+    expect(second.operationKey).toBe(first.operationKey);
+  });
+
+  it('regenerates operationKey when reopened', async () => {
+    const user = userEvent.setup();
+    stub.post.mockResolvedValue({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        alreadyHarvested: false,
+        adjustments: [],
+        outputs: [],
+      },
+    });
+    const { rerender } = renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+    const keyA = stub.post.mock.calls[0][1].operationKey;
+
+    // Close and reopen.
+    await act(async () => {
+      rerender(<HarvestJobDialog isOpen={false} onClose={vi.fn()} job={baseJob} />);
+    });
+    await act(async () => {
+      rerender(<HarvestJobDialog isOpen={true} onClose={vi.fn()} job={baseJob} />);
+    });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    await waitFor(() => expect(stub.post).toHaveBeenCalledTimes(2));
+    const keyB = stub.post.mock.calls[1][1].operationKey;
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it('sends binCode and quantityOverride when the user overrides preview defaults', async () => {
+    const user = userEvent.setup();
+    stub.post.mockResolvedValueOnce({
+      data: {
+        printJobId: 'job-1',
+        harvestedAt: '2026-01-01T00:00:00Z',
+        alreadyHarvested: false,
+        adjustments: [],
+        outputs: [],
+      },
+    });
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+
+    await user.type(screen.getByLabelText(/destination bin/i), 'BIN-7');
+    await user.click(screen.getByLabelText(/override quantity/i));
+    // Now uniform qty field appears
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+
+    await waitFor(() => expect(stub.post).toHaveBeenCalled());
+    const body = stub.post.mock.calls[0][1];
+    expect(body.binCode).toBe('BIN-7');
+    expect(body.quantityOverride).toBe(1);
+  });
+});

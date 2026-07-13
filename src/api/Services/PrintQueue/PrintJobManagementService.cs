@@ -432,7 +432,8 @@ public class PrintJobManagementService(
                             Color = t.Color,
                             Description = t.Description
                         })
-                        .ToList()
+                        .ToList(),
+                    HarvestedAt = pj.HarvestedAt
                 })
                 .ToList();
 
