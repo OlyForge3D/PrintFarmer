@@ -131,4 +131,118 @@ final class AppRouterTests: XCTestCase {
             XCTFail("Expected advancedPrinterControls case")
         }
     }
+
+    // MARK: - Legacy sheet reset (#727)
+
+    func testResetLegacySheetDashboardClearsDashboardSheetPath() {
+        let router = AppRouter()
+        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
+        XCTAssertFalse(router.dashboardSheetPath.isEmpty)
+
+        router.resetLegacySheet(.dashboard)
+        XCTAssertTrue(router.dashboardSheetPath.isEmpty,
+                      "Dismissing the Dashboard sheet must clear its owned path")
+    }
+
+    func testResetLegacySheetMaintenanceClearsMaintenanceSheetPath() {
+        let router = AppRouter()
+        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
+        XCTAssertFalse(router.maintenanceSheetPath.isEmpty)
+
+        router.resetLegacySheet(.maintenance)
+        XCTAssertTrue(router.maintenanceSheetPath.isEmpty,
+                      "Dismissing the Maintenance sheet must clear its owned path")
+    }
+
+    func testResetLegacySheetNotificationsClearsNotificationsSheetPath() {
+        let router = AppRouter()
+        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
+        XCTAssertFalse(router.notificationsSheetPath.isEmpty)
+
+        router.resetLegacySheet(.notifications)
+        XCTAssertTrue(router.notificationsSheetPath.isEmpty,
+                      "Dismissing the legacy Notifications sheet must clear its owned path")
+    }
+
+    func testResetLegacySheetSettingsIsNoOp() {
+        // SettingsView owns a local NavigationStack, so the router has no
+        // path to reset. The case must exist so callers can wire every
+        // legacy sheet through the same entry point, but the router state
+        // must be untouched.
+        let router = AppRouter()
+        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
+        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
+        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
+        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
+
+        router.resetLegacySheet(.settings)
+
+        XCTAssertFalse(router.notificationsPath.isEmpty)
+        XCTAssertFalse(router.dashboardSheetPath.isEmpty)
+        XCTAssertFalse(router.maintenanceSheetPath.isEmpty)
+        XCTAssertFalse(router.notificationsSheetPath.isEmpty)
+    }
+
+    func testResetLegacySheetLeavesAttentionTabStackIntact() {
+        // The Attention tab's `notificationsPath` MUST NOT be touched when
+        // a legacy sheet is dismissed. This is the whole point of keeping
+        // sheet-owned paths separate from tab-owned paths (#727).
+        let router = AppRouter()
+        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
+        let attentionDepthBefore = router.notificationsPath.count
+
+        for sheet in LegacySheet.allCases {
+            router.resetLegacySheet(sheet)
+            XCTAssertEqual(router.notificationsPath.count, attentionDepthBefore,
+                           "Dismissing \(sheet) must not touch the Attention tab stack")
+        }
+    }
+
+    func testResetLegacySheetLeavesOtherTabStacksIntact() {
+        // Dismissing a legacy sheet must never disturb any other tab's
+        // stack — Farm, Tasks, Scan, or Inventory.
+        let router = AppRouter()
+        router.printersPath.append(AppDestination.printerDetail(id: printerId))
+        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
+        router.scanPath.append(AppDestination.jobDetail(id: printerId))
+        router.inventoryPath.append(AppDestination.jobDetail(id: printerId))
+
+        for sheet in LegacySheet.allCases {
+            router.resetLegacySheet(sheet)
+        }
+
+        XCTAssertEqual(router.printersPath.count, 1, "Farm tab stack must be intact")
+        XCTAssertEqual(router.jobsPath.count, 1, "Tasks tab stack must be intact")
+        XCTAssertEqual(router.scanPath.count, 1, "Scan tab stack must be intact")
+        XCTAssertEqual(router.inventoryPath.count, 1, "Inventory tab stack must be intact")
+    }
+
+    func testResetLegacySheetOnlyClearsTargetedSheet() {
+        // Resetting one sheet's path must not clear any other sheet's path.
+        let router = AppRouter()
+        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
+        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
+        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
+
+        router.resetLegacySheet(.dashboard)
+        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
+        XCTAssertEqual(router.maintenanceSheetPath.count, 1)
+        XCTAssertEqual(router.notificationsSheetPath.count, 1)
+
+        router.resetLegacySheet(.maintenance)
+        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
+        XCTAssertEqual(router.notificationsSheetPath.count, 1)
+
+        router.resetLegacySheet(.notifications)
+        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
+    }
+
+    func testLegacySheetPathsDefaultEmpty() {
+        // A freshly constructed router must have empty sheet stacks so
+        // that opening a legacy sheet always starts at its root.
+        let router = AppRouter()
+        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
+        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
+        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
+    }
 }

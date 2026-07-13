@@ -108,6 +108,23 @@ struct AttentionView: View {
         .sheet(isPresented: $showingNotifications) {
             NotificationsView()
         }
+        // #727: Reset each legacy fallback sheet's owned NavigationPath
+        // when the sheet is dismissed so reopening starts at its documented
+        // root. `resetLegacySheet(_:)` never touches the active tab's
+        // stack, so dismissing a sheet leaves the Attention tab's own
+        // navigation intact.
+        .onChange(of: showingDashboard) { _, isPresented in
+            if !isPresented { router.resetLegacySheet(.dashboard) }
+        }
+        .onChange(of: showingMaintenance) { _, isPresented in
+            if !isPresented { router.resetLegacySheet(.maintenance) }
+        }
+        .onChange(of: showingNotifications) { _, isPresented in
+            if !isPresented { router.resetLegacySheet(.notifications) }
+        }
+        .onChange(of: showingSettings) { _, isPresented in
+            if !isPresented { router.resetLegacySheet(.settings) }
+        }
     }
 
     // MARK: - Feature-disabled fallback (#725)

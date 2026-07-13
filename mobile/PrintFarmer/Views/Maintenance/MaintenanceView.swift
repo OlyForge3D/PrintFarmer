@@ -11,7 +11,7 @@ struct MaintenanceView: View {
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.maintenancePath) {
+        NavigationStack(path: $router.maintenanceSheetPath) {
             Group {
                 if viewModel.isLoading && viewModel.alerts.isEmpty {
                     ProgressView("Loading maintenance…")

@@ -13,7 +13,7 @@ struct DashboardView: View {
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.dashboardPath) {
+        NavigationStack(path: $router.dashboardSheetPath) {
             Group {
                 if viewModel.isLoading && viewModel.printers.isEmpty {
                     loadingState
