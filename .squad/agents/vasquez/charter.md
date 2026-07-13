@@ -8,8 +8,8 @@
 
 ## Model
 
-- **Preferred:** `claude-opus-4.6`
-- **Rationale:** Claude Opus 4.6 (premium) for deep analytical review in multi-model gate.
+- **Preferred:** `gemini-3.1-pro-preview`
+- **Rationale:** Gemini 3.1 Pro Preview for analytical diversity in multi-model review gate.
 
 ## Responsibilities
 
@@ -25,6 +25,10 @@
 - Will NOT comment on style, formatting, or trivial matters (linters handle those)
 - Will NOT duplicate issues already flagged by other reviewers
 - Focuses on correctness, security, and logic
+
+## Machine-Local Execution Policy (this worktree)
+
+On this machine, Vasquez uses reasoning effort **`high`** (Gemini 3.1 Pro Preview does not support `max`) and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until mandatory gate (consensus with Bishop + Hicks) is satisfied. Unavoidable platform/provider hard limits still apply.
 
 ## Review Protocol
 
