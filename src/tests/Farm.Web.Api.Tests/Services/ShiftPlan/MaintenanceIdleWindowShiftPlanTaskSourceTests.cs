@@ -1,0 +1,166 @@
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.ShiftPlan;
+using Farm.Infrastructure.Services.ShiftPlan.Sources;
+using Farm.Infrastructure.Settings;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Services.ShiftPlan;
+
+/// <summary>
+/// Tests for <see cref="MaintenanceIdleWindowShiftPlanTaskSource"/> covering Fix 11:
+/// dispatch-eligible windows are skipped, under-lead windows are dropped,
+/// and alert message flows into the spec description.
+/// </summary>
+public class MaintenanceIdleWindowShiftPlanTaskSourceTests
+{
+    private static readonly Guid PrinterId = Guid.Parse("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA");
+    private static readonly Guid AlertId = Guid.Parse("B1B1B1B1-B1B1-B1B1-B1B1-B1B1B1B1B1B1");
+
+    private readonly Mock<IMaintenanceAlertRepository> _alertsRepo = new();
+    private readonly Mock<IIdleWindowService> _idleWindows = new();
+    private readonly Mock<ISettingsService> _settings = new();
+
+    private void SetupSettings(int minIdleMinutes = 10, int leadMinutes = 5)
+    {
+        _settings.Setup(s => s.Get<ShiftPlanSettings>()).Returns(new ShiftPlanSettings
+        {
+            MinIdleWindowMinutes = minIdleMinutes,
+            MaintenanceLeadMinutes = leadMinutes,
+        });
+    }
+
+    private MaintenanceIdleWindowShiftPlanTaskSource BuildSource()
+        => new(
+            _alertsRepo.Object,
+            _idleWindows.Object,
+            _settings.Object,
+            NullLogger<MaintenanceIdleWindowShiftPlanTaskSource>.Instance);
+
+    private static MaintenanceAlert BuildAlert(string title = "Check nozzle", string message = "Nozzle needs cleaning.")
+        => new()
+        {
+            Id = AlertId,
+            PrinterId = PrinterId,
+            Title = title,
+            Message = message,
+            Severity = 2,
+            Status = MaintenanceAlertStatus.Active,
+        };
+
+    // -------------------------------------------------------------------------
+    // Fix 11: dispatch-eligible window → skipped
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fix 11: if the printer's idle window is dispatch-eligible (a job would be sent
+    /// there), the maintenance task is not emitted so the compiler does not compete
+    /// with the dispatcher.
+    /// </summary>
+    [Fact]
+    public async Task ProduceAsync_DispatchEligibleWindow_SkipsAlert()
+    {
+        SetupSettings(minIdleMinutes: 10, leadMinutes: 0);
+
+        DateTime now = DateTime.UtcNow;
+        IdleWindow eligibleWindow = new(
+            PrinterId,
+            "TestPrinter",
+            StartUtc: now,
+            EndUtc: now.AddHours(2),
+            IsDispatchEligibleNow: true); // dispatcher would fill this slot
+
+        _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert() });
+        _idleWindows.Setup(s => s.GetIdleWindowsAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IdleWindow> { eligibleWindow });
+
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+        IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
+
+        Assert.Empty(specs);
+    }
+
+    // -------------------------------------------------------------------------
+    // Fix 11: window shorter than MinIdleWindow after lead-buffer is dropped
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fix 11: if the window minus lead-minutes is shorter than MinIdleWindowMinutes,
+    /// the spec is not emitted (the window is effectively too short to schedule work).
+    /// </summary>
+    [Fact]
+    public async Task ProduceAsync_WindowTooShortAfterLead_DropsSpec()
+    {
+        // MinIdleWindow=10min, Lead=5min; window is only 12 min wide.
+        // After subtracting lead: 12-5=7 min remaining < 10 min → dropped.
+        SetupSettings(minIdleMinutes: 10, leadMinutes: 5);
+
+        DateTime now = DateTime.UtcNow;
+        IdleWindow shortWindow = new(
+            PrinterId,
+            "TestPrinter",
+            StartUtc: now,
+            EndUtc: now.AddMinutes(12),
+            IsDispatchEligibleNow: false);
+
+        _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert() });
+        _idleWindows.Setup(s => s.GetIdleWindowsAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IdleWindow> { shortWindow });
+
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+        IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
+
+        Assert.Empty(specs);
+    }
+
+    // -------------------------------------------------------------------------
+    // Fix 11: alert message flows into task description
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fix 11: the alert's <c>Message</c> is surfaced as the spec's
+    /// <see cref="ShiftPlanTaskSpec.Description"/> so operators see the detail.
+    /// </summary>
+    [Fact]
+    public async Task ProduceAsync_ValidWindow_AlertMessageFlowsIntoDescription()
+    {
+        SetupSettings(minIdleMinutes: 5, leadMinutes: 0);
+
+        DateTime now = DateTime.UtcNow;
+        IdleWindow goodWindow = new(
+            PrinterId,
+            "TestPrinter",
+            StartUtc: now,
+            EndUtc: now.AddHours(2),
+            IsDispatchEligibleNow: false);
+
+        const string expectedMessage = "Nozzle is clogged — replace before next print.";
+        _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert(message: expectedMessage) });
+        _idleWindows.Setup(s => s.GetIdleWindowsAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IdleWindow> { goodWindow });
+
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+        IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
+
+        ShiftPlanTaskSpec spec = Assert.Single(specs);
+        Assert.Equal(expectedMessage, spec.Description);
+        Assert.Equal(UserTaskSourceKind.Maintenance, spec.SourceKind);
+        Assert.Equal($"maintenancealert:{AlertId}", spec.SourceId);
+    }
+
+    /// <summary>
+    /// Fix 4: OwnedKinds declares exactly [Maintenance], used by the compiler
+    /// for source-failure isolation.
+    /// </summary>
+    [Fact]
+    public void OwnedKinds_ContainsMaintenance()
+    {
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+        Assert.Equal([UserTaskSourceKind.Maintenance], source.OwnedKinds);
+    }
+}

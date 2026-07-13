@@ -105,20 +105,14 @@ public class AttentionShiftPlanTaskSourceTests
         Assert.Empty(await src.ProduceAsync(CancellationToken.None));
     }
 
+    /// <summary>
+    /// Fix 4: a failing inner IAttentionSource must propagate its exception outward so the
+    /// compiler can suppress auto-complete for the whole attention source's OwnedKinds.
+    /// Previous behavior swallowed the exception and continued with the remaining sources.
+    /// </summary>
     [Fact]
-    public async Task ProduceAsync_FailingAttentionSource_IsIsolated()
+    public async Task ProduceAsync_FailingAttentionSource_PropagatesException()
     {
-        AttentionItemDto ok = new(
-            Id: "harvest:1",
-            Kind: AttentionKind.Harvest,
-            Severity: AttentionSeverity.Info,
-            PrinterId: PrinterId,
-            PrinterName: "P1",
-            Title: "Harvest",
-            Detail: "",
-            OccurredAt: DateTime.UtcNow,
-            Actions: Array.Empty<AttentionActionDto>());
-
         Mock<IAttentionSource> throwing = new();
         throwing.SetupGet(s => s.SourceName).Returns("bad");
         throwing.Setup(s => s.GetItemsAsync(It.IsAny<CancellationToken>()))
@@ -127,7 +121,7 @@ public class AttentionShiftPlanTaskSourceTests
         Mock<IAttentionSource> good = new();
         good.SetupGet(s => s.SourceName).Returns("good");
         good.Setup(s => s.GetItemsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { ok });
+            .ReturnsAsync(Array.Empty<AttentionItemDto>());
 
         Mock<ISettingsService> settings = new();
         settings.Setup(s => s.Get<SpoolCoverageSettings>()).Returns(new SpoolCoverageSettings());
@@ -137,9 +131,19 @@ public class AttentionShiftPlanTaskSourceTests
             settings.Object,
             NullLogger<AttentionShiftPlanTaskSource>.Instance);
 
-        IReadOnlyList<ShiftPlanTaskSpec> specs = await src.ProduceAsync(CancellationToken.None);
-        Assert.Single(specs);
-        Assert.Equal(UserTaskType.HarvestReady, specs[0].TaskType);
+        // The compiler expects the exception to propagate so it can suppress auto-complete.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => src.ProduceAsync(CancellationToken.None));
+    }
+
+    /// <summary>Fix 4: OwnedKinds must include the three attention-source kinds.</summary>
+    [Fact]
+    public void OwnedKinds_ContainsExpectedSourceKinds()
+    {
+        AttentionShiftPlanTaskSource src = BuildSource(new SpoolCoverageSettings());
+        Assert.Contains(UserTaskSourceKind.FailureIncident, src.OwnedKinds);
+        Assert.Contains(UserTaskSourceKind.Harvest, src.OwnedKinds);
+        Assert.Contains(UserTaskSourceKind.FilamentCoverage, src.OwnedKinds);
     }
 
     private static AttentionShiftPlanTaskSource BuildSource(SpoolCoverageSettings settings, params AttentionItemDto[] items)

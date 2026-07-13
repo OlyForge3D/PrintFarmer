@@ -1,7 +1,96 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Domain;
+
+/// <summary>
+/// Strict camelCase JSON converter for <see cref="UserTaskAnchorKind"/>.
+/// Rejects integer values; maps unknown strings to <see cref="UserTaskAnchorKind.Unspecified"/>.
+/// Wire values are kept in lockstep with the EF value converter in
+/// <c>UserTaskConfiguration</c>.
+/// </summary>
+internal sealed class UserTaskAnchorKindJsonConverter : JsonConverter<UserTaskAnchorKind>
+{
+    public override UserTaskAnchorKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException($"Expected a string value for {nameof(UserTaskAnchorKind)}, got {reader.TokenType}.");
+        }
+
+        return FromWire(reader.GetString() ?? string.Empty);
+    }
+
+    public override void Write(Utf8JsonWriter writer, UserTaskAnchorKind value, JsonSerializerOptions options)
+        => writer.WriteStringValue(ToWire(value));
+
+    internal static string ToWire(UserTaskAnchorKind value) => value switch
+    {
+        UserTaskAnchorKind.Now => "now",
+        UserTaskAnchorKind.At => "at",
+        UserTaskAnchorKind.Window => "window",
+        UserTaskAnchorKind.AnytimeToday => "anytimeToday",
+        UserTaskAnchorKind.Timeline => "timeline",
+        _ => "unspecified",
+    };
+
+    internal static UserTaskAnchorKind FromWire(string value) => value switch
+    {
+        "now" => UserTaskAnchorKind.Now,
+        "at" => UserTaskAnchorKind.At,
+        "window" => UserTaskAnchorKind.Window,
+        "anytimeToday" => UserTaskAnchorKind.AnytimeToday,
+        "timeline" => UserTaskAnchorKind.Timeline,
+        _ => UserTaskAnchorKind.Unspecified,
+    };
+}
+
+/// <summary>
+/// Strict camelCase JSON converter for <see cref="UserTaskSourceKind"/>.
+/// Rejects integer values; maps unknown strings to <see cref="UserTaskSourceKind.Unspecified"/>.
+/// Wire values are kept in lockstep with the EF value converter in
+/// <c>UserTaskConfiguration</c>.
+/// </summary>
+internal sealed class UserTaskSourceKindJsonConverter : JsonConverter<UserTaskSourceKind>
+{
+    public override UserTaskSourceKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException($"Expected a string value for {nameof(UserTaskSourceKind)}, got {reader.TokenType}.");
+        }
+
+        return FromWire(reader.GetString() ?? string.Empty);
+    }
+
+    public override void Write(Utf8JsonWriter writer, UserTaskSourceKind value, JsonSerializerOptions options)
+        => writer.WriteStringValue(ToWire(value));
+
+    internal static string ToWire(UserTaskSourceKind value) => value switch
+    {
+        UserTaskSourceKind.Attention => "attention",
+        UserTaskSourceKind.FailureIncident => "failureIncident",
+        UserTaskSourceKind.Harvest => "harvest",
+        UserTaskSourceKind.FilamentCoverage => "filamentCoverage",
+        UserTaskSourceKind.Maintenance => "maintenance",
+        UserTaskSourceKind.SpoolReorder => "spoolReorder",
+        UserTaskSourceKind.PrintedPartStock => "printedPartStock",
+        _ => "unspecified",
+    };
+
+    internal static UserTaskSourceKind FromWire(string value) => value switch
+    {
+        "attention" => UserTaskSourceKind.Attention,
+        "failureIncident" => UserTaskSourceKind.FailureIncident,
+        "harvest" => UserTaskSourceKind.Harvest,
+        "filamentCoverage" => UserTaskSourceKind.FilamentCoverage,
+        "maintenance" => UserTaskSourceKind.Maintenance,
+        "spoolReorder" => UserTaskSourceKind.SpoolReorder,
+        "printedPartStock" => UserTaskSourceKind.PrintedPartStock,
+        _ => UserTaskSourceKind.Unspecified,
+    };
+}
 
 /// <summary>
 /// Types of tasks that can be assigned to users.
@@ -92,7 +181,7 @@ public enum UserTaskType
 /// <see cref="Unspecified"/>; anchor sorting groups Unspecified as
 /// <see cref="AnytimeToday"/>. Names are stable.
 /// </remarks>
-[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<UserTaskAnchorKind>))]
+[JsonConverter(typeof(UserTaskAnchorKindJsonConverter))]
 public enum UserTaskAnchorKind
 {
     /// <summary>Legacy or unspecified anchor; treated as anytimeToday.</summary>
@@ -108,7 +197,16 @@ public enum UserTaskAnchorKind
     Window = 3,
 
     /// <summary>Anytime during the current shift (no fixed time).</summary>
-    AnytimeToday = 4
+    AnytimeToday = 4,
+
+    /// <summary>
+    /// Group label for the merged At/Window timeline segment in the shift-plan
+    /// response. Individual tasks within this group retain their specific
+    /// <see cref="At"/> or <see cref="Window"/> anchor kind. This value is used
+    /// only on <see cref="Farm.Infrastructure.Services.Tasks.ShiftPlanGroupDto"/>,
+    /// never persisted on <see cref="UserTask"/>.
+    /// </summary>
+    Timeline = 5,
 }
 
 /// <summary>
@@ -121,7 +219,7 @@ public enum UserTaskAnchorKind
 /// values from older code paths are tolerated (materializer treats them as
 /// <see cref="Unspecified"/>).
 /// </remarks>
-[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<UserTaskSourceKind>))]
+[JsonConverter(typeof(UserTaskSourceKindJsonConverter))]
 public enum UserTaskSourceKind
 {
     /// <summary>Legacy or manual task with no compiler source.</summary>

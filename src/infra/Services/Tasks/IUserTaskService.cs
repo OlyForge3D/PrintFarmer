@@ -52,7 +52,13 @@ public record UserTaskDto(
 /// <summary>
 /// A group of tasks sharing the same anchor bucket in the shift-plan view.
 /// </summary>
-/// <param name="AnchorKind">Anchor bucket (now, at, window, anytimeToday).</param>
+/// <param name="AnchorKind">
+/// Anchor bucket. The value <see cref="UserTaskAnchorKind.Timeline"/> identifies the
+/// merged At+Window group; individual tasks in that group retain their own
+/// <see cref="UserTaskAnchorKind"/> (At or Window).
+/// Other values are <see cref="UserTaskAnchorKind.Now"/> and
+/// <see cref="UserTaskAnchorKind.AnytimeToday"/>.
+/// </param>
 /// <param name="Tasks">Tasks in this group, deterministically ordered per contract.</param>
 public sealed record ShiftPlanGroupDto(
     UserTaskAnchorKind AnchorKind,
@@ -63,9 +69,8 @@ public sealed record ShiftPlanGroupDto(
 /// </summary>
 /// <param name="Groups">
 /// Anchor-grouped, deterministically ordered task groups. Group order is
-/// <c>Now</c> → <c>At</c> (by anchor time asc) / <c>Window</c> (by window start asc,
-/// interleaved with At by earliest boundary) → <c>AnytimeToday</c> (which also
-/// carries legacy <c>Unspecified</c> tasks so no task disappears).
+/// <c>Now</c> → <c>Timeline</c> (At + Window interleaved by earliest boundary asc) →
+/// <c>AnytimeToday</c> (which also carries legacy <c>Unspecified</c> tasks so no task disappears).
 /// </param>
 /// <param name="GeneratedAt">UTC snapshot time; useful for client freshness.</param>
 public sealed record ShiftPlanDto(
@@ -128,10 +133,18 @@ public interface IUserTaskService
     /// deterministically ordered for operator consumption (issue #713).
     /// </summary>
     /// <remarks>
-    /// Group order is Now → At/Window (interleaved by earliest boundary asc) →
-    /// AnytimeToday (which absorbs any legacy <c>Unspecified</c> tasks so no
-    /// task disappears from the operator view). Within a group, ordering is
-    /// anchor/window start asc, then priority desc, then created asc, then id asc.
+    /// Group order is Now → Timeline (At+Window interleaved by earliest boundary asc) →
+    /// AnytimeToday (which absorbs any legacy <c>Unspecified</c> tasks). Within the
+    /// Timeline group, At tasks use <see cref="UserTask.AnchorAtUtc"/> and Window tasks
+    /// use <see cref="UserTask.WindowStartUtc"/> as the ordering boundary. Within a group,
+    /// ordering is boundary asc, priority desc, created asc, id asc.
+    /// Maintenance-sourced tasks are excluded from results unless the caller passes
+    /// <c>isAdmin: true</c>.
     /// </remarks>
     Task<ShiftPlanDto> GetShiftPlanAsync(CancellationToken ct = default);
+
+    /// <inheritdoc cref="GetShiftPlanAsync(CancellationToken)"/>
+    /// <param name="isAdmin"><c>true</c> to include maintenance-sourced tasks.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<ShiftPlanDto> GetShiftPlanAsync(bool isAdmin, CancellationToken ct = default);
 }

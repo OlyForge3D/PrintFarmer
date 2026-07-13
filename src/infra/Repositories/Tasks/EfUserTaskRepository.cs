@@ -74,11 +74,17 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     /// <inheritdoc />
     public async Task<IReadOnlyList<UserTask>> GetOpenCompilerTasksAsync(CancellationToken ct = default)
     {
-        return await _db.UserTasks
+        List<UserTask> rows = await _db.UserTasks
             .Where(t =>
                 t.SourceKind != UserTaskSourceKind.Unspecified &&
                 (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
             .ToListAsync(ct);
+
+        // Post-materialize filter: rows whose persisted SourceKind string was not a
+        // known enum member materialize as Unspecified (via the EF value converter's
+        // default case). Exclude them so unknown/future source kinds are never
+        // swept into auto-complete, preserving forward-compatibility.
+        return rows.Where(t => t.SourceKind != UserTaskSourceKind.Unspecified).ToList();
     }
 
     /// <inheritdoc />
@@ -103,11 +109,26 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
+    public Task TrackAddAsync(UserTask task, CancellationToken ct = default)
+    {
+        _ = _db.UserTasks.Add(task);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public async Task UpdateAsync(UserTask task, CancellationToken ct = default)
     {
         task.UpdatedAt = DateTime.UtcNow;
         _ = _db.UserTasks.Update(task);
         _ = await _db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public Task TrackUpdateAsync(UserTask task, CancellationToken ct = default)
+    {
+        task.UpdatedAt = DateTime.UtcNow;
+        _ = _db.UserTasks.Update(task);
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

@@ -40,8 +40,9 @@ public sealed record ShiftPlanTaskSpec(
 /// <remarks>
 /// Sources SHOULD:
 /// - Be safe to invoke concurrently with the rest of the system.
-/// - Fail closed: on error, log and return an empty list rather than throwing —
-///   this keeps a single source's failure from stalling the whole compiler.
+/// - Fail closed: on error, let the exception propagate — the compiler
+///   catches it, increments its failure counter, and suppresses auto-complete
+///   for this source's <see cref="OwnedKinds"/> in the current pass.
 /// - Emit stable <see cref="ShiftPlanTaskSpec.SourceId"/> values; changing the
 ///   id for the same condition will cause a spurious complete + recreate.
 /// </remarks>
@@ -49,6 +50,15 @@ public interface IShiftPlanTaskSource
 {
     /// <summary>Deterministic name for logs and diagnostics.</summary>
     string SourceName { get; }
+
+    /// <summary>
+    /// The set of <see cref="UserTaskSourceKind"/> values this source owns.
+    /// The compiler uses this to restrict auto-complete to tasks whose source
+    /// kind belongs to a source that completed successfully in the current pass.
+    /// Every source must declare at least one owned kind (excluding
+    /// <see cref="UserTaskSourceKind.Unspecified"/>).
+    /// </summary>
+    IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; }
 
     /// <summary>Returns the specs this source currently wants materialized.</summary>
     Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct);

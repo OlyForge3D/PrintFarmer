@@ -55,9 +55,21 @@ public interface IUserTaskRepository
     Task AddAsync(UserTask task, CancellationToken ct = default);
 
     /// <summary>
+    /// Tracks a new task in the change tracker without saving. Call
+    /// <see cref="SaveChangesAsync"/> after batching multiple adds/updates.
+    /// </summary>
+    Task TrackAddAsync(UserTask task, CancellationToken ct = default);
+
+    /// <summary>
     /// Updates an existing task.
     /// </summary>
     Task UpdateAsync(UserTask task, CancellationToken ct = default);
+
+    /// <summary>
+    /// Tracks an update in the change tracker without saving. Call
+    /// <see cref="SaveChangesAsync"/> after batching multiple adds/updates.
+    /// </summary>
+    Task TrackUpdateAsync(UserTask task, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes a task.

@@ -24,46 +24,53 @@ public class UserTaskShiftPlanTests
             Mock.Of<ITaskBroadcaster>());
     }
 
+    /// <summary>
+    /// Fix 5: At and Window tasks must be interleaved into a single "Timeline" group
+    /// ordered by their earliest boundary, sitting between Now and AnytimeToday.
+    /// </summary>
     [Fact]
-    public async Task GetShiftPlanAsync_GroupsAndOrdersAnchors_NowFirst_ThenAtWindowByBoundary_ThenAnytime()
+    public async Task GetShiftPlanAsync_GroupsAndOrdersAnchors_NowFirst_ThenTimelineInterleaved_ThenAnytime()
     {
         DateTime baseUtc = new(2026, 07, 12, 12, 00, 00, DateTimeKind.Utc);
 
         UserTask now = Task("now", UserTaskAnchorKind.Now);
         UserTask atEarly = Task("at-early", UserTaskAnchorKind.At, anchorAt: baseUtc.AddMinutes(30));
-        UserTask atLate = Task("at-late", UserTaskAnchorKind.At, anchorAt: baseUtc.AddMinutes(90));
-        UserTask window = Task("win", UserTaskAnchorKind.Window,
+        UserTask win = Task("win", UserTaskAnchorKind.Window,
             windowStart: baseUtc.AddMinutes(45), windowEnd: baseUtc.AddMinutes(75));
+        UserTask atLate = Task("at-late", UserTaskAnchorKind.At, anchorAt: baseUtc.AddMinutes(90));
         UserTask anytime = Task("anytime", UserTaskAnchorKind.AnytimeToday);
         UserTask legacy = Task("legacy", UserTaskAnchorKind.Unspecified);
 
         // Return in shuffled order to prove the service imposes order, not the repo.
         _repo.Setup(r => r.GetPendingTasksAsync(null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { anytime, atLate, legacy, window, now, atEarly });
+            .ReturnsAsync(new[] { anytime, atLate, legacy, win, now, atEarly });
 
         ShiftPlanDto plan = await _service.GetShiftPlanAsync();
 
-        // Groups appear in canonical order: Now, At, Window, AnytimeToday (Unspecified absorbed).
+        // Fix 5: At and Window merge into a single Timeline group (not separate groups).
         Assert.Collection(
             plan.Groups,
             g => Assert.Equal(UserTaskAnchorKind.Now, g.AnchorKind),
-            g => Assert.Equal(UserTaskAnchorKind.At, g.AnchorKind),
-            g => Assert.Equal(UserTaskAnchorKind.Window, g.AnchorKind),
+            g => Assert.Equal(UserTaskAnchorKind.Timeline, g.AnchorKind),
             g => Assert.Equal(UserTaskAnchorKind.AnytimeToday, g.AnchorKind));
 
         Assert.Single(plan.Groups[0].Tasks, t => t.Title == "now");
 
-        // At bucket ordered by AnchorAtUtc ascending.
+        // Timeline group: At-early (30min boundary) → Window (45min boundary) → At-late (90min).
         Assert.Collection(
             plan.Groups[1].Tasks,
             t => Assert.Equal("at-early", t.Title),
+            t => Assert.Equal("win", t.Title),
             t => Assert.Equal("at-late", t.Title));
 
-        Assert.Single(plan.Groups[2].Tasks, t => t.Title == "win");
+        // Individual tasks in Timeline retain their own AnchorKind (not "timeline").
+        Assert.Equal(UserTaskAnchorKind.At, plan.Groups[1].Tasks[0].AnchorKind);
+        Assert.Equal(UserTaskAnchorKind.Window, plan.Groups[1].Tasks[1].AnchorKind);
+        Assert.Equal(UserTaskAnchorKind.At, plan.Groups[1].Tasks[2].AnchorKind);
 
         // Legacy Unspecified tasks land in AnytimeToday alongside AnytimeToday tasks.
-        Assert.Contains(plan.Groups[3].Tasks, t => t.Title == "anytime");
-        Assert.Contains(plan.Groups[3].Tasks, t => t.Title == "legacy");
+        Assert.Contains(plan.Groups[2].Tasks, t => t.Title == "anytime");
+        Assert.Contains(plan.Groups[2].Tasks, t => t.Title == "legacy");
     }
 
     [Fact]
@@ -84,6 +91,38 @@ public class UserTaskShiftPlanTests
         Assert.Equal(new[] { "high", "normal-old", "normal-new", "low" }, titles);
     }
 
+    /// <summary>Fix 8: maintenance tasks are excluded for non-admin callers (isAdmin=false).</summary>
+    [Fact]
+    public async Task GetShiftPlanAsync_NonAdmin_MaintenanceTasksExcluded()
+    {
+        UserTask maintenance = Task("maint", UserTaskAnchorKind.Now, sourceKind: UserTaskSourceKind.Maintenance);
+        UserTask normal = Task("normal", UserTaskAnchorKind.Now, sourceKind: UserTaskSourceKind.FailureIncident);
+
+        _repo.Setup(r => r.GetPendingTasksAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { maintenance, normal });
+
+        ShiftPlanDto plan = await _service.GetShiftPlanAsync(isAdmin: false);
+
+        IEnumerable<UserTaskDto> allTasks = plan.Groups.SelectMany(g => g.Tasks);
+        Assert.DoesNotContain(allTasks, t => t.Title == "maint");
+        Assert.Contains(allTasks, t => t.Title == "normal");
+    }
+
+    /// <summary>Fix 8: maintenance tasks are visible to admin callers.</summary>
+    [Fact]
+    public async Task GetShiftPlanAsync_Admin_MaintenanceTasksIncluded()
+    {
+        UserTask maintenance = Task("maint", UserTaskAnchorKind.Now, sourceKind: UserTaskSourceKind.Maintenance);
+
+        _repo.Setup(r => r.GetPendingTasksAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { maintenance });
+
+        ShiftPlanDto plan = await _service.GetShiftPlanAsync(isAdmin: true);
+
+        IEnumerable<UserTaskDto> allTasks = plan.Groups.SelectMany(g => g.Tasks);
+        Assert.Contains(allTasks, t => t.Title == "maint");
+    }
+
     private static UserTask Task(
         string title,
         UserTaskAnchorKind anchor,
@@ -91,7 +130,8 @@ public class UserTaskShiftPlanTests
         DateTime? windowStart = null,
         DateTime? windowEnd = null,
         UserTaskPriority priority = UserTaskPriority.Normal,
-        DateTime? createdAt = null) => new()
+        DateTime? createdAt = null,
+        UserTaskSourceKind sourceKind = UserTaskSourceKind.Unspecified) => new()
         {
             Id = Guid.NewGuid(),
             Title = title,
@@ -104,5 +144,6 @@ public class UserTaskShiftPlanTests
             WindowEndUtc = windowEnd,
             CreatedAt = createdAt ?? DateTime.UtcNow,
             UpdatedAt = createdAt ?? DateTime.UtcNow,
+            SourceKind = sourceKind,
         };
 }

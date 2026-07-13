@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Settings;
+﻿using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -9,6 +10,9 @@ namespace Farm.Infrastructure.Services.ShiftPlan;
 /// Runs <see cref="IShiftPlanCompiler.CompileAsync"/> on a fixed interval so
 /// operator-facing shift-plan tasks stay fresh even when no domain event
 /// drives an out-of-band recompile.
+/// The service no-ops silently when <see cref="OperatorFeature.ShiftPlan"/> is
+/// disabled via <see cref="IOperatorFeatureGate"/> — it does not shut down, so
+/// the flag can be re-enabled at runtime without restarting the API.
 /// </summary>
 public sealed class ShiftPlanCompilerHostedService : BackgroundService
 {
@@ -40,12 +44,23 @@ public sealed class ShiftPlanCompilerHostedService : BackgroundService
             try
             {
                 await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
-                ISettingsService settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
-                ShiftPlanSettings settings = settingsService.Get<ShiftPlanSettings>() ?? new ShiftPlanSettings();
-                intervalSeconds = Math.Max(15, settings.CompileIntervalSeconds);
 
-                IShiftPlanCompiler compiler = scope.ServiceProvider.GetRequiredService<IShiftPlanCompiler>();
-                await compiler.CompileAsync(stoppingToken).ConfigureAwait(false);
+                // Fix 7: check the feature gate each iteration; skip compile when disabled.
+                IOperatorFeatureGate featureGate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
+                if (!featureGate.IsEnabled(OperatorFeature.ShiftPlan))
+                {
+                    _logger.LogDebug("Shift-plan feature is disabled; skipping compile pass");
+                    intervalSeconds = 60;
+                }
+                else
+                {
+                    ISettingsService settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+                    ShiftPlanSettings settings = settingsService.Get<ShiftPlanSettings>() ?? new ShiftPlanSettings();
+                    intervalSeconds = Math.Max(15, settings.CompileIntervalSeconds);
+
+                    IShiftPlanCompiler compiler = scope.ServiceProvider.GetRequiredService<IShiftPlanCompiler>();
+                    await compiler.CompileAsync(stoppingToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {

@@ -33,6 +33,14 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
 
     public string SourceName => "attention";
 
+    /// <inheritdoc/>
+    public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } =
+    [
+        UserTaskSourceKind.FailureIncident,
+        UserTaskSourceKind.Harvest,
+        UserTaskSourceKind.FilamentCoverage,
+    ];
+
     public async Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
     {
         List<ShiftPlanTaskSpec> results = new();
@@ -52,16 +60,10 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
         foreach (IAttentionSource src in _attentionSources)
         {
             ct.ThrowIfCancellationRequested();
-            IReadOnlyList<AttentionItemDto> items;
-            try
-            {
-                items = await src.GetItemsAsync(ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Attention source {Source} failed in shift-plan compile", src.SourceName);
-                continue;
-            }
+
+            // Fix 4: do NOT catch per-inner-source exceptions — let them propagate
+            // so the compiler can suppress auto-complete for this source's OwnedKinds.
+            IReadOnlyList<AttentionItemDto> items = await src.GetItemsAsync(ct).ConfigureAwait(false);
 
             foreach (AttentionItemDto item in items)
             {

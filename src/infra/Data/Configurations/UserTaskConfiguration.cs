@@ -59,46 +59,16 @@ public sealed class UserTaskConfiguration : IEntityTypeConfiguration<UserTask>
             .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
     }
 
-    // Canonical wire values. Names are stable — do not rename.
-    internal static string AnchorKindToWire(UserTaskAnchorKind value) => value switch
-    {
-        UserTaskAnchorKind.Now => "now",
-        UserTaskAnchorKind.At => "at",
-        UserTaskAnchorKind.Window => "window",
-        UserTaskAnchorKind.AnytimeToday => "anytimeToday",
-        _ => "unspecified",
-    };
+    // Canonical wire values. Delegates to the domain converters so EF and JSON stay in lockstep.
+    internal static string AnchorKindToWire(UserTaskAnchorKind value)
+        => UserTaskAnchorKindJsonConverter.ToWire(value);
 
-    internal static UserTaskAnchorKind AnchorKindFromWire(string value) => value switch
-    {
-        "now" => UserTaskAnchorKind.Now,
-        "at" => UserTaskAnchorKind.At,
-        "window" => UserTaskAnchorKind.Window,
-        "anytimeToday" => UserTaskAnchorKind.AnytimeToday,
-        _ => UserTaskAnchorKind.Unspecified,
-    };
+    internal static UserTaskAnchorKind AnchorKindFromWire(string value)
+        => UserTaskAnchorKindJsonConverter.FromWire(value);
 
-    internal static string SourceKindToWire(UserTaskSourceKind value) => value switch
-    {
-        UserTaskSourceKind.Attention => "attention",
-        UserTaskSourceKind.FailureIncident => "failureIncident",
-        UserTaskSourceKind.Harvest => "harvest",
-        UserTaskSourceKind.FilamentCoverage => "filamentCoverage",
-        UserTaskSourceKind.Maintenance => "maintenance",
-        UserTaskSourceKind.SpoolReorder => "spoolReorder",
-        UserTaskSourceKind.PrintedPartStock => "printedPartStock",
-        _ => "unspecified",
-    };
+    internal static string SourceKindToWire(UserTaskSourceKind value)
+        => UserTaskSourceKindJsonConverter.ToWire(value);
 
-    internal static UserTaskSourceKind SourceKindFromWire(string value) => value switch
-    {
-        "attention" => UserTaskSourceKind.Attention,
-        "failureIncident" => UserTaskSourceKind.FailureIncident,
-        "harvest" => UserTaskSourceKind.Harvest,
-        "filamentCoverage" => UserTaskSourceKind.FilamentCoverage,
-        "maintenance" => UserTaskSourceKind.Maintenance,
-        "spoolReorder" => UserTaskSourceKind.SpoolReorder,
-        "printedPartStock" => UserTaskSourceKind.PrintedPartStock,
-        _ => UserTaskSourceKind.Unspecified,
-    };
+    internal static UserTaskSourceKind SourceKindFromWire(string value)
+        => UserTaskSourceKindJsonConverter.FromWire(value);
 }

@@ -36,10 +36,11 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
     public int CompileIntervalSeconds { get; set; } = 60;
 
     /// <summary>
-    /// Lead time for maintenance tasks anchored to idle windows, in minutes.
-    /// The task's <see cref="Farm.Infrastructure.Domain.UserTask.AnchorAtUtc"/>
-    /// is set to (window start − this value) so the task surfaces before the
-    /// idle window opens.
+    /// Lead-time buffer in minutes applied to the <em>end</em> of an idle window
+    /// for maintenance tasks. The effective window presented to the operator is
+    /// <c>[windowStart, windowEnd − maintenanceLeadMinutes)</c>, ensuring they
+    /// are not scheduled to work in the last few minutes before the next print
+    /// begins. A value of 0 disables the buffer.
     /// </summary>
     [JsonPropertyName("maintenanceLeadMinutes")]
     [SettingDisplay(Name = "Maintenance Lead Time (minutes)", Description = "How far in advance of an idle window a maintenance task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 2)]

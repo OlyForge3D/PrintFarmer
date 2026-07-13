@@ -1,4 +1,7 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Security.Claims;
+using System.Text.Json;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Tasks;
 using Farm.Web.Api.Controllers;
 using FluentValidation;
@@ -13,13 +16,22 @@ public class TasksControllerTests
 {
     private readonly Mock<IUserTaskService> _taskServiceMock;
     private readonly Mock<IValidator<CreateManualTaskDto>> _validatorMock;
+    private readonly Mock<IOperatorFeatureGate> _featureGateMock;
     private readonly TasksController _controller;
 
     public TasksControllerTests()
     {
         _taskServiceMock = new Mock<IUserTaskService>();
         _validatorMock = new Mock<IValidator<CreateManualTaskDto>>();
-        _controller = new TasksController(_taskServiceMock.Object, _validatorMock.Object);
+        _featureGateMock = new Mock<IOperatorFeatureGate>();
+
+        // Default: shift-plan feature is enabled.
+        _featureGateMock.Setup(g => g.IsEnabled(OperatorFeature.ShiftPlan)).Returns(true);
+
+        _controller = new TasksController(
+            _taskServiceMock.Object,
+            _featureGateMock.Object,
+            _validatorMock.Object);
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext()
@@ -67,6 +79,63 @@ public class TasksControllerTests
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         IReadOnlyList<UserTaskDto> returnedTasks = Assert.IsAssignableFrom<IReadOnlyList<UserTaskDto>>(okResult.Value);
         Assert.Empty(returnedTasks);
+    }
+
+    /// <summary>Fix 7: when shift-plan feature is disabled, view=shift returns 404.</summary>
+    [Fact]
+    public async Task GetPendingTasksAsync_ViewShift_FeatureDisabled_ReturnsNotFound()
+    {
+        _featureGateMock.Setup(g => g.IsEnabled(OperatorFeature.ShiftPlan)).Returns(false);
+        // OperatorFeatureProblemDetails.NotFound calls gate.GetFlagName internally.
+        _featureGateMock.Setup(g => g.GetFlagName(OperatorFeature.ShiftPlan))
+            .Returns("shiftPlanEnabled");
+
+        IActionResult result = await _controller.GetPendingTasksAsync(view: "shift", CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    /// <summary>Fix 7: when shift-plan feature is enabled, view=shift delegates to service.</summary>
+    [Fact]
+    public async Task GetPendingTasksAsync_ViewShift_FeatureEnabled_ReturnsShiftPlan()
+    {
+        ShiftPlanDto plan = new([], DateTime.UtcNow);
+        _taskServiceMock
+            .Setup(s => s.GetShiftPlanAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(plan);
+
+        IActionResult result = await _controller.GetPendingTasksAsync(view: "shift", CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Same(plan, ok.Value);
+    }
+
+    /// <summary>Fix 6: enum fields in ShiftPlanDto must serialize as camelCase strings, not integers.</summary>
+    [Fact]
+    public async Task GetPendingTasksAsync_ViewShift_SerializesAnchorKindAsCamelCaseString()
+    {
+        ShiftPlanGroupDto group = new(
+            UserTaskAnchorKind.Now,
+            new[] { CreateUserTaskDto("t", UserTaskType.Custom) });
+        ShiftPlanDto plan = new(new[] { group }, DateTime.UtcNow);
+
+        _taskServiceMock
+            .Setup(s => s.GetShiftPlanAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(plan);
+
+        IActionResult result = await _controller.GetPendingTasksAsync(view: "shift", CancellationToken.None);
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+
+        // Serialize exactly as ASP.NET Core would (with camelCase policy).
+        string json = JsonSerializer.Serialize(ok.Value, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        });
+
+        // Fix 6: must be "now" (camelCase), not "Now" (PascalCase), not 0 (integer).
+        Assert.Contains("\"anchorKind\":\"now\"", json);
+        Assert.DoesNotContain("\"anchorKind\":\"Now\"", json);
+        Assert.DoesNotContain("\"anchorKind\":0", json);
     }
 
     #endregion
@@ -159,6 +228,40 @@ public class TasksControllerTests
         Assert.IsType<NotFoundResult>(result.Result);
     }
 
+    /// <summary>Fix 8: non-admin looking up a maintenance task by id gets 404 (not visible).</summary>
+    [Fact]
+    public async Task GetByIdAsync_MaintenanceTask_NonAdmin_ReturnsNotFound()
+    {
+        Guid taskId = Guid.NewGuid();
+        UserTaskDto maintenanceTask = CreateUserTaskDto("maint", UserTaskType.MaintenanceDue, taskId,
+            sourceKind: UserTaskSourceKind.Maintenance);
+        _taskServiceMock
+            .Setup(s => s.GetByIdAsync(taskId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(maintenanceTask);
+        // HttpContext has no farm_admin claim → IsAdmin = false.
+
+        ActionResult<UserTaskDto> result = await _controller.GetByIdAsync(taskId, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    /// <summary>Fix 8: admin can access a maintenance task by id.</summary>
+    [Fact]
+    public async Task GetByIdAsync_MaintenanceTask_Admin_ReturnsOk()
+    {
+        Guid taskId = Guid.NewGuid();
+        UserTaskDto maintenanceTask = CreateUserTaskDto("maint", UserTaskType.MaintenanceDue, taskId,
+            sourceKind: UserTaskSourceKind.Maintenance);
+        _taskServiceMock
+            .Setup(s => s.GetByIdAsync(taskId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(maintenanceTask);
+        SetAdminUser();
+
+        ActionResult<UserTaskDto> result = await _controller.GetByIdAsync(taskId, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+    }
+
     #endregion
 
     #region GetPendingCountAsync Tests
@@ -232,6 +335,39 @@ public class TasksControllerTests
 
         // Assert
         Assert.IsType<NotFoundResult>(result);
+    }
+
+    /// <summary>Fix 8: non-admin attempting to complete a maintenance task gets 403.</summary>
+    [Fact]
+    public async Task CompleteAsync_MaintenanceTask_NonAdmin_ReturnsForbid()
+    {
+        Guid taskId = Guid.NewGuid();
+        UserTaskDto maintenanceTask = CreateUserTaskDto("maint", UserTaskType.MaintenanceDue, taskId,
+            sourceKind: UserTaskSourceKind.Maintenance);
+        _taskServiceMock
+            .Setup(s => s.GetByIdAsync(taskId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(maintenanceTask);
+        // No farm_admin claim.
+
+        IActionResult result = await _controller.CompleteAsync(taskId, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+        _taskServiceMock.Verify(s => s.CompleteTaskAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>Fix 8: admin can complete a maintenance task.</summary>
+    [Fact]
+    public async Task CompleteAsync_MaintenanceTask_Admin_ReturnsNoContent()
+    {
+        Guid taskId = Guid.NewGuid();
+        _taskServiceMock
+            .Setup(s => s.CompleteTaskAsync(taskId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        SetAdminUser();
+
+        IActionResult result = await _controller.CompleteAsync(taskId, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
     }
 
     #endregion
@@ -312,7 +448,19 @@ public class TasksControllerTests
 
     #region Helper Methods
 
-    private static UserTaskDto CreateUserTaskDto(string title, UserTaskType taskType, Guid? id = null)
+    private void SetAdminUser()
+    {
+        ClaimsIdentity identity = new(
+            [new Claim(ClaimTypes.Role, "farm_admin")],
+            authenticationType: "test");
+        _controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(identity);
+    }
+
+    private static UserTaskDto CreateUserTaskDto(
+        string title,
+        UserTaskType taskType,
+        Guid? id = null,
+        UserTaskSourceKind sourceKind = UserTaskSourceKind.Unspecified)
     {
         return new UserTaskDto(
             Id: id ?? Guid.NewGuid(),
@@ -332,9 +480,10 @@ public class TasksControllerTests
             AnchorAtUtc: null,
             WindowStartUtc: null,
             WindowEndUtc: null,
-            SourceKind: UserTaskSourceKind.Unspecified,
+            SourceKind: sourceKind,
             SourceId: null);
     }
 
     #endregion
 }
+

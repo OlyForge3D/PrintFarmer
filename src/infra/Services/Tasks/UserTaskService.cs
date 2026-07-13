@@ -203,47 +203,57 @@ public class UserTaskService(
     /// <inheritdoc />
     public async Task<ShiftPlanDto> GetShiftPlanAsync(CancellationToken ct = default)
     {
+        return await GetShiftPlanAsync(isAdmin: false, ct);
+    }
+
+    /// <inheritdoc cref="IUserTaskService.GetShiftPlanAsync(bool, CancellationToken)"/>
+    /// <param name="isAdmin">
+    /// When <c>true</c>, maintenance-sourced tasks are included. Non-admin
+    /// callers must pass <c>false</c> so sensitive alert details are excluded.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<ShiftPlanDto> GetShiftPlanAsync(bool isAdmin, CancellationToken ct = default)
+    {
         IReadOnlyList<UserTask> pending = await _taskRepository.GetPendingTasksAsync(null, ct);
 
-        // Legacy tasks that pre-date the shift-plan compiler carry
-        // AnchorKind = Unspecified — keep them visible in AnytimeToday so no
-        // task disappears from the operator view.
+        // Fix 8: exclude maintenance tasks for non-admin callers.
+        IEnumerable<UserTask> visible = isAdmin
+            ? pending
+            : pending.Where(t => t.SourceKind != UserTaskSourceKind.Maintenance);
+
+        // Fix 5: Now → Timeline (At+Window interleaved by boundary) → AnytimeToday.
+        // Legacy tasks with Unspecified land in AnytimeToday.
         static UserTaskAnchorKind BucketOf(UserTaskAnchorKind kind) => kind switch
         {
             UserTaskAnchorKind.Now => UserTaskAnchorKind.Now,
-            UserTaskAnchorKind.At => UserTaskAnchorKind.At,
-            UserTaskAnchorKind.Window => UserTaskAnchorKind.Window,
+            UserTaskAnchorKind.At or UserTaskAnchorKind.Window => UserTaskAnchorKind.Timeline,
             _ => UserTaskAnchorKind.AnytimeToday,
         };
 
-        // Group order: Now → At/Window interleaved by earliest boundary asc → AnytimeToday.
-        // We compute a synthetic "primary boundary" per task for stable ordering.
+        // Primary boundary for interleaved ordering: At tasks use AnchorAtUtc,
+        // Window tasks use WindowStartUtc, Now tasks float to the top, Anytime to the bottom.
         static DateTime PrimaryBoundary(UserTask t)
         {
             UserTaskAnchorKind b = BucketOf(t.AnchorKind);
             return b switch
             {
                 UserTaskAnchorKind.Now => DateTime.MinValue,
-                UserTaskAnchorKind.At => t.AnchorAtUtc ?? DateTime.MaxValue,
-                UserTaskAnchorKind.Window => t.WindowStartUtc ?? t.AnchorAtUtc ?? DateTime.MaxValue,
+                UserTaskAnchorKind.Timeline => t.AnchorAtUtc ?? t.WindowStartUtc ?? DateTime.MaxValue,
                 _ => DateTime.MaxValue,
             };
         }
 
-        // Deterministic per-group ordering: primary boundary asc,
-        // priority desc, created asc, id asc.
-        List<UserTask> ordered = [.. pending
+        List<UserTask> ordered = [.. visible
             .OrderBy(t => PrimaryBoundary(t))
             .ThenByDescending(t => t.Priority)
             .ThenBy(t => t.CreatedAt)
             .ThenBy(t => t.Id)];
 
-        List<ShiftPlanGroupDto> groups = new(4);
+        List<ShiftPlanGroupDto> groups = new(3);
         foreach (UserTaskAnchorKind bucket in new[]
         {
             UserTaskAnchorKind.Now,
-            UserTaskAnchorKind.At,
-            UserTaskAnchorKind.Window,
+            UserTaskAnchorKind.Timeline,
             UserTaskAnchorKind.AnytimeToday,
         })
         {

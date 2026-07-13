@@ -11,13 +11,18 @@ namespace Farm.Infrastructure.Services.ShiftPlan;
 /// <list type="bullet">
 ///   <item>Missing task → INSERT with the spec's anchor/source fields.</item>
 ///   <item>Existing open task for same (SourceKind, SourceId) → UPDATE anchor,
-///         window, title, description, and priority in place. Status is left
-///         alone so operator-initiated <c>InProgress</c> tasks are not
-///         demoted to <c>Pending</c>.</item>
-///   <item>Open task whose spec is absent from this pass → auto-complete
-///         (Status=Completed, CompletedAt=now, SourceId preserved). Legacy
-///         tasks (SourceKind=Unspecified) are never touched by this pass.</item>
+///         window, title, description, and priority in place <em>only when a
+///         field materially changed</em>. Status is left alone so
+///         operator-initiated <c>InProgress</c> tasks are not demoted to
+///         <c>Pending</c>.</item>
+///   <item>Open task whose spec is absent from this pass AND whose
+///         <see cref="UserTask.SourceKind"/> belongs to a source that
+///         completed successfully → auto-complete (Status=Completed,
+///         CompletedAt=now). Tasks whose source failed this pass are preserved
+///         to avoid transient failures completing real tasks.</item>
+///   <item>Legacy tasks (SourceKind=Unspecified) are never touched.</item>
 /// </list>
+/// All adds/updates are batched into a single <c>SaveChangesAsync</c> per pass.
 /// </summary>
 public sealed class ShiftPlanCompiler : IShiftPlanCompiler
 {
@@ -43,6 +48,10 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         DateTime now = _clock.GetUtcNow().UtcDateTime;
         int sourceFailures = 0;
 
+        // Track which source kinds were successfully evaluated this pass.
+        // Auto-complete is restricted to tasks in this set.
+        HashSet<UserTaskSourceKind> successfulKinds = new();
+
         // 1) Collect all specs. Isolate per-source failures — the compiler
         //    must not stall if one source throws.
         Dictionary<(UserTaskSourceKind, string), ShiftPlanTaskSpec> specs = new();
@@ -53,11 +62,19 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             try
             {
                 produced = await src.ProduceAsync(ct).ConfigureAwait(false);
+
+                // Source succeeded — mark its owned kinds as successfully evaluated.
+                foreach (UserTaskSourceKind kind in src.OwnedKinds)
+                {
+                    successfulKinds.Add(kind);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 sourceFailures++;
                 _logger.LogWarning(ex, "Shift-plan source {Source} failed; skipping", src.SourceName);
+
+                // Do NOT add its OwnedKinds to successfulKinds — auto-complete suppressed.
                 continue;
             }
 
@@ -85,7 +102,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
 
         int created = 0, updated = 0, autoCompleted = 0;
 
-        // 3) Upserts.
+        // 3) Upserts — batch all changes, save once at the end.
         foreach (KeyValuePair<(UserTaskSourceKind, string), ShiftPlanTaskSpec> kv in specs)
         {
             ct.ThrowIfCancellationRequested();
@@ -93,9 +110,12 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
 
             if (openByKey.TryGetValue(kv.Key, out UserTask? existing))
             {
-                ApplySpec(existing, spec, now, isNew: false);
-                await _tasks.UpdateAsync(existing, ct).ConfigureAwait(false);
-                updated++;
+                // Fix 3: only write if a material field changed.
+                if (ApplySpec(existing, spec, now, isNew: false))
+                {
+                    await _tasks.TrackUpdateAsync(existing, ct).ConfigureAwait(false);
+                    updated++;
+                }
             }
             else
             {
@@ -106,12 +126,13 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                     Status = UserTaskStatus.Pending,
                 };
                 ApplySpec(fresh, spec, now, isNew: true);
-                await _tasks.AddAsync(fresh, ct).ConfigureAwait(false);
+                await _tasks.TrackAddAsync(fresh, ct).ConfigureAwait(false);
                 created++;
             }
         }
 
-        // 4) Auto-complete: open compiler tasks whose spec vanished from this pass.
+        // 4) Auto-complete: open compiler tasks whose spec vanished, restricted to
+        //    source kinds that completed successfully this pass (Fix 4).
         foreach (KeyValuePair<(UserTaskSourceKind, string), UserTask> kv in openByKey)
         {
             if (specs.ContainsKey(kv.Key))
@@ -119,11 +140,20 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 continue;
             }
 
+            // Fix 4: if the source that owns this kind failed, preserve the task.
+            if (!successfulKinds.Contains(kv.Key.Item1))
+            {
+                _logger.LogDebug(
+                    "Preserving task {TaskId} (source kind {Kind}) because its source failed this pass",
+                    kv.Value.Id, kv.Key.Item1);
+                continue;
+            }
+
             UserTask stale = kv.Value;
             stale.Status = UserTaskStatus.Completed;
             stale.CompletedAt = now;
             stale.UpdatedAt = now;
-            await _tasks.UpdateAsync(stale, ct).ConfigureAwait(false);
+            await _tasks.TrackUpdateAsync(stale, ct).ConfigureAwait(false);
             autoCompleted++;
         }
 
@@ -136,8 +166,32 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         return new ShiftPlanCompileResult(created, updated, autoCompleted, sourceFailures);
     }
 
-    private static void ApplySpec(UserTask task, ShiftPlanTaskSpec spec, DateTime now, bool isNew)
+    /// <returns><c>true</c> if any material field was mutated; <c>false</c> if the task is unchanged.</returns>
+    private static bool ApplySpec(UserTask task, ShiftPlanTaskSpec spec, DateTime now, bool isNew)
     {
+        // Fix 3: compare before writing so we do not bump UpdatedAt on unchanged tasks.
+        bool changed = isNew
+            || task.TaskType != spec.TaskType
+            || task.SourceKind != spec.SourceKind
+            || task.SourceId != spec.SourceId
+            || task.EntityType != spec.EntityType
+            || task.EntityId != spec.EntityId
+            || task.Title != spec.Title
+            || task.Description != spec.Description
+            || task.Priority != spec.Priority
+            || task.AnchorKind != spec.AnchorKind
+            || task.AnchorAtUtc != spec.AnchorAtUtc
+            || task.WindowStartUtc != spec.WindowStartUtc
+            || task.WindowEndUtc != spec.WindowEndUtc
+            || task.DueAt != spec.DueAt
+            || (spec.MetadataJson is not null && task.MetadataJson != spec.MetadataJson)
+            || (spec.RelatedEntityIdsJson is not null && task.RelatedEntityIdsJson != spec.RelatedEntityIdsJson);
+
+        if (!changed)
+        {
+            return false;
+        }
+
         task.TaskType = spec.TaskType;
         task.SourceKind = spec.SourceKind;
         task.SourceId = spec.SourceId;
@@ -168,5 +222,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         {
             task.CreatedAt = now;
         }
+
+        return true;
     }
 }

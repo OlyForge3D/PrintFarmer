@@ -32,6 +32,10 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
 
     public string SourceName => "maintenance-idle-window";
 
+    /// <inheritdoc/>
+    public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } =
+        [UserTaskSourceKind.Maintenance];
+
     public async Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
     {
         ShiftPlanSettings settings;

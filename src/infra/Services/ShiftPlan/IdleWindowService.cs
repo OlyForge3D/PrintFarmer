@@ -13,19 +13,31 @@ namespace Farm.Infrastructure.Services.ShiftPlan;
 /// <remarks>
 /// <para>
 /// An idle window is a projected gap on a printer's assigned queue timeline.
-/// Windows are computed as <c>[now, ETA of first assigned job)</c>, using
-/// existing print statistics for run-time estimates. Printers currently in
-/// an active print (Assigned/Starting/Printing/Paused) have no immediate
-/// idle window until that job finishes.
+/// A printer is only considered idle (and therefore eligible for a window) when
+/// it has NO active job (Starting, Printing, or Paused). Overdue or zero-ETA
+/// active jobs do NOT produce a window — the printer is busy until the active
+/// job resolves.
 /// </para>
 /// <para>
-/// Dispatch alignment: for each candidate window, we also check whether the
-/// printer is a viable target for any unassigned queued job at or above the
-/// dispatcher's configured minimum score threshold. When it is, the window
-/// still reports (so callers can reason about it) but with
-/// <see cref="IdleWindow.IsDispatchEligibleNow"/> set — the shift-plan
-/// compiler MUST NOT recommend maintenance in that window, because the
-/// dispatcher would have started a job instead.
+/// Window end-time: the start of the next queued/assigned-but-not-yet-started
+/// job on the printer. If that job has no ETA the window ends immediately
+/// (returns <c>now</c>) so callers never see an artificially wide window while
+/// a queued job is waiting.
+/// </para>
+/// <para>
+/// Dispatch alignment: for each candidate window we check whether the printer
+/// is a viable target for any unassigned queued job, using the same gates as
+/// <c>AutoDispatchBackgroundService</c>:
+/// <list type="bullet">
+///   <item>Global auto-dispatch enabled and mode ≠ Manual.</item>
+///   <item>Per-printer auto-dispatch enabled.</item>
+///   <item>Printer in Ready state or BedPreConfirmed.</item>
+///   <item>No active job on the printer.</item>
+///   <item>Candidate job selection and ordering identical to the dispatcher.</item>
+/// </list>
+/// When eligible the window is still reported (so callers can reason about it)
+/// but with <see cref="IdleWindow.IsDispatchEligibleNow"/> set — the shift-plan
+/// compiler MUST NOT schedule maintenance in that window.
 /// </para>
 /// </remarks>
 public sealed class IdleWindowService : IIdleWindowService
@@ -57,9 +69,13 @@ public sealed class IdleWindowService : IIdleWindowService
             return Array.Empty<IdleWindow>();
         }
 
-        // Resolve dispatch threshold + list of eligible-for-dispatch queued jobs once.
+        // Load dispatch settings, global candidates, and per-printer dispatch states
+        // in a single DB round-trip.
+        bool globalDispatchEnabled;
         double minScore;
-        List<PrintJob> dispatchCandidates;
+        List<PrintJob> globalCandidates;
+        Dictionary<Guid, PrinterDispatchState?> dispatchStates;
+
         await using (AppDbContext db = await _dbFactory.CreateDbContextAsync(ct))
         {
             DispatchSettings dispatchSettings = await db.DispatchSettings
@@ -67,17 +83,30 @@ public sealed class IdleWindowService : IIdleWindowService
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false)
                 ?? new DispatchSettings();
+
+            globalDispatchEnabled = dispatchSettings.AutoDispatchEnabled
+                && dispatchSettings.AutoDispatchMode != AutoDispatchMode.Manual;
             minScore = dispatchSettings.MinimumScoreThreshold;
 
-            // Unassigned jobs in a state the dispatcher could pick up. Reuse job.Status
-            // Queued semantics — assignment yields Status=Assigned.
-            dispatchCandidates = await db.PrintJobs
+            // Candidate query mirrors AutoDispatchBackgroundService.ExecuteDispatchCycleAsync exactly:
+            // unassigned queued jobs, same ordering (Priority asc, QueuePosition asc, QueuedAt asc).
+            globalCandidates = await db.PrintJobs
                 .AsNoTracking()
                 .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
-                .OrderByDescending(j => j.Priority)
+                .OrderBy(j => j.Priority)
                 .ThenBy(j => j.QueuePosition)
+                .ThenBy(j => j.QueuedAt)
                 .Take(20)
                 .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            // Load per-printer dispatch states for ready-gate checks.
+            HashSet<Guid> printerIdSet = [.. printers.Select(p => p.Id)];
+            dispatchStates = await db.Printers
+                .AsNoTracking()
+                .Include(p => p.DispatchState)
+                .Where(p => printerIdSet.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, p => p.DispatchState, ct)
                 .ConfigureAwait(false);
         }
 
@@ -89,26 +118,31 @@ public sealed class IdleWindowService : IIdleWindowService
 
             List<PrintJob> assigned = await _queue.GetPrintJobsForPrinterAsync(printer.Id, ct).ConfigureAwait(false);
 
-            DateTime? busyUntil = ProjectBusyUntil(assigned, now);
-            DateTime windowStart = busyUntil ?? now;
+            // Fix 1: If the printer has ANY active job (Starting/Printing/Paused),
+            // it is not idle right now — emit no window.
+            bool hasActiveJob = assigned.Any(j =>
+                j.Status == PrintJobStatus.Starting
+                || j.Status == PrintJobStatus.Printing
+                || j.Status == PrintJobStatus.Paused);
 
-            // We only surface windows starting at "now" — future windows come from
-            // subsequent compiler passes as the queue drains. Skip a printer that
-            // is actively working on something (busyUntil > now).
-            if (windowStart > now)
+            if (hasActiveJob)
             {
                 continue;
             }
 
-            // Bound the window at the ETA of the next assigned queued job on this
-            // printer that has not yet started (Queued/Assigned). MaxValue = open-ended.
+            // Window starts at now (printer is idle) and ends at the next queued job.
+            DateTime windowStart = now;
             DateTime windowEnd = ProjectNextBoundary(assigned, now) ?? DateTime.MaxValue;
             if (windowEnd - windowStart < minWindow)
             {
                 continue;
             }
 
-            bool dispatchEligibleNow = await IsDispatchEligibleAsync(printer.Id, dispatchCandidates, minScore, ct)
+            dispatchStates.TryGetValue(printer.Id, out PrinterDispatchState? printerDispatchState);
+
+            bool dispatchEligibleNow = await IsDispatchEligibleAsync(
+                    printer, printerDispatchState, globalDispatchEnabled,
+                    globalCandidates, assigned, minScore, ct)
                 .ConfigureAwait(false);
 
             results.Add(new IdleWindow(printer.Id, printer.Name, windowStart, windowEnd, dispatchEligibleNow));
@@ -117,57 +151,76 @@ public sealed class IdleWindowService : IIdleWindowService
         return results;
     }
 
-    private static DateTime? ProjectBusyUntil(IEnumerable<PrintJob> assigned, DateTime now)
-    {
-        // If any active job is running, we're busy until its ETA.
-        PrintJob? active = assigned.FirstOrDefault(j =>
-            j.Status == PrintJobStatus.Starting
-            || j.Status == PrintJobStatus.Printing
-            || j.Status == PrintJobStatus.Paused);
-        if (active is null)
-        {
-            return null;
-        }
-
-        DateTime start = active.ActualStartTime ?? now;
-        TimeSpan estimate = active.EstimatedPrintTime ?? TimeSpan.Zero;
-        return start + estimate;
-    }
-
     private static DateTime? ProjectNextBoundary(IEnumerable<PrintJob> assigned, DateTime now)
     {
-        // First queued/assigned-but-not-started job on this printer sets the window end.
+        // Fix 1: if any queued/assigned job exists on this printer, the window ends
+        // immediately (now) regardless of whether that job has an ETA. A queued job
+        // waiting to start means the printer's idle window is 0-length or less.
         PrintJob? next = assigned
             .Where(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned)
             .OrderBy(j => j.QueuePosition)
             .FirstOrDefault();
+
         if (next is null)
         {
-            return null;
+            return null; // open-ended idle window
         }
 
-        // Best-effort ETA: use estimate if available, else no bound.
-        // We conservatively return "now" so the window is 0-length only if the job
-        // is imminent. Callers filter by minWindow.
-        return next.EstimatedPrintTime is null ? (DateTime?)null : now;
+        // Return now so the window length is 0 for MinWindow filtering.
+        return now;
     }
 
     private async Task<bool> IsDispatchEligibleAsync(
-        Guid printerId,
-        List<PrintJob> candidateJobs,
+        Printer printer,
+        PrinterDispatchState? dispatchState,
+        bool globalDispatchEnabled,
+        List<PrintJob> globalCandidates,
+        List<PrintJob> assignedJobs,
         double minScore,
         CancellationToken ct)
     {
-        // If there are no unassigned queued jobs, the printer is truly idle.
-        if (candidateJobs.Count == 0)
+        // Fix 2: mirror all dispatcher gates exactly.
+
+        // Gate 1: global auto-dispatch enabled + mode != Manual
+        if (!globalDispatchEnabled)
         {
             return false;
         }
 
-        // Score at most a bounded number of jobs to avoid unbounded scoring work
-        // when queues are deep. This mirrors AutoDispatchBackgroundService's
-        // "take first qualifying" strategy.
-        foreach (PrintJob job in candidateJobs)
+        // Gate 2: per-printer auto-dispatch flag
+        if (!printer.AutoDispatchEnabled)
+        {
+            return false;
+        }
+
+        // Gate 3: ready-gate (operator confirmed bed is clear or pre-confirmed)
+        bool isReady = (dispatchState?.AutoDispatchState ?? AutoDispatchState.None) == AutoDispatchState.Ready
+            || (dispatchState?.BedPreConfirmed ?? false);
+        if (!isReady)
+        {
+            return false;
+        }
+
+        // Gate 4: no active job (already guaranteed by the caller — if hasActiveJob we
+        // returned early, so this is always true here, but state explicitly for clarity).
+
+        // Candidates: global unassigned + jobs already assigned to this printer that
+        // are still queued — mirrors the dispatcher's candidate selection exactly.
+        List<PrintJob> candidates = globalCandidates
+            .Concat(assignedJobs.Where(j => j.Status == PrintJobStatus.Queued))
+            .DistinctBy(j => j.Id)
+            .OrderBy(j => j.Priority)
+            .ThenBy(j => j.QueuePosition)
+            .ThenBy(j => j.QueuedAt)
+            .Take(20)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (PrintJob job in candidates)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -182,7 +235,7 @@ public sealed class IdleWindowService : IIdleWindowService
                 continue;
             }
 
-            DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
+            DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printer.Id);
             if (printerScore is null || printerScore.Eliminated)
             {
                 continue;
