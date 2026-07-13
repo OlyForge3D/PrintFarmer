@@ -126,7 +126,7 @@ Agent Scribe initialized and ready for work. Maintains orchestration log, sessio
 - ℹ️ No new decisions in inbox (icon-only shield decision already merged 2026-03-25T16:00:00Z)
 - `.squad/decisions/decisions.md` remains consolidated from prior session
 
-**Outcome:** 
+**Outcome:**
 PendingReady fix fully documented. No pending squad state. Branch clean after push to origin. User directive honored: end-to-end confirmation pending per Jeff Papiez directive.
 
 ---
@@ -236,3 +236,40 @@ PendingReady fix fully documented. No pending squad state. Branch clean after pu
 
 **Outcome:** Camera management history now captures the completed UI, API, DTO, and validation work. No commit was made because the user requested no additional commit beyond agent-pushed work.
 
+
+## 2026-07-12 — iOS PR #727 v3 Gate Orchestration & Reconciliation Documentation
+
+**Task:** Document unanimous APPROVE outcome for iOS PR #727 v3 candidate 541552c11 after three-reviewer review gate with Vasquez scope reconciliation.
+
+**Status:** ✅ COMPLETE
+
+**Orchestration Logs Created:**
+1. `.squad/orchestration-log/2026-07-12T20-34-42Z-bishop-pr727-final-review.md` — Bishop initial APPROVE sustained through reconciliation
+2. `.squad/orchestration-log/2026-07-12T20-34-42Z-hicks-pr727-final-review.md` — Hicks APPROVE with extended reasoning verification
+3. `.squad/orchestration-log/2026-07-12T20-34-42Z-vasquez-pr727-reconciliation.md` — Vasquez REJECT → APPROVE reconciliation
+
+**Session Log Created:**
+- `.squad/log/2026-07-12T20-34-42Z-pr727-unanimous-gate.md` — Complete gate process and key distinctions documented
+
+**Decision Entry Created:**
+- `.squad/decisions.md` — New entry documenting unanimous APPROVE, scope clarification (inert test seams vs. forbidden production refactoring), and durable learning
+
+**Agent History Updates:**
+- Bishop history: Reconciliation context and durable lesson about test seams vs. path hoisting
+- Hicks history: Extended reasoning value and scope boundary verification process
+- Vasquez history: Complete reconciliation narrative (REJECT → evidence review → withdrawn objection → APPROVE)
+- Scribe history: This log entry
+
+**Key Distinction Documented:**
+
+| Pattern | Status | Evidence |
+|---------|--------|----------|
+| Settings dismiss/reopen UI test coverage | ✅ ALLOWED | Issue #727 explicitly requires it |
+| Settings accessibility identifier (test seam) | ✅ ALLOWED | Inert (test file only, no production changes) |
+| Settings path hoisting in production code | ❌ FORBIDDEN | Verified absent; no route changes |
+
+**Outcome:**
+
+iOS PR #727 v3 pre-PR review gate complete with unanimous consensus. Scope boundary clarified: inert test seams are legitimate test infrastructure within issue scope; forbidden patterns are production-code refactoring (path hoisting, shared routing changes). Scribe documentation preserves gate process, reconciliation evidence, and durable learning for team decisions.
+
+**Strict lockout released. Candidate ready for merge.**

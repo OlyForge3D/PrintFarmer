@@ -81,3 +81,48 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+### 2026-07-12 — iOS PR #727 v3 Initial Review & Reconciliation: REJECT → APPROVE
+
+- **Initial Verdict:** ❌ REJECT (scope concern)
+- **Reconciliation Verdict:** ✅ APPROVE (objection withdrawn after evidence review)
+- **Final Consensus:** ✅ APPROVE (unanimous with Bishop and Hicks)
+
+- **Candidate:** 541552c11db667e87e5eacf3cb67b285181123a3 (Kane v3 revision)
+- **Issue:** #727 — iOS: reset legacy sheet navigation state after dismissal
+- **Scope:** Test-only revision, Notifications fallback UI test rewrite for non-vacuous coverage
+
+**Initial REJECT rationale:**
+- Settings accessibility identifier inclusion alleged to be out-of-scope drift
+- Characterized as unrelated to core #727 fix (legacy sheet navigation reset)
+- Scope objection: Settings accessibility identifier seemed tangential to Notifications test focus
+
+**Strict Lockout Applied:**
+- Per Reviewer Rejection Protocol, strict lockout provisionally applied
+- Candidate frozen, clean, unpushed during review cycle
+
+**Reconciliation Process:**
+- Bishop and Hicks independently challenged the objection with detailed evidence
+- Both agents traced identifier usage: appears test-file only (no production routing changes)
+- Both agents verified issue #727 explicitly requires Settings dismiss/reopen coverage (acceptance criteria)
+- Both agents confirmed: Settings accessibility identifier is inert test seam, not forbidden production path hoisting
+
+**Evidence-Based Reconsideration:**
+- Key distinction verified: Settings accessibility identifier (test seam, inert) ≠ Settings path hoisting (forbidden refactoring)
+- Issue #727 acceptance criteria includes: "every legacy/fallback sheet resets its owned NavigationPath... [including] Dashboard, Notifications, Maintenance, Settings..."
+- Accessibility identifier serves legitimate test infrastructure for Settings dismiss/reopen coverage requirement
+- No forbidden Settings routing changes present; production code verified clean
+
+**Revised Understanding:**
+- Initial characterization was incorrect
+- Inert test seams (accessibility identifiers, test data markers) are legitimate test infrastructure, not scope drift
+- The objection conflated two distinct change categories: test infrastructure vs. production refactoring
+- Issue scope explicitly includes Settings coverage → Settings accessibility identifier is within scope
+
+**New Verdict:** ✅ APPROVE
+
+Vasquez withdrew the REJECT, acknowledged the initial characterization was wrong, and returned APPROVE. **Final consensus: unanimous APPROVE for HEAD 541552c11.**
+
+**Durable lesson:** Scope drift objections must verify the alleged drift is a forbidden production change (path hoisting, shared routing refactoring), not legitimate test infrastructure. Distinguish between inert test seams and production refactoring to prevent false-positive scope creep objections. When first voice raises scope concern, second/third voices must independently trace the change through production code before sustaining the objection.
+
+**Outcome:** Strict lockout released. Candidate ready for merge.

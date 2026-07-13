@@ -4450,3 +4450,54 @@ issue: 274
 
 
 
+
+
+
+---
+date: 2026-07-12T20:34:42Z
+owner: Bishop, Hicks, Vasquez (consensus)
+status: approved
+issue: 727
+---
+
+## iOS PR #727 v3 — Pre-PR Review Gate Unanimous APPROVE (Commit 541552c11)
+
+**Candidate:** iOS: revision v3 — non-vacuous Notifications fallback UI test (#727)
+**Commit:** 541552c11db667e87e5eacf3cb67b285181123a3
+**Requested by:** Kane (v3 author)
+
+### Gate Process
+
+Three-reviewer consensus required; all reviewers examined the candidate:
+
+1. **Bishop:** Initial APPROVE (cumulative series verification, mutation litmus passed)
+2. **Hicks** (gpt-5.6-sol, max): Initial APPROVE (extended reasoning review, test coverage confirmed)
+3. **Vasquez:** Initial REJECT (scope concern: Settings accessibility identifier alleged out-of-scope)
+   - **Strict Lockout Applied** (per Reviewer Rejection Protocol)
+   - Bishop and Hicks independently challenged objection with detailed evidence
+   - **Vasquez Reconsideration:** Withdrew REJECT, returned APPROVE
+
+### Unanimous Verdict
+
+✅ **APPROVE** (all three reviewers)
+
+**Scope Clarification Documented:**
+- Settings accessibility identifier is an **inert test seam** (test file only, no production changes) ✅ ALLOWED
+- Settings dismiss/reopen UI test coverage (required by issue #727 acceptance criteria) ✅ ALLOWED
+- Settings path hoisting or shared routing changes ❌ FORBIDDEN (verified absent)
+
+### Change Scope
+
+**Test-only revision** scoped to `AttentionDisabledFallbackUITests`:
+- Rewrote `testNotificationsFallbackSheetResetsPushedJobDetailAfterDismissal` for non-vacuous failure conditions
+- Unified global nav bar query across pre-dismissal and post-reopen assertions
+- Added settle for asynchronous stale restoration edge cases
+- Mutation litmus: removing legacy sheet reset handler causes test FAIL
+
+**No production code path changes.** Candidate frozen, clean, unpushed during review cycle.
+
+### Key Learning
+
+Inert test seams (accessibility identifiers, test data markers, UI test helper methods) are **legitimate test infrastructure** when required for coverage compliance. The distinction between inert test seams and forbidden production refactoring must be explicitly verified during gate reviews to prevent scope creep objections from conflating different change categories.
+
+**Status:** Ready for merge pending other team gates. Strict lockout released.

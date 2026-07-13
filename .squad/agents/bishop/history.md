@@ -107,3 +107,21 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+### 2026-07-12 — iOS PR #727 v3 Final Review: Unanimous APPROVE (Reconciliation)
+
+- **Verdict:** ✅ APPROVE (initial) → ✅ APPROVE (sustained after reconciliation)
+- **Candidate:** 541552c11db667e87e5eacf3cb67b285181123a3 (Kane v3 revision)
+- **Issue:** #727 — iOS: reset legacy sheet navigation state after dismissal
+- **Scope:** Test-only revision, Notifications fallback UI test rewrite for non-vacuous coverage
+- **Key finding:** Cumulative series mutation litmus passed; removal of legacy sheet reset handler causes test FAIL at reopen path (confirms non-vacuous coverage)
+
+**Reconciliation context:**
+- Vasquez raised initial REJECT: Settings accessibility identifier alleged out-of-scope
+- Bishop and Hicks independently challenged with evidence: identifier is inert test seam (no production path changes), and issue #727 explicitly requires Settings dismiss/reopen coverage
+- Vasquez reconsidered and withdrew REJECT, returning APPROVE
+- **Final consensus:** Unanimous APPROVE for HEAD 541552c11
+
+**Durable lesson:** Distinguish inert test seams (accessibility identifiers, test markers) from forbidden production refactoring (path hoisting, shared routing changes). Test scope drift objections must verify that the alleged drift is production-code refactoring, not test infrastructure required for coverage compliance. Settings accessibility identifier ≠ Settings path hoisting.
+
+**Outcome:** Gate complete. Strict lockout released. Candidate ready for merge.

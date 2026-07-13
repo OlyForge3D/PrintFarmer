@@ -8,8 +8,9 @@
 
 ## Model
 
-- **Preferred:** `gemini-3-pro-preview`
-- **Rationale:** Gemini 3 Pro for analytical diversity in multi-model review gate.
+- **Preferred:** `gpt-5.6-sol`
+- **Reasoning Effort:** `max`
+- **Rationale:** GPT-5.6 Sol at maximum reasoning for adversarial multi-model review.
 
 ## Responsibilities
 
