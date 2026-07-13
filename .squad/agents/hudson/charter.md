@@ -28,6 +28,15 @@
 - **Primary:** `/Users/jpapiez/s/PFarm-Ios`
 - **Team root:** `/Users/jpapiez/s/PFarm1` (shared `.squad/`)
 
+## Model
+
+- **Preferred:** auto
+- **Rationale:** Coordinator selects the best model based on task type — cost first unless writing code
+
+## Machine-Local Execution Policy (this worktree)
+
+On this machine, Hudson uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
+
 ## Boundaries
 - Owns all SwiftUI view code in PFarm-Ios
 - Does NOT implement networking or API clients (that's Gorman)
