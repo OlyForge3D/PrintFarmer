@@ -45,6 +45,10 @@ public class MaintenanceScheduleDeploymentController(
         s.CreatedAt,
         s.UpdatedAt);
 
+    private static bool UsesPrintHourIntervals(MaintenancePlan plan) =>
+        plan.PlanTasks.Any(planTask =>
+            (planTask.IntervalHoursOverride ?? planTask.MaintenanceTask.IntervalHours).HasValue);
+
     /// <summary>
     /// Gets all schedule deployments. Optionally filter by printer, plan, or active status.
     /// </summary>
@@ -126,6 +130,15 @@ public class MaintenanceScheduleDeploymentController(
             if (toolhead.ToolheadType != ToolheadType.Physical)
             {
                 return BadRequest(new { message = $"Toolhead {request.ToolheadId} is not a physical toolhead and is not eligible for maintenance scope." });
+            }
+
+            if (!printerWithToolheads!.SupportsPerToolAttribution
+                && UsesPrintHourIntervals(plan))
+            {
+                return BadRequest(new
+                {
+                    message = "Hour-based per-tool maintenance requires a printer that supports per-tool attribution. Use a calendar-based plan or printer-wide scope."
+                });
             }
         }
 

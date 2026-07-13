@@ -96,6 +96,32 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
         return ok.Value.Should().BeOfType<List<PrinterMaintenanceScheduleResponse>>().Subject;
     }
 
+    private async Task AddPlanTaskAsync(
+        MaintenancePlan plan,
+        double? intervalHours,
+        int? intervalDays)
+    {
+        var task = new MaintenanceTask
+        {
+            Id = Guid.NewGuid(),
+            TaskName = $"Task-{Guid.NewGuid():N}",
+            Category = "Test",
+            IntervalHours = intervalHours,
+            IntervalDays = intervalDays
+        };
+        var planTask = new PlanTask
+        {
+            Id = Guid.NewGuid(),
+            MaintenancePlanId = plan.Id,
+            MaintenancePlan = plan,
+            MaintenanceTaskId = task.Id,
+            MaintenanceTask = task
+        };
+        _db.MaintenanceTasks.Add(task);
+        _db.Set<PlanTask>().Add(planTask);
+        await _db.SaveChangesAsync();
+    }
+
     [Fact]
     public async Task Deploy_WithPhysicalToolhead_PersistsToolheadScope()
     {
@@ -107,6 +133,38 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
         PrinterMaintenanceScheduleResponse body = GetCreatedBody(result);
         body.ToolheadId.Should().Be(t0.Id);
         body.ToolheadName.Should().Be("T0");
+    }
+
+    [Fact]
+    public async Task Deploy_HourBasedPlanOnUnsupportedPrinter_ReturnsExplanatoryBadRequest()
+    {
+        (Printer p, Toolhead t0, _, MaintenancePlan plan) = await SeedAsync();
+        await AddPlanTaskAsync(plan, intervalHours: 100, intervalDays: null);
+
+        ActionResult<PrinterMaintenanceScheduleResponse> result = await _controller.DeployAsync(
+            new DeployMaintenancePlanRequest(plan.Id, p.Id, t0.Id),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = result.Result
+            .Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequest.Value.Should().BeEquivalentTo(new
+        {
+            message = "Hour-based per-tool maintenance requires a printer that supports per-tool attribution. Use a calendar-based plan or printer-wide scope."
+        });
+        (await _db.Set<PrinterMaintenanceSchedule>().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Deploy_CalendarBasedPlanOnUnsupportedPrinter_PreservesPerToolScope()
+    {
+        (Printer p, Toolhead t0, _, MaintenancePlan plan) = await SeedAsync();
+        await AddPlanTaskAsync(plan, intervalHours: null, intervalDays: 30);
+
+        ActionResult<PrinterMaintenanceScheduleResponse> result = await _controller.DeployAsync(
+            new DeployMaintenancePlanRequest(plan.Id, p.Id, t0.Id),
+            CancellationToken.None);
+
+        GetCreatedBody(result).ToolheadId.Should().Be(t0.Id);
     }
 
     [Fact]
