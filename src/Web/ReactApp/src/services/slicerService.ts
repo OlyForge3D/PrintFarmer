@@ -189,8 +189,26 @@ export interface SlicerEngineInfo {
   engine: string;
   /** All installed versions, newest first (System.Version sort). */
   versions: string[];
-  /** The newest installed version, or null if none registered. */
+  /**
+   * Per-version availability. `available` is `true` only when at least one
+   * Online SlicerService currently advertises that (engine, version) pair.
+   * When no SlicerService rows exist yet (fresh install), the backend marks
+   * every entry available so the version selector is still usable.
+   * The UI MUST use this to disable unavailable versions in the selector —
+   * a job pinned to an unavailable version will otherwise hang in the queue.
+   */
+  versionEntries: SlicerEngineVersionEntry[];
+  /**
+   * The newest AVAILABLE version (never returns an unavailable version unless
+   * every entry is unavailable). Prefer this over `versions[0]` when
+   * defaulting an unpinned submission to "latest".
+   */
   latest: string | null;
+}
+
+export interface SlicerEngineVersionEntry {
+  version: string;
+  available: boolean;
 }
 
 export const slicerService = new SlicerService();

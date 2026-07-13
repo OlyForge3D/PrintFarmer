@@ -32,8 +32,11 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// when at least one Online <see cref="SlicerService"/> currently advertises
     /// that (engine, version) pair, so the UI can distinguish "installed" from
     /// "actually claimable right now" and never pin a job to a version no worker
-    /// can serve. When no services have registered yet (fresh install) every
-    /// version is reported as available so the version pin is still usable.
+    /// can serve. When there are no registered <see cref="SlicerService"/> rows
+    /// at all (fresh install / legacy single-worker deployments that never call
+    /// /api/slicers/register), every version is reported as available so the
+    /// version pin remains usable. Once at least one row exists, availability
+    /// is gated strictly by the Online set — offline services are honoured.
     /// </summary>
     [HttpGet("engines")]
     [AllowAnonymous]
@@ -49,10 +52,12 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
             .Where(t => !string.IsNullOrEmpty(t.Engine))
             .ToHashSet();
 
-        // If nothing is online, don't hide the registry — legacy single-worker
-        // deployments may never have a SlicerService row, and hiding the
-        // registry would break the version selector entirely.
-        bool anyOnline = online.Count > 0;
+        // Fresh install / legacy deployment fallback: only when NO service rows
+        // exist at all do we mark every registry version available. When rows
+        // exist but none are Online we honour that state (marking versions
+        // unavailable) — otherwise the UI would happily let the user pin a
+        // job to a version that will hang in the queue forever.
+        bool anyServiceRows = services.Count > 0;
 
         var engines = libraries
             .GroupBy(l => l.SlicerName, StringComparer.OrdinalIgnoreCase)
@@ -62,7 +67,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
                     .Select(l => new
                     {
                         version = l.SlicerVersion,
-                        available = !anyOnline || online.Contains((g.Key, l.SlicerVersion)),
+                        available = !anyServiceRows || online.Contains((g.Key, l.SlicerVersion)),
                     })
                     .ToArray();
 

@@ -5,6 +5,7 @@ using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 
@@ -216,6 +217,25 @@ public static class Program
         {
             app.Logger.LogError("Failed to preload profiles at startup: {Exception}", ex.Message);
             throw; // Fail startup if profiles cannot be preloaded
+        }
+
+        // Issue #578: Gate startup on OrcaBinaryHealthCheck when binary verification
+        // is enabled. Without this the RegistrationBackgroundService + QueueConsumerService
+        // start advertising and claiming version-pinned jobs even when the binary
+        // reports a different version than the worker advertises — the queue would
+        // silently deliver v2.3.1 work to a v2.4.0 binary. WORKER_RELAXED_READINESS
+        // (already respected below for the readiness endpoint) also disables this
+        // startup gate so local dev containers without a real binary still boot.
+        if (!relaxedReadiness)
+        {
+            OrcaBinaryHealthCheck versionCheck = ActivatorUtilities.CreateInstance<OrcaBinaryHealthCheck>(app.Services);
+            HealthCheckResult probe = await versionCheck.CheckHealthAsync(new HealthCheckContext());
+            if (probe.Status == HealthStatus.Unhealthy)
+            {
+                app.Logger.LogCritical("OrcaBinaryHealthCheck refused startup: {Description}", probe.Description);
+                throw new InvalidOperationException(
+                    $"Refusing to start worker: {probe.Description}. Set WORKER_RELAXED_READINESS=true to bypass in dev.");
+            }
         }
 
         await app.RunAsync();

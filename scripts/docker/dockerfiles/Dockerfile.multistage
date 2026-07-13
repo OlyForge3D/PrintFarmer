@@ -95,7 +95,11 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./migrations/Farm.Slicer.Migrations.PostgreSQL/Farm.Slicer.Migrations.PostgreSQL.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
-    dotnet build ./migrations/Farm.Slicer.Migrations.SqlServer/Farm.Slicer.Migrations.SqlServer.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
+    dotnet build ./migrations/Farm.Slicer.Migrations.SqlServer/Farm.Slicer.Migrations.SqlServer.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Mirroring slicer plugins into slicer-host publish payload (issue #578; microservices split loads plugins via Slicer:PluginsPath)..." && \
+    mkdir -p /app/publish/slicer-host/plugins/slicer && \
+    dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj -c Release -o /app/publish/slicer-host/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj -c Release -o /app/publish/slicer-host/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
 
 # Verify critical runtime files exist and fail immediately if any are missing
 RUN echo "Checking published artifacts..." && \
@@ -119,6 +123,9 @@ RUN echo "Checking published artifacts..." && \
     ([ -f /app/publish/api/plugins/slicer/Farm.Slicer.Module.Api.dll ] || (echo "✗ MISSING: /app/publish/api/plugins/slicer/Farm.Slicer.Module.Api.dll"; exit 1)) && \
     ([ -f /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll ] || (echo "✗ MISSING: /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll"; exit 1)) && \
     ([ -f /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll ] || (echo "✗ MISSING: /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll"; exit 1)) && \
+    echo "Checking for slicer plugin DLLs in slicer-host payload (issue #578; microservices split):" && ls -lah /app/publish/slicer-host/plugins/slicer/ 2>&1 | head -10 && \
+    ([ -f /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll ] || (echo "✗ MISSING: /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll"; exit 1)) && \
+    ([ -f /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll ] || (echo "✗ MISSING: /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll"; exit 1)) && \
     echo "✓ All .NET builds completed successfully"
 
 ############################################################
@@ -205,6 +212,9 @@ COPY --chown=appuser:appuser --from=shared-build /app/publish/slicer-host .
 
 ENV ASPNETCORE_URLS=http://+:5246
 ENV ASPNETCORE_ENVIRONMENT=Production
+# Issue #578 dual-engine: point plugin discovery at the mirrored plugin payload
+# copied above so ISlicerRegistry sees both v2_4_0 and v2_3_1 in slicer-host too.
+ENV Slicer__PluginsPath=/app/plugins/slicer
 
 USER appuser
 

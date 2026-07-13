@@ -10,6 +10,7 @@ import { Alert } from '@/common/components/ui/Alert';
 import { LayersIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { sliceJobService, type SubmitSliceJobRequest } from '@/services/sliceJobService';
+import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
 import {
   slicerProfilesService,
   type OrcaMachineProfile,
@@ -73,6 +74,14 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       }));
     },
     staleTime: 30_000,
+  });
+
+  // Issue #578: dual-engine registry so QuickSlice can pin to the newest
+  // AVAILABLE OrcaSlicer version rather than accepting whatever worker claims first.
+  const { data: registeredEngines } = useQuery<SlicerEngineInfo[]>({
+    queryKey: ['slicer-engines-registry'],
+    queryFn: () => slicerService.listEngines(),
+    staleTime: 300_000,
   });
 
   // Effective printer: user selection or first available
@@ -174,11 +183,22 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     const apiBase = getApiBaseUrl();
     const modelFileUrl = `${apiBase}/3d-models/file/${model.id}`;
 
+    // Issue #578 dual-engine: pin QuickSlice to the newest AVAILABLE OrcaSlicer
+    // version reported by the registry. Without a pin the job could be picked
+    // up by any registered OrcaSlicer worker (including an older engine that
+    // may not understand this profile bundle). Falls back to unpinned when the
+    // engines endpoint hasn't populated yet or nothing is available.
+    const orcaEngine = registeredEngines?.find(
+      e => (e?.engine ?? '').toLowerCase() === 'orcaslicer',
+    );
+    const pinnedVersion = orcaEngine?.latest ?? undefined;
+
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       modelFileUrl,
       modelFileName: model.fileName || model.name,
       slicerEngine: 0, // OrcaSlicer
+      ...(pinnedVersion ? { slicerEngineVersion: pinnedVersion } : {}),
       slicerProfileJson: JSON.stringify({
         machineProfileName: effectiveMachineProfileId,
         filamentProfileName: effectiveFilamentProfileId,
@@ -200,6 +220,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     selectedBedType,
     submitMutation,
     user?.id,
+    registeredEngines,
   ]);
 
   const handleAdvanced = useCallback(() => {

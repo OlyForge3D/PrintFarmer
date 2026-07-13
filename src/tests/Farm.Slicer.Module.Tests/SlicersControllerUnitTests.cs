@@ -107,7 +107,7 @@ public class SlicersControllerUnitTests
         Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca24 =
             new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
         _ = orca24.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
-        _ = orca24.SetupGet(l => l.SlicerVersion).Returns("2.4.0");
+        _ = orca24.SetupGet(l => l.SlicerVersion).Returns("2.4.1");
 
         Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca23 =
             new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
@@ -135,10 +135,10 @@ public class SlicersControllerUnitTests
         // assert the JSON contract the React client depends on.
         string json = System.Text.Json.JsonSerializer.Serialize(ok!.Value);
         _ = json.Should().Contain("\"engine\":\"OrcaSlicer\"");
-        _ = json.Should().Contain("\"2.4.0\"").And.Contain("\"2.3.1\"");
-        _ = json.Should().Contain("\"latest\":\"2.4.0\"");
-        // When no SlicerService is online we fall back to available=true so the
-        // version selector still works on fresh installs.
+        _ = json.Should().Contain("\"2.4.1\"").And.Contain("\"2.3.1\"");
+        _ = json.Should().Contain("\"latest\":\"2.4.1\"");
+        // When no SlicerService rows exist (fresh install) we fall back to
+        // available=true so the version selector still works.
         _ = json.Should().Contain("\"available\":true");
     }
 }

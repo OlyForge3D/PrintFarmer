@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -241,33 +241,54 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 300_000,
   });
   const engineName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
-  const versionsForEngine = useMemo(
-    () => registeredEngines?.find(e => (e?.engine ?? '').toLowerCase() === engineName.toLowerCase())?.versions ?? [],
+  const engineInfo = useMemo(
+    () => registeredEngines?.find(e => (e?.engine ?? '').toLowerCase() === engineName.toLowerCase()),
     [registeredEngines, engineName],
+  );
+  const versionsForEngine = useMemo(() => engineInfo?.versions ?? [], [engineInfo]);
+  const versionEntriesForEngine = useMemo(() => engineInfo?.versionEntries ?? [], [engineInfo]);
+  const availableVersionsForEngine = useMemo(
+    () => versionEntriesForEngine.filter(v => v.available).map(v => v.version),
+    [versionEntriesForEngine],
+  );
+  // Backend-computed "newest available" — prefer this over versions[0]; only
+  // falls back to versions[0] when the backend didn't return a latest (defensive).
+  const latestAvailableForEngine = useMemo(
+    () => engineInfo?.latest ?? availableVersionsForEngine[0] ?? undefined,
+    [engineInfo, availableVersionsForEngine],
   );
   useEffect(() => {
     // Reset the pin whenever engine changes so a stale pin doesn't survive.
     // Also cascade profile selections (issue #578): a v2.3.1 machine or filament
     // profile will not be valid for v2.4.0 and vice versa. Same treatment when
     // switching between Orca and Prusa. Printer selection stays intact because
-    // it is orthogonal to the slicer engine.
+    // it is orthogonal to the slicer engine. Multi-extruder mappings must clear
+    // too — they hold profile NAMES that are equally version-bound.
     setSelectedEngineVersion(undefined);
     setSelectedMachineProfileId('');
     setSelectedNozzleFilter('');
     setSelectedFilamentProfileId('');
     setSelectedFilamentMaterial('');
+    setExtruderFilamentProfileIds({});
+    setExtruderFilamentColours({});
   }, [selectedSlicerId]);
 
+  // Track first mount so the initial undefined→undefined render doesn't wipe
+  // user selections, but any subsequent transition (including pinned→undefined
+  // "back to Latest") still cascades a reset — the resolved effective version
+  // has changed, so the profile set the user was staring at may no longer apply.
+  const engineVersionInitialRenderRef = useRef(true);
   useEffect(() => {
-    // Version pin changes also invalidate slicer-version-specific profile
-    // selections. Guarded by the pin actually being set so the initial
-    // undefined→undefined render doesn't wipe user selections.
-    if (selectedEngineVersion !== undefined) {
-      setSelectedMachineProfileId('');
-      setSelectedNozzleFilter('');
-      setSelectedFilamentProfileId('');
-      setSelectedFilamentMaterial('');
+    if (engineVersionInitialRenderRef.current) {
+      engineVersionInitialRenderRef.current = false;
+      return;
     }
+    setSelectedMachineProfileId('');
+    setSelectedNozzleFilter('');
+    setSelectedFilamentProfileId('');
+    setSelectedFilamentMaterial('');
+    setExtruderFilamentProfileIds({});
+    setExtruderFilamentColours({});
   }, [selectedEngineVersion]);
 
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>(() => {
@@ -1715,11 +1736,11 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
       // Issue #578 dual-engine: when the user leaves the dropdown on "Latest"
-      // (undefined pin) but 1+ versions are known, resolve to the newest one
-      // so the job is deterministically routed rather than accepted by any
-      // worker (including older ones). If nothing is registered yet, remain
+      // (undefined pin), resolve to the backend-computed newest AVAILABLE
+      // version so the job is deterministically routed to a worker that can
+      // actually claim it. When nothing is registered/available, remain
       // unpinned so legacy single-worker deployments still work.
-      slicerEngineVersion: selectedEngineVersion ?? (versionsForEngine.length > 0 ? versionsForEngine[0] : undefined),
+      slicerEngineVersion: selectedEngineVersion ?? latestAvailableForEngine,
       slicerProfileJson: JSON.stringify({
             machineProfileName: selectedMachineProfileId,
             filamentProfileName: selectedFilamentProfileId,
@@ -1785,12 +1806,12 @@ export const NewSliceJobPage: React.FC = () => {
     selectedMachineProfileId,
     selectedProcessPresetId,
     selectedEngineVersion,
+    latestAvailableForEngine,
     slicerInfo.engine,
     slicerSettings,
     submitMutation,
     user?.id,
     selectedModelId,
-    versionsForEngine,
   ]);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -1969,7 +1990,9 @@ export const NewSliceJobPage: React.FC = () => {
             engineOptions={engineOptions}
           />
 
-          {/* ENGINE VERSION PIN (issue #578) — only shown when 2+ versions are registered. */}
+          {/* ENGINE VERSION PIN (issue #578) — shown when 2+ versions are registered.
+               Unavailable versions (no online worker) are rendered disabled so a
+               user cannot pin a job that will hang in the queue forever. */}
           {versionsForEngine.length > 1 && (
             <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5">
               <label htmlFor="slicer-engine-version" className="block text-sm font-semibold text-pf-text-primary mb-1.5">
@@ -1983,14 +2006,17 @@ export const NewSliceJobPage: React.FC = () => {
                   setSelectedEngineVersion(v === '' ? undefined : v);
                 }}
               >
-                <option value="">Latest ({versionsForEngine[0]})</option>
-                {versionsForEngine.map(v => (
-                  <option key={v} value={v}>{v}</option>
+                <option value="">Latest ({latestAvailableForEngine ?? '—'})</option>
+                {versionEntriesForEngine.map(entry => (
+                  <option key={entry.version} value={entry.version} disabled={!entry.available}>
+                    {entry.version}{entry.available ? '' : ' (offline)'}
+                  </option>
                 ))}
               </Select>
               <p className="mt-1 text-xs text-pf-text-muted">
                 Pins the slice job to a specific {engineName} engine. Leave on Latest
-                unless you need a particular version for compatibility.
+                unless you need a particular version for compatibility. Versions
+                marked "offline" have no worker currently registered and cannot claim jobs.
               </p>
             </div>
           )}
