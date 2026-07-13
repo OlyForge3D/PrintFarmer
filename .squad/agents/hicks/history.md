@@ -100,3 +100,22 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+### 2026-07-13 — Issue #708 Backend v3 Review (Double-Attempt, gpt-5.6-sol/max)
+
+**Context:** First attempt on live worktree aborted when branch advanced mid-review. Coordinator isolated worktree at exact SHA `6ce67c89ead4da3d1457c336f1b79d7400298b71` (branch `jpapiez-squad-708-native-push-backend`); second attempt completed on immutable copy.
+
+**Verdict:** ❌ REQUEST_CHANGES (3 blockers at SHA `6ce67c89ead4da3d1457c336f1b79d7400298b71`)
+
+**Blockers:**
+1. `TelemetryStartup.cs:97-102` — APNs token redaction incomplete. Registration accepts arbitrary token suffix; APNs sender interpolates raw token in log prefix. Query-like suffixes (e.g., `token?ver=2`) escape path-only redaction masking.
+2. `NotificationsController.cs:291-307` + `NotificationService.cs:501-520` — Legacy PUT creates default attention opt-outs and now resets stored opt-outs. Existing contract test bypasses production controller path; mutation not verified end-to-end.
+3. `NativePushDispatcher.cs:148-156` — Persisted `PushOn*` attention preferences not applied during dispatch. Native push can be sent despite opt-out flag in database.
+
+**Verified:** B3 auth ✓, migrations ✓, build ✓, full suite clean ✓
+
+**Handoff:** Revision assigned to Lambert. Jeff Papiez locked out for this cycle. Dallas recommended for next revision.
+
+**Orchestration note:** Invalid attempt 1 created scratch `TestEnum/` + `test_enum.cs` artifacts during cleanliness check; coordinator removed and re-ran. Only valid retry verdict recorded above.
+
+**Lesson — Immutable-review contract:** When live branch changes mid-review, abort immediately and isolate at exact SHA. The review verdict is only valid for the exact commit SHA reviewed.
