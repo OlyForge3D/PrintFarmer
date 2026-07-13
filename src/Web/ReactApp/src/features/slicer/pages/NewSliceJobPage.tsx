@@ -242,13 +242,33 @@ export const NewSliceJobPage: React.FC = () => {
   });
   const engineName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
   const versionsForEngine = useMemo(
-    () => registeredEngines?.find(e => e.engine.toLowerCase() === engineName.toLowerCase())?.versions ?? [],
+    () => registeredEngines?.find(e => (e?.engine ?? '').toLowerCase() === engineName.toLowerCase())?.versions ?? [],
     [registeredEngines, engineName],
   );
   useEffect(() => {
     // Reset the pin whenever engine changes so a stale pin doesn't survive.
+    // Also cascade profile selections (issue #578): a v2.3.1 machine or filament
+    // profile will not be valid for v2.4.0 and vice versa. Same treatment when
+    // switching between Orca and Prusa. Printer selection stays intact because
+    // it is orthogonal to the slicer engine.
     setSelectedEngineVersion(undefined);
+    setSelectedMachineProfileId('');
+    setSelectedNozzleFilter('');
+    setSelectedFilamentProfileId('');
+    setSelectedFilamentMaterial('');
   }, [selectedSlicerId]);
+
+  useEffect(() => {
+    // Version pin changes also invalidate slicer-version-specific profile
+    // selections. Guarded by the pin actually being set so the initial
+    // undefined→undefined render doesn't wipe user selections.
+    if (selectedEngineVersion !== undefined) {
+      setSelectedMachineProfileId('');
+      setSelectedNozzleFilter('');
+      setSelectedFilamentProfileId('');
+      setSelectedFilamentMaterial('');
+    }
+  }, [selectedEngineVersion]);
 
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>(() => {
     try {
@@ -690,10 +710,14 @@ export const NewSliceJobPage: React.FC = () => {
              (selectedSlicerId === 2 && typeName === 'PrusaSlicer');
     });
     const typeName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
+    // Map the UI slicer id (1=Orca, 2=Prusa) to the SlicerEngineType enum value
+    // (OrcaSlicer=0, PrusaSlicer=1) expected by the server. Issue #578 dual-engine
+    // dispatch depends on the correct engine name to build capability tags.
+    const engineEnum = selectedSlicerId === 1 ? 0 : 1;
     return {
       name: typeName,
       version: slicer?.version || 'Unknown',
-      engine: selectedSlicerId
+      engine: engineEnum
     };
   }, [selectedSlicerId, availableSlicers, getSlicerTypeName]);
 
@@ -1690,7 +1714,12 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileUrl: effectiveModelFileUrl,
       modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
-      slicerEngineVersion: selectedEngineVersion,
+      // Issue #578 dual-engine: when the user leaves the dropdown on "Latest"
+      // (undefined pin) but 1+ versions are known, resolve to the newest one
+      // so the job is deterministically routed rather than accepted by any
+      // worker (including older ones). If nothing is registered yet, remain
+      // unpinned so legacy single-worker deployments still work.
+      slicerEngineVersion: selectedEngineVersion ?? (versionsForEngine.length > 0 ? versionsForEngine[0] : undefined),
       slicerProfileJson: JSON.stringify({
             machineProfileName: selectedMachineProfileId,
             filamentProfileName: selectedFilamentProfileId,
@@ -1761,6 +1790,7 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation,
     user?.id,
     selectedModelId,
+    versionsForEngine,
   ]);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {

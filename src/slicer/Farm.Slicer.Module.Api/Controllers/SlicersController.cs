@@ -28,30 +28,73 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// <summary>
     /// Lists all slicer engines available in the plugin registry, including all
     /// installed versions per engine (issue #578). Used by the React version
-    /// selector.
+    /// selector. Each version carries an <c>available</c> flag that is true only
+    /// when at least one Online <see cref="SlicerService"/> currently advertises
+    /// that (engine, version) pair, so the UI can distinguish "installed" from
+    /// "actually claimable right now" and never pin a job to a version no worker
+    /// can serve. When no services have registered yet (fresh install) every
+    /// version is reported as available so the version pin is still usable.
     /// </summary>
     [HttpGet("engines")]
     [AllowAnonymous]
-    public IActionResult ListEngines()
+    public async Task<IActionResult> ListEnginesAsync()
     {
         IReadOnlyList<ISlicerLibrary> libraries = _registry.ListAllLibraries().ToList();
+        IReadOnlyList<SlicerService> services = await _service.ListAsync(HttpContext.RequestAborted);
+
+        HashSet<(string Engine, string Version)> online = services
+            .Where(s => string.Equals(s.Status, "Online", StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrWhiteSpace(s.Version))
+            .Select(s => (Engine: SlicerTypeToEngineName(s.SlicerType), Version: s.Version!.Trim()))
+            .Where(t => !string.IsNullOrEmpty(t.Engine))
+            .ToHashSet();
+
+        // If nothing is online, don't hide the registry — legacy single-worker
+        // deployments may never have a SlicerService row, and hiding the
+        // registry would break the version selector entirely.
+        bool anyOnline = online.Count > 0;
 
         var engines = libraries
             .GroupBy(l => l.SlicerName, StringComparer.OrdinalIgnoreCase)
             .Select(g =>
             {
-                string[] versions = g.Select(l => l.SlicerVersion).ToArray();
+                var versionEntries = g
+                    .Select(l => new
+                    {
+                        version = l.SlicerVersion,
+                        available = !anyOnline || online.Contains((g.Key, l.SlicerVersion)),
+                    })
+                    .ToArray();
+
+                string[] allVersions = versionEntries.Select(v => v.version).ToArray();
+                string? latestAvailable = versionEntries.FirstOrDefault(v => v.available)?.version
+                                          ?? allVersions.FirstOrDefault();
+
                 return new
                 {
                     engine = g.Key,
-                    versions,
-                    latest = versions.FirstOrDefault(),
+                    versions = allVersions,
+                    versionEntries,
+                    latest = latestAvailable,
                 };
             })
             .OrderBy(e => e.engine, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return Ok(engines);
+    }
+
+    private static string SlicerTypeToEngineName(int slicerType)
+    {
+        // Mirrors Farm.Slicer.Module.Domain.SlicerType enum values. Keep in sync
+        // when adding engines. Unknown enums are ignored (empty string) so a
+        // stale registry row can't accidentally satisfy an availability check.
+        return slicerType switch
+        {
+            0 => "PrusaSlicer",
+            1 => "OrcaSlicer",
+            _ => string.Empty,
+        };
     }
 
     /// <summary>

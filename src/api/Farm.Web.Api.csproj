@@ -92,6 +92,9 @@
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
     </ProjectReference>
+    <!-- Previous OrcaSlicer engine (issue #578): shipped alongside current so the
+         host loads both plugins from Slicer:PluginsPath. Drop this and the
+         matching CopySlicerPlugins entry when the version is retired. -->
     <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>

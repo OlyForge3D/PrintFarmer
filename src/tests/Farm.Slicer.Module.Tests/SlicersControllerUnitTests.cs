@@ -102,7 +102,7 @@ public class SlicersControllerUnitTests
     }
 
     [Fact(DisplayName = "GET /api/slicers/engines returns registered engines grouped by name (issue #578)")]
-    public void ListEngines_GroupsRegisteredLibrariesByEngineName()
+    public async Task ListEngines_GroupsRegisteredLibrariesByEngineName()
     {
         Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca24 =
             new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
@@ -119,10 +119,14 @@ public class SlicersControllerUnitTests
         _ = registry.Setup(r => r.ListAllLibraries())
             .Returns(new[] { orca24.Object, orca23.Object });
 
-        SlicersController controller = new SlicersController(new Mock<ISlicersService>().Object, registry.Object);
+        Mock<ISlicersService> service = new Mock<ISlicersService>();
+        _ = service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)Array.Empty<Farm.Slicer.Module.Domain.SlicerService>());
+
+        SlicersController controller = new SlicersController(service.Object, registry.Object);
         controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
-        IActionResult result = controller.ListEngines();
+        IActionResult result = await controller.ListEnginesAsync();
 
         OkObjectResult? ok = result as OkObjectResult;
         _ = ok.Should().NotBeNull();
@@ -133,6 +137,9 @@ public class SlicersControllerUnitTests
         _ = json.Should().Contain("\"engine\":\"OrcaSlicer\"");
         _ = json.Should().Contain("\"2.4.0\"").And.Contain("\"2.3.1\"");
         _ = json.Should().Contain("\"latest\":\"2.4.0\"");
+        // When no SlicerService is online we fall back to available=true so the
+        // version selector still works on fresh installs.
+        _ = json.Should().Contain("\"available\":true");
     }
 }
 
