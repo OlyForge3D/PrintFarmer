@@ -532,30 +532,57 @@ final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
         row.tap()
 
         // The push targets JobDetailView, whose navigationTitle is the
-        // job's name (falls back to 'Job' if unloaded). Either the job
-        // name or the generic 'Notifications' back button confirms a
-        // nested destination is on screen.
-        let backButton = app.navigationBars.buttons["Notifications"]
-        return backButton.waitForExistence(timeout: 5)
+        // job's name (falls back to 'Job' if unloaded). The global
+        // 'Notifications' back button — a nav-bar button whose label
+        // reads 'Notifications' anywhere in the hierarchy — is the
+        // child sentinel this test relies on. Its absence here is a
+        // hard failure: without a pushed child there is nothing to
+        // regress in the #727 fallback flow.
+        let childSentinel = app.navigationBars.buttons["Notifications"]
+        guard childSentinel.waitForExistence(timeout: 5) else {
+            XCTFail("Nested Notifications → job detail push did not surface the global 'Notifications' back button within 5s — the child sentinel this test depends on never appeared",
+                    file: file, line: line)
+            return false
+        }
+        return true
     }
 
     func testNotificationsFallbackSheetResetsPushedJobDetailAfterDismissal() {
+        // The child sentinel is the identical query used before
+        // dismissal AND after reopen: any nav bar back button labeled
+        // 'Notifications'. On the Notifications root this must be
+        // absent (a root has no parent to point back to). When a
+        // nested JobDetailView is pushed, the pushed screen's back
+        // button carries this label. Using the SAME query both times
+        // is what makes this test non-vacuous — a scoped query after
+        // reopen would trivially return absent whenever the top bar
+        // is not titled 'Notifications' and silently pass on the
+        // exact bug #727 fixes.
+        let childSentinel = app.navigationBars.buttons["Notifications"]
+        let notificationsRootBar = app.navigationBars["Notifications"]
+
         // 1. Open the fallback Notifications sheet.
         openFallbackNotifications()
-        guard app.navigationBars["Notifications"].exists else { return }
+        XCTAssertTrue(
+            notificationsRootBar.waitForExistence(timeout: 5),
+            "Notifications fallback root did not present — cannot exercise the #727 regression path"
+        )
+        guard notificationsRootBar.exists else { return }
 
-        // 2. Push nested job detail.
+        // 2. Push nested job detail. pushFirstNotificationJobDetail
+        // now fails loudly on a missing row OR a missing child
+        // sentinel; we only stop here after those failures are
+        // reported so the acceptance path never silently passes.
         guard pushFirstNotificationJobDetail() else { return }
 
-        // The pushed nested destination must be verifiable — the back
-        // button in the nav bar reads 'Notifications' (its parent).
-        let backButtonBeforeDismiss = app.navigationBars.buttons["Notifications"]
+        // 3. Confirm the child sentinel is present before dismissal
+        // using the identical query used after reopen.
         XCTAssertTrue(
-            backButtonBeforeDismiss.waitForExistence(timeout: 5),
-            "Nested Notifications → job detail push did not put a 'Notifications' back button on screen"
+            childSentinel.waitForExistence(timeout: 5),
+            "Nested Notifications → job detail push did not surface the global 'Notifications' back button — child sentinel absent before dismissal"
         )
 
-        // 3. Dismiss while nested. Swipe on the top nav bar (which is
+        // 4. Dismiss while nested. Swipe on the top nav bar (which is
         // the job detail bar, not 'Notifications').
         let currentBar = app.navigationBars.element(boundBy: 0)
         guard currentBar.waitForExistence(timeout: 3) else {
@@ -578,18 +605,35 @@ final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
             "Dismissing the nested Notifications fallback did not return to the disabled-attention fallback surface"
         )
 
-        // 4. Reopen. Notifications sheet MUST land at its root; the
-        // previous 'Notifications' back button (i.e. any nested job
-        // detail) MUST be gone.
+        // 5. Reopen. Notifications sheet MUST land at its root.
         openFallbackNotifications()
 
-        // On reopen at the root, no back button labeled 'Notifications'
-        // exists (a root nav bar has no parent to point back to).
-        let notificationsBackAfterReopen = app.navigationBars["Notifications"]
-            .buttons["Notifications"]
+        // 5a. Root visibility is a positive precondition — without it
+        // any assertion about the child sentinel would be vacuous.
+        XCTAssertTrue(
+            notificationsRootBar.waitForExistence(timeout: 5),
+            "Reopened fallback Notifications sheet did not present its root — #727 regression indicator"
+        )
+
+        // 5b. Brief settle to catch asynchronous stale restoration
+        // where a legacy child re-pushes shortly after the root
+        // appears (the exact race #727's reset handler guards).
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // 5c. After the async settle the Notifications root must
+        // still be the visible surface. If a stale child was
+        // restored, the root nav bar would no longer be on screen.
+        XCTAssertTrue(
+            notificationsRootBar.exists,
+            "Notifications root disappeared after async settle — a stale child was asynchronously restored on reopen"
+        )
+
+        // 5d. The IDENTICAL global sentinel used before dismissal
+        // must now be absent. Using the same query proves the
+        // pushed child is truly gone — this is the #727 contract.
         XCTAssertFalse(
-            notificationsBackAfterReopen.exists,
-            "Reopened fallback Notifications sheet must NOT retain the pushed job-detail child — #727 regression"
+            childSentinel.exists,
+            "Reopened fallback Notifications sheet retained the pushed job-detail child (global 'Notifications' back button still present) — #727 regression"
         )
     }
 }
