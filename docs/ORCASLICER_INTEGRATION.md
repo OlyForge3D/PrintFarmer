@@ -160,10 +160,14 @@ Use this sequence before retiring a version such as `2.3.1`:
 
 5. **Validate the retirement.** Run the SQL query again and confirm that it
    returns zero rows. Check the queue view for no stranded `Queued` or
-   `Processing` jobs, then inspect engine discovery:
+   `Processing` jobs, then inspect engine discovery. The default targets
+   monolithic/single-container deployments on the main API port (`5245`); for
+   microservices deployments, override the URL to reach `slicer-host` on
+   `5246` (nginx routes `/api/slicers` there in split mode):
 
    ```bash
-   curl -fsS http://localhost:5245/api/slicers/engines | jq .
+   SLICER_ENGINES_URL="${SLICER_ENGINES_URL:-http://localhost:5245/api/slicers/engines}"
+   curl -fsS "$SLICER_ENGINES_URL" | jq .
    ```
 
    After deploying the application release that removes the retired plugin,
