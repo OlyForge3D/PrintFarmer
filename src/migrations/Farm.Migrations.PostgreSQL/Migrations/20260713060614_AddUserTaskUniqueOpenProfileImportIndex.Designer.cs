@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260713060614_AddUserTaskUniqueOpenProfileImportIndex")]
+    partial class AddUserTaskUniqueOpenProfileImportIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5538,9 +5541,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("Status", "AnchorKind", "AnchorAtUtc")
                         .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
-
-                    b.HasIndex("Status", "SourceKind", "SourceId")
-                        .HasDatabaseName("IX_UserTasks_Status_SourceKind_SourceId");
 
                     b.HasIndex("TaskType", "EntityType", "EntityId")
                         .IsUnique()

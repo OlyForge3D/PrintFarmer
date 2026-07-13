@@ -5459,6 +5459,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("AnchorAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AnchorKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("datetime2");
 
@@ -5495,6 +5503,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("RelatedEntityIdsJson")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("SourceId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -5509,9 +5526,34 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("WindowEndUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("WindowStartUtc")
+                        .HasColumnType("datetime2");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DismissedByUserId");
+
+                    b.HasIndex("SourceKind", "SourceId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserTasks_SourceKind_SourceId")
+                        .HasFilter("[SourceId] IS NOT NULL AND [Status] IN (0, 1)");
+
+                    b.HasIndex("Status", "UpdatedAt")
+                        .HasDatabaseName("IX_UserTasks_Status_UpdatedAt");
+
+                    b.HasIndex("Status", "AnchorKind", "AnchorAtUtc")
+                        .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
+
+                    b.HasIndex("Status", "SourceKind", "SourceId")
+                        .HasDatabaseName("IX_UserTasks_Status_SourceKind_SourceId");
+
+                    b.HasIndex("TaskType", "EntityType", "EntityId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserTasks_OpenProfileImport")
+                        .HasFilter("[TaskType] = 1 AND [EntityType] = 'PrinterModel' AND [Status] IN (0, 1)");
 
                     b.ToTable("UserTasks");
                 });
