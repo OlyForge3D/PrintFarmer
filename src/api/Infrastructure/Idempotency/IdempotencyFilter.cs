@@ -59,6 +59,15 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
     /// <summary>Header name written on replayed responses so clients can distinguish a replay from a fresh 200.</summary>
     public const string ReplayHeaderName = "Idempotent-Replay";
 
+    /// <summary>
+    /// <see cref="HttpContext.Items"/> key under which the filter stashes a synthesized
+    /// <c>operationKey</c> for the parts-adjust route (issue #715, Hicks r2 blocker 2).
+    /// The controller reads it as a fallback when the client omitted the body
+    /// <c>operationKey</c>, guaranteeing the domain's natural idempotency always backstops
+    /// the filter's Processing-row retention semantics.
+    /// </summary>
+    public const string SynthesizedOperationKeyItemKey = "Farm.Web.Api.Idempotency.SynthesizedOperationKey";
+
     private readonly IIdempotencyStore _store;
     private readonly IOperatorFeatureGate _featureGate;
     private readonly ILogger<IdempotencyFilter> _logger;
@@ -152,15 +161,25 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
             return;
         }
 
-        // Fold the *resolved* request path into the identity so that a single client
-        // key reused across different {id}/{sku}/{toolheadIndex} values cannot silently
-        // replay one resource's response for another (or, for empty-body actions like
-        // TaskComplete, silently drop the second mutation). The route-key constant is a
+        // Fold the *resolved* request identity into the idempotency identity so that a
+        // single client key reused across different {id}/{sku}/{toolheadIndex} values cannot
+        // silently replay one resource's response for another (or, for empty-body actions
+        // like TaskComplete, silently drop the second mutation). The route-key constant is a
         // static template shared by every id, so on its own it is only a prefix.
-        // Request.Path is the already-resolved path — we use it directly rather than
-        // RouteData.Values because value ordering is not guaranteed across templates.
+        //
+        // For parts-adjust specifically (Hicks r2 blocker 1) the discriminator must be the
+        // *normalized* SKU rather than the raw path: the domain resolves the target entity by
+        // case-insensitive SKU, so /abc/adjust and /ABC/adjust are the same resource and must
+        // share one idempotency record — otherwise a same-key retry with different SKU casing
+        // double-applies the delta. BuildEffectiveIdentity centralizes that per-route rule.
         string resolvedPath = http.Request.Path.HasValue ? http.Request.Path.Value! : string.Empty;
-        string effectiveRouteKey = $"{metadata.RouteKey}|{resolvedPath}";
+        string? partsInventorySku = context.RouteData.Values.TryGetValue("sku", out object? skuRouteValue)
+            ? skuRouteValue as string
+            : null;
+        string effectiveRouteKey = IdempotencyRouteKeys.BuildEffectiveIdentity(
+            metadata.RouteKey,
+            resolvedPath,
+            partsInventorySku);
 
         string requestHash = IdempotencyKeyUtilities.ComputeRequestHash(effectiveRouteKey, bodyBytes);
 
@@ -179,9 +198,11 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
                 return;
 
             case IdempotencyLookupOutcome.InProgress:
-                // Advise the client how long to back off before retrying. The staleness
-                // reclaim horizon means a wedged Processing row becomes reclaimable shortly,
-                // so a short, bounded Retry-After keeps retries from executing unprotected.
+                // Advise the client to back off before retrying. RetryAfterSeconds is a small,
+                // fixed client-friendly backoff hint (see IdempotencyProblemDetails) — it is a
+                // politeness signal, deliberately NOT aligned to the multi-minute
+                // ProcessingStaleness reclaim horizon. A retry that lands before the wedged row
+                // is reclaimable simply gets another 409 InProgress, which is safe.
                 http.Response.Headers.RetryAfter = IdempotencyProblemDetails.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
                 context.Result = IdempotencyProblemDetails.InProgress();
                 return;
@@ -198,6 +219,20 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
                 return;
 
             case IdempotencyLookupOutcome.Inserted when lookup.Record is not null:
+                // Parts-adjust only (Hicks r2 blocker 2): if this first-execution is going to
+                // run the mutation, hand the controller a deterministic operationKey derived
+                // from the idempotency identity so the domain's (PartInventoryId, OperationKey)
+                // uniqueness backstops us. Without this, a client that omits operationKey and
+                // suffers a post-mutation flush failure could, after the Processing row is
+                // reclaimed, retry the same header key and double-apply the delta — the store's
+                // retention alone cannot prevent that once the row is gone. Only set the ambient
+                // value; the controller falls back to it only when the body omitted the key.
+                if (string.Equals(metadata.RouteKey, IdempotencyRouteKeys.PartsInventoryAdjust, StringComparison.Ordinal))
+                {
+                    http.Items[SynthesizedOperationKeyItemKey] =
+                        IdempotencyKeyUtilities.ComputeSynthesizedOperationKey(userId, effectiveRouteKey, idempotencyKey);
+                }
+
                 await ExecuteWithCaptureAsync(context, next, lookup.Record.Id);
                 return;
 
@@ -274,6 +309,13 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
             // the same key against a healed backend. Flush the action's bytes first so the
             // client still sees the original error body; abandon regardless of flush
             // outcome because a failed mutation is always safe to re-execute.
+            //
+            // Correctness assumption (Bishop r2 NB): a 5xx WITHOUT a surfaced exception is
+            // treated as "mutation did not commit," which holds only because every gated
+            // controller wraps its write in a single transaction that rolls back before it
+            // returns a 5xx. If a future gated route returned 5xx *after* committing without
+            // throwing, abandoning here would reopen the double-execution window — such a
+            // route must either throw on failure or supply its own operationKey.
             try
             {
                 await FlushBufferedBodyAsync(buffer, originalBody);

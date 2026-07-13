@@ -1,5 +1,6 @@
 ﻿using System.Data.Common;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Idempotency;
@@ -7,6 +8,7 @@ using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -720,6 +722,70 @@ public class IdempotencyStoreTests : IDisposable
             .Should().BeFalse("the stale winner must have been reclaimed");
     }
 
+    [Fact]
+    public async Task TryBegin_ReclaimRacesConcurrentCompletion_DoesNotEraseCompletedRecord()
+    {
+        // Hicks r2 blocker 3 (reclaim TOCTOU): the initial-read reclaim path reads a stale
+        // Processing row (AsNoTracking snapshot), then deletes it. If a concurrent
+        // CompleteAsync commits BETWEEN that read and the delete, an unconditional
+        // delete-by-id would erase the just-completed record — the next replay attempt would
+        // then miss it and re-execute the already-applied mutation. The conditional delete
+        // (WHERE still-reclaimable) must instead match zero rows, leaving the completed
+        // record intact so this caller replays it.
+        //
+        // The race is made deterministic with a command interceptor that completes the row
+        // on the SAME connection/transaction the reclaim DELETE is about to use — modelling a
+        // CompleteAsync that commits an instant before the delete executes.
+        (string connectionString, SqliteConnection keepAlive) = await CreateSharedDbAsync();
+        await using SqliteConnection keepAliveConn = keepAlive;
+
+        Guid staleId = Guid.NewGuid();
+        byte[] winnerBody = Encoding.UTF8.GetBytes("{\"winner\":true}");
+        using (SqliteConnection seedConn = new(connectionString))
+        {
+            seedConn.Open();
+            using AppDbContext seed = new(
+                new DbContextOptionsBuilder<AppDbContext>().UseSqlite(seedConn).Options);
+            _ = seed.IdempotencyRecords.Add(new IdempotencyRecord
+            {
+                Id = staleId,
+                UserId = "user-A",
+                RouteKey = IdempotencyRouteKeys.TaskComplete,
+                IdempotencyKey = "toctou-key",
+                RequestHash = "hash-A",
+                Status = IdempotencyRecordStatus.Processing,
+                // Older than ProcessingStaleness so the reclaim path engages.
+                CreatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(6),
+                UpdatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(6),
+            });
+            _ = seed.SaveChanges();
+        }
+
+        CompleteOnReclaimDeleteInterceptor interceptor = new("toctou-key", winnerBody);
+        InterceptingContextFactory factory = new(connectionString, interceptor);
+        IdempotencyOptions options = new() { ProcessingStaleness = TimeSpan.FromMinutes(5) };
+        IdempotencyStore sut = new(factory, NullLogger<IdempotencyStore>.Instance, options);
+
+        IdempotencyLookupResult result = await sut.TryBeginAsync(
+            "user-A", IdempotencyRouteKeys.TaskComplete, "toctou-key", "hash-A", CancellationToken.None);
+
+        _ = interceptor.DidFire.Should().BeTrue(
+            "the concurrent completion must have raced the reclaim delete for the test to be meaningful");
+        _ = result.Outcome.Should().Be(IdempotencyLookupOutcome.ReplayCompleted,
+            "a record completed between the reclaim read and delete must be replayed, not erased and re-executed");
+        _ = result.Record!.Id.Should().Be(staleId, "the surviving record is the completed winner, not a fresh insert");
+        _ = result.Record!.ResponseBody.Should().Equal(winnerBody,
+            "the replay must expose the concurrently-committed winner's response bytes");
+
+        await using SqliteConnection verifyConn = new(connectionString);
+        await verifyConn.OpenAsync();
+        await using AppDbContext verify = new(
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(verifyConn).Options);
+        IdempotencyRecord survivor = await verify.IdempotencyRecords.SingleAsync(CancellationToken.None);
+        _ = survivor.Id.Should().Be(staleId, "the completed record must survive the reclaim race (no TOCTOU erasure)");
+        _ = survivor.Status.Should().Be(IdempotencyRecordStatus.Completed);
+    }
+
     /// <summary>
     /// Creates a shared-cache in-memory SQLite database and returns its connection
     /// string plus a keep-alive connection (a shared-cache database is destroyed when
@@ -806,6 +872,140 @@ public class IdempotencyStoreTests : IDisposable
         {
             await base.DisposeAsync();
             await connection.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// <see cref="IDbContextFactory{TContext}"/> that hands out contexts against a
+    /// shared-cache in-memory database with a command interceptor attached, so a raw SQL
+    /// completion can be spliced into the reclaim DELETE's own connection/transaction to
+    /// reproduce the reclaim-vs-completion TOCTOU race deterministically.
+    /// </summary>
+    private sealed class InterceptingContextFactory(
+        string connectionString,
+        IInterceptor interceptor) : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext()
+        {
+            SqliteConnection connection = new(connectionString);
+            connection.Open();
+            using (SqliteCommand pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA busy_timeout=10000;";
+                _ = pragma.ExecuteNonQuery();
+            }
+
+            DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connection)
+                .AddInterceptors(interceptor)
+                .Options;
+            return new OwningConnectionContext(options, connection);
+        }
+
+        public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateDbContext());
+    }
+
+    /// <summary>
+    /// <see cref="AppDbContext"/> that owns and disposes the shared-cache connection handed
+    /// to it, mirroring <see cref="ConflictInjectingContext"/>'s lifetime management.
+    /// </summary>
+    private sealed class OwningConnectionContext(
+        DbContextOptions<AppDbContext> options,
+        SqliteConnection connection) : AppDbContext(options)
+    {
+        public override void Dispose()
+        {
+            base.Dispose();
+            connection.Dispose();
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await base.DisposeAsync();
+            await connection.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Command interceptor that, exactly once, completes the target idempotency row on the
+    /// same connection and transaction the reclaim DELETE is about to run — simulating a
+    /// <c>CompleteAsync</c> that commits between the reclaim's snapshot read and its delete.
+    /// The row is matched by <see cref="IdempotencyRecord.IdempotencyKey"/> (TEXT) to avoid
+    /// SQLite GUID-format ambiguity, and CreatedAt/UpdatedAt are left untouched so EF reads
+    /// them back cleanly.
+    /// </summary>
+    private sealed class CompleteOnReclaimDeleteInterceptor(
+        string idempotencyKey,
+        byte[] responseBody) : DbCommandInterceptor
+    {
+        private int _fired;
+
+        public bool DidFire => Volatile.Read(ref _fired) != 0;
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (IsReclaimDelete(command.CommandText) && Interlocked.Exchange(ref _fired, 1) == 0)
+            {
+                await CompleteConcurrentlyAsync(command, cancellationToken);
+            }
+
+            return await base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override InterceptionResult<int> NonQueryExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result)
+        {
+            if (IsReclaimDelete(command.CommandText) && Interlocked.Exchange(ref _fired, 1) == 0)
+            {
+                CompleteConcurrently(command);
+            }
+
+            return base.NonQueryExecuting(command, eventData, result);
+        }
+
+        private static bool IsReclaimDelete(string sql)
+            => sql.Contains("DELETE", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("IdempotencyRecords", StringComparison.Ordinal);
+
+        private DbCommand BuildCompletion(DbCommand deleteCommand)
+        {
+            DbCommand complete = deleteCommand.Connection!.CreateCommand();
+            complete.Transaction = deleteCommand.Transaction;
+            complete.CommandText =
+                "UPDATE \"IdempotencyRecords\" SET \"Status\" = 'Completed', " +
+                "\"ResponseStatusCode\" = 200, \"ResponseContentType\" = 'application/json', " +
+                "\"ResponseBody\" = $body " +
+                "WHERE \"IdempotencyKey\" = $key AND \"Status\" = 'Processing';";
+            AddParam(complete, "$key", idempotencyKey);
+            AddParam(complete, "$body", responseBody);
+            return complete;
+        }
+
+        private void CompleteConcurrently(DbCommand deleteCommand)
+        {
+            using DbCommand complete = BuildCompletion(deleteCommand);
+            _ = complete.ExecuteNonQuery();
+        }
+
+        private async Task CompleteConcurrentlyAsync(DbCommand deleteCommand, CancellationToken ct)
+        {
+            await using DbCommand complete = BuildCompletion(deleteCommand);
+            _ = await complete.ExecuteNonQueryAsync(ct);
+        }
+
+        private static void AddParam(DbCommand command, string name, object value)
+        {
+            DbParameter parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            _ = command.Parameters.Add(parameter);
         }
     }
 }

@@ -28,8 +28,11 @@ public static class IdempotencyProblemDetails
     /// <summary>
     /// Seconds a client should wait before retrying an in-progress key. Surfaced both
     /// as a <c>Retry-After</c> response header and a <c>retryAfterSeconds</c> ProblemDetails
-    /// extension. Matches the store's <c>ProcessingStaleness</c> reclaim horizon so a
-    /// backed-off retry lands after a wedged Processing row would be reclaimable.
+    /// extension. This is a small, fixed client-friendly backoff hint — it is deliberately
+    /// <b>not</b> aligned to the store's multi-minute <c>ProcessingStaleness</c> reclaim
+    /// horizon (Bishop r2 NB1 / Hicks). A retry that lands before a wedged Processing row
+    /// becomes reclaimable simply receives another <c>409 InProgress</c>, which is safe; the
+    /// hint exists only to keep well-behaved clients from hot-looping.
     /// </summary>
     public const int RetryAfterSeconds = 5;
 

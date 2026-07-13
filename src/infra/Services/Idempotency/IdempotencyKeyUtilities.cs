@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 
 namespace Farm.Infrastructure.Services.Idempotency;
@@ -23,6 +23,65 @@ public static class IdempotencyKeyUtilities
     /// <c>IHeaderDictionary</c> lookup handles that automatically.
     /// </summary>
     public const string HeaderName = "Idempotency-Key";
+
+    /// <summary>
+    /// Prefix marking an <c>operationKey</c> that the idempotency filter synthesized
+    /// on the client's behalf (issue #715, Hicks r2 blocker 2). When a gated
+    /// parts-adjust request carries an <c>Idempotency-Key</c> header but omits the
+    /// body <c>operationKey</c>, the filter derives a deterministic key from the
+    /// caller's identity so the domain's natural <c>(PartInventoryId, OperationKey)</c>
+    /// uniqueness still backstops the filter — even if a post-mutation flush failure
+    /// leaves the Processing row to be reclaimed and the same header key is retried.
+    /// </summary>
+    public const string SynthesizedOperationKeyPrefix = "idem:";
+
+    /// <summary>
+    /// Derives a deterministic domain <c>operationKey</c> from the idempotency identity
+    /// so retries of the same client key always collapse onto the same natural-idempotency
+    /// slot. The value is the <see cref="SynthesizedOperationKeyPrefix"/> followed by the
+    /// lowercase hex SHA-256 of the NUL-delimited <c>(userId, effectiveRouteKey,
+    /// idempotencyKey)</c> triple — the exact same identity the store keys its unique index
+    /// on. Because it is a pure function of that triple, an initial request and any
+    /// post-reclaim re-execution of the same client key produce an identical operation key
+    /// and therefore conflict on the domain's <c>(PartInventoryId, OperationKey)</c> unique
+    /// index, guaranteeing the stock delta is applied at most once. Two different users (or
+    /// two different client keys) derive different operation keys, so genuinely distinct
+    /// operations are never collapsed. The result is 69 characters ("idem:" + 64 hex),
+    /// comfortably within the 128-char persisted column limit.
+    /// </summary>
+    public static string ComputeSynthesizedOperationKey(string userId, string effectiveRouteKey, string idempotencyKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(effectiveRouteKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
+
+        byte[] userIdBytes = Encoding.UTF8.GetBytes(userId);
+        byte[] routeBytes = Encoding.UTF8.GetBytes(effectiveRouteKey);
+        byte[] keyBytes = Encoding.UTF8.GetBytes(idempotencyKey);
+
+        // NUL-delimited triple: userId + NUL + effectiveRouteKey + NUL + idempotencyKey.
+        int total = userIdBytes.Length + 1 + routeBytes.Length + 1 + keyBytes.Length;
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(total);
+        try
+        {
+            int offset = 0;
+            userIdBytes.CopyTo(buffer, offset);
+            offset += userIdBytes.Length;
+            buffer[offset++] = 0;
+            routeBytes.CopyTo(buffer, offset);
+            offset += routeBytes.Length;
+            buffer[offset++] = 0;
+            keyBytes.CopyTo(buffer, offset);
+
+            Span<byte> hash = stackalloc byte[32];
+            _ = SHA256.HashData(buffer.AsSpan(0, total), hash);
+            return SynthesizedOperationKeyPrefix + Convert.ToHexStringLower(hash);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
 
     /// <summary>
     /// Returns whether <paramref name="key"/> is a syntactically valid

@@ -237,6 +237,22 @@ public class PartsInventoryController(
             return BadRequest(new { message = "Request body is required." });
         }
 
+        // Idempotency backstop (issue #715, Hicks r2 blocker 2): when the client omits the
+        // body operationKey, fall back to the deterministic key the idempotency filter
+        // synthesized for this route. That guarantees the domain's natural
+        // (PartInventoryId, OperationKey) dedup always backstops the filter — so even if a
+        // post-mutation flush failure leaves the Processing row to be reclaimed, a retry of
+        // the same Idempotency-Key cannot double-apply the delta. When the client DID supply
+        // an operationKey we honor it unchanged.
+        string? operationKey = request.OperationKey;
+        if (string.IsNullOrWhiteSpace(operationKey)
+            && HttpContext.Items.TryGetValue(IdempotencyFilter.SynthesizedOperationKeyItemKey, out object? synthesized)
+            && synthesized is string synthesizedKey
+            && !string.IsNullOrWhiteSpace(synthesizedKey))
+        {
+            operationKey = synthesizedKey;
+        }
+
         AdjustResult result = await partInventoryService.AdjustAsync(
             sku,
             new AdjustCommand(
@@ -245,7 +261,7 @@ public class PartsInventoryController(
                 request.JobId,
                 request.BinCode,
                 request.Notes,
-                request.OperationKey,
+                operationKey,
                 GetActorId()),
             ct);
 

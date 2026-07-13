@@ -71,7 +71,8 @@ public class IdempotencyFilterTests : IDisposable
         byte[]? body,
         string? userId = "user-42",
         string? contentType = "application/json",
-        string path = "/test")
+        string path = "/test",
+        IReadOnlyDictionary<string, object?>? routeValues = null)
     {
         DefaultHttpContext http = new();
         http.Request.Method = HttpMethods.Post;
@@ -102,6 +103,14 @@ public class IdempotencyFilterTests : IDisposable
             RouteValues = new Dictionary<string, string?>(),
         };
         RouteData routeData = new();
+        if (routeValues is not null)
+        {
+            foreach (KeyValuePair<string, object?> kvp in routeValues)
+            {
+                routeData.Values[kvp.Key] = kvp.Value;
+            }
+        }
+
         ActionContext actionContext = new(http, routeData, descriptor);
         return new ResourceExecutingContext(actionContext, new List<IFilterMetadata>(), new List<IValueProviderFactory>());
     }
@@ -121,6 +130,27 @@ public class IdempotencyFilterTests : IDisposable
     {
         Task<ResourceExecutedContext> Next()
         {
+            context.HttpContext.Response.StatusCode = statusCode;
+            context.HttpContext.Response.ContentType = responseContentType;
+            byte[] bytes = Encoding.UTF8.GetBytes(responseBody);
+            context.HttpContext.Response.Body.Write(bytes, 0, bytes.Length);
+            return Task.FromResult(new ResourceExecutedContext(context, context.Filters));
+        }
+
+        await filter.OnResourceExecutionAsync(context, Next);
+    }
+
+    private static async Task RunAsync(
+        IdempotencyFilter filter,
+        ResourceExecutingContext context,
+        int statusCode,
+        string responseBody,
+        Action onExecute,
+        string responseContentType = "application/json")
+    {
+        Task<ResourceExecutedContext> Next()
+        {
+            onExecute();
             context.HttpContext.Response.StatusCode = statusCode;
             context.HttpContext.Response.ContentType = responseContentType;
             byte[] bytes = Encoding.UTF8.GetBytes(responseBody);
@@ -369,6 +399,63 @@ public class IdempotencyFilterTests : IDisposable
         using Farm.Infrastructure.Data.AppDbContext db = new(_options);
         _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
             .Should().Be(1, "an exact replay must not create a second record");
+    }
+
+    [Fact]
+    public async Task PartsAdjust_SameKey_SameBody_DifferentSkuCasing_Replays_NotReExecutes()
+    {
+        // Hicks r2 blocker 1: the domain resolves the parts-adjust target by NORMALIZED
+        // (case-insensitive, trimmed) SKU, so /abc/adjust, /ABC/adjust and /Abc/adjust are the
+        // SAME resource. The idempotency identity must fold in the normalized SKU rather than
+        // the raw request path — otherwise a same-key retry that differs only in SKU casing
+        // creates a distinct record and double-applies the stock delta. All three casings must
+        // therefore share ONE record and only the first request may execute; the rest replay.
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"delta\":1}");
+        const string key = "casing-key";
+
+        int executionCount = 0;
+
+        // First request: sku "abc" — executes the adjust and persists a Completed record.
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, key, body,
+            path: "/api/parts-inventory/abc/adjust",
+            routeValues: new Dictionary<string, object?> { ["sku"] = "abc" });
+        await RunAsync(filter, first, 200, "{\"onHand\":1}", () => executionCount++);
+        _ = first.HttpContext.Response.StatusCode.Should().Be(200);
+
+        // Second request: sku "ABC" (upper) — same normalized identity → must replay.
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, key, body,
+            path: "/api/parts-inventory/ABC/adjust",
+            routeValues: new Dictionary<string, object?> { ["sku"] = "ABC" });
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            executionCount++;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+        _ = second.Result.Should().BeOfType<IdempotencyReplayResult>(
+            "a same-key retry that differs only in SKU casing must replay, not re-execute");
+
+        // Third request: sku "Abc" (mixed) — same normalized identity → must also replay.
+        ResourceExecutingContext third = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, key, body,
+            path: "/api/parts-inventory/Abc/adjust",
+            routeValues: new Dictionary<string, object?> { ["sku"] = "Abc" });
+        await filter.OnResourceExecutionAsync(third, () =>
+        {
+            executionCount++;
+            return Task.FromResult(new ResourceExecutedContext(third, third.Filters));
+        });
+        _ = third.Result.Should().BeOfType<IdempotencyReplayResult>(
+            "SKU casing must not create a distinct idempotency identity");
+
+        _ = executionCount.Should().Be(1,
+            "only the first request may run the adjust; the two casing variants must replay");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "all three SKU casings must share ONE idempotency record");
     }
 
     [Fact]

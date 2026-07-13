@@ -103,12 +103,18 @@ public sealed class IdempotencyStore : IIdempotencyStore
                     // Expired (past the retention window) OR a Processing row whose owning
                     // request appears to have died before completing (older than
                     // ProcessingStaleness): purge it before attempting a fresh insert so a
-                    // crashed request cannot block the key until it ages out. If a concurrent
-                    // caller beat us to the delete or the row is already gone, ExecuteDeleteAsync
-                    // simply returns 0 — no error. Fall through to the insert below.
-                    _ = await db.IdempotencyRecords
-                        .Where(r => r.Id == existing.Id)
-                        .ExecuteDeleteAsync(ct);
+                    // crashed request cannot block the key until it ages out. The delete is
+                    // CONDITIONAL on the reclaim predicate (Hicks r2 blocker 3): if a
+                    // concurrent CompleteAsync committed between our AsNoTracking read and
+                    // this delete, zero rows match and we must NOT fall through to a fresh
+                    // insert — that would erase the just-completed record and re-execute the
+                    // mutation. Re-loop instead to re-interpret the row as a replay hit.
+                    if (!await TryReclaimStaleRecordAsync(db, existing.Id, now, ct))
+                    {
+                        continue;
+                    }
+
+                    // Reclaimed — fall through to the insert below.
                 }
                 else if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
                 {
@@ -174,12 +180,13 @@ public sealed class IdempotencyStore : IIdempotencyStore
                 if (IsReclaimable(winner, now))
                 {
                     // The reloaded winner is itself expired or a stale Processing row.
-                    // Apply the same reclaim the initial-read path uses (Bishop NB3) —
-                    // delete it and retry the insert so this caller can win protection
-                    // instead of being told a dead request is still in progress.
-                    _ = await readDb.IdempotencyRecords
-                        .Where(r => r.Id == winner.Id)
-                        .ExecuteDeleteAsync(ct);
+                    // Apply the same conditional reclaim the initial-read path uses (Bishop
+                    // NB3 + Hicks r2 blocker 3). Whether the conditional delete wins (stale
+                    // row purged) or loses to a concurrent completion (zero rows matched),
+                    // re-looping re-interprets the row correctly: a freshly-completed winner
+                    // becomes a ReplayCompleted hit on the next pass instead of being erased,
+                    // and a genuinely purged row becomes a fresh insert.
+                    _ = await TryReclaimStaleRecordAsync(readDb, winner.Id, now, ct);
 
                     continue;
                 }
@@ -217,6 +224,41 @@ public sealed class IdempotencyStore : IIdempotencyStore
 
         return record.Status == IdempotencyRecordStatus.Processing
             && record.CreatedAt < now - _options.ProcessingStaleness;
+    }
+
+    /// <summary>
+    /// Conditionally deletes a record, but only while it still satisfies the reclaim
+    /// predicate (<see cref="IsReclaimable"/>) — evaluated atomically inside the DELETE's
+    /// WHERE clause against the same <paramref name="now"/> the caller used for its
+    /// read-side decision, so completion cannot slip between the check and the delete.
+    /// Returns <c>true</c> when a row was deleted (reclaim succeeded), <c>false</c> when
+    /// zero rows matched — meaning the record stopped being reclaimable between the caller's
+    /// snapshot read and this delete (a concurrent <see cref="CompleteAsync"/> committed, or
+    /// a competing reclaim won the race).
+    ///
+    /// <para>
+    /// This closes the TOCTOU window (Hicks r2 blocker 3): an unconditional delete-by-id
+    /// would erase a freshly-completed record, causing the next replay attempt to miss it
+    /// and re-execute the already-applied mutation. Both reclaim sites in
+    /// <see cref="TryBeginAsync"/> route through here so they share identical semantics.
+    /// </para>
+    /// </summary>
+    private async Task<bool> TryReclaimStaleRecordAsync(AppDbContext db, Guid recordId, DateTime now, CancellationToken ct)
+    {
+        DateTime retentionCutoff = now - IIdempotencyStore.RetentionWindow;
+        DateTime stalenessCutoff = now - _options.ProcessingStaleness;
+
+        // Predicate mirrors IsReclaimable exactly: expired (past retention) OR a
+        // still-Processing row older than the staleness horizon. Because it runs in the
+        // database as part of the DELETE, a row that was completed after the caller's read
+        // no longer matches and survives.
+        int deletedRows = await db.IdempotencyRecords
+            .Where(r => r.Id == recordId
+                && (r.CreatedAt < retentionCutoff
+                    || (r.Status == IdempotencyRecordStatus.Processing && r.CreatedAt < stalenessCutoff)))
+            .ExecuteDeleteAsync(ct);
+
+        return deletedRows > 0;
     }
 
     /// <inheritdoc />
