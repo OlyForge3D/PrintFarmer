@@ -113,9 +113,6 @@ import {
   FailureDetectionEvent,
   NotificationDto,
   NotificationPreferencesDto,
-  AttentionCategoriesResponse,
-  AttentionPushPreferencesDto,
-  UpdateAttentionPushPreferencesRequest,
   TelegramSettingsDto,
   TelegramTestResult,
   UpdateBedTypeRequest,
@@ -4489,20 +4486,6 @@ export class ApiClient {
   async updateNotificationPreferences(preferences: UpdateNotificationPreferencesRequest): Promise<NotificationPreferencesDto> {
     const response = await this.client.put('/notifications/preferences', preferences);
     return response.data;
-  }
-
-  async getAttentionCategories(): Promise<AttentionCategoriesResponse> {
-    const response = await this.client.get('/notifications/attention-categories');
-    return response.data;
-  }
-
-  async getAttentionPushPreferences(): Promise<AttentionPushPreferencesDto> {
-    const response = await this.client.get('/notifications/attention-push-preferences');
-    return response.data;
-  }
-
-  async updateAttentionPushPreferences(prefs: UpdateAttentionPushPreferencesRequest): Promise<void> {
-    await this.client.put('/notifications/attention-push-preferences', prefs);
   }
 
   async getTelegramSettings(): Promise<TelegramSettingsDto> {
