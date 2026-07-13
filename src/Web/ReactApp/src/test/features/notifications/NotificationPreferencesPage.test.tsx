@@ -68,6 +68,7 @@ const CAPABLE_CAPABILITIES = {
     NotificationPreferenceEventType.JobCompleted,
     NotificationPreferenceEventType.JobFailed,
     NotificationPreferenceEventType.JobPaused,
+    NotificationPreferenceEventType.PrinterFailure,
     NotificationPreferenceEventType.FilamentRunout,
     NotificationPreferenceEventType.HarvestReady,
     NotificationPreferenceEventType.MaintenanceDue,
@@ -288,6 +289,52 @@ describe('NotificationPreferencesPage', () => {
       expect((screen.getByLabelText('Harvest Ready in-app') as HTMLInputElement).checked).toBe(true);
       expect((screen.getByLabelText('Harvest Ready push') as HTMLInputElement).checked).toBe(true);
       expect((screen.getByLabelText('Harvest Ready email') as HTMLInputElement).checked).toBe(false);
+    });
+
+    it('does not render a printerFailure row (kept out of #716 UI scope) but preserves it on save', async () => {
+      const capable = createCapablePreferences();
+      capable.eventChannelPreferences.push({
+        eventType: NotificationPreferenceEventType.PrinterFailure,
+        inApp: true,
+        email: true,
+        push: true,
+        telegram: false,
+      });
+      mockUseNotificationPreferences.mockReturnValue({
+        data: capable,
+        isLoading: false,
+        error: null,
+      });
+      mockUseNotificationCapabilities.mockReturnValue({
+        data: CAPABLE_CAPABILITIES,
+        isLoading: false,
+        error: null,
+      });
+
+      renderPage();
+
+      // No visible label/toggle for printerFailure.
+      expect(screen.queryByText(/printer failure/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/printer failure in-app/i)).not.toBeInTheDocument();
+
+      // Toggle something visible to force the save through, then confirm the
+      // server-returned printerFailure row is echoed back verbatim.
+      fireEvent.click(screen.getByLabelText('Harvest Ready push'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+      await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+
+      const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+      const printerFailure = payload.eventChannelPreferences?.find(
+        r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
+      );
+      expect(printerFailure).toEqual({
+        eventType: NotificationPreferenceEventType.PrinterFailure,
+        inApp: true,
+        email: true,
+        push: true,
+        telegram: false,
+      });
     });
   });
 });

@@ -3616,18 +3616,28 @@ export enum NotificationFrequency {
 }
 
 export enum NotificationPreferenceEventType {
-  JobStarted = 'JobStarted',
-  JobCompleted = 'JobCompleted',
-  JobFailed = 'JobFailed',
-  JobPaused = 'JobPaused',
-  // Operator alert categories introduced by F3 (#708). Anticipatory tokens: the
-  // backend enum contract in NotificationsController is expected to accept
-  // these string values once #708 lands. Legacy servers that do not know these
-  // tokens must never receive them — see features/notifications/preferencesAdapter.
-  FilamentRunout = 'FilamentRunout',
-  HarvestReady = 'HarvestReady',
-  MaintenanceDue = 'MaintenanceDue',
-  PrinterOffline = 'PrinterOffline'
+  // Wire tokens are camelCase per #708 shared web preference contract
+  // (JsonStringEnumConverter with camelCase naming policy). Adding new tokens
+  // requires updating operatorCategories.ts + the backend enum in
+  // NotificationsController.cs simultaneously — see #708/#750.
+  JobStarted = 'jobStarted',
+  JobCompleted = 'jobCompleted',
+  JobFailed = 'jobFailed',
+  JobPaused = 'jobPaused',
+  // Operator alert categories introduced by F3 (#708). Legacy servers that do
+  // not advertise these tokens in GET /notifications/preferences/capabilities
+  // must never receive them — see features/notifications/preferencesAdapter.
+  //
+  // PrinterFailure is intentionally NOT rendered as a visible row in the
+  // #716 UI scope (see OPERATOR_EVENT_ROWS in operatorCategories.ts), but is
+  // enumerated here so hydrate can pass its server-returned row through
+  // opaquely and buildSavePayload will forward it back verbatim when the
+  // server advertises support.
+  PrinterFailure = 'printerFailure',
+  FilamentRunout = 'filamentRunout',
+  HarvestReady = 'harvestReady',
+  MaintenanceDue = 'maintenanceDue',
+  PrinterOffline = 'printerOffline'
 }
 
 /**

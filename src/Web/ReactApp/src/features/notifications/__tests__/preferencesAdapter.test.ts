@@ -53,11 +53,13 @@ function baseLegacyServerResponse(): NotificationPreferencesDto {
 }
 
 const CAPABLE_CAPABILITIES: NotificationCapabilitiesResponse = {
+  // Enum-declaration order per #708 backend contract.
   supportedEventTypes: [
     NotificationPreferenceEventType.JobStarted,
     NotificationPreferenceEventType.JobCompleted,
     NotificationPreferenceEventType.JobFailed,
     NotificationPreferenceEventType.JobPaused,
+    NotificationPreferenceEventType.PrinterFailure,
     NotificationPreferenceEventType.FilamentRunout,
     NotificationPreferenceEventType.HarvestReady,
     NotificationPreferenceEventType.MaintenanceDue,
@@ -134,25 +136,40 @@ describe('preferencesAdapter.hydratePreferences', () => {
       NotificationPreferenceEventType.JobCompleted,
       NotificationPreferenceEventType.JobFailed,
       NotificationPreferenceEventType.JobPaused,
+      NotificationPreferenceEventType.PrinterFailure,
       NotificationPreferenceEventType.FilamentRunout,
       NotificationPreferenceEventType.HarvestReady,
       NotificationPreferenceEventType.MaintenanceDue,
       NotificationPreferenceEventType.PrinterOffline,
     ]);
+    // New backend persistence defaults for attention rows: inApp=true,
+    // push=true, email=false, telegram=false.
+    const harvest = form.eventChannelPreferences?.find(
+      r => r.eventType === NotificationPreferenceEventType.HarvestReady,
+    );
+    expect(harvest).toEqual({
+      eventType: NotificationPreferenceEventType.HarvestReady,
+      inApp: true,
+      email: false,
+      push: true,
+      telegram: false,
+    });
   });
 
   it('marks a legacy server (no capabilities probe) as not supporting operator categories', () => {
     const { serverSupportsOperatorCategories, form } = hydratePreferences(baseLegacyServerResponse(), null);
 
     expect(serverSupportsOperatorCategories).toBe(false);
+    // Missing operator rows use the new backend defaults so the UI shows the
+    // same starting state the server would persist for a new user.
     const runout = form.eventChannelPreferences?.find(
       r => r.eventType === NotificationPreferenceEventType.FilamentRunout,
     );
     expect(runout).toEqual({
       eventType: NotificationPreferenceEventType.FilamentRunout,
-      inApp: false,
+      inApp: true,
       email: false,
-      push: false,
+      push: true,
       telegram: false,
     });
   });
@@ -285,10 +302,72 @@ describe('preferencesAdapter.buildSavePayload', () => {
     expect(tokens).toContain(NotificationPreferenceEventType.JobCompleted);
     expect(tokens).toContain(NotificationPreferenceEventType.JobFailed);
     expect(tokens).toContain(NotificationPreferenceEventType.JobPaused);
+    expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterFailure);
     expect(tokens).not.toContain(NotificationPreferenceEventType.FilamentRunout);
     expect(tokens).not.toContain(NotificationPreferenceEventType.HarvestReady);
     expect(tokens).not.toContain(NotificationPreferenceEventType.MaintenanceDue);
     expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
+  });
+
+  it('sends the exact camelCase wire tokens the #708 contract publishes', () => {
+    const payload = buildSavePayload(formWithOperatorChanges(), CAPABLE_CAPABILITIES);
+    const wireTokens = (payload.eventChannelPreferences ?? []).map(r => String(r.eventType));
+    // Sanity: enum members carry the exact camelCase wire string values.
+    expect(wireTokens).toEqual(
+      expect.arrayContaining([
+        'jobStarted',
+        'jobCompleted',
+        'jobFailed',
+        'jobPaused',
+        'printerFailure',
+        'filamentRunout',
+        'harvestReady',
+        'maintenanceDue',
+        'printerOffline',
+      ]),
+    );
+  });
+
+  it('forwards a server-returned printerFailure row verbatim even though the UI does not render it', () => {
+    // Legacy-server matrix that already contains a printerFailure row from a
+    // partially-upgraded backend. The UI does not render it, but hydrate must
+    // preserve it and buildSavePayload must forward it when advertised.
+    const preferences = baseLegacyServerResponse();
+    preferences.eventChannelPreferences.push(
+      row(NotificationPreferenceEventType.PrinterFailure, { inApp: true, email: true, push: true, telegram: false }),
+    );
+    const partial: NotificationCapabilitiesResponse = {
+      supportedEventTypes: [
+        NotificationPreferenceEventType.JobStarted,
+        NotificationPreferenceEventType.JobCompleted,
+        NotificationPreferenceEventType.JobFailed,
+        NotificationPreferenceEventType.JobPaused,
+        NotificationPreferenceEventType.PrinterFailure,
+      ],
+    };
+    const { form } = hydratePreferences(preferences, partial);
+    const printerFailure = form.eventChannelPreferences?.find(
+      r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
+    );
+    expect(printerFailure).toEqual({
+      eventType: NotificationPreferenceEventType.PrinterFailure,
+      inApp: true,
+      email: true,
+      push: true,
+      telegram: false,
+    });
+
+    const payload = buildSavePayload(form, partial);
+    const echoed = payload.eventChannelPreferences?.find(
+      r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
+    );
+    expect(echoed).toEqual({
+      eventType: NotificationPreferenceEventType.PrinterFailure,
+      inApp: true,
+      email: true,
+      push: true,
+      telegram: false,
+    });
   });
 
   it('keeps operator rows when the capabilities probe advertises them', () => {

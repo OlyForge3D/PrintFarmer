@@ -47,6 +47,23 @@ const DEFAULT_MATRIX_ROW = (
   telegram: false,
 });
 
+/**
+ * Default channel values for a newly-created operator/attention row. Mirrors
+ * the backend persistence defaults published for the #708 shared contract
+ * (inApp=true, push=true, email=false, telegram=false) so a null-preferences
+ * user on a capable server sees the same starting state the server would
+ * persist on their behalf.
+ */
+const DEFAULT_ATTENTION_ROW = (
+  eventType: NotificationPreferenceEventType,
+): NotificationEventChannelPreferenceDto => ({
+  eventType,
+  inApp: true,
+  email: false,
+  push: true,
+  telegram: false,
+});
+
 /** Default matrix used when the server returns no preferences at all. */
 export function defaultEventChannelPreferences(): NotificationEventChannelPreferenceDto[] {
   return [
@@ -54,7 +71,7 @@ export function defaultEventChannelPreferences(): NotificationEventChannelPrefer
     { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: true, push: true, telegram: false },
     { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: true, push: true, telegram: false },
     { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: true, push: true, telegram: false },
-    ...OPERATOR_EVENT_TYPES.map(DEFAULT_MATRIX_ROW),
+    ...OPERATOR_EVENT_TYPES.map(DEFAULT_ATTENTION_ROW),
   ];
 }
 
@@ -160,7 +177,7 @@ export function hydratePreferences(
     if (!byType.has(eventType)) byType.set(eventType, DEFAULT_MATRIX_ROW(eventType));
   }
   for (const eventType of OPERATOR_EVENT_TYPES) {
-    if (!byType.has(eventType)) byType.set(eventType, DEFAULT_MATRIX_ROW(eventType));
+    if (!byType.has(eventType)) byType.set(eventType, DEFAULT_ATTENTION_ROW(eventType));
   }
 
   // Enforce JobFailed in-app always-on invariant defensively.

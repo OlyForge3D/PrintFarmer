@@ -1,15 +1,24 @@
 import { NotificationPreferenceEventType } from '@/types/api';
 
 /**
- * Operator alert categories introduced by F3 (#708).
+ * Operator alert categories from the #708 shared web preference contract.
  *
- * These tokens are anticipatory. Until #708 ships the backend enum + DTO
- * contract, older servers will not accept them in `PUT /notifications/preferences`
- * and will reject the request with 400 during `JsonStringEnumConverter`
- * deserialization. `preferencesAdapter` is responsible for stripping them from
- * outbound payloads when server capability has not been observed.
+ * This set is the "known-to-this-client" list. Membership drives:
+ *
+ * - `hydratePreferences`: unknown tokens go into an opaque pass-through
+ *   bucket; known operator tokens get a default row when the server omits
+ *   them.
+ * - `buildSavePayload`: outbound rows are filtered against the
+ *   capabilities probe, so unknown-to-server tokens are stripped on legacy
+ *   servers.
+ *
+ * PrinterFailure is enumerated here (so its server-returned row is preserved
+ * verbatim on hydrate and forwarded back on save) but intentionally omitted
+ * from OPERATOR_EVENT_ROWS below — issue #716 AC does not include a
+ * PrinterFailure toggle in the visible matrix.
  */
 export const OPERATOR_EVENT_TYPES: readonly NotificationPreferenceEventType[] = [
+  NotificationPreferenceEventType.PrinterFailure,
   NotificationPreferenceEventType.FilamentRunout,
   NotificationPreferenceEventType.HarvestReady,
   NotificationPreferenceEventType.MaintenanceDue,
@@ -62,6 +71,10 @@ export const JOB_EVENT_ROWS: readonly EventRowMeta[] = [
   },
 ];
 
+/**
+ * Visible operator alert rows for #716. PrinterFailure is intentionally
+ * excluded — see comment on OPERATOR_EVENT_TYPES above.
+ */
 export const OPERATOR_EVENT_ROWS: readonly EventRowMeta[] = [
   {
     eventType: NotificationPreferenceEventType.FilamentRunout,

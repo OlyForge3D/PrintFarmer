@@ -4497,7 +4497,7 @@ export class ApiClient {
    */
   async getNotificationCapabilities(): Promise<NotificationCapabilitiesResponse | null> {
     try {
-      const response = await this.client.get('/notifications/capabilities');
+      const response = await this.client.get('/notifications/preferences/capabilities');
       return response.data as NotificationCapabilitiesResponse;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
