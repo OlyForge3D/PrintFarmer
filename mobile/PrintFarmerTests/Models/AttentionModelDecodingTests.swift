@@ -192,28 +192,58 @@ final class AttentionModelDecodingTests: XCTestCase {
 
     // MARK: - Snooze request/response
 
-    func testSnoozeRequestEncodesCamelCaseUtcFieldWithoutClientAnchor() throws {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-
-        // The mobile client intentionally does NOT expose a caller-supplied
-        // `attentionItemAnchorAtUtc`: the shared JSON encoder uses
-        // `.iso8601`, which truncates fractional seconds, and the server's
-        // strict `item.OccurredAt > anchor` bypass check would then treat
-        // an otherwise valid anchor as older than the very item that
-        // produced it. The backend derives the anchor server-side when the
-        // field is omitted, so the request body carries only the deadline.
+    /// Compile-anchored regression guard for #707 (v3).
+    ///
+    /// The rejected candidate carried a two-property `SnoozeAttentionRequest`
+    /// (`snoozedUntilUtc` + `attentionItemAnchorAtUtc: Date?`). Because
+    /// `Optional` stored properties do NOT receive a synthesised
+    /// declaration-site default, Swift's memberwise initialiser for that
+    /// shape has signature `init(snoozedUntilUtc:attentionItemAnchorAtUtc:)`
+    /// — both arguments required. Constructing the request with a single
+    /// `snoozedUntilUtc:` argument (as this test does) therefore fails to
+    /// compile against the rejected model, and the test target itself
+    /// refuses to build. That is the guarantee this test provides that a
+    /// substring/absence assertion against the wire cannot: the check is
+    /// enforced by the source compiler, not by runtime string matching.
+    ///
+    /// Beyond the compile anchor, we also assert the exact key set of the
+    /// encoded body is `{"snoozedUntilUtc"}` — which simultaneously pins
+    /// the camelCase field name, the absence of any anchor field, and the
+    /// absence of any null-valued or extra keys — without reflection or
+    /// any production-side test hooks.
+    func testSnoozeRequestEncodesExactlyOneCamelCaseKey() throws {
+        // Compile anchor: single-argument construction. If the rejected
+        // two-property request model is ever reintroduced without a
+        // declaration-site default for the anchor, this line stops
+        // compiling and the test target fails to build — which is a
+        // stronger guarantee than any runtime absence check.
         let req = SnoozeAttentionRequest(
             snoozedUntilUtc: Date(timeIntervalSince1970: 1_800_000_000)
         )
-        let encoded = String(decoding: try encoder.encode(req), as: UTF8.self)
-        XCTAssertTrue(encoded.contains("\"snoozedUntilUtc\""),
-            "Must serialise the camelCase property name expected by the backend contract.")
-        XCTAssertFalse(encoded.contains("attentionItemAnchorAtUtc"),
-            "Client must never send a lossy anchor derived from a decoded fractional Date.")
-        XCTAssertFalse(encoded.contains("null"),
-            "Snooze body must not carry a null anchor either — the server treats presence as intent.")
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(req)
+
+        // Parse the emitted JSON as a top-level object and inspect its
+        // key set directly. `Set` equality catches, in a single
+        // assertion:
+        //   • wrong casing (e.g. `SnoozedUntilUtc`, `snoozed_until_utc`)
+        //   • extra fields (e.g. a re-added `attentionItemAnchorAtUtc`,
+        //     even if its value were `null`, because JSON serialisation
+        //     of a nil Optional would still emit the key)
+        //   • missing fields
+        let parsed = try JSONSerialization.jsonObject(with: data)
+        let object = try XCTUnwrap(parsed as? [String: Any],
+            "Snooze request must encode as a JSON object.")
+        XCTAssertEqual(Set(object.keys), Set(["snoozedUntilUtc"]),
+            "Snooze request body must carry exactly one camelCase key \"snoozedUntilUtc\"; got \(object.keys.sorted()).")
+
+        // Belt-and-braces: the value must be the ISO8601 string for the
+        // deadline we passed in, not accidentally the current time or a
+        // number, so nobody can silently swap the encoding strategy.
+        XCTAssertEqual(object["snoozedUntilUtc"] as? String, "2027-01-15T08:00:00Z",
+            "snoozedUntilUtc must serialise as the ISO8601 UTC string for the supplied Date.")
     }
 
     func testSnoozeResponseDecodesFullPayload() throws {

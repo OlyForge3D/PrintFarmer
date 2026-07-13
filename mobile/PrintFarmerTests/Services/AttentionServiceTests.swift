@@ -124,82 +124,23 @@ final class AttentionServiceTests: XCTestCase {
             "Client must never send an anchor field: the encoder is lossy on fractional seconds; got: \(bodyStr)")
     }
 
-    /// End-to-end regression for the anchor-truncation bug that got the
-    /// first #707 candidate rejected.
-    ///
-    /// The failure mode was: the mobile decoder preserves fractional seconds
-    /// on incoming `occurredAt`, but the shared JSON encoder serialises
-    /// `Date` with `.iso8601` (no fractions). A client that decoded an
-    /// AttentionItem and then round-tripped its `occurredAt` back to the
-    /// server as `attentionItemAnchorAtUtc` would silently send a
-    /// fraction-truncated timestamp; the server's strict
-    /// `item.OccurredAt > anchor` bypass check would then match the very
-    /// same item on the very next fetch and defeat the snooze.
-    ///
-    /// This test wires up the real `APIClient` code path (decoder → snooze
-    /// request → encoder → captured body) with a fixture whose `occurredAt`
-    /// carries non-zero fractional seconds, and asserts that the body sent
-    /// on the wire contains no anchor field at all.
-    func testSnoozeOnItemWithFractionalOccurredAtDoesNotSendClientAnchor() async throws {
-        // Feed page containing one item whose occurredAt has real
-        // fractional seconds (…:59.123456Z). This is the shape ASP.NET Core
-        // emits when the underlying `DateTime` retains sub-second precision.
-        let feedJSON = """
-        {
-          "items": [
-            {
-              "id": "failure:22222222-2222-2222-2222-222222222222",
-              "kind": "failure",
-              "severity": "warning",
-              "printerId": "33333333-3333-3333-3333-333333333333",
-              "printerName": "Bay 3",
-              "title": "Layer shift detected",
-              "detail": "Motion axis reported a step loss on layer 42.",
-              "occurredAt": "2026-06-01T11:59:59.123456Z",
-              "actions": []
-            }
-          ],
-          "nextCursor": null,
-          "healthyPrinterCount": 3
-        }
-        """
-        MockAPIClient.stubResponse(json: feedJSON)
-
-        let feed = try await service.getFeed()
-        let item = try XCTUnwrap(feed.items.first,
-            "Fixture must decode into exactly one item so we exercise the fractional path.")
-        // Sanity: the decoder did preserve sub-second precision. The mobile
-        // decoder rounds fractional ISO8601 to millisecond resolution, so
-        // we check whole-second alignment rather than exact micros — the
-        // bug reviewers flagged is that `.iso8601` encoding then drops
-        // ALL fractional seconds, so any sub-second detail is enough to
-        // demonstrate the lossy round-trip.
-        let occurredSeconds = item.occurredAt.timeIntervalSince1970
-        XCTAssertNotEqual(occurredSeconds.rounded(.towardZero), occurredSeconds,
-            "Test fixture must not decode to a whole-second timestamp; got \(occurredSeconds).")
-
-        // Reset so the next captured request is the snooze POST alone.
-        MockURLProtocol.reset()
-        MockAPIClient.stubResponse(json: """
-        { "snoozedUntilUtc": "2026-06-02T12:00:00Z", "attentionItemAnchorAtUtc": "2026-06-01T11:59:59.123456Z" }
-        """)
-
-        let until = Date(timeIntervalSince1970: 1_800_000_000)
-        _ = try await service.snooze(
-            itemId: item.id,
-            snoozedUntilUtc: until
-        )
-
-        let request = try XCTUnwrap(MockURLProtocol.capturedRequests.first,
-            "Snooze POST must be observable on the wire.")
-        let body = try XCTUnwrap(request.capturedHTTPBody())
-        let bodyStr = try XCTUnwrap(String(data: body, encoding: .utf8))
-
-        XCTAssertTrue(bodyStr.contains("\"snoozedUntilUtc\""),
-            "Snooze deadline field must still be on the wire; got: \(bodyStr)")
-        XCTAssertFalse(bodyStr.contains("attentionItemAnchorAtUtc"),
-            "Regression: mobile client must NOT round-trip a decoded fractional occurredAt as the snooze anchor. Body was: \(bodyStr)")
-    }
+    // NOTE: A prior candidate for #707 shipped a service-path fractional
+    // round-trip test here. It was removed in v3: with the current service
+    // signature `snooze(itemId:snoozedUntilUtc:)` — which has NO anchor
+    // parameter at all — the assertion "the wire body contains no anchor"
+    // is trivially true for every input, fractional or not. The old
+    // pre-v2 service exposed an `attentionItemAnchorAtUtc: Date? = nil`
+    // parameter that defaulted to nil and produced byte-identical output
+    // when omitted, so this test would have passed unchanged against the
+    // rejected two-property API and did not anchor the removal.
+    //
+    // The real compile-anchored regression guard lives in
+    // `AttentionModelDecodingTests.testSnoozeRequestEncodesExactlyOneCamelCaseKey`:
+    // it constructs `SnoozeAttentionRequest(snoozedUntilUtc:)` with a
+    // single argument, which fails to compile if the anchor property is
+    // reintroduced on the model without a declaration-site default.
+    // Ordinary wire coverage for the snooze POST is retained in
+    // `testSnoozePostsCamelCaseBodyToUrlEncodedIdSegment` above.
 
     // MARK: - DELETE /api/attention/{id}/snooze
 
