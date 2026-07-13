@@ -1,6 +1,8 @@
 import { useCallback } from "react";
 import { Button } from "@/common/components/ui/Button";
+import { HarvestJobAction } from "@/features/harvest/components/HarvestJobAction";
 import type { HistoryJob } from "@/types/queue";
+import type { HarvestJobResponse } from "@/types/parts-inventory";
 
 /** Collapse repeated/duplicated material tokens (e.g. "PETG;PETG;PETG") to a compact list. */
 function formatMaterial(material?: string | null): string | null {
@@ -17,6 +19,17 @@ interface HistoryJobTableProps {
   jobs: HistoryJob[];
   onRerun: (jobId: string) => void;
   onViewDetails?: (jobId: string) => void;
+  /**
+   * Called after a successful (or replayed) harvest with the server response,
+   * so the parent can optimistically flip the row's harvested badge without a
+   * full reload (which would unmount the open dialog — #722 H5).
+   */
+  onHarvested?: (response: HarvestJobResponse) => void;
+  /**
+   * Called when the harvest dialog closes after a successful harvest, so the
+   * parent can run its deferred full refresh (#722 H5).
+   */
+  onCloseAfterSuccess?: () => void;
 }
 
 /**
@@ -29,6 +42,8 @@ export default function HistoryJobTable({
   jobs,
   onRerun,
   onViewDetails,
+  onHarvested,
+  onCloseAfterSuccess,
 }: HistoryJobTableProps) {
   const formatDuration = useCallback((seconds: number) => {
     const minutes = Math.round(seconds / 60);
@@ -229,6 +244,14 @@ export default function HistoryJobTable({
                   {/* Actions */}
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
+                      {job.status === "completed" && (
+                        <HarvestJobAction
+                          job={{ id: job.id, name: job.name, harvestedAt: job.harvestedAt }}
+                          variant="table"
+                          onHarvested={onHarvested}
+                          onCloseAfterSuccess={onCloseAfterSuccess}
+                        />
+                      )}
                       {(job.status === "completed" || job.status === "cancelled") && (
                         <Button
                           onClick={() => onRerun(job.id)}
@@ -236,6 +259,7 @@ export default function HistoryJobTable({
                           size="sm"
                           className="px-2 py-1 text-xs"
                           title="Rerun this job"
+                          aria-label={`Rerun ${job.name}`}
                         >
                           ↻
                         </Button>

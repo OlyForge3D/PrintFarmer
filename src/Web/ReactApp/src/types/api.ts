@@ -1942,6 +1942,8 @@ export interface ApiError {
    * consumers are unaffected.
    */
   data?: unknown;
+  /** True when the underlying error was an axios error. */
+  isAxiosError?: boolean;
 }
 
 // Authentication types
@@ -2433,6 +2435,11 @@ export interface QueueHistoryEntryDto {
   actualPrintTimeSeconds: number;
   failureReason?: string;
   toolheadUsages?: PrintJobToolheadUsage[];
+  /**
+   * UTC timestamp when the completed job was harvested into printed-part stock
+   * (#722/#741). Null when unharvested.
+   */
+  harvestedAt?: string | null;
 }
 
 export interface TimelineEventDto {
