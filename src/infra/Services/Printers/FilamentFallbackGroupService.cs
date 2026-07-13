@@ -1,4 +1,4 @@
-using System.Data.Common;
+﻿using System.Data.Common;
 using System.Reflection;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
