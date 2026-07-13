@@ -20,6 +20,7 @@ final class ServiceContainer: @unchecked Sendable {
     var spoolService: any SpoolServiceProtocol
     var barcodeIntakeService: any BarcodeIntakeServiceProtocol
     var maintenanceService: any MaintenanceServiceProtocol
+    var attentionService: any AttentionServiceProtocol
     var autoPrintService: any AutoDispatchServiceProtocol
     var jobAnalyticsService: any JobAnalyticsServiceProtocol
     var predictiveService: any PredictiveServiceProtocol
@@ -96,6 +97,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.notificationService = NotificationService(apiClient: client)
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
+        self.attentionService = AttentionService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
         self.jobAnalyticsService = JobAnalyticsService(apiClient: client)
         self.predictiveService = PredictiveService(apiClient: client)
@@ -135,6 +137,7 @@ final class ServiceContainer: @unchecked Sendable {
             spoolService: DemoSpoolService(),
             barcodeIntakeService: DemoBarcodeIntakeService(),
             maintenanceService: DemoMaintenanceService(),
+            attentionService: DemoAttentionService(),
             autoPrintService: DemoAutoDispatchService(),
             jobAnalyticsService: DemoJobAnalyticsService(),
             predictiveService: DemoPredictiveService(),
@@ -157,6 +160,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = DemoSpoolService()
         self.barcodeIntakeService = DemoBarcodeIntakeService()
         self.maintenanceService = DemoMaintenanceService()
+        self.attentionService = DemoAttentionService()
         self.autoPrintService = DemoAutoDispatchService()
         self.jobAnalyticsService = DemoJobAnalyticsService()
         self.predictiveService = DemoPredictiveService()
@@ -282,6 +286,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.notificationService = NotificationService(apiClient: client)
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
+        self.attentionService = AttentionService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
         self.jobAnalyticsService = JobAnalyticsService(apiClient: client)
         self.predictiveService = PredictiveService(apiClient: client)
@@ -330,6 +335,7 @@ final class ServiceContainer: @unchecked Sendable {
         spoolService: any SpoolServiceProtocol,
         barcodeIntakeService: any BarcodeIntakeServiceProtocol,
         maintenanceService: any MaintenanceServiceProtocol,
+        attentionService: any AttentionServiceProtocol,
         autoPrintService: any AutoDispatchServiceProtocol,
         jobAnalyticsService: any JobAnalyticsServiceProtocol,
         predictiveService: any PredictiveServiceProtocol,
@@ -365,6 +371,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = spoolService
         self.barcodeIntakeService = barcodeIntakeService
         self.maintenanceService = maintenanceService
+        self.attentionService = attentionService
         self.autoPrintService = autoPrintService
         self.jobAnalyticsService = jobAnalyticsService
         self.predictiveService = predictiveService

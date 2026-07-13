@@ -46,6 +46,7 @@
 		05882F81ABFBD68C96376608 /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D49DAAAE1D5A8AC05429321 /* MockAuthService.swift */; };
 		137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */; };
 		14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */; };
+		A70A710000000000A0000101 /* AttentionModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */; };
 		BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */; };
 		174F8F2B2DBC083C8D2425E9 /* ServiceError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */; };
 		1D1B7EDF3FD6B2A17D268882 /* PrinterServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288048764D1B47272B433307 /* PrinterServiceProtocol.swift */; };
@@ -140,6 +141,7 @@
 		CB2A92710AD3D33CE4B22717 /* PrinterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6F328EBCA1FFAB87F2E1347 /* PrinterService.swift */; };
 		CD8577F6945003EB16C1FF53 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */; };
 		CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */; };
+		A70A710000000000A0000102 /* AttentionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000102 /* AttentionServiceTests.swift */; };
 		D0C9B8A7F6E5D4C3B2A1F2E1 /* NFCTagParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParser.swift */; };
 		D1E2F3A4B5C6D7E8F9A0B1C2 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */; };
 		D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0630DF455D4C1F4FA86F892 /* PrinterDetailView.swift */; };
@@ -185,6 +187,10 @@
 		2F1EBC82C83B69891CDDF0F3 /* JobTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61F8B5ADAF667F7D1B0CFFE /* JobTimelineView.swift */; };
 		4513626386D331DFA6D2FAD6 /* MaintenanceServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A621DD81EC9966336CD261 /* MaintenanceServiceProtocol.swift */; };
 		49AC71FD7934C59CB7ACEA1B /* MaintenanceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E393ECB4303DE4FE8DD482E8 /* MaintenanceService.swift */; };
+		A70A710000000000A0000001 /* AttentionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000001 /* AttentionModels.swift */; };
+		A70A710000000000A0000002 /* AttentionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000002 /* AttentionServiceProtocol.swift */; };
+		A70A710000000000A0000003 /* AttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000003 /* AttentionService.swift */; };
+		A70A710000000000A0000004 /* DemoAttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000004 /* DemoAttentionService.swift */; };
 		5B9EEBAC73AA153E37C05095 /* JobAnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 051CF8A25906AE585EC15D70 /* JobAnalyticsModels.swift */; };
 		5D81245E04D496024C95D742 /* PredictiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2AEDF58431DDF97E25F237 /* PredictiveService.swift */; };
 		5846CCD3387F46CCF882B7AF /* FailureDetectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E274864032D02184C5684CA /* FailureDetectionService.swift */; };
@@ -312,6 +318,7 @@
 		288048764D1B47272B433307 /* PrinterServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterServiceProtocol.swift; sourceTree = "<group>"; };
 		2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceError.swift; sourceTree = "<group>"; };
 		319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientTests.swift; sourceTree = "<group>"; };
+		A70A710000000000B0000102 /* AttentionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionServiceTests.swift; sourceTree = "<group>"; };
 		34D860B7B852D3B6814A7CAF /* AddSpoolViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSpoolViewModel.swift; sourceTree = "<group>"; };
 		3C12D0C96BEDCD759DF8A6F1 /* MockSignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSignalRService.swift; sourceTree = "<group>"; };
 		3DDD6FCA23053FB398C63F95 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -343,6 +350,7 @@
 		6B199518AF445724CE1C3213 /* MockJobService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockJobService.swift; sourceTree = "<group>"; };
 		6E4E6FB4888EBB6541E982BC /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecodingTests.swift; sourceTree = "<group>"; };
+		A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionModelDecodingTests.swift; sourceTree = "<group>"; };
 		FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterProgressContractTests.swift; sourceTree = "<group>"; };
 		809149B9D7E0B339296A7E1E /* SignalRServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRServiceProtocol.swift; sourceTree = "<group>"; };
 		820455561ACB377B99D56057 /* NotificationServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationServiceProtocol.swift; sourceTree = "<group>"; };
@@ -444,6 +452,10 @@
 		DE816C8D542C6E41C7743FF9 /* PredictiveModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictiveModels.swift; sourceTree = "<group>"; };
 		1F8B5C6B605BB5B8AE7E1BF3 /* FailureDetectionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureDetectionModels.swift; sourceTree = "<group>"; };
 		E393ECB4303DE4FE8DD482E8 /* MaintenanceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceService.swift; sourceTree = "<group>"; };
+		A70A710000000000B0000001 /* AttentionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionModels.swift; sourceTree = "<group>"; };
+		A70A710000000000B0000002 /* AttentionServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionServiceProtocol.swift; sourceTree = "<group>"; };
+		A70A710000000000B0000003 /* AttentionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionService.swift; sourceTree = "<group>"; };
+		A70A710000000000B0000004 /* DemoAttentionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAttentionService.swift; sourceTree = "<group>"; };
 		E8899CF6F69FA4326C4DD166 /* PredictiveServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictiveServiceProtocol.swift; sourceTree = "<group>"; };
 		D72FDFB20E2DDD6F54AA2A3C /* FailureDetectionServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureDetectionServiceProtocol.swift; sourceTree = "<group>"; };
 		F4A621DD81EC9966336CD261 /* MaintenanceServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceServiceProtocol.swift; sourceTree = "<group>"; };
@@ -619,6 +631,7 @@
 				E393ECB4303DE4FE8DD482E8 /* MaintenanceService.swift */,
 				3B2AEDF58431DDF97E25F237 /* PredictiveService.swift */,
 				4E274864032D02184C5684CA /* FailureDetectionService.swift */,
+				A70A710000000000B0000003 /* AttentionService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -673,6 +686,7 @@
 				CA7BCA96F36B67682F5623A0 /* MaintenanceModels.swift */,
 				DE816C8D542C6E41C7743FF9 /* PredictiveModels.swift */,
 				1F8B5C6B605BB5B8AE7E1BF3 /* FailureDetectionModels.swift */,
+				A70A710000000000B0000001 /* AttentionModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -698,6 +712,7 @@
 				F4A621DD81EC9966336CD261 /* MaintenanceServiceProtocol.swift */,
 				E8899CF6F69FA4326C4DD166 /* PredictiveServiceProtocol.swift */,
 				D72FDFB20E2DDD6F54AA2A3C /* FailureDetectionServiceProtocol.swift */,
+				A70A710000000000B0000002 /* AttentionServiceProtocol.swift */,
 			);
 			path = Protocols;
 			sourceTree = "<group>";
@@ -971,6 +986,7 @@
 			isa = PBXGroup;
 			children = (
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
+				A70A710000000000B0000102 /* AttentionServiceTests.swift */,
 				BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */,
 				BC20000000000000000000FA /* SpoolServiceTests.swift */,
 				D61000000000000000000005 /* ServerRegistryTests.swift */,
@@ -1038,6 +1054,7 @@
 			isa = PBXGroup;
 			children = (
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
+				A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */,
 				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
 			);
 			path = Models;
@@ -1092,6 +1109,7 @@
 				4E5C58A71BE0E413E9B4F00F /* DemoFailureDetectionService.swift */,
 				7B2964C5D45A5CE3875411C5 /* DemoDispatchService.swift */,
 				647C4A6609FCEA4362C65F32 /* DemoSignalRService.swift */,
+				A70A710000000000B0000004 /* DemoAttentionService.swift */,
 			);
 			path = Demo;
 			sourceTree = "<group>";
@@ -1236,12 +1254,14 @@
 				77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */,
 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
+				A70A710000000000A0000101 /* AttentionModelDecodingTests.swift in Sources */,
 				BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */,
 				BC1000000000000000000008 /* MockBarcodeIntakeService.swift in Sources */,
 				BC1000000000000000000009 /* BarcodeIntakeViewModelTests.swift in Sources */,
 				BC100000000000000000000A /* BarcodeIntakeServiceTests.swift in Sources */,
 				BC10000000000000000000FA /* SpoolServiceTests.swift in Sources */,
 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
+				A70A710000000000A0000102 /* AttentionServiceTests.swift in Sources */,
 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
 				CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */,
 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
@@ -1303,6 +1323,7 @@
 				174989D8244174929492B23F /* DemoNotificationService.swift in Sources */,
 				58A3F5C8288BD92030DC1904 /* DemoStatisticsService.swift in Sources */,
 				3524856D77AEAE9BAD649186 /* DemoMaintenanceService.swift in Sources */,
+				A70A710000000000A0000004 /* DemoAttentionService.swift in Sources */,
 				60F2B655F2FBC9AFCFBAD01C /* DemoAutoDispatchService.swift in Sources */,
 				CB2FF0F351CB05372F628076 /* DemoJobAnalyticsService.swift in Sources */,
 				020C765E7D2D796BD28ACC51 /* DemoPredictiveService.swift in Sources */,
@@ -1406,18 +1427,21 @@
 				C31B17605CE275A98D53A86C /* DispatchModels.swift in Sources */,
 				5B9EEBAC73AA153E37C05095 /* JobAnalyticsModels.swift in Sources */,
 				0B3949F0DF6634129AE4352E /* MaintenanceModels.swift in Sources */,
+				A70A710000000000A0000001 /* AttentionModels.swift in Sources */,
 				9D31AD58644A85D673FB5422 /* PredictiveModels.swift in Sources */,
 				C430B04AC7A42EFDBFD47538 /* FailureDetectionModels.swift in Sources */,
 				6BC8FAF604CD9AFD2639F9E8 /* AutoDispatchServiceProtocol.swift in Sources */,
 				07E8DD5AB6382882B9BE9D03 /* DispatchServiceProtocol.swift in Sources */,
 				186EEE6749F7CA935D146200 /* JobAnalyticsServiceProtocol.swift in Sources */,
 				4513626386D331DFA6D2FAD6 /* MaintenanceServiceProtocol.swift in Sources */,
+				A70A710000000000A0000002 /* AttentionServiceProtocol.swift in Sources */,
 				951F2280C4D89B65EF64D26B /* PredictiveServiceProtocol.swift in Sources */,
 				79969421CF7853E6351911C3 /* FailureDetectionServiceProtocol.swift in Sources */,
 				106D6F84978B35EC277D9AF9 /* AutoDispatchService.swift in Sources */,
 				CCE5C88ED5A47C0CDE718088 /* DispatchService.swift in Sources */,
 				E36958254468F349BCE07693 /* JobAnalyticsService.swift in Sources */,
 				49AC71FD7934C59CB7ACEA1B /* MaintenanceService.swift in Sources */,
+				A70A710000000000A0000003 /* AttentionService.swift in Sources */,
 				5D81245E04D496024C95D742 /* PredictiveService.swift in Sources */,
 				5846CCD3387F46CCF882B7AF /* FailureDetectionService.swift in Sources */,
 				8FF4E0F3F7650B6BC5AFABE1 /* AutoDispatchViewModel.swift in Sources */,
