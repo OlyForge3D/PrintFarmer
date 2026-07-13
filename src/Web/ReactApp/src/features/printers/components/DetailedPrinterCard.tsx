@@ -24,6 +24,7 @@ import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDe
 import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
 import { toast } from 'sonner';
 import { Button, LoadedFilamentCard } from '@/common/components/ui';
+import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
 import { 
   EditIcon, 
   ExternalLinkIcon,
@@ -788,15 +789,21 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               )}
             </div>
             {hasMultipleSpoolSources && effectiveToolheads ? (
-              <ToolheadSpoolPicker
-                printerId={printer.id}
-                toolheads={effectiveToolheads}
-                onSpoolChange={() => {
-                  queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                }}
-              />
+              <>
+                <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" />
+                <ToolheadSpoolPicker
+                  printerId={printer.id}
+                  toolheads={effectiveToolheads}
+                  onSpoolChange={() => {
+                    queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+                  }}
+                />
+              </>
             ) : (
-              <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
+              <>
+                <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" />
+                <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
+              </>
             )}
           </div>
         );

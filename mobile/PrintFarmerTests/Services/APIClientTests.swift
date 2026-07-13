@@ -363,6 +363,131 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    // MARK: - Gated 404 ProblemDetails (#728)
+
+    /// Structured operator feature-gate 404: body carries ProblemDetails
+    /// with `code: "featureDisabled"`. Callers must be able to branch on
+    /// this without parsing localized text.
+    func testFeatureDisabled404ThrowsFeatureDisabled() async {
+        let json = """
+        {
+            "type": "https://printfarmer/errors/feature-disabled",
+            "title": "Feature Disabled",
+            "status": 404,
+            "detail": "The attention feature is disabled on this server.",
+            "code": "featureDisabled"
+        }
+        """
+        MockAPIClient.stubResponse(json: json, statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/attention")
+            XCTFail("Expected NetworkError.featureDisabled")
+        } catch let error as NetworkError {
+            if case .featureDisabled(let apiError) = error {
+                XCTAssertEqual(apiError.code, "featureDisabled")
+                XCTAssertEqual(apiError.status, 404)
+                XCTAssertEqual(apiError.title, "Feature Disabled")
+                XCTAssertEqual(apiError.detail, "The attention feature is disabled on this server.")
+            } else {
+                XCTFail("Expected .featureDisabled, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// Ordinary ProblemDetails 404 without the gate `code` must remain a
+    /// plain `.notFound` so existing callers behave unchanged.
+    func testOrdinaryProblemDetails404FallsBackToNotFound() async {
+        let json = """
+        {
+            "type": "https://printfarmer/errors/not-found",
+            "title": "Not Found",
+            "status": 404,
+            "detail": "Printer not found."
+        }
+        """
+        MockAPIClient.stubResponse(json: json, statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// Empty 404 body (legacy server behavior) maps to `.notFound`.
+    func testEmpty404BodyFallsBackToNotFound() async {
+        MockAPIClient.stubResponse(json: "", statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// Malformed JSON in a 404 body must safely fall back to `.notFound`
+    /// instead of surfacing a decode error.
+    func testMalformed404BodyFallsBackToNotFound() async {
+        MockAPIClient.stubResponse(json: "{ not valid json", statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// A ProblemDetails 404 whose `code` extension is some unrecognized
+    /// value (not `"featureDisabled"`) is treated as an ordinary
+    /// not-found so the gate contract stays narrow.
+    func testUnknownCode404FallsBackToNotFound() async {
+        let json = """
+        {
+            "title": "Not Found",
+            "status": 404,
+            "code": "someOtherCode"
+        }
+        """
+        MockAPIClient.stubResponse(json: json, statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     func testServerErrorResponseThrows500() async {
         MockAPIClient.stubResponse(json: "{}", statusCode: 500)
 

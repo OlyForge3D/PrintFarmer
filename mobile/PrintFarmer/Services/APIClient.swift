@@ -741,6 +741,19 @@ actor APIClient {
         case 403:
             throw NetworkError.forbidden
         case 404:
+            // #728: 404 bodies may carry RFC 7807 ProblemDetails with a
+            // camelCase `code` extension. The operator feature gate
+            // (#725) uses `code == "featureDisabled"` to indicate that a
+            // gated endpoint (e.g. `/api/attention`) short-circuited.
+            // Decode the body so callers can distinguish a gated 404
+            // from a genuinely missing resource without parsing
+            // localized text. Empty, malformed, or legacy 404 bodies
+            // continue to map to `.notFound` for backward compatibility.
+            if !data.isEmpty,
+               let apiError = try? decoder.decode(APIError.self, from: data),
+               apiError.code == "featureDisabled" {
+                throw NetworkError.featureDisabled(apiError)
+            }
             throw NetworkError.notFound
         case 405:
             throw NetworkError.methodNotAllowed
@@ -822,6 +835,12 @@ enum NetworkError: LocalizedError, Sendable {
     case unauthorized
     case forbidden
     case notFound
+    /// A gated endpoint short-circuited with an RFC 7807 ProblemDetails
+    /// 404 whose `code` extension identifies the gate (currently only
+    /// `"featureDisabled"` from the operator feature gate, #725).
+    /// Callers use this to branch to a safe fallback UI instead of
+    /// treating the resource as genuinely missing. Introduced by #728.
+    case featureDisabled(APIError)
     case methodNotAllowed
     case conflict
     case noConnection
@@ -842,6 +861,8 @@ enum NetworkError: LocalizedError, Sendable {
         case .unauthorized: return "Authentication required"
         case .forbidden: return "Access denied"
         case .notFound: return "Resource not found"
+        case .featureDisabled(let apiError):
+            return apiError.detail ?? apiError.title ?? "This feature is disabled on the server."
         case .methodNotAllowed:
             return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
         case .conflict: return "Conflict — resource was modified"
