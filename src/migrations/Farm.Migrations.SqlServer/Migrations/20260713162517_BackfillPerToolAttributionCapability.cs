@@ -13,15 +13,17 @@ public partial class BackfillPerToolAttributionCapability : Migration
         migrationBuilder.Sql(
             """
             UPDATE [Printers]
-            SET [SupportsPerToolAttribution] = 1
-            WHERE [SupportsPerToolAttribution] = 0
-              AND [Backend] = 1
-              AND (
-                  SELECT COUNT(*)
-                  FROM [Toolheads] AS [toolhead]
-                  WHERE [toolhead].[PrinterId] = [Printers].[Id]
-                    AND [toolhead].[Type] = 0
-              ) >= 2;
+            SET [SupportsPerToolAttribution] = CASE
+                WHEN [Backend] = 1
+                  AND (
+                      SELECT COUNT(*)
+                      FROM [Toolheads] AS [toolhead]
+                      WHERE [toolhead].[PrinterId] = [Printers].[Id]
+                        AND [toolhead].[ToolheadType] = 0
+                  ) >= 2
+                THEN 1
+                ELSE 0
+            END;
             """);
     }
 

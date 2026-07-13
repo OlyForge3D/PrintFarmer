@@ -23,7 +23,11 @@ public sealed class PerToolAttributionCapabilityBackfillMigrationTests
         Assert.Contains("SupportsPerToolAttribution", backfill.Sql, StringComparison.Ordinal);
         Assert.Contains("Backend", backfill.Sql, StringComparison.Ordinal);
         Assert.Contains("Toolheads", backfill.Sql, StringComparison.Ordinal);
-        Assert.Contains("Type", backfill.Sql, StringComparison.Ordinal);
+        Assert.True(
+            backfill.Sql.Contains("\"ToolheadType\"", StringComparison.Ordinal)
+            || backfill.Sql.Contains("[ToolheadType]", StringComparison.Ordinal));
+        Assert.DoesNotContain("\"Type\"", backfill.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Type]", backfill.Sql, StringComparison.Ordinal);
         Assert.Contains(">= 2", backfill.Sql, StringComparison.Ordinal);
         Assert.Empty(migration.DownOperations);
 
@@ -40,19 +44,24 @@ public sealed class PerToolAttributionCapabilityBackfillMigrationTests
             CREATE TABLE Toolheads (
                 Id TEXT NOT NULL PRIMARY KEY,
                 PrinterId TEXT NOT NULL,
-                Type INTEGER NOT NULL
+                ToolheadType INTEGER NOT NULL
             );
             """);
 
         string eligible = await InsertPrinterAsync(connection, backend: 1, supported: false);
+        string alreadyEligible = await InsertPrinterAsync(connection, backend: 1, supported: true);
         string onePhysical = await InsertPrinterAsync(connection, backend: 1, supported: false);
+        string staleTrueOnePhysical = await InsertPrinterAsync(connection, backend: 1, supported: true);
         string mixedToolheads = await InsertPrinterAsync(connection, backend: 1, supported: false);
         string unsupportedBackend = await InsertPrinterAsync(connection, backend: 2, supported: false);
-        string existingTrue = await InsertPrinterAsync(connection, backend: 2, supported: true);
+        string staleTrueUnsupportedBackend = await InsertPrinterAsync(connection, backend: 2, supported: true);
 
         await InsertToolheadAsync(connection, eligible, type: 0);
         await InsertToolheadAsync(connection, eligible, type: 0);
+        await InsertToolheadAsync(connection, alreadyEligible, type: 0);
+        await InsertToolheadAsync(connection, alreadyEligible, type: 0);
         await InsertToolheadAsync(connection, onePhysical, type: 0);
+        await InsertToolheadAsync(connection, staleTrueOnePhysical, type: 0);
         await InsertToolheadAsync(connection, mixedToolheads, type: 0);
         await InsertToolheadAsync(connection, mixedToolheads, type: 1);
         await InsertToolheadAsync(connection, unsupportedBackend, type: 0);
@@ -62,10 +71,12 @@ public sealed class PerToolAttributionCapabilityBackfillMigrationTests
         await ExecuteAsync(connection, backfill.Sql);
 
         Assert.True(await IsSupportedAsync(connection, eligible));
+        Assert.True(await IsSupportedAsync(connection, alreadyEligible));
         Assert.False(await IsSupportedAsync(connection, onePhysical));
+        Assert.False(await IsSupportedAsync(connection, staleTrueOnePhysical));
         Assert.False(await IsSupportedAsync(connection, mixedToolheads));
         Assert.False(await IsSupportedAsync(connection, unsupportedBackend));
-        Assert.True(await IsSupportedAsync(connection, existingTrue));
+        Assert.False(await IsSupportedAsync(connection, staleTrueUnsupportedBackend));
     }
 
     private static async Task<string> InsertPrinterAsync(
@@ -95,7 +106,7 @@ public sealed class PerToolAttributionCapabilityBackfillMigrationTests
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             """
-            INSERT INTO Toolheads (Id, PrinterId, Type)
+            INSERT INTO Toolheads (Id, PrinterId, ToolheadType)
             VALUES ($id, $printerId, $type);
             """;
         command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("D"));
