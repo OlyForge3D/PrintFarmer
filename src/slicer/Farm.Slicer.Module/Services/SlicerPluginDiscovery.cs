@@ -133,6 +133,21 @@ public static class SlicerPluginDiscovery
                                 ?? throw new InvalidOperationException(
                                     $"Failed to instantiate slicer UI provider type {attribute.UIProviderType.FullName}");
 
+                            // De-dup guard (issue #578): static lists accumulate across
+                            // multiple DiscoverAndRegisterSlicerPlugins() calls (e.g., in test
+                            // fixtures or when the same plugin is loaded via both compile-time
+                            // reference and runtime dir). Skip if a library with the same
+                            // (name, version) tuple is already registered.
+                            if (RegisteredLibraries.Any(l =>
+                                string.Equals(l.SlicerName, library.SlicerName, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(l.SlicerVersion, library.SlicerVersion, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                Debug.WriteLine(
+                                    $"[SlicerPluginDiscovery] Skipped duplicate plugin: {library.SlicerName} v{library.SlicerVersion} " +
+                                    $"from assembly {assembly.GetName().Name}");
+                                continue;
+                            }
+
                             // Register instances
                             RegisteredLibraries.Add(library);
                             RegisteredUIProviders.Add(uiProvider);

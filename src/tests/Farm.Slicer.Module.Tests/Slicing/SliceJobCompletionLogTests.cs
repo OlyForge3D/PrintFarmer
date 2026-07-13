@@ -39,9 +39,12 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         SliceJobMetrics metrics = new SliceJobMetrics();
         IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<IWorkerAuthService>();
         IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
+        Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry slicerRegistry =
+            scope.ServiceProvider.GetService<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>()
+            ?? new Moq.Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object;
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
-        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
+        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository, slicerRegistry)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

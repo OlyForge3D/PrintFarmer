@@ -40,6 +40,17 @@ public class SliceJob
     public int SlicerEngine { get; set; }
 
     /// <summary>
+    /// Optional engine-version pin (e.g. "2.4.0", "2.3.1"). NULL = "any version"
+    /// (back-compat with legacy single-engine deployments). When non-NULL the
+    /// submit-side pins the job's <see cref="RequiredCapabilitiesJson"/> to the
+    /// version-only capability tag (e.g. <c>["orcaslicer:2.4.0"]</c>) so only a
+    /// worker of that exact engine version can claim the job. Resolved to the
+    /// registry's latest library version at submit time; never at claim time.
+    /// </summary>
+    [MaxLength(32)]
+    public string? SlicerEngineVersion { get; set; }
+
+    /// <summary>
     /// Serialized slicer profile/settings (JSON).
     /// </summary>
     public string? SlicerProfileJson { get; set; }

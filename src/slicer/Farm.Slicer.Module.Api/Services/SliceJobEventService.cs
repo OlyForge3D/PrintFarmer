@@ -26,6 +26,7 @@ public class SliceJobEventService(
             Status = job.Status,
             QueuedAt = job.QueuedAt,
             Priority = job.Priority,
+            SlicerEngineVersion = job.SlicerEngineVersion,
             Timestamp = DateTime.UtcNow
         };
 
@@ -47,6 +48,7 @@ public class SliceJobEventService(
             QueuedAt = job.QueuedAt,
             StartedAt = job.StartedAt,
             WorkerId = job.WorkerId,
+            SlicerEngineVersion = job.SlicerEngineVersion,
             Timestamp = DateTime.UtcNow
         };
 
@@ -67,6 +69,7 @@ public class SliceJobEventService(
             Status = job.Status,
             ProgressPercent = job.ProgressPercent,
             ProgressMessage = job.ProgressMessage,
+            SlicerEngineVersion = job.SlicerEngineVersion,
             Timestamp = DateTime.UtcNow
         };
 
@@ -93,6 +96,7 @@ public class SliceJobEventService(
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = job.FilamentUsedGrams,
             WorkerId = job.WorkerId,
+            SlicerEngineVersion = job.SlicerEngineVersion,
             Timestamp = DateTime.UtcNow
         };
 
@@ -116,6 +120,7 @@ public class SliceJobEventService(
             StartedAt = job.StartedAt,
             CompletedAt = job.CompletedAt,
             WorkerId = job.WorkerId,
+            SlicerEngineVersion = job.SlicerEngineVersion,
             Timestamp = DateTime.UtcNow
         };
 
@@ -137,6 +142,7 @@ public class SliceJobEventService(
             QueuedAt = job.QueuedAt,
             StartedAt = job.StartedAt,
             CompletedAt = job.CompletedAt,
+            SlicerEngineVersion = job.SlicerEngineVersion,
             Timestamp = DateTime.UtcNow
         };
 
