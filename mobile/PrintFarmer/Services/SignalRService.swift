@@ -27,6 +27,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     private var printerUpdateHandlers: [@Sendable (PrinterStatusUpdate) -> Void] = []
     private var jobQueueUpdateHandlers: [@Sendable (JobQueueUpdate) -> Void] = []
+    private var attentionChangedHandlers: [@Sendable (AttentionChangedEvent) -> Void] = []
     private let handlerLock = NSLock()
 
     init(serverURL: URL, session: URLSession = .shared, tokenProvider: @escaping @Sendable () async -> String?) {
@@ -82,6 +83,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {
         handlerLock.lock()
         jobQueueUpdateHandlers.append(handler)
+        handlerLock.unlock()
+    }
+
+    func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {
+        handlerLock.lock()
+        attentionChangedHandlers.append(handler)
         handlerLock.unlock()
     }
 
@@ -293,6 +300,24 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 }
             } catch {
                 logger.warning("Failed to decode jobqueueupdate: \(error.localizedDescription)")
+            }
+
+        // issue #707: `attentionchanged` is a lowercase invalidation event
+        // on `/hubs/printers`. The payload is a small hint the client uses
+        // to trigger a refetch of `GET /api/attention`; it is never the
+        // authoritative item state. A malformed payload is logged and
+        // dropped so a bad frame cannot poison the handler queue.
+        case "attentionchanged":
+            do {
+                let event = try decoder.decode(AttentionChangedEvent.self, from: argData)
+                handlerLock.lock()
+                let handlers = attentionChangedHandlers
+                handlerLock.unlock()
+                for handler in handlers {
+                    handler(event)
+                }
+            } catch {
+                logger.warning("Failed to decode attentionchanged: \(error.localizedDescription)")
             }
 
         case "toolheadupdate", "extruderupdate", "heaterbedupdate":

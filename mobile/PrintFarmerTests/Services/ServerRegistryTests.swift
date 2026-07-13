@@ -486,6 +486,8 @@ final class ServerRegistryTests: XCTestCase {
 
         func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {}
 
+        func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {}
+
         func resumeDisconnect() {
             lock.lock()
             let continuation = disconnectContinuation
