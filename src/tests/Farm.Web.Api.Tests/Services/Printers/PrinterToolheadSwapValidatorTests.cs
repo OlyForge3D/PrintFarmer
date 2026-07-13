@@ -815,4 +815,28 @@ public class PrinterToolheadSwapValidatorTests
         // physical hotend of an MMU printer is not a filament source.
         Assert.Null(ToolheadIndexMapper.ToGcodeToolIndex(new Toolhead { Index = 0, ToolheadType = ToolheadType.MmuGate }));
     }
+
+    [Fact]
+    public void ToolheadIndexMapper_MmuTopology_ExcludesPhysicalHotendAndMapsGateOneToT0()
+    {
+        Toolhead physical = new() { Index = 0, ToolheadType = ToolheadType.Physical };
+        Toolhead gateOne = new() { Index = 1, ToolheadType = ToolheadType.MmuGate };
+        Toolhead gateTwo = new() { Index = 2, ToolheadType = ToolheadType.MmuGate };
+        Toolhead[] topology = [physical, gateOne, gateTwo];
+
+        ToolheadIndexMapper.IsFilamentSource(physical, topology).Should().BeFalse();
+        ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(physical, topology).Should().BeNull();
+        ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(gateOne, topology).Should().Be(0);
+        ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(gateTwo, topology).Should().Be(1);
+    }
+
+    [Fact]
+    public void ToolheadIndexMapper_NonMmuTopology_KeepsPhysicalT0AsFilamentSource()
+    {
+        Toolhead physical = new() { Index = 0, ToolheadType = ToolheadType.Physical };
+        Toolhead[] topology = [physical];
+
+        ToolheadIndexMapper.IsFilamentSource(physical, topology).Should().BeTrue();
+        ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(physical, topology).Should().Be(0);
+    }
 }

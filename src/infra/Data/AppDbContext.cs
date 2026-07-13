@@ -245,6 +245,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Durable audit of guided filament-swap material-mismatch overrides (issue #710).
     public DbSet<FilamentSwapOverride> FilamentSwapOverrides => Set<FilamentSwapOverride>();
 
+    // Ordered same-material fallback chains over existing Toolheads (issue #711, F6).
+    public DbSet<FilamentFallbackGroup> FilamentFallbackGroups => Set<FilamentFallbackGroup>();
+
+    public DbSet<FilamentFallbackGroupMember> FilamentFallbackGroupMembers => Set<FilamentFallbackGroupMember>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -300,6 +305,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             case "Microsoft.EntityFrameworkCore.SqlServer":
                 _ = profileImportRecoveryIndex.IsUnique().HasFilter(
                     "[TaskType] = 1 AND [EntityType] = 'PrinterModel' AND [Status] IN (0, 1)");
+                break;
+            default:
+                // MySQL / InMemory / others: no filtered-index support — leave non-unique.
+                break;
+        }
+
+        // Finding H7 (issue #711): one completion log per resolved maintenance alert. A UNIQUE
+        // filtered index on ResolvedAlertId restricted to non-null values makes a duplicate
+        // completion insert impossible even under a concurrent retry race, while leaving legacy
+        // logs (ResolvedAlertId IS NULL) unconstrained. The filter SQL is provider-specific, so it
+        // must be declared here rather than in MaintenanceLogConfiguration. Providers without
+        // filtered-index support fall back to a plain non-unique index (best-effort).
+        Microsoft.EntityFrameworkCore.Metadata.Builders.IndexBuilder<MaintenanceLog> resolvedAlertIndex =
+            modelBuilder.Entity<MaintenanceLog>()
+                .HasIndex(l => l.ResolvedAlertId)
+                .HasDatabaseName("IX_MaintenanceLogs_ResolvedAlertId");
+
+        switch (Database.ProviderName)
+        {
+            case "Npgsql.EntityFrameworkCore.PostgreSQL":
+            case "Microsoft.EntityFrameworkCore.Sqlite":
+                _ = resolvedAlertIndex.IsUnique().HasFilter("\"ResolvedAlertId\" IS NOT NULL");
+                break;
+            case "Microsoft.EntityFrameworkCore.SqlServer":
+                _ = resolvedAlertIndex.IsUnique().HasFilter("[ResolvedAlertId] IS NOT NULL");
                 break;
             default:
                 // MySQL / InMemory / others: no filtered-index support — leave non-unique.

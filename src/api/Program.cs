@@ -805,14 +805,22 @@ static void PruneOpenApiMaintenanceNavigationProperties(JsonTypeInfo jsonTypeInf
         [
             "printer",
             "printerMaintenanceSchedule",
-            "maintenanceTask"
+            "maintenanceTask",
+            "toolhead"
         ],
         Type type when type == typeof(MaintenanceLog) =>
         [
             "printer",
             "printerMaintenanceSchedule",
             "resolvedAlert",
-            "maintenanceTask"
+            "maintenanceTask",
+            "toolhead"
+        ],
+        Type type when type == typeof(PrinterMaintenanceSchedule) =>
+        [
+            "printer",
+            "maintenancePlan",
+            "toolhead"
         ],
         Type type when type == typeof(PrinterStatistics) =>
         [
