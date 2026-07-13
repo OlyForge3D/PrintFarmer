@@ -161,6 +161,71 @@ describe('scrubSettingsForVersion — added/removed/renamed with injected delta'
   });
 });
 
+describe('multi-state scrub → submit-payload diff (Vasquez r7)', () => {
+  // Reproduces the full NewSliceJobPage lifecycle: user edits a 2.4-only key
+  // in the LIVE editor (which writes to `slicerSettings`, NOT
+  // `advancedProcessSettings`), then switches engine to 2.3.1. The scrub
+  // effect must remove the key from `slicerSettings` AND
+  // `originalProcessSettings` so `diffProcessOverrides()` at submit time
+  // cannot leak the 2.4-only key into the legacy worker's overrides payload.
+  it('scrubbed slicerSettings + originalProcessSettings yields empty overrides for a 2.4-only edit on 2.3.1', () => {
+    // BEFORE version change (on 2.4.1): user edited precise_z_height
+    const originalOn24 = { layer_height: 0.2 } as Record<string, unknown>;
+    const slicerSettingsOn24 = {
+      layer_height: 0.2,
+      precise_z_height: 0.05, // 2.4-only value the user picked
+    } as Record<string, unknown>;
+
+    // Version switch: 2.4.1 -> 2.3.1. Apply scrub to BOTH states.
+    const scrubbedSettings = scrubSettingsForVersion(slicerSettingsOn24, 'process', '2.3.1');
+    const scrubbedOriginal = scrubSettingsForVersion(originalOn24, 'process', '2.3.1');
+
+    // 2.4-only key must be gone from both states.
+    expect(scrubbedSettings.precise_z_height).toBeUndefined();
+    expect(scrubbedOriginal.precise_z_height).toBeUndefined();
+    // Common key survives.
+    expect(scrubbedSettings.layer_height).toBe(0.2);
+
+    // Compute overrides the way NewSliceJobPage's submit path does.
+    const overrides: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(scrubbedSettings)) {
+      if (JSON.stringify(value) !== JSON.stringify(scrubbedOriginal[key])) {
+        overrides[key] = value;
+      }
+    }
+    // Payload sent to the 2.3.1 worker must not contain the 2.4-only key.
+    expect(overrides.precise_z_height).toBeUndefined();
+    // And since layer_height was unchanged, no key at all leaks.
+    expect(Object.keys(overrides)).toHaveLength(0);
+  });
+
+  it('scrubbing slicerSettings AND originalProcessSettings preserves a legitimate user edit on the target version', () => {
+    // User edited layer_height (present in both engine versions) on 2.4.1.
+    const originalOn24 = {
+      layer_height: 0.2,
+      precise_z_height: 0.0,
+    } as Record<string, unknown>;
+    const slicerSettingsOn24 = {
+      layer_height: 0.3, // user edit
+      precise_z_height: 0.0,
+    } as Record<string, unknown>;
+
+    const scrubbedSettings = scrubSettingsForVersion(slicerSettingsOn24, 'process', '2.3.1');
+    const scrubbedOriginal = scrubSettingsForVersion(originalOn24, 'process', '2.3.1');
+
+    const overrides: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(scrubbedSettings)) {
+      if (JSON.stringify(value) !== JSON.stringify(scrubbedOriginal[key])) {
+        overrides[key] = value;
+      }
+    }
+    // Legitimate cross-version edit survives.
+    expect(overrides.layer_height).toBe(0.3);
+    // 2.4-only key never reaches the 2.3.1 worker.
+    expect(overrides.precise_z_height).toBeUndefined();
+  });
+});
+
 describe('metadata identity/caching', () => {
   it('same version returns metadata with same setting count', () => {
     const a = getMetadataForVersion('2.4.1');

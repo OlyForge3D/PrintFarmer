@@ -294,22 +294,32 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Version-scoped settings scrub (issue #578). When the pinned engine version
   // changes, drop keys that don't exist in the new version's metadata and
-  // migrate renamed keys to their target-version equivalents. This guarantees
-  // added fields appear, removed fields disappear and are omitted from the
-  // submit payload, and renamed fields only submit under the new key.
+  // migrate renamed keys to their target-version equivalents across ALL
+  // in-flight settings state: `advancedProcessSettings` (dynamic dict),
+  // `slicerSettings` (typed OrcaProcessSettings) and `originalProcessSettings`
+  // (baseline snapshot used by `diffProcessOverrides` at submit time). This
+  // guarantees that added fields appear, removed fields disappear and are
+  // omitted from the submit payload's `overrides`, and renamed fields only
+  // submit under the new key regardless of which state object the user's
+  // edits landed in.
   const effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine;
   useEffect(() => {
-    setAdvancedProcessSettings((prev) => {
+    const scrubDict = (prev: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
       if (!prev || Object.keys(prev).length === 0) return prev;
       const scrubbed = scrubSettingsForVersion(prev, 'process', effectiveEngineVersion);
-      // Preserve identity when no changes to avoid render loops.
       const prevKeys = Object.keys(prev);
       const nextKeys = Object.keys(scrubbed);
       if (prevKeys.length === nextKeys.length && prevKeys.every((k) => k in scrubbed && scrubbed[k] === prev[k])) {
         return prev;
       }
       return scrubbed;
+    };
+    setAdvancedProcessSettings((prev) => scrubDict(prev) ?? prev);
+    setSlicerSettings((prev) => {
+      const scrubbed = scrubDict(prev as unknown as Record<string, unknown>);
+      return (scrubbed as unknown as OrcaProcessSettings) ?? prev;
     });
+    setOriginalProcessSettings((prev) => scrubDict(prev) ?? prev);
   }, [effectiveEngineVersion]);
 
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>(() => {
