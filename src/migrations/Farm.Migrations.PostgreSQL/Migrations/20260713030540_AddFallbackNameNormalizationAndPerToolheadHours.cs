@@ -41,6 +41,28 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             migrationBuilder.Sql(
                 "UPDATE \"FilamentFallbackGroups\" SET \"NameNormalized\" = LOWER(\"Name\");");
 
+            // Existing names may differ only by case (for example, "PLA" and "pla"). Keep the
+            // oldest row's normalized name and deterministically suffix later duplicates with
+            // their globally unique ID before the unique index is created.
+            migrationBuilder.Sql(
+                """
+                WITH ranked AS (
+                    SELECT
+                        "Id",
+                        ROW_NUMBER() OVER (
+                            PARTITION BY "PrinterId", "NameNormalized"
+                            ORDER BY "CreatedAt", "Id"
+                        ) AS "DuplicateRank"
+                    FROM "FilamentFallbackGroups"
+                )
+                UPDATE "FilamentFallbackGroups" AS target
+                SET "NameNormalized" =
+                    LEFT(target."NameNormalized", 91) || ':' || target."Id"::text
+                FROM ranked
+                WHERE target."Id" = ranked."Id"
+                  AND ranked."DuplicateRank" > 1;
+                """);
+
             // Per-toolhead cumulative hours start at 0 for all existing toolheads (issue #711,
             // FIX B). This is the documented "no per-tool history yet" baseline: per-tool
             // maintenance schedules measure accrual from the point the migration runs.

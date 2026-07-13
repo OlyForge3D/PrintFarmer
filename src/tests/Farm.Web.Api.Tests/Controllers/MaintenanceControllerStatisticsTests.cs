@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Controllers;
@@ -29,6 +30,7 @@ public class MaintenanceControllerStatisticsTests
             toolheadStatisticsRepository: Mock.Of<IToolheadStatisticsRepository>(),
             alertService: Mock.Of<IMaintenanceAlertService>(),
             printersService: _printersService.Object,
+            operatorFeatureGate: Mock.Of<IOperatorFeatureGate>(),
             maintenanceHub: Mock.Of<IHubContext<MaintenanceHub>>(),
             webhookService: Mock.Of<IWebhookService>());
     }

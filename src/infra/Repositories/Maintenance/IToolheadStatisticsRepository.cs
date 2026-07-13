@@ -33,13 +33,12 @@ public interface IToolheadStatisticsRepository
     Task<double?> GetCumulativeHoursAsync(Guid toolheadId, CancellationToken ct = default);
 
     /// <summary>
-    /// Adds <paramref name="deltaHours"/> to the active/primary physical toolhead of the
-    /// printer. The active toolhead is the primary physical toolhead, or — when none is
-    /// flagged primary — the lowest-index physical toolhead. Loads the toolhead tracked on the
-    /// shared scoped <c>AppDbContext</c> and mutates it, but does NOT call
+    /// Splits <paramref name="deltaHours"/> equally across every physical toolhead of the
+    /// printer. Loads the toolheads tracked on the shared scoped <c>AppDbContext</c> and
+    /// mutates them, but does NOT call
     /// <c>SaveChangesAsync</c>; the caller persists via its own unit-of-work save so the
-    /// increment commits atomically with the printer-statistics upsert. Returns the toolhead
-    /// that was credited, or <c>null</c> when the printer has no physical toolhead.
+    /// increment commits atomically with the printer-statistics upsert. Returns every credited
+    /// toolhead ID, or an empty list when no positive increment can be applied.
     /// </summary>
-    Task<Guid?> IncrementActiveToolheadHoursAsync(Guid printerId, double deltaHours, CancellationToken ct = default);
+    Task<IReadOnlyList<Guid>> IncrementActiveToolheadHoursAsync(Guid printerId, double deltaHours, CancellationToken ct = default);
 }

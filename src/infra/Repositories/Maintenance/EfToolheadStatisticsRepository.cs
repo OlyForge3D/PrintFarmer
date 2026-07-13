@@ -50,7 +50,7 @@ public class EfToolheadStatisticsRepository : IToolheadStatisticsRepository
         return toolhead?.CumulativePrintHours;
     }
 
-    public async Task<Guid?> IncrementActiveToolheadHoursAsync(Guid printerId, double deltaHours, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Guid>> IncrementActiveToolheadHoursAsync(Guid printerId, double deltaHours, CancellationToken ct = default)
     {
         // Load the printer's physical toolheads TRACKED so mutations are captured by the
         // shared scoped context's next SaveChanges. MMU/AMS gates are not eligible spool
@@ -59,18 +59,22 @@ public class EfToolheadStatisticsRepository : IToolheadStatisticsRepository
             .Where(t => t.PrinterId == printerId && t.ToolheadType == ToolheadType.Physical)
             .ToListAsync(ct);
 
-        if (toolheads.Count == 0)
+        if (toolheads.Count == 0 || deltaHours <= 0)
         {
-            return null;
+            return [];
         }
 
-        // Active toolhead = primary physical, else the lowest-index physical toolhead.
-        Toolhead active = toolheads.FirstOrDefault(t => t.IsPrimary)
-            ?? toolheads.OrderBy(t => t.Index).First();
+        // Until per-job tool telemetry is available, equal utilization is the conservative
+        // estimate: secondary physical heads accrue wear instead of being permanently ignored,
+        // while the printer-wide delta is not multiplied across the toolheads.
+        double perToolheadDelta = deltaHours / toolheads.Count;
+        DateTime updatedAt = DateTime.UtcNow;
+        foreach (Toolhead toolhead in toolheads)
+        {
+            toolhead.CumulativePrintHours += perToolheadDelta;
+            toolhead.UpdatedAt = updatedAt;
+        }
 
-        active.CumulativePrintHours += deltaHours;
-        active.UpdatedAt = DateTime.UtcNow;
-
-        return active.Id;
+        return [.. toolheads.Select(t => t.Id)];
     }
 }

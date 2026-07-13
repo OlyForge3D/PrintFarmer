@@ -2,14 +2,17 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Controllers;
@@ -41,7 +44,8 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
             NullLogger<MaintenanceScheduleDeploymentController>.Instance,
             _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
             _scope.ServiceProvider.GetRequiredService<IMaintenancePlanRepository>(),
-            _scope.ServiceProvider.GetRequiredService<IPrintersRepository>());
+            _scope.ServiceProvider.GetRequiredService<IPrintersRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>());
         await Task.CompletedTask;
     }
 
@@ -96,6 +100,26 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
         PrinterMaintenanceScheduleResponse body = GetCreatedBody(result);
         body.ToolheadId.Should().Be(t0.Id);
         body.ToolheadName.Should().Be("T0");
+    }
+
+    [Fact]
+    public async Task Deploy_WithPhysicalToolheadAndFeatureDisabled_ReturnsBadRequest()
+    {
+        (Printer p, Toolhead t0, _, MaintenancePlan plan) = await SeedAsync();
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        var controller = new MaintenanceScheduleDeploymentController(
+            NullLogger<MaintenanceScheduleDeploymentController>.Instance,
+            _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IMaintenancePlanRepository>(),
+            _scope.ServiceProvider.GetRequiredService<IPrintersRepository>(),
+            gate.Object);
+
+        ActionResult<PrinterMaintenanceScheduleResponse> result = await controller.DeployAsync(
+            new DeployMaintenancePlanRequest(plan.Id, p.Id, t0.Id), CancellationToken.None);
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        (await _db.Set<PrinterMaintenanceSchedule>().CountAsync()).Should().Be(0);
     }
 
     [Fact]

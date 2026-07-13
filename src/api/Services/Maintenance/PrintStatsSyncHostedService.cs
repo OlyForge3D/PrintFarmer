@@ -6,6 +6,7 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -104,6 +105,7 @@ public class PrintStatsSyncHostedService(
             IPrinterStatisticsRepository statsRepo = scope.ServiceProvider.GetRequiredService<IPrinterStatisticsRepository>();
             IToolheadStatisticsRepository toolheadStatsRepo = scope.ServiceProvider.GetRequiredService<IToolheadStatisticsRepository>();
             IPrintJobStatisticsRepository jobStatsRepo = scope.ServiceProvider.GetRequiredService<IPrintJobStatisticsRepository>();
+            IOperatorFeatureGate featureGate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
 
             // Get all printers
             List<Printer> printers = await printersRepo.GetAllAsync(ct);
@@ -129,7 +131,15 @@ public class PrintStatsSyncHostedService(
 
                 try
                 {
-                    await SyncPrinterStatisticsAsync(printer, settings, statsRepo, toolheadStatsRepo, jobStatsRepo, scope.ServiceProvider, ct);
+                    await SyncPrinterStatisticsAsync(
+                        printer,
+                        settings,
+                        statsRepo,
+                        toolheadStatsRepo,
+                        jobStatsRepo,
+                        featureGate,
+                        scope.ServiceProvider,
+                        ct);
                 }
                 catch (Exception ex)
                 {
@@ -159,6 +169,7 @@ public class PrintStatsSyncHostedService(
         IPrinterStatisticsRepository statsRepo,
         IToolheadStatisticsRepository toolheadStatsRepo,
         IPrintJobStatisticsRepository jobStatsRepo,
+        IOperatorFeatureGate featureGate,
         IServiceProvider serviceProvider,
         CancellationToken ct)
     {
@@ -195,6 +206,8 @@ public class PrintStatsSyncHostedService(
             settings,
             serviceProvider,
             ct);
+        double externalTotalPrintHours = stats.TotalPrintHours;
+        double externalDelta = Math.Max(0, externalTotalPrintHours - previousTotalPrintHours);
 
         // Sync from PrintFarmer job history
         if (settings.IncludePrintFarmerJobs)
@@ -208,24 +221,46 @@ public class PrintStatsSyncHostedService(
             stats.LastSyncTime = DateTime.UtcNow;
             await statsRepo.UpsertAsync(stats, ct);
 
-            // Attribute the incremental printer-wide hour delta to the active/primary physical
-            // toolhead (issue #711, FIX B). Only when a baseline already existed and hours
-            // advanced. The increment is left uncommitted here and persisted by the outer
-            // SaveChangesAsync on the same scoped context.
-            double delta = stats.TotalPrintHours - previousTotalPrintHours;
-            if (statsExisted && delta > 0.0001)
+            // Attribute only the successful external backend's per-cycle delta. PrintFarmer job
+            // aggregation below is mutable and model-wide, so it is not a reliable wear source.
+            // The increment remains uncommitted until the outer scoped SaveChangesAsync.
+            IReadOnlyList<Guid> credited = await AttributeExternalToolheadHoursAsync(
+                printer.Id,
+                statsExisted,
+                externalSyncSuccess,
+                featureGate.IsEnabled(OperatorFeature.MultiSlotFallback),
+                externalDelta,
+                toolheadStatsRepo,
+                ct);
+            if (credited.Count > 0)
             {
-                Guid? credited = await toolheadStatsRepo.IncrementActiveToolheadHoursAsync(printer.Id, delta, ct);
-                if (credited is not null)
-                {
-                    _logger.LogDebug(
-                        "Attributed {Delta:F2}h to toolhead {ToolheadId} on printer '{Name}'",
-                        delta,
-                        credited,
-                        printer.Name);
-                }
+                _logger.LogDebug(
+                    "Attributed {Delta:F2}h across {ToolheadCount} physical toolheads on printer '{Name}'",
+                    externalDelta,
+                    credited.Count,
+                    printer.Name);
             }
         }
+    }
+
+    internal static async Task<IReadOnlyList<Guid>> AttributeExternalToolheadHoursAsync(
+        Guid printerId,
+        bool statsExisted,
+        bool externalSyncSuccess,
+        bool perToolMaintenanceEnabled,
+        double externalDelta,
+        IToolheadStatisticsRepository toolheadStatsRepo,
+        CancellationToken ct)
+    {
+        if (!statsExisted
+            || !externalSyncSuccess
+            || !perToolMaintenanceEnabled
+            || externalDelta <= 0.0001)
+        {
+            return [];
+        }
+
+        return await toolheadStatsRepo.IncrementActiveToolheadHoursAsync(printerId, externalDelta, ct);
     }
 
     private async Task<bool> SyncExternalPrinterStatisticsAsync(
@@ -354,6 +389,8 @@ public class PrintStatsSyncHostedService(
     {
         try
         {
+            // TODO(#711): Replace this model-wide, all-time aggregation with a per-printer
+            // completion watermark. Until then it must not feed per-toolhead wear attribution.
             // Get all successful jobs for this printer from PrintFarmer history
             // Note: PrintJobStatistics doesn't have PrinterId directly, so we query by printer model
             List<PrintJobStatistics> printerJobs = await jobStatsRepo.GetByPrinterModelAsync(

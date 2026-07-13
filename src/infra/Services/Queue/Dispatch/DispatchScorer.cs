@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoTagging;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -311,8 +312,13 @@ public class DispatchScorer(
             return new FactorScore(factorName, 60, WeightPerToolLoadout, 60 * WeightPerToolLoadout, false);
         }
 
-        // Prefer the toolhead whose Index matches the required tool slot (T0 = 0, T1 = 1, ...).
-        Toolhead? indexed = printer.Toolheads.FirstOrDefault(t => t.Index == req.Tool);
+        // Stored MMU gate indices are one-based while G-code tools are zero-based. Prefer an
+        // MMU source when a shared physical hotend maps to the same G-code tool.
+        Toolhead? indexed = printer.Toolheads
+            .Where(t => ToolheadIndexMapper.ToGcodeToolIndex(t) == req.Tool)
+            .OrderByDescending(t => t.ToolheadType == ToolheadType.MmuGate)
+            .ThenBy(t => t.Index)
+            .FirstOrDefault();
         if (indexed is not null
             && !string.IsNullOrWhiteSpace(indexed.CurrentMaterial)
             && string.Equals(indexed.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase))
@@ -320,9 +326,9 @@ public class DispatchScorer(
             return new FactorScore(factorName, 100, WeightPerToolLoadout, 100 * WeightPerToolLoadout, false);
         }
 
-        // Fall back: any physical toolhead on the printer currently loaded with the required material.
+        // Fall back: any physical toolhead or MMU gate currently loaded with the material.
         bool anyLoaded = printer.Toolheads.Any(t =>
-            t.ToolheadType == ToolheadType.Physical
+            (t.ToolheadType == ToolheadType.Physical || t.ToolheadType == ToolheadType.MmuGate)
             && !string.IsNullOrWhiteSpace(t.CurrentMaterial)
             && string.Equals(t.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase));
         if (anyLoaded)

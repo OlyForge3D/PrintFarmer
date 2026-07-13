@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -46,8 +46,8 @@ public class FilamentFallbackGroupMemberConfiguration : IEntityTypeConfiguration
         // and a member cascades from its owning group — a second Cascade to Toolhead would
         // form a diamond that SQL Server rejects. Member rows are cleaned up via the owning
         // group's Cascade (which fires when the printer is deleted, since the group cascades
-        // from the printer). Direct Toolhead deletion is not a supported operation — printers
-        // cascade to their toolheads and to their fallback groups directly. Issue #711 (F6).
+        // from the printer). Supported direct MMU-gate removal explicitly deletes memberships
+        // and under-populated groups in PrintersService before deleting gates. Issue #711 (F6).
         _ = builder.HasOne(m => m.Toolhead)
             .WithMany()
             .HasForeignKey(m => m.ToolheadId)

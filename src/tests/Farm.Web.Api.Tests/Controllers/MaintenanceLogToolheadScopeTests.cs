@@ -1,12 +1,14 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Controllers;
@@ -98,6 +100,23 @@ public class MaintenanceLogToolheadScopeTests : IAsyncLifetime
 
         MaintenanceLog persisted = await _db.MaintenanceLogs.AsNoTracking().SingleAsync(l => l.Id == body.Id);
         persisted.ToolheadId.Should().Be(t0.Id);
+    }
+
+    [Fact]
+    public async Task CreateLog_WithPhysicalToolheadAndFeatureDisabled_ReturnsBadRequest()
+    {
+        (Printer p, Toolhead t0, _) = await SeedAsync();
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        MaintenanceController controller = ActivatorUtilities.CreateInstance<MaintenanceController>(
+            _scope.ServiceProvider,
+            gate.Object);
+
+        ActionResult<MaintenanceLog> result = await controller.CreateMaintenanceLogAsync(
+            LogRequest(p.Id, t0.Id), CancellationToken.None);
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        (await _db.MaintenanceLogs.CountAsync()).Should().Be(0);
     }
 
     [Fact]

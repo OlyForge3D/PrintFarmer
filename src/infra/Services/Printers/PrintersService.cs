@@ -3520,7 +3520,11 @@ public class PrintersService(
     }
 
     /// <inheritdoc />
-    public void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4)
+    public async Task SyncMmuToolheadsOnEntityAsync(
+        Printer printer,
+        bool wasMultiMaterial,
+        int mmuGateCount = 4,
+        CancellationToken ct = default)
     {
         if (!wasMultiMaterial && printer.MultiMaterial)
         {
@@ -3534,15 +3538,56 @@ public class PrintersService(
                 .Where(t => t.ToolheadType == ToolheadType.MmuGate)
                 .ToList();
 
+            HashSet<Guid> gateIds = [.. gatesToRemove.Select(gate => gate.Id)];
+            List<FilamentFallbackGroup> affectedGroups = gateIds.Count == 0
+                ? []
+                : await _db.FilamentFallbackGroups
+                    .Include(group => group.Members)
+                    .Where(group => group.Members.Any(member => gateIds.Contains(member.ToolheadId)))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+            int removedMemberships = 0;
+            int removedGroups = 0;
+            foreach (FilamentFallbackGroup group in affectedGroups)
+            {
+                List<FilamentFallbackGroupMember> membershipsToRemove = group.Members
+                    .Where(member => gateIds.Contains(member.ToolheadId))
+                    .ToList();
+
+                _db.FilamentFallbackGroupMembers.RemoveRange(membershipsToRemove);
+                foreach (FilamentFallbackGroupMember membership in membershipsToRemove)
+                {
+                    _ = group.Members.Remove(membership);
+                }
+
+                removedMemberships += membershipsToRemove.Count;
+                if (group.Members.Count < 2)
+                {
+                    _ = _db.FilamentFallbackGroups.Remove(group);
+                    removedGroups++;
+                }
+            }
+
             foreach (Toolhead gate in gatesToRemove)
             {
-                printer.Toolheads.Remove(gate);
+                _ = printer.Toolheads.Remove(gate);
+            }
+
+            if (removedMemberships > 0)
+            {
+                _logger.LogInformation(
+                    "SyncMmuToolheadsOnEntityAsync: Removed {MembershipCount} fallback membership(s) and {GroupCount} under-populated group(s) for printer {PName} ({Id})",
+                    removedMemberships,
+                    removedGroups,
+                    printer.Name,
+                    printer.Id);
             }
 
             if (gatesToRemove.Count > 0)
             {
                 _logger.LogInformation(
-                    "SyncMmuToolheadsOnEntity: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
+                    "SyncMmuToolheadsOnEntityAsync: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
                     gatesToRemove.Count, printer.Name, printer.Id);
             }
         }

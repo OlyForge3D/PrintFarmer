@@ -1660,7 +1660,7 @@ public class PrintersController(
 
         if (wasMultiMaterial != p.MultiMaterial)
         {
-            _printersService.SyncMmuToolheadsOnEntity(p, wasMultiMaterial);
+            await _printersService.SyncMmuToolheadsOnEntityAsync(p, wasMultiMaterial, ct: ct);
         }
 
         if (dto.SupportsAutoLeveling.HasValue && dto.SupportsAutoLeveling.Value != p.SupportsAutoLeveling)

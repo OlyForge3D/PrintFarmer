@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.OperatorFeatures;
@@ -221,6 +221,67 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
 
         s.ScoreBreakdown["PerToolLoadout.T0"].Score.Should().Be(75);
+    }
+
+    [Fact]
+    public async Task ScorePrinters_MmuGateOnlyPrinter_MapsStoredIndicesToGcodeTools()
+    {
+        (Printer printer, Toolhead gate0, Toolhead gate1) = SeedMultiToolheadPrinter(
+            t0Material: "PLA",
+            t1Material: "PETG");
+        gate0.ToolheadType = ToolheadType.MmuGate;
+        gate0.Index = 1;
+        gate1.ToolheadType = ToolheadType.MmuGate;
+        gate1.Index = 2;
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, null),
+            new PrintJobToolMaterialRequirement(1, "PETG", null, null));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance);
+        DispatchScore score = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        score.ScoreBreakdown["PerToolLoadout.T0"].Score.Should().Be(100);
+        score.ScoreBreakdown["PerToolLoadout.T1"].Score.Should().Be(100);
+    }
+
+    [Fact]
+    public async Task ScorePrinters_MixedPhysicalAndMmuGate_PrefersMappedMmuSourceForT0()
+    {
+        (Printer printer, _, Toolhead gate0) = SeedMultiToolheadPrinter(
+            t0Material: "ABS",
+            t1Material: "PLA");
+        gate0.ToolheadType = ToolheadType.MmuGate;
+        gate0.Index = 1;
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, null));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance);
+        DispatchScore score = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        score.ScoreBreakdown["PerToolLoadout.T0"].Score.Should().Be(100);
+    }
+
+    [Fact]
+    public async Task ScorePrinters_MmuMaterialLoadedOnDifferentTool_ScoresPartialCredit()
+    {
+        (Printer printer, _, Toolhead gate0) = SeedMultiToolheadPrinter(
+            t0Material: "ABS",
+            t1Material: "PETG");
+        gate0.ToolheadType = ToolheadType.MmuGate;
+        gate0.Index = 1;
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(1, "PETG", null, null));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance);
+        DispatchScore score = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        score.ScoreBreakdown["PerToolLoadout.T1"].Score.Should().Be(75);
     }
 
     [Fact]

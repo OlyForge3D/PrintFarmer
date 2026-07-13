@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -20,13 +21,15 @@ public class MaintenanceScheduleDeploymentController(
     ILogger<MaintenanceScheduleDeploymentController> logger,
     IPrinterMaintenanceScheduleRepository scheduleRepository,
     IMaintenancePlanRepository planRepository,
-    IPrintersRepository printersRepository)
+    IPrintersRepository printersRepository,
+    IOperatorFeatureGate featureGate)
     : ControllerBase
 {
     private readonly ILogger<MaintenanceScheduleDeploymentController> _logger = logger;
     private readonly IPrinterMaintenanceScheduleRepository _scheduleRepository = scheduleRepository;
     private readonly IMaintenancePlanRepository _planRepository = planRepository;
     private readonly IPrintersRepository _printersRepository = printersRepository;
+    private readonly IOperatorFeatureGate _featureGate = featureGate;
 
     private static PrinterMaintenanceScheduleResponse ToResponse(PrinterMaintenanceSchedule s) => new(
         s.Id,
@@ -79,6 +82,12 @@ public class MaintenanceScheduleDeploymentController(
         [FromBody] DeployMaintenancePlanRequest request,
         CancellationToken ct)
     {
+        if (request.ToolheadId.HasValue
+            && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+        {
+            return BadRequest(new { message = "Per-tool maintenance is disabled." });
+        }
+
         // Verify the plan exists
         MaintenancePlan? plan = await _planRepository.GetByIdAsync(request.MaintenancePlanId, ct);
         if (plan == null)

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Controllers.Responses;
@@ -32,6 +33,7 @@ public class MaintenanceController(
     IToolheadStatisticsRepository toolheadStatisticsRepository,
     IMaintenanceAlertService alertService,
     IPrintersService printersService,
+    IOperatorFeatureGate operatorFeatureGate,
     IHubContext<MaintenanceHub> maintenanceHub,
     IWebhookService webhookService)
     : ControllerBase
@@ -44,6 +46,7 @@ public class MaintenanceController(
     private readonly IToolheadStatisticsRepository _toolheadStatisticsRepository = toolheadStatisticsRepository;
     private readonly IMaintenanceAlertService _alertService = alertService;
     private readonly IPrintersService _printersService = printersService;
+    private readonly IOperatorFeatureGate _operatorFeatureGate = operatorFeatureGate;
     private readonly IHubContext<MaintenanceHub> _maintenanceHub = maintenanceHub;
     private readonly IWebhookService _webhookService = webhookService;
 
@@ -651,6 +654,12 @@ public class MaintenanceController(
 
                 // Deployment scope wins so the log is always consistent with its schedule.
                 effectiveToolheadId = deployment.ToolheadId;
+            }
+
+            if (effectiveToolheadId.HasValue
+                && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            {
+                return BadRequest("Per-tool maintenance is disabled.");
             }
 
             // Validate the (resolved) per-toolhead scope (issue #711, F6). Null = printer-wide
