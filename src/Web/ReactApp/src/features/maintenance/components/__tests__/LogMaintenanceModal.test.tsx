@@ -179,7 +179,7 @@ describe('LogMaintenanceModal — toolhead scope', () => {
     expect(onSubmit.mock.calls[0][0].deploymentId).toBe('sched-th2');
   });
 
-  it('does NOT cross-scope-fall-back: leaves deploymentId undefined when no exact-scope deployment exists (Hicks #2)', async () => {
+  it('does NOT cross-scope-fall-back: deploymentId stays null when no exact-scope deployment exists (Hicks #2)', async () => {
     // Regression guard: previously the modal would fall back to the printer-wide
     // deployment when the operator chose a specific toolhead but no
     // toolhead-scoped deployment existed. That corrupts attribution — the log

@@ -206,4 +206,56 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
       expect.objectContaining({ toolheadId: null })
     );
   });
+
+  it('disables the Deploy button while the printer capability query is loading (Hicks v2 major #1)', async () => {
+    // Never resolves during the assertion window — simulates a still-pending
+    // capability query. The Deploy button must be disabled so the operator
+    // can't fire a per-tool-capable printer through as printer-wide by
+    // accident.
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<PrinterDetails>(() => { /* never resolves */ })
+    );
+
+    renderModal();
+    const user = userEvent.setup();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /select printer/i }),
+      'printer-1'
+    );
+
+    // A visible loading indicator communicates the pending state.
+    await waitFor(() =>
+      expect(screen.getByTestId('printer-details-loading')).toBeInTheDocument()
+    );
+    const deployBtn = screen.getByRole('button', { name: /^Deploy$/ });
+    expect(deployBtn).toBeDisabled();
+
+    // And clicking it does not fire the mutation.
+    await user.click(deployBtn);
+    expect(maintenancePlanService.deployPlan).not.toHaveBeenCalled();
+  });
+
+  it('shows a role="alert" retry banner and blocks Deploy when the printer capability query fails (Hicks v2 major #1)', async () => {
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('boom')
+    );
+
+    renderModal();
+    const user = userEvent.setup();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /select printer/i }),
+      'printer-1'
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/could not load printer capabilities/i);
+    expect(
+      screen.getByRole('button', { name: /retry loading printer capabilities/i })
+    ).toBeInTheDocument();
+
+    const deployBtn = screen.getByRole('button', { name: /^Deploy$/ });
+    expect(deployBtn).toBeDisabled();
+    await user.click(deployBtn);
+    expect(maintenancePlanService.deployPlan).not.toHaveBeenCalled();
+  });
 });

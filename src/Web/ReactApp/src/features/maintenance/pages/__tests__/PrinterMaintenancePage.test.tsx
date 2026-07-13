@@ -458,4 +458,42 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(/could not load printer details/i)
     );
   });
+
+  it('renders odometer due-state as "unknown" while the upcoming-maintenance feed is loading (Hicks v2 major #2)', async () => {
+    // The upcoming feed never resolves during the assertion window — the
+    // odometer cards must NOT default to "OK" (that would be a false all-
+    // clear). They should render the `unknown` chip instead.
+    seedDefaults();
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise(() => { /* never resolves */ })
+    );
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+
+    // Every card renders the unknown chip; none renders OK.
+    const t0Card = screen.getByTestId('toolhead-odometer-th-0');
+    const t1Card = screen.getByTestId('toolhead-odometer-th-1');
+    expect(t0Card.querySelector('[data-testid="due-state-unknown"]')).not.toBeNull();
+    expect(t1Card.querySelector('[data-testid="due-state-unknown"]')).not.toBeNull();
+    expect(t0Card.querySelector('[data-testid="due-state-ok"]')).toBeNull();
+    expect(t1Card.querySelector('[data-testid="due-state-ok"]')).toBeNull();
+  });
+
+  it('surfaces a visible alert and renders odometers as "unknown" when the upcoming-maintenance feed errors (Hicks v2 major #2)', async () => {
+    seedDefaults();
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('feed offline')
+    );
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('upcoming-maintenance-error')).toBeInTheDocument()
+    );
+    const t0Card = screen.getByTestId('toolhead-odometer-th-0');
+    expect(t0Card.querySelector('[data-testid="due-state-unknown"]')).not.toBeNull();
+    expect(t0Card.querySelector('[data-testid="due-state-ok"]')).toBeNull();
+  });
 });
