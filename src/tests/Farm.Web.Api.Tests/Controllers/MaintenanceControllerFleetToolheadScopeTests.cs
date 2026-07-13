@@ -43,7 +43,8 @@ public sealed class MaintenanceControllerFleetToolheadScopeTests
             printersService: _printersService.Object,
             operatorFeatureGate: Mock.Of<IOperatorFeatureGate>(),
             maintenanceHub: Mock.Of<IHubContext<MaintenanceHub>>(),
-            webhookService: Mock.Of<IWebhookService>());
+            webhookService: Mock.Of<IWebhookService>(),
+            alertResolutionService: Mock.Of<IMaintenanceAlertResolutionService>());
     }
 
     private static PrinterMaintenanceSchedule BuildSchedule(Guid printerId, Guid taskId, Guid? toolheadId, double intervalHours)

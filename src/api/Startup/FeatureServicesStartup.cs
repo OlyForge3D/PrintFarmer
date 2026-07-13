@@ -99,6 +99,9 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
+        // Atomic resolve-with-log to close the resolve TOCTOU (issue #711, round-7 Finding 5).
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertResolutionService, Farm.Infrastructure.Services.Maintenance.MaintenanceAlertResolutionService>();
+
         // Filament fallback groups (issue #711, F6)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService,
             Farm.Infrastructure.Services.Printers.FilamentFallbackGroupService>();

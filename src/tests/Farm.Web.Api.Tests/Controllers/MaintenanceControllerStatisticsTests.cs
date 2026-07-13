@@ -32,7 +32,8 @@ public class MaintenanceControllerStatisticsTests
             printersService: _printersService.Object,
             operatorFeatureGate: Mock.Of<IOperatorFeatureGate>(),
             maintenanceHub: Mock.Of<IHubContext<MaintenanceHub>>(),
-            webhookService: Mock.Of<IWebhookService>());
+            webhookService: Mock.Of<IWebhookService>(),
+            alertResolutionService: Mock.Of<IMaintenanceAlertResolutionService>());
     }
 
     [Fact]

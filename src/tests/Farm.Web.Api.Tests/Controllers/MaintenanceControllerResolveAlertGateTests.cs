@@ -28,6 +28,7 @@ public sealed class MaintenanceControllerResolveAlertGateTests
     private readonly Mock<IPrinterStatisticsRepository> _statisticsRepository = new(MockBehavior.Loose);
     private readonly Mock<IToolheadStatisticsRepository> _toolheadStatisticsRepository = new(MockBehavior.Loose);
     private readonly Mock<IMaintenanceAlertService> _alertService = new(MockBehavior.Loose);
+    private readonly Mock<IMaintenanceAlertResolutionService> _alertResolutionService = new(MockBehavior.Loose);
     private readonly Mock<IOperatorFeatureGate> _operatorFeatureGate = new(MockBehavior.Loose);
     private readonly Mock<IHubContext<MaintenanceHub>> _maintenanceHub = new(MockBehavior.Loose);
 
@@ -46,6 +47,28 @@ public sealed class MaintenanceControllerResolveAlertGateTests
             .Setup(r => r.AddAsync(It.IsAny<MaintenanceLog>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((MaintenanceLog log, CancellationToken _) => log);
 
+        // The resolve path now delegates the atomic gate-recheck + log + alert mutation to the
+        // resolution service (issue #711, round-7 Finding 5). Echo the staged log back with a
+        // resolved alert so the controller's success path can broadcast without NREs.
+        _alertResolutionService
+            .Setup(s => s.ResolveWithLogAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<MaintenanceLog>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid alertId, MaintenanceLog log, string resolvedBy, CancellationToken _) =>
+                new MaintenanceAlertResolutionResult(
+                    new MaintenanceAlert
+                    {
+                        Id = alertId,
+                        PrinterId = log.PrinterId,
+                        ToolheadId = log.ToolheadId,
+                        Status = MaintenanceAlertStatus.Resolved,
+                        ResolvedAt = DateTime.UtcNow,
+                        ResolvedBy = resolvedBy
+                    },
+                    log));
+
         return new MaintenanceController(
             logger: Mock.Of<ILogger<MaintenanceController>>(),
             alertRepository: _alertRepository.Object,
@@ -57,7 +80,8 @@ public sealed class MaintenanceControllerResolveAlertGateTests
             printersService: Mock.Of<IPrintersService>(),
             operatorFeatureGate: _operatorFeatureGate.Object,
             maintenanceHub: _maintenanceHub.Object,
-            webhookService: Mock.Of<IWebhookService>());
+            webhookService: Mock.Of<IWebhookService>(),
+            alertResolutionService: _alertResolutionService.Object);
     }
 
     private static ResolveAlertRequest Request() =>
@@ -85,7 +109,14 @@ public sealed class MaintenanceControllerResolveAlertGateTests
         BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
         bad.Value.Should().Be("Per-tool maintenance is disabled.");
 
-        // The rejection must happen before any log is written.
+        // The rejection must happen before the atomic resolve-with-log op runs, so no log is written.
+        _alertResolutionService.Verify(
+            s => s.ResolveWithLogAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<MaintenanceLog>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
         _logRepository.Verify(r => r.AddAsync(It.IsAny<MaintenanceLog>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -111,7 +142,13 @@ public sealed class MaintenanceControllerResolveAlertGateTests
         ActionResult<ResolveAlertResponse> result = await controller.ResolveAlertAsync(alertId, Request(), CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
-        _logRepository.Verify(r => r.AddAsync(It.Is<MaintenanceLog>(l => l.ToolheadId == null), It.IsAny<CancellationToken>()), Times.Once);
+        _alertResolutionService.Verify(
+            s => s.ResolveWithLogAsync(
+                alertId,
+                It.Is<MaintenanceLog>(l => l.ToolheadId == null),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

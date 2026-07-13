@@ -35,7 +35,8 @@ public class MaintenanceController(
     IPrintersService printersService,
     IOperatorFeatureGate operatorFeatureGate,
     IHubContext<MaintenanceHub> maintenanceHub,
-    IWebhookService webhookService)
+    IWebhookService webhookService,
+    IMaintenanceAlertResolutionService alertResolutionService)
     : ControllerBase
 {
     private readonly ILogger<MaintenanceController> _logger = logger;
@@ -49,6 +50,7 @@ public class MaintenanceController(
     private readonly IOperatorFeatureGate _operatorFeatureGate = operatorFeatureGate;
     private readonly IHubContext<MaintenanceHub> _maintenanceHub = maintenanceHub;
     private readonly IWebhookService _webhookService = webhookService;
+    private readonly IMaintenanceAlertResolutionService _alertResolutionService = alertResolutionService;
 
     #region Maintenance Alerts
 
@@ -224,18 +226,27 @@ public class MaintenanceController(
                 ToolheadHoursAtMaintenance = toolheadHoursAtMaintenance
             };
 
-            MaintenanceLog createdLog = await _logRepository.AddAsync(maintenanceLog, ct);
+            // Atomically resolve the alert and persist its completion log in a single transaction so
+            // a per-tool gate that flips after the pre-check above cannot leave an orphaned log with
+            // an unresolved alert (issue #711, round-7 Finding 5). The service re-checks the gate,
+            // stages the log, mutates the alert, and commits — or rolls back on any failure.
+            MaintenanceAlertResolutionResult? resolution = await _alertResolutionService.ResolveWithLogAsync(
+                id,
+                maintenanceLog,
+                request.PerformedBy,
+                ct);
+            if (resolution == null)
+            {
+                return NotFound($"Alert with ID {id} not found");
+            }
 
-            // Resolve the alert
-            await _alertService.ResolveAlertAsync(id, request.PerformedBy, ct);
-
-            // Reload to get updated state
-            alert = await _alertRepository.GetByIdAsync(id, ct);
+            alert = resolution.Alert;
+            MaintenanceLog createdLog = resolution.Log;
 
             // Broadcast status change
             await _maintenanceHub.Clients.All.SendAsync("alertstatuschanged", new
             {
-                id = alert!.Id,
+                id = alert.Id,
                 printerId = alert.PrinterId,
                 status = alert.Status.ToString(),
                 resolvedAt = alert.ResolvedAt,
