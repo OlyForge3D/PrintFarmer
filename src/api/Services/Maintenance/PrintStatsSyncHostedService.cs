@@ -142,7 +142,7 @@ public class PrintStatsSyncHostedService(
                     IOperatorFeatureGate featureGate =
                         scopedServices.GetRequiredService<IOperatorFeatureGate>();
 
-                    await SyncPrinterStatisticsAsync(
+                    ToolheadActivitySnapshot? activitySnapshot = await SyncPrinterStatisticsAsync(
                         printer,
                         settings,
                         statsRepo,
@@ -153,8 +153,14 @@ public class PrintStatsSyncHostedService(
                         ct);
 
                     // Persist only after the complete per-printer flow succeeds. This atomically
-                    // commits the external baseline, aggregate totals, and toolhead wear.
-                    await statsRepo.SaveChangesAsync(ct);
+                    // commits the external baseline, aggregate totals, and toolhead wear. Pending
+                    // telemetry is acknowledged only after that commit, so a failed save retries
+                    // against the same baseline-scoped evidence on the next cycle.
+                    await CommitAndAcknowledgeAsync(
+                        statsRepo,
+                        scopedServices.GetService<IToolheadActivityAccumulator>(),
+                        activitySnapshot,
+                        ct);
                 }
                 catch (Exception ex)
                 {
@@ -175,7 +181,7 @@ public class PrintStatsSyncHostedService(
         }
     }
 
-    internal async Task SyncPrinterStatisticsAsync(
+    internal async Task<ToolheadActivitySnapshot?> SyncPrinterStatisticsAsync(
         Printer printer,
         PrintStatsSyncSettings settings,
         IPrinterStatisticsRepository statsRepo,
@@ -303,6 +309,8 @@ public class PrintStatsSyncHostedService(
             await SyncPrintFarmerJobStatisticsAsync(printer, stats, jobStatsRepo, ct);
         }
 
+        ToolheadActivitySnapshot? snapshotToAcknowledge = null;
+
         // Update statistics in database
         if (outcome == ExternalSyncOutcome.Succeeded || aggregatePrintFarmerJobs)
         {
@@ -312,6 +320,13 @@ public class PrintStatsSyncHostedService(
             // Attribute only an established external backend's per-cycle delta. PrintFarmer job
             // aggregation above is mutable and model-wide, so it is not a reliable wear source.
             // The increment remains uncommitted until the outer scoped SaveChangesAsync.
+            IToolheadActivityAccumulator? activityAccumulator =
+                serviceProvider.GetService<IToolheadActivityAccumulator>();
+            if (externalDelta > 0)
+            {
+                snapshotToAcknowledge = activityAccumulator?.PeekActiveSeconds(printer.Id);
+            }
+
             IReadOnlyList<Guid> credited = await AttributeExternalToolheadHoursAsync(
                 printer.Id,
                 statsExisted,
@@ -322,8 +337,7 @@ public class PrintStatsSyncHostedService(
                 toolheadStatsRepo,
                 ct,
                 _logger,
-                serviceProvider.GetService<IPrinterStatusCacheReader>(),
-                serviceProvider.GetService<IToolheadActivityAccumulator>());
+                snapshotToAcknowledge);
             if (credited.Count > 0)
             {
                 _logger.LogDebug(
@@ -332,6 +346,22 @@ public class PrintStatsSyncHostedService(
                     credited.Count,
                     printer.Name);
             }
+        }
+
+        return snapshotToAcknowledge;
+    }
+
+    internal static async Task CommitAndAcknowledgeAsync(
+        IPrinterStatisticsRepository statsRepo,
+        IToolheadActivityAccumulator? activityAccumulator,
+        ToolheadActivitySnapshot? activitySnapshot,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(statsRepo);
+        await statsRepo.SaveChangesAsync(ct);
+        if (activitySnapshot is not null)
+        {
+            activityAccumulator?.AckActiveSecondsThrough(activitySnapshot);
         }
     }
 
@@ -360,20 +390,13 @@ public class PrintStatsSyncHostedService(
         IToolheadStatisticsRepository toolheadStatsRepo,
         CancellationToken ct,
         ILogger? logger = null,
-        IPrinterStatusCacheReader? statusCache = null,
+        ToolheadActivitySnapshot? activitySnapshot = null,
         IToolheadActivityAccumulator? activityAccumulator = null)
     {
-        // Always drain the interval accumulator (when present) so its in-memory rolling window stays
-        // bounded to ~one sync cycle even when this cycle ultimately attributes nothing (feature off,
-        // no delta, or an incapable backend). Only real telemetry-backed seconds are ever
-        // accumulated, so discarding an unused drain fabricates nothing.
-        IReadOnlyDictionary<int, double> intervalActiveSeconds =
-            activityAccumulator?.DrainActiveSeconds(printerId) ?? EmptyIntervalSeconds;
-
         if (!statsExisted
             || !externalSyncSuccess
             || !perToolMaintenanceEnabled
-            || externalDelta <= 0.0001)
+            || externalDelta <= 0)
         {
             return [];
         }
@@ -393,6 +416,10 @@ public class PrintStatsSyncHostedService(
             return [];
         }
 
+        ToolheadActivitySnapshot snapshot =
+            activitySnapshot
+            ?? activityAccumulator?.PeekActiveSeconds(printerId)
+            ?? ToolheadActivitySnapshot.Empty(printerId);
         IReadOnlyDictionary<int, Guid> physicalToolheads =
             await toolheadStatsRepo.GetPhysicalToolheadIdsByIndexAsync(printerId, ct);
         if (physicalToolheads.Count == 0)
@@ -405,7 +432,7 @@ public class PrintStatsSyncHostedService(
         // sync interval. Unlike the single-snapshot fallback below, this correctly represents tool
         // switches that happened within the interval — the head that printed most gets the most wear.
         Dictionary<Guid, double> perToolheadSeconds = new();
-        foreach ((int toolIndex, double seconds) in intervalActiveSeconds)
+        foreach ((int toolIndex, double seconds) in snapshot.ActiveSeconds)
         {
             if (seconds > 0 && physicalToolheads.TryGetValue(toolIndex, out Guid toolheadId))
             {
@@ -415,59 +442,36 @@ public class PrintStatsSyncHostedService(
             }
         }
 
-        if (perToolheadSeconds.Count > 0)
+        double recognizedPhysicalSeconds = perToolheadSeconds.Values.Sum();
+        if (recognizedPhysicalSeconds > 0 && snapshot.WindowSeconds > 0)
         {
-            double totalSeconds = perToolheadSeconds.Values.Sum();
+            double coverage = Math.Min(recognizedPhysicalSeconds / snapshot.WindowSeconds, 1);
             Dictionary<Guid, double> weights = perToolheadSeconds.ToDictionary(
                 static kvp => kvp.Key,
-                kvp => kvp.Value / totalSeconds);
+                kvp => (kvp.Value / recognizedPhysicalSeconds) * coverage);
             ToolheadHourAttribution intervalAttribution = ToolheadHourAttribution.FromWeights(weights, externalDelta);
             IReadOnlyList<Guid> intervalCredited = await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, intervalAttribution, ct);
             logger?.LogDebug(
-                "Printer {PrinterId} attributed {Delta:F2}h across {ToolheadCount} physical toolhead(s) " +
-                "from interval-aware active-tool telemetry (issue #711).",
+                "Printer {PrinterId} attributed {Credited:F2}h of a {Delta:F2}h external delta across " +
+                "{ToolheadCount} physical toolhead(s) with {Coverage:P1} telemetry coverage (issue #711).",
                 printerId,
+                intervalAttribution.TotalHours,
                 externalDelta,
-                intervalCredited.Count);
+                intervalCredited.Count,
+                coverage);
             return intervalCredited;
         }
 
-        // Fallback: no interval telemetry accrued this cycle (the accumulator is unavailable, or a
-        // print started too near the end of the interval to record a segment) but the live status
-        // cache still shows a fresh active tool. Credit the whole delta to that single tool. This is
-        // the pre-round-14 single-sample approximation; it cannot represent mid-interval switches.
-        PrinterStatusCacheSnapshot? snapshot = statusCache?.GetSnapshot(printerId);
-        MmuStatusDto? mmuStatus = PrinterStatusFreshness.IsFreshOnline(snapshot, DateTime.UtcNow)
-            ? snapshot!.Status.MmuStatus
-            : null;
-        int? activeToolIndex = mmuStatus is { Enabled: true, ActiveTool: >= 0 }
-            ? mmuStatus.ActiveTool
-            : mmuStatus is { Enabled: true, ActiveGate: >= 0 }
-                ? mmuStatus.ActiveGate
-                : null;
-
-        if (activeToolIndex.HasValue
-            && physicalToolheads.TryGetValue(activeToolIndex.Value, out Guid activeToolheadId))
-        {
-            ToolheadHourAttribution attribution = ToolheadHourAttribution.FromWeights(
-                new Dictionary<Guid, double> { [activeToolheadId] = 1.0 },
-                externalDelta);
-            return await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, attribution, ct);
-        }
-
-        // Capable backend but no telemetry at all this cycle: leave the delta unattributed for
-        // per-toolhead wear rather than fabricate an equal split (Finding 1).
+        // A point-in-time status cannot quantify coverage, so no full-delta fallback is permitted.
         logger?.LogInformation(
             "Printer {PrinterId} supports per-tool attribution but produced no active-tool " +
-            "telemetry this cycle; per-toolhead wear is unattributed for the {Delta:F2}h external " +
-            "history delta (issue #711).",
+            "duration telemetry for its {Window:F0}s baseline window; per-toolhead wear is " +
+            "unattributed for the {Delta:F2}h external history delta (issue #711).",
             printerId,
+            snapshot.WindowSeconds,
             externalDelta);
         return [];
     }
-
-    /// <summary>Shared empty result so a no-op accumulator drain allocates nothing.</summary>
-    private static readonly IReadOnlyDictionary<int, double> EmptyIntervalSeconds = new Dictionary<int, double>();
 
     private async Task<ExternalSyncOutcome> SyncExternalPrinterStatisticsAsync(
         Printer printer,

@@ -1101,7 +1101,7 @@ public sealed class MoonrakerSubscriptionService(
         // round-14). The accumulator credits the elapsed time since the previous sample to the tool
         // that was active while printing; the statistics sync later drains and attributes it.
         DateTime nowUtc = DateTime.UtcNow;
-        _activityAccumulator?.Sample(printerId, ResolveActivePhysicalToolIndex(state), IsPrinting(state), nowUtc);
+        _activityAccumulator?.Sample(printerId, ResolveActivePhysicalToolIndex(state), IsPrinting(state));
 
         // Track successful status update time
         _lastStatusUpdateTimes[printerId] = nowUtc;

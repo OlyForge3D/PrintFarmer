@@ -3,17 +3,16 @@
 /// <summary>
 /// Accumulates interval-aware per-tool "active time" telemetry so that an external-history
 /// print-hour delta can be attributed to the physical toolheads that actually did the work over a
-/// sync interval, rather than to a single latest-known active tool (issue #711, round-14).
+/// external-baseline interval, rather than to a single latest-known active tool (issue #711).
 ///
 /// <para>
 /// A backend plugin that surfaces the currently active physical tool (for example the Moonraker
 /// plugin, which tracks the Snapmaker U1 active lane, a Happy Hare active tool, or the native
 /// Klipper active extruder) calls <see cref="Sample"/> on every status poll. The accumulator adds
 /// the elapsed wall-clock time between consecutive samples to the tool that was active during that
-/// segment, but only while the printer was actually printing. On each statistics sync cycle
-/// <c>PrintStatsSyncHostedService</c> calls <see cref="DrainActiveSeconds"/> to read and
-/// clear the per-tool seconds, normalizes them into attribution weights, and distributes the
-/// external-history delta accordingly.
+/// segment, but only while the printer was actually printing. Statistics synchronization peeks at
+/// the retained telemetry only when the external baseline advances, then acknowledges exactly that
+/// snapshot after the database commit succeeds.
 /// </para>
 ///
 /// <para>
@@ -46,17 +45,20 @@ public interface IToolheadActivityAccumulator
     /// <param name="isPrinting">
     /// <c>true</c> when the printer is actively printing; only printing segments accrue wear.
     /// </param>
-    /// <param name="timestampUtc">The observation time (UTC), expected to be monotonic per printer.</param>
-    void Sample(Guid printerId, int? activeToolIndex, bool isPrinting, DateTime timestampUtc);
+    void Sample(Guid printerId, int? activeToolIndex, bool isPrinting);
 
     /// <summary>
-    /// Atomically reads and clears the accumulated per-tool active seconds for a printer, returning a
-    /// map of backend/G-code tool index → seconds observed as active-and-printing since the previous
-    /// drain. The last-observed sample (tool, printing flag, timestamp) is preserved so a segment that
-    /// straddles the drain boundary is carried into the next interval without losing time. Returns an
-    /// empty map when nothing accrued.
+    /// Atomically captures pending telemetry without removing it. The snapshot includes known
+    /// per-tool seconds and the complete monotonic elapsed window since the previous acknowledgment.
     /// </summary>
-    IReadOnlyDictionary<int, double> DrainActiveSeconds(Guid printerId);
+    ToolheadActivitySnapshot PeekActiveSeconds(Guid printerId);
+
+    /// <summary>
+    /// Acknowledges only the telemetry represented by <paramref name="snapshot"/>. Samples recorded
+    /// after the peek remain pending, and stale snapshots from a reset generation are ignored.
+    /// </summary>
+    /// <param name="snapshot">The successfully persisted snapshot.</param>
+    void AckActiveSecondsThrough(ToolheadActivitySnapshot snapshot);
 
     /// <summary>
     /// Discards all accumulated state for a printer (used when a printer is deleted so its buckets do

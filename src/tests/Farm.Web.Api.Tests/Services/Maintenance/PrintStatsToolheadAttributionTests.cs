@@ -1,8 +1,6 @@
-﻿using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
-using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Services.Maintenance;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -236,57 +234,6 @@ public class PrintStatsToolheadAttributionTests
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
-    }
-
-    [Fact]
-    public async Task AttributeExternalToolheadHoursAsync_FreshActiveToolTelemetry_CreditsOnlyActiveToolhead()
-    {
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
-            .Options;
-        await using var db = new AppDbContext(options);
-        Guid printerId = Guid.NewGuid();
-        Toolhead t0 = CreateToolhead(printerId, ToolheadType.Physical, index: 0, cumulativeHours: 0);
-        Toolhead t1 = CreateToolhead(printerId, ToolheadType.Physical, index: 1, cumulativeHours: 0);
-        db.Toolheads.AddRange(t0, t1);
-        await db.SaveChangesAsync();
-        EfToolheadStatisticsRepository repository = new(db);
-        Mock<IPrinterStatusCacheReader> statusCache = new(MockBehavior.Strict);
-        statusCache.Setup(cache => cache.GetSnapshot(printerId)).Returns(
-            new PrinterStatusCacheSnapshot(
-                new PrinterStatusDto(
-                    printerId,
-                    IsOnline: true,
-                    State: "printing",
-                    MmuStatus: new MmuStatusDto(
-                        Enabled: true,
-                        IsHomed: true,
-                        ActiveTool: 1,
-                        ActiveGate: 1,
-                        FilamentState: "Loaded",
-                        Action: "Idle",
-                        NumGates: 2,
-                        HasBypass: false,
-                        EndlessSpool: false,
-                        ClogDetection: false,
-                        Gates: [])),
-                DateTime.UtcNow));
-
-        IReadOnlyList<Guid> credited = await PrintStatsSyncHostedService.AttributeExternalToolheadHoursAsync(
-            printerId,
-            statsExisted: true,
-            externalSyncSuccess: true,
-            perToolMaintenanceEnabled: true,
-            supportsPerToolAttribution: true,
-            externalDelta: 8,
-            repository,
-            CancellationToken.None,
-            statusCache: statusCache.Object);
-        await db.SaveChangesAsync();
-
-        credited.Should().Equal(t1.Id);
-        t0.CumulativePrintHours.Should().Be(0, "idle heads must not accrue wear");
-        t1.CumulativePrintHours.Should().Be(8);
     }
 
     [Fact]
