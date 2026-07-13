@@ -36,8 +36,8 @@ export interface ToolheadScopePickerProps {
 /**
  * Accessible per-toolhead scope picker used across the maintenance surface
  * (deployment, logging, filtering). Renders "Printer-wide" plus one radio per
- * eligible physical toolhead; MMU/AMS gates are filtered out unless the API
- * explicitly opts them in via `supportsMaintenanceScope`.
+ * eligible physical toolhead. MMU/AMS gates are excluded — the #711 backend
+ * contract is physical-only and the client mirrors that rule.
  */
 export function ToolheadScopePicker({
   toolheads,
@@ -79,16 +79,22 @@ export function ToolheadScopePicker({
       <div id={labelId} className="text-sm font-medium text-pf-text-primary mb-2">
         {label}
       </div>
-      <div role="group" aria-labelledby={labelId} aria-describedby={helperId}>
-        <RadioGroup
-          name={groupId}
-          options={options}
-          value={value}
-          onChange={onChange}
-          disabled={disabled}
-          direction="vertical"
-        />
-      </div>
+      {/*
+        Name the radiogroup directly (not just a wrapping role="group"), so
+        that screen readers announce the group name when the radios receive
+        focus. WCAG 4.1.2 (Name, Role, Value) requires the radiogroup itself
+        to have an accessible name.
+      */}
+      <RadioGroup
+        name={groupId}
+        options={options}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        direction="vertical"
+        aria-labelledby={labelId}
+        aria-describedby={helperId}
+      />
       {helperText && (
         <p id={helperId} className="text-xs text-pf-text-tertiary mt-1">
           {helperText}

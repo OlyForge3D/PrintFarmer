@@ -31,6 +31,7 @@ import {
   type ToolheadScopeValue,
 } from '../components/toolheadScope';
 import { selectMaintenanceEligibleToolheads } from '@/features/printers/utils/isEligibleMaintenanceToolhead';
+import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
@@ -72,16 +73,16 @@ export function PrinterMaintenancePage() {
 
   // Fetch printer details for the toolhead list (independent of the summary
   // /printers endpoint above so both paths keep working with the current API).
-  const { data: printerDetails } = useQuery<PrinterDetails | null>({
+  // Errors are propagated to React Query so the caller can observe them via
+  // `printerDetailsError`; we do NOT swallow them into a null result, because
+  // that would silently hide per-tool UI on transient network failures.
+  const {
+    data: printerDetails,
+    isLoading: printerDetailsLoading,
+    error: printerDetailsError,
+  } = useQuery<PrinterDetails>({
     queryKey: ['printerDetails', printerId],
-    queryFn: async () => {
-      if (!printerId) return null;
-      try {
-        return await apiClient.getPrinterDetails(printerId);
-      } catch {
-        return null;
-      }
-    },
+    queryFn: () => apiClient.getPrinterDetails(printerId!),
     enabled: !!printerId,
     staleTime: 60_000,
   });
@@ -135,22 +136,33 @@ export function PrinterMaintenancePage() {
     enabled: !!printerId,
   });
 
+  // Real due state comes from the upcoming-maintenance feed, which the
+  // backend computes from schedule intervals + last-performed timestamps.
+  // Alert severity is task priority, NOT timing, so we must not conflate
+  // "high-severity alert" with "overdue task" — a low-priority schedule
+  // can be overdue and a high-priority one can be perfectly on time.
+  const { tasks: upcomingTasks } = useUpcomingMaintenance({
+    printerId,
+    includeOverdue: true,
+  });
+
   // Build per-toolhead odometers in-memory from `PrinterDetailsDto.toolheads[]`
   // (#711 stable contract at 0bfa50343 — there is NO dedicated odometer
   // endpoint; the backend surfaces per-tool cumulative hours as a field on
-  // each toolhead). Due-state is derived from the active alerts feed for
-  // the same toolhead so the card reflects real scheduled work.
+  // each toolhead). Due-state joins the upcoming-maintenance feed by
+  // `toolheadId` so the card reflects the schedule engine's own verdict.
   const odometers = useMemo<PrinterToolheadOdometer[]>(() => {
     if (!perToolAllowed) return [];
     return eligibleToolheadsRaw.map(t => {
-      const toolheadAlerts = (alerts ?? []).filter(a =>
-        a.toolheadId === t.id &&
-        (a.status === MaintenanceAlertStatus.Active ||
-          a.status === MaintenanceAlertStatus.Acknowledged)
+      const toolheadTasks = upcomingTasks.filter(
+        task => task.toolheadId === t.id
       );
-      const overdue = toolheadAlerts.some(a => a.severity >= 3);
-      const dueToday = !overdue && toolheadAlerts.length > 0;
-      const nextDueTaskName = toolheadAlerts[0]?.title ?? null;
+      const overdue = toolheadTasks.some(task => task.isOverdue);
+      const dueToday = !overdue && toolheadTasks.some(task => task.isDueToday);
+      const nextDueTask =
+        toolheadTasks.find(task => task.isOverdue) ??
+        toolheadTasks.find(task => task.isDueToday) ??
+        toolheadTasks[0];
       return {
         toolheadId: t.id,
         toolheadName: t.name ?? null,
@@ -159,10 +171,10 @@ export function PrinterMaintenancePage() {
           typeof t.cumulativePrintHours === 'number' ? t.cumulativePrintHours : null,
         isOverdue: overdue,
         isDueToday: dueToday,
-        nextDueTaskName,
+        nextDueTaskName: nextDueTask?.taskName ?? null,
       };
     });
-  }, [perToolAllowed, eligibleToolheadsRaw, alerts]);
+  }, [perToolAllowed, eligibleToolheadsRaw, upcomingTasks]);
 
   const toolheadLabel = (toolheadId: string | null | undefined): string => {
     if (!toolheadId) return 'Printer-wide';
@@ -197,17 +209,28 @@ export function PrinterMaintenancePage() {
     await maintenanceService.createMaintenanceLog(data);
     // Refresh data. `printerDetails` invalidation picks up the new
     // per-tool `cumulativePrintHours` after the backend recomputes on
-    // `maintenancecompleted` (#711).
+    // `maintenancecompleted` (#711). `scheduleDeployments` picks up the
+    // "last performed" watermark that the backend updates when the log
+    // resolves an active deployment. `upcoming-maintenance` uses a nested
+    // options object as its second key element, so we invalidate by
+    // prefix — matching every variant regardless of lookaheadDays /
+    // includeOverdue / printerId filter.
     queryClient.invalidateQueries({ queryKey: ['printerMaintenanceLogs', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerStatistics', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerAlerts', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerDetails', printerId] });
-    queryClient.invalidateQueries({ queryKey: ['upcomingMaintenance', printerId] });
+    queryClient.invalidateQueries({ queryKey: ['scheduleDeployments', printerId] });
+    queryClient.invalidateQueries({ queryKey: ['upcoming-maintenance'] });
     setShowLogModal(false);
   };
 
   const isLoading =
-    printerLoading || statsLoading || logsLoading || deploymentsLoading || alertsLoading;
+    printerLoading ||
+    printerDetailsLoading ||
+    statsLoading ||
+    logsLoading ||
+    deploymentsLoading ||
+    alertsLoading;
 
   if (!printerId) {
     return (
@@ -270,6 +293,22 @@ export function PrinterMaintenancePage() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/*
+            Surface printer-details failures explicitly instead of silently
+            collapsing per-tool UI. The per-tool surface is naturally gated
+            by `supportsPerToolAttribution === true`, but the operator needs
+            to know that the data source failed so they can distinguish
+            "this printer doesn't support per-tool" from "the request broke".
+          */}
+          {printerDetailsError && (
+            <div
+              role="alert"
+              className="rounded-md border border-pf-warning/40 bg-pf-warning/10 px-4 py-3 text-sm text-pf-warning"
+            >
+              Could not load printer details. Per-toolhead maintenance data
+              may be unavailable — try refreshing.
+            </div>
+          )}
           {/* Per-toolhead odometer row (#711/#719). Hidden entirely when the
               printer has no eligible physical toolheads or no odometer data. */}
           {eligibleToolheads.length > 0 && odometers.length > 0 && (

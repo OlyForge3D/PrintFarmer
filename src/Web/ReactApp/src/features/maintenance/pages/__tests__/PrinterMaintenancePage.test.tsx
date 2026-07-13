@@ -27,6 +27,7 @@ vi.mock('@/services/maintenanceService', () => ({
     getPrinterMaintenanceLogs: vi.fn(),
     getPrinterAlerts: vi.fn(),
     createMaintenanceLog: vi.fn(),
+    getUpcomingMaintenance: vi.fn(),
   },
 }));
 
@@ -187,15 +188,23 @@ function renderPage() {
 
 function seedDefaults(overrides: {
   details?: PrinterDetails | null;
+  detailsError?: Error;
   alerts?: MaintenanceAlert[];
   logs?: MaintenanceLog[];
   deployments?: PrinterMaintenanceScheduleDto[];
   capabilities?: unknown;
+  upcoming?: unknown[];
 } = {}) {
   (apiClient.getPrinters as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([printer]);
-  (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-    overrides.details === undefined ? printerDetailsMulti : overrides.details
-  );
+  if (overrides.detailsError) {
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      overrides.detailsError
+    );
+  } else {
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      overrides.details === undefined ? printerDetailsMulti : overrides.details
+    );
+  }
 
   (maintenanceService.getPrinterStatistics as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
     printerId,
@@ -208,6 +217,9 @@ function seedDefaults(overrides: {
   );
   (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
     overrides.alerts ?? [legacyAlert, scopedAlert]
+  );
+  (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    overrides.upcoming ?? []
   );
   (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
     overrides.deployments ?? [legacyDeployment, scopedDeployment]
@@ -375,5 +387,75 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     // Null-hours toolhead: dash placeholder, NOT "0.0 h".
     expect(nullCard).toHaveTextContent(/—/);
     expect(nullCard).not.toHaveTextContent(/0\.0 h/);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Remediation coverage for split-verdict findings (Hicks #3/#4/#7, Vasquez #1)
+  // ---------------------------------------------------------------------------
+
+  it('does NOT mark a toolhead odometer as "Overdue" just because it has a high-severity alert (Hicks #3)', async () => {
+    // Alert severity == priority, not timing. The odometer must reflect the
+    // schedule engine's own overdue/dueToday verdict from the upcoming-
+    // maintenance feed, not a heuristic over alert severity.
+    const highSeverityAlertOnT0: MaintenanceAlert = {
+      ...legacyAlert,
+      id: 'a-t0-critical',
+      title: 'Critical alert for T0',
+      severity: 4, // "Critical" — highest
+      toolheadId: 'th-0',
+    };
+    seedDefaults({
+      alerts: [highSeverityAlertOnT0],
+      upcoming: [], // No overdue/dueToday tasks from the schedule engine.
+    });
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+    const t0Card = screen.getByTestId('toolhead-odometer-th-0');
+    expect(t0Card).not.toHaveTextContent(/overdue/i);
+    expect(t0Card).not.toHaveTextContent(/due today/i);
+  });
+
+  it('marks a toolhead odometer as "Overdue" when the upcoming feed reports an overdue task for that toolhead (Hicks #3)', async () => {
+    seedDefaults({
+      alerts: [],
+      upcoming: [
+        {
+          id: 'u-1',
+          scheduleId: 's-1',
+          printerId,
+          printerName: 'Voron 2.4',
+          toolheadId: 'th-1',
+          taskName: 'Nozzle change',
+          priority: 1,
+          intervalType: 'days',
+          intervalValue: 30,
+          isOverdue: true,
+          isDueToday: false,
+          daysUntilDue: -3,
+        },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+    const t1Card = screen.getByTestId('toolhead-odometer-th-1');
+    expect(t1Card).toHaveTextContent(/overdue/i);
+    // The unrelated toolhead does not inherit the overdue state.
+    const t0Card = screen.getByTestId('toolhead-odometer-th-0');
+    expect(t0Card).not.toHaveTextContent(/overdue/i);
+  });
+
+  it('surfaces a visible alert when printerDetails fails to load instead of silently hiding per-tool UI (Hicks #7)', async () => {
+    seedDefaults({ detailsError: new Error('boom') });
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/could not load printer details/i)
+    );
   });
 });

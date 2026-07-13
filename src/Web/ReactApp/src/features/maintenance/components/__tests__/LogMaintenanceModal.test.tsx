@@ -101,14 +101,14 @@ describe('LogMaintenanceModal — toolhead scope', () => {
     renderModal({ toolheads: [physical] });
 
     expect(screen.queryByTestId('log-maintenance-scope')).not.toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: /maintenance scope/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: /maintenance scope/i })).not.toBeInTheDocument();
   });
 
   it('renders the accessible scope picker when there are multiple eligible toolheads', () => {
     renderModal({ toolheads: [physical, physical2] });
 
     expect(screen.getByTestId('log-maintenance-scope')).toBeInTheDocument();
-    const group = screen.getByRole('group', { name: /maintenance scope/i });
+    const group = screen.getByRole('radiogroup', { name: /maintenance scope/i });
     expect(group).toBeInTheDocument();
     expect(screen.getByLabelText('Printer-wide')).toBeInTheDocument();
     expect(screen.getByLabelText('T0 · T0')).toBeInTheDocument();
@@ -179,7 +179,12 @@ describe('LogMaintenanceModal — toolhead scope', () => {
     expect(onSubmit.mock.calls[0][0].deploymentId).toBe('sched-th2');
   });
 
-  it('falls back to a printer-wide deployment when no scoped deployment exists', async () => {
+  it('does NOT cross-scope-fall-back: leaves deploymentId undefined when no exact-scope deployment exists (Hicks #2)', async () => {
+    // Regression guard: previously the modal would fall back to the printer-wide
+    // deployment when the operator chose a specific toolhead but no
+    // toolhead-scoped deployment existed. That corrupts attribution — the log
+    // would be tied to a deployment whose scope disagrees with the log's own
+    // `toolheadId`. The new behavior is exact match only.
     const printerWide = makeDeployment({ id: 'sched-wide', toolheadId: null });
     const otherScoped = makeDeployment({ id: 'sched-th1', toolheadId: 'th-1' });
     const { onSubmit } = renderModal({
@@ -192,6 +197,11 @@ describe('LogMaintenanceModal — toolhead scope', () => {
     await user.click(screen.getByRole('button', { name: /^Log Maintenance$/ }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0].deploymentId).toBe('sched-wide');
+    expect(onSubmit.mock.calls[0][0].toolheadId).toBe('th-2');
+    // No exact-scope deployment → deploymentId must not point at the
+    // printer-wide fallback (may be undefined or null depending on how the
+    // modal represents "no deployment"; both are acceptable — the point is
+    // it MUST NOT equal 'sched-wide').
+    expect(onSubmit.mock.calls[0][0].deploymentId ?? null).toBeNull();
   });
 });

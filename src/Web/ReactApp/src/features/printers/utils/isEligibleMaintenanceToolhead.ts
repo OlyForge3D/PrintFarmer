@@ -1,40 +1,27 @@
 import type { ToolheadDto } from '@/types/api';
 
 /**
- * Extended shape the backend may attach to a toolhead once the per-toolhead
- * maintenance contract (#711) lands. Kept optional so this compiles against
- * the current shipping `ToolheadDto` and only reacts if the API opts in.
+ * A physical, maintainable toolhead. The #711 backend contract is physical-only:
+ * the server excludes MMU/AMS gate toolheads from every maintenance surface
+ * (schedules, alerts, logs, statistics, odometers), so the UI mirrors that
+ * exact rule. There is no client-side opt-in for gate toolheads.
  */
-export interface MaintenanceEligibleToolhead extends ToolheadDto {
-  /**
-   * When the backend explicitly marks a toolhead as eligible for hotend
-   * maintenance scoping we honour it. This is the only way an MMU/AMS gate
-   * can become an eligible maintenance target (see #719 acceptance).
-   */
-  supportsMaintenanceScope?: boolean | null;
-}
+export type MaintenanceEligibleToolhead = ToolheadDto;
 
 /**
  * Returns true when the toolhead can act as an independent hotend-maintenance
  * scope (per-toolhead schedules, alerts, logs, odometers).
  *
- * Rules (derived from #711 backend consensus + #719 acceptance):
- * - Physical toolheads are always eligible.
- * - MMU / AMS gate toolheads are excluded by default.
- * - The API may opt any toolhead in via `supportsMaintenanceScope === true`.
- *   Explicit `false` always wins, even for physical toolheads.
+ * Rules (finalized against #711/#752 wire contract):
+ * - Physical toolheads are eligible.
+ * - MMU / AMS gate toolheads are excluded (server-enforced; this is the
+ *   client-side mirror so we never construct a request the API would reject).
+ * - Unknown / missing types are excluded.
  */
 export function isEligibleMaintenanceToolhead(
-  toolhead: MaintenanceEligibleToolhead | ToolheadDto | null | undefined
+  toolhead: ToolheadDto | null | undefined
 ): boolean {
   if (!toolhead) {
-    return false;
-  }
-  const extended = toolhead as MaintenanceEligibleToolhead;
-  if (extended.supportsMaintenanceScope === true) {
-    return true;
-  }
-  if (extended.supportsMaintenanceScope === false) {
     return false;
   }
   return normalizeToolheadType(toolhead.toolheadType) === 'Physical';
@@ -45,7 +32,7 @@ export function isEligibleMaintenanceToolhead(
  * sorted by index (falling back to name / id) for stable presentation.
  */
 export function selectMaintenanceEligibleToolheads(
-  toolheads: readonly (MaintenanceEligibleToolhead | ToolheadDto)[] | null | undefined
+  toolheads: readonly ToolheadDto[] | null | undefined
 ): MaintenanceEligibleToolhead[] {
   if (!toolheads?.length) {
     return [];

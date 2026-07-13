@@ -91,7 +91,7 @@ describe('ToolheadScopePicker', () => {
     expect(screen.queryByLabelText(/Gate 1/)).not.toBeInTheDocument();
   });
 
-  it('includes MMU gate when API explicitly marks it eligible', () => {
+  it('excludes MMU gate even when API sets `supportsMaintenanceScope: true` (#711 is physical-only)', () => {
     render(
       <ToolheadScopePicker
         toolheads={[
@@ -101,14 +101,16 @@ describe('ToolheadScopePicker', () => {
             index: 2,
             name: 'Feeder',
             toolheadType: 'MmuGate',
+            // Rogue field must NOT bypass the physical-only rule.
             supportsMaintenanceScope: true,
-          }),
+          } as unknown as Record<string, unknown>),
         ]}
         value={PRINTER_WIDE_SCOPE}
         onChange={() => {}}
       />
     );
-    expect(screen.getByLabelText(/Feeder/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Feeder/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
   });
 
   it('emits the toolhead id when a specific toolhead is selected', () => {
@@ -149,7 +151,7 @@ describe('ToolheadScopePicker', () => {
         helperText="Choose which toolhead this maintenance applies to."
       />
     );
-    const group = screen.getByRole('group', { name: 'Log scope' });
+    const group = screen.getByRole('radiogroup', { name: 'Log scope' });
     expect(group).toBeInTheDocument();
     expect(group).toHaveAccessibleDescription(/Choose which toolhead/);
   });

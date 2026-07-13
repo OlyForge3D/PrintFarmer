@@ -137,14 +137,16 @@ export function LogMaintenanceModal({
     try {
       const scopedToolheadId = toolheadIdFromScope(scope);
 
-      // Link to a deployment scoped to the same toolhead if possible; otherwise
-      // fall back to a printer-wide (null-toolhead) active deployment, and
-      // only then to any active deployment for backward compatibility.
-      const activeDeployments = deployments.filter(d => d.isActive);
-      const matchingDeployment =
-        activeDeployments.find(d => (d.toolheadId ?? null) === scopedToolheadId) ??
-        activeDeployments.find(d => (d.toolheadId ?? null) === null) ??
-        activeDeployments[0];
+      // Only link to a deployment whose scope EXACTLY matches this log's
+      // scope (both printer-wide or both scoped to the same toolhead). Any
+      // cross-scope fallback would either be rejected by the backend or,
+      // worse, be silently accepted and store the log against a deployment
+      // that belongs to a different toolhead — corrupting attribution.
+      // When no exact match exists, submit with a null deploymentId and let
+      // the backend / server-side alert engine resolve.
+      const matchingDeployment = deployments.find(
+        d => d.isActive && (d.toolheadId ?? null) === scopedToolheadId
+      );
 
       const request: CreateMaintenanceLogRequest = {
         printerId,
