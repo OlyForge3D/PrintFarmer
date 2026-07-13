@@ -3619,7 +3619,15 @@ export enum NotificationPreferenceEventType {
   JobStarted = 'JobStarted',
   JobCompleted = 'JobCompleted',
   JobFailed = 'JobFailed',
-  JobPaused = 'JobPaused'
+  JobPaused = 'JobPaused',
+  // Operator alert categories introduced by F3 (#708). Anticipatory tokens: the
+  // backend enum contract in NotificationsController is expected to accept
+  // these string values once #708 lands. Legacy servers that do not know these
+  // tokens must never receive them — see features/notifications/preferencesAdapter.
+  RunoutRisk = 'RunoutRisk',
+  HarvestReady = 'HarvestReady',
+  MaintenanceDue = 'MaintenanceDue',
+  PrinterOffline = 'PrinterOffline'
 }
 
 export interface NotificationEventChannelPreferenceDto {

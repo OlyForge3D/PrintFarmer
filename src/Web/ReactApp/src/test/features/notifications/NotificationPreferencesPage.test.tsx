@@ -26,7 +26,7 @@ vi.mock('@/features/notifications/hooks/usePushSubscription', () => ({
   usePushSubscription: () => mockUsePushSubscription(),
 }));
 
-function createPreferences(): NotificationPreferencesDto {
+function createLegacyPreferences(): NotificationPreferencesDto {
   return {
     userId: 'u1',
     enableEmailNotifications: true,
@@ -48,6 +48,18 @@ function createPreferences(): NotificationPreferencesDto {
   };
 }
 
+function createCapablePreferences(): NotificationPreferencesDto {
+  const p = createLegacyPreferences();
+  p.eventChannelPreferences = [
+    ...p.eventChannelPreferences,
+    { eventType: NotificationPreferenceEventType.RunoutRisk, inApp: true, email: true, push: false, telegram: false },
+    { eventType: NotificationPreferenceEventType.HarvestReady, inApp: true, email: false, push: true, telegram: false },
+    { eventType: NotificationPreferenceEventType.MaintenanceDue, inApp: false, email: true, push: false, telegram: false },
+    { eventType: NotificationPreferenceEventType.PrinterOffline, inApp: true, email: true, push: true, telegram: true },
+  ];
+  return p;
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -60,7 +72,7 @@ describe('NotificationPreferencesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseNotificationPreferences.mockReturnValue({
-      data: createPreferences(),
+      data: createLegacyPreferences(),
       isLoading: false,
       error: null,
     });
@@ -82,10 +94,11 @@ describe('NotificationPreferencesPage', () => {
     renderPage();
 
     expect(screen.getByText('Event × Channel Matrix')).toBeInTheDocument();
-    expect(screen.getByText('In-App')).toBeInTheDocument();
-    expect(screen.getByText('Email')).toBeInTheDocument();
-    expect(screen.getByText('Browser Push')).toBeInTheDocument();
-    expect(screen.getByText('Telegram')).toBeInTheDocument();
+    // Header appears in both job matrix and operator matrix cards, so use getAllByText
+    expect(screen.getAllByText('In-App').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Email').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Browser Push').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Telegram').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByLabelText('Print Complete email')).toBeInTheDocument();
     expect(screen.getByLabelText('Print Complete Telegram')).toBeInTheDocument();
   });
@@ -129,5 +142,122 @@ describe('NotificationPreferencesPage', () => {
     const completed = payload.eventChannelPreferences?.find(x => x.eventType === NotificationPreferenceEventType.JobCompleted);
     expect(completed?.telegram).toBe(true);
     expect(payload.enableTelegramNotifications).toBe(true);
+  });
+
+  describe('operator alerts (issue #716)', () => {
+    it('renders operator alert rows with descriptions and accessible toggles', () => {
+      renderPage();
+
+      expect(screen.getByRole('heading', { name: 'Operator Alerts' })).toBeInTheDocument();
+      expect(screen.getByText('Filament Runout Risk')).toBeInTheDocument();
+      expect(screen.getByText('Harvest Ready')).toBeInTheDocument();
+      expect(screen.getByText('Maintenance Due')).toBeInTheDocument();
+      expect(screen.getByText('Printer Offline')).toBeInTheDocument();
+
+      for (const label of [
+        'Filament Runout Risk',
+        'Harvest Ready',
+        'Maintenance Due',
+        'Printer Offline',
+      ]) {
+        expect(screen.getByLabelText(`${label} in-app`)).toBeInTheDocument();
+        expect(screen.getByLabelText(`${label} email`)).toBeInTheDocument();
+        expect(screen.getByLabelText(`${label} push`)).toBeInTheDocument();
+        expect(screen.getByLabelText(`${label} Telegram`)).toBeInTheDocument();
+      }
+    });
+
+    it('shows a legacy-server notice when the server does not expose operator categories', () => {
+      renderPage();
+
+      expect(
+        screen.getByText(/server does not yet expose operator alert categories/i),
+      ).toBeInTheDocument();
+    });
+
+    it('hides the legacy notice when the server has demonstrated operator category support', () => {
+      mockUseNotificationPreferences.mockReturnValue({
+        data: createCapablePreferences(),
+        isLoading: false,
+        error: null,
+      });
+
+      renderPage();
+
+      expect(
+        screen.queryByText(/server does not yet expose operator alert categories/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it('strips operator tokens from the save payload on legacy servers', async () => {
+      renderPage();
+
+      // Toggle a harvest-ready channel — a legacy server must never receive this token.
+      fireEvent.click(screen.getByLabelText('Harvest Ready push'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+      const tokens = payload.eventChannelPreferences?.map(r => r.eventType) ?? [];
+      expect(tokens).toEqual(
+        expect.arrayContaining([
+          NotificationPreferenceEventType.JobStarted,
+          NotificationPreferenceEventType.JobCompleted,
+          NotificationPreferenceEventType.JobFailed,
+          NotificationPreferenceEventType.JobPaused,
+        ]),
+      );
+      expect(tokens).not.toContain(NotificationPreferenceEventType.HarvestReady);
+      expect(tokens).not.toContain(NotificationPreferenceEventType.RunoutRisk);
+      expect(tokens).not.toContain(NotificationPreferenceEventType.MaintenanceDue);
+      expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
+    });
+
+    it('keeps operator tokens in the save payload when the server supports them', async () => {
+      mockUseNotificationPreferences.mockReturnValue({
+        data: createCapablePreferences(),
+        isLoading: false,
+        error: null,
+      });
+
+      renderPage();
+
+      fireEvent.click(screen.getByLabelText('Maintenance Due Telegram'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+      const maintenance = payload.eventChannelPreferences?.find(
+        r => r.eventType === NotificationPreferenceEventType.MaintenanceDue,
+      );
+      expect(maintenance?.telegram).toBe(true);
+      expect(payload.enableTelegramNotifications).toBe(true);
+    });
+
+    it('hydrates operator-row values from a capable server response', () => {
+      mockUseNotificationPreferences.mockReturnValue({
+        data: createCapablePreferences(),
+        isLoading: false,
+        error: null,
+      });
+
+      renderPage();
+
+      // PrinterOffline had all four channels on in the capable fixture.
+      expect((screen.getByLabelText('Printer Offline in-app') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText('Printer Offline email') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText('Printer Offline push') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText('Printer Offline Telegram') as HTMLInputElement).checked).toBe(true);
+      // HarvestReady had only in-app + push
+      expect((screen.getByLabelText('Harvest Ready in-app') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText('Harvest Ready push') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText('Harvest Ready email') as HTMLInputElement).checked).toBe(false);
+    });
   });
 });
