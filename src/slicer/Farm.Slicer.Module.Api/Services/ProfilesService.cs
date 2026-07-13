@@ -2846,14 +2846,25 @@ public class ProfilesService(
                 s.SlicerType == 1 &&
                 !string.IsNullOrEmpty(s.Host)).ToList();
 
+            // Freshness cutoff mirrors SlicersController.ListEnginesAsync
+            // (issue #578, Hicks R4 #1). A row can linger with Status="Online"
+            // after a worker is killed abruptly — worse, the host it advertised
+            // can be reused by a NEW worker running a DIFFERENT engine version
+            // before the old row is reaped. Requiring a recent heartbeat before
+            // trusting either the Status or the (host, version) mapping closes
+            // that wrong-version data-serving gap.
+            const int OnlineFreshnessSeconds = 60;
+            DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-OnlineFreshnessSeconds);
+
             string? trimmedVersion = string.IsNullOrWhiteSpace(engineVersion) ? null : engineVersion.Trim();
 
-            // Preference 1: Online worker of the requested version.
+            // Preference 1: Fresh, online worker of the requested version.
             SlicerService? orcaWorker = null;
             if (trimmedVersion is not null)
             {
                 orcaWorker = orcaCandidates.FirstOrDefault(s =>
                     s.Status == "Online" &&
+                    s.LastSeen >= freshnessCutoff &&
                     string.Equals(s.Version?.Trim(), trimmedVersion, StringComparison.OrdinalIgnoreCase));
                 if (orcaWorker != null)
                 {
@@ -2862,44 +2873,32 @@ public class ProfilesService(
                         orcaWorker.Name, orcaWorker.Version, orcaWorker.Host);
                     return orcaWorker.Host;
                 }
-            }
 
-            // Preference 2: Any Online OrcaSlicer worker. Only accept this
-            // when the caller didn't request a specific version — a
-            // version-scoped query MUST NOT silently cross versions, or
-            // Hicks R3 finding 3 (H4a) re-opens.
-            if (trimmedVersion is null)
-            {
-                orcaWorker = orcaCandidates.FirstOrDefault(s => s.Status == "Online");
-                if (orcaWorker != null)
-                {
-                    _logger.LogInformation("Using OrcaSlicer worker from registry: {OrcaWorkerName} at {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
-                    return orcaWorker.Host;
-                }
-            }
-
-            // Preference 3: Offline worker of the requested version (for
-            // best-effort browsing when the fleet is down but rows exist).
-            if (trimmedVersion is not null)
-            {
-                orcaWorker = orcaCandidates.FirstOrDefault(s =>
-                    string.Equals(s.Version?.Trim(), trimmedVersion, StringComparison.OrdinalIgnoreCase));
-                if (orcaWorker != null)
-                {
-                    _logger.LogWarning(
-                        "OrcaSlicer worker {OrcaWorkerName} (v{Version}) is not online; using anyway for version-scoped query: {OrcaWorkerHost}",
-                        orcaWorker.Name, orcaWorker.Version, orcaWorker.Host);
-                    return orcaWorker.Host;
-                }
-
-                // Version explicitly requested but no candidate at all — do
-                // NOT fall through to a wrong-version worker.
-                _logger.LogWarning("No OrcaSlicer worker (v{Version}) found in slicer registry", trimmedVersion);
+                // Version explicitly requested but no FRESH ONLINE candidate
+                // exists. Do NOT fall back to a stale/offline row — the host
+                // it advertised may now belong to a different-version worker
+                // (Hicks R4 #1). Returning null forces the caller to surface
+                // an "engine unavailable" error rather than serving profiles
+                // that could mismatch the executing binary.
+                _logger.LogWarning(
+                    "No fresh online OrcaSlicer worker (v{Version}) found in slicer registry",
+                    trimmedVersion);
                 return null;
             }
 
-            // Preference 4: any OrcaSlicer worker regardless of status
-            // (legacy fallback when no version was requested).
+            // Preference 2: Any fresh online OrcaSlicer worker (unpinned query).
+            orcaWorker = orcaCandidates.FirstOrDefault(s =>
+                s.Status == "Online" && s.LastSeen >= freshnessCutoff);
+            if (orcaWorker != null)
+            {
+                _logger.LogInformation("Using OrcaSlicer worker from registry: {OrcaWorkerName} at {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
+                return orcaWorker.Host;
+            }
+
+            // Preference 3: any OrcaSlicer worker regardless of status
+            // (legacy fallback when no version was requested and nothing is
+            // fresh/online). Best-effort browsing only — never used for
+            // version-scoped queries.
             orcaWorker = orcaCandidates.FirstOrDefault();
             if (orcaWorker != null)
             {

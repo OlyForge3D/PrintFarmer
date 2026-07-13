@@ -1646,24 +1646,46 @@ export const NewSliceJobPage: React.FC = () => {
   const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
 
-    // Issue #578 dual-engine (Hicks R3): guard against submitting a job for
-    // an engine that has NO online worker available. `engineInfo` describes
-    // this engine as seen by the registry. If it's registered (has any
-    // installed versions) but the backend didn't return a `latest`, that
-    // means every version is offline/stale — the job would sit unclaimable
-    // in the queue. When the user has manually pinned a version we let
-    // the availability decision fall to the entry the dropdown already
-    // rendered disabled; the guard here catches "Latest" mode where the UI
-    // has no per-option affordance to prevent submission.
+    // Issue #578 dual-engine (Hicks R3, refined R4): reject submission until
+    // the engine registry has resolved. Otherwise Latest-mode would build
+    // profile queries against `effectiveEngineVersion === undefined` and
+    // dispatch an unpinned Orca job that any installed version could claim —
+    // re-opening the profile/worker version mismatch H#3/H#R4 flagged.
+    if (registeredEngines === undefined) {
+      setError('Slicer registry not yet loaded. Please retry in a moment.');
+      return;
+    }
+
+    // Backend returns latest=null in TWO shapes (Hicks R4 #3, Vasquez R4):
+    //   1. Legacy / fresh-install: NO SlicerService rows — every
+    //      versionEntry.available is true so we leave the job UNPINNED so
+    //      a generic-capability legacy worker can claim it.
+    //   2. All-offline: rows exist but none fresh+online — every
+    //      versionEntry.available is false so the job would sit
+    //      unclaimable. In both cases `engineInfo.latest` is null; only the
+    //      per-entry availability signal distinguishes them.
+    // The Latest-mode submit guard fires ONLY when we can prove all versions
+    // are unavailable. Manually pinning a version is separately validated by
+    // the dropdown's `disabled` state, and a legacy submission (fresh
+    // install) is legitimately unpinned.
+    const engineHasAnyAvailable = engineInfo
+      ? versionEntriesForEngine.some(v => v.available)
+      : true;
     if (
       selectedEngineVersion === undefined
       && engineInfo
       && engineInfo.versions.length > 0
       && !engineInfo.latest
+      && !engineHasAnyAvailable
     ) {
       setError(`No online ${engineName} worker is available to accept this job.`);
       return;
     }
+
+    // Legacy / fresh-install path is served naturally: `latestAvailableForEngine`
+    // is undefined (backend `latest=null`), no user pin is set, so
+    // `slicerEngineVersion` stays undefined below and a legacy single-worker
+    // deployment can claim the job with its generic "orcaslicer" capability.
 
     // Plate-aware slicing: only the ACTIVE plate's models are sliced. The IDs
     // are passed synchronously from the workspace's Slice button so we never
@@ -1828,6 +1850,8 @@ export const NewSliceJobPage: React.FC = () => {
     latestAvailableForEngine,
     engineInfo,
     engineName,
+    registeredEngines,
+    versionEntriesForEngine,
     slicerInfo.engine,
     slicerSettings,
     submitMutation,

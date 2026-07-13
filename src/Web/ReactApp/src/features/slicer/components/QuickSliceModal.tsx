@@ -191,15 +191,13 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       return;
     }
 
-    // Issue #578 dual-engine (Hicks R3): the engines registry query MUST have
-    // populated before we submit. Without it we would fall through to an
-    // unpinned Orca job that any registered version could claim — including
-    // the specific race condition Hicks flagged where the older engine grabs
-    // work built against newer profiles. If the query is still pending or
-    // failed we tell the user to retry rather than submit blind. The
-    // exception is a legacy deployment where the backend returns an empty
-    // engines list (no plugins loaded on this API instance yet) — that
-    // predates dual-engine entirely and is handled by leaving `latest` null.
+    // Issue #578 dual-engine (Hicks R3, refined R4): the engines registry
+    // query MUST have populated before we submit. Without it we would fall
+    // through to an unpinned Orca job that any registered version could
+    // claim — including the specific race condition Hicks flagged where the
+    // older engine grabs work built against newer profiles. If the query is
+    // still pending or failed we tell the user to retry rather than submit
+    // blind.
     if (registeredEngines === undefined) {
       setError('Slicer registry not yet loaded. Please retry in a moment.');
       return;
@@ -207,17 +205,26 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     const orcaEngine = registeredEngines.find(
       e => (e?.engine ?? '').toLowerCase() === 'orcaslicer',
     );
-    // Backend returns latest=null in the legacy fallback (no SlicerService
-    // rows registered) — we intentionally leave the job UNPINNED so the
-    // legacy generic-capability worker can claim it. Any non-null latest
-    // is a firm signal to pin.
+    // Backend returns latest=null in TWO shapes (Hicks R4 #3, Vasquez R4):
+    //   1. Legacy / fresh-install: NO SlicerService rows registered — every
+    //      versionEntry.available is true so the UI selector remains usable
+    //      but we leave the job UNPINNED so a generic-capability legacy
+    //      worker can claim it.
+    //   2. All-offline: rows exist but nothing is fresh+online — every
+    //      versionEntry.available is false and the job would sit
+    //      unclaimable in the queue.
+    // The presence of at least one `available` entry is the only reliable
+    // signal that distinguishes legacy from all-offline.
     const pinnedVersion = orcaEngine?.latest ?? undefined;
-    // Hard-block submission when Orca is a registered engine (versions
-    // exist) but no version is currently available — the job would sit
-    // unclaimable in the queue. Fresh install has orcaEngine === undefined,
-    // which is fine because latest=null there is also OK to submit
-    // unpinned via the legacy path.
-    if (orcaEngine && orcaEngine.versions.length > 0 && !pinnedVersion) {
+    const hasAnyAvailableVersion = orcaEngine
+      ? (orcaEngine.versionEntries ?? []).some(v => v.available)
+      : true;
+    if (
+      orcaEngine
+      && orcaEngine.versions.length > 0
+      && !pinnedVersion
+      && !hasAnyAvailableVersion
+    ) {
       setError('No online OrcaSlicer worker is available to accept this job.');
       return;
     }
