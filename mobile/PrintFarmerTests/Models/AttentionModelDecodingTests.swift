@@ -192,34 +192,28 @@ final class AttentionModelDecodingTests: XCTestCase {
 
     // MARK: - Snooze request/response
 
-    func testSnoozeRequestEncodesCamelCaseUtcFields() throws {
+    func testSnoozeRequestEncodesCamelCaseUtcFieldWithoutClientAnchor() throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
 
-        // With the anchor present, both camelCase keys must appear.
-        let anchoredReq = SnoozeAttentionRequest(
-            snoozedUntilUtc: Date(timeIntervalSince1970: 1_800_000_000),
-            attentionItemAnchorAtUtc: Date(timeIntervalSince1970: 1_700_000_000)
+        // The mobile client intentionally does NOT expose a caller-supplied
+        // `attentionItemAnchorAtUtc`: the shared JSON encoder uses
+        // `.iso8601`, which truncates fractional seconds, and the server's
+        // strict `item.OccurredAt > anchor` bypass check would then treat
+        // an otherwise valid anchor as older than the very item that
+        // produced it. The backend derives the anchor server-side when the
+        // field is omitted, so the request body carries only the deadline.
+        let req = SnoozeAttentionRequest(
+            snoozedUntilUtc: Date(timeIntervalSince1970: 1_800_000_000)
         )
-        let anchored = String(decoding: try encoder.encode(anchoredReq), as: UTF8.self)
-        XCTAssertTrue(anchored.contains("\"snoozedUntilUtc\""),
+        let encoded = String(decoding: try encoder.encode(req), as: UTF8.self)
+        XCTAssertTrue(encoded.contains("\"snoozedUntilUtc\""),
             "Must serialise the camelCase property name expected by the backend contract.")
-        XCTAssertTrue(anchored.contains("\"attentionItemAnchorAtUtc\""),
-            "Anchor field must be encoded when the caller provides it so fresh-occurrence bypass works.")
-
-        // With no anchor, the field is legitimately omitted (backend treats
-        // that as "no bypass anchor"). This test locks the shape so we do
-        // not accidentally start sending `"attentionItemAnchorAtUtc":null`,
-        // which would confuse cursor stability on the server.
-        let bareReq = SnoozeAttentionRequest(
-            snoozedUntilUtc: Date(timeIntervalSince1970: 1_800_000_000),
-            attentionItemAnchorAtUtc: nil
-        )
-        let bare = String(decoding: try encoder.encode(bareReq), as: UTF8.self)
-        XCTAssertTrue(bare.contains("\"snoozedUntilUtc\""))
-        XCTAssertFalse(bare.contains("\"attentionItemAnchorAtUtc\""),
-            "Optional anchor field must be omitted from the payload when nil.")
+        XCTAssertFalse(encoded.contains("attentionItemAnchorAtUtc"),
+            "Client must never send a lossy anchor derived from a decoded fractional Date.")
+        XCTAssertFalse(encoded.contains("null"),
+            "Snooze body must not carry a null anchor either — the server treats presence as intent.")
     }
 
     func testSnoozeResponseDecodesFullPayload() throws {

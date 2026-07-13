@@ -20,12 +20,11 @@ final class DemoAttentionService: AttentionServiceProtocol, @unchecked Sendable 
 
     func snooze(
         itemId: String,
-        snoozedUntilUtc: Date,
-        attentionItemAnchorAtUtc: Date?
+        snoozedUntilUtc: Date
     ) async throws -> SnoozeAttentionResponse {
         SnoozeAttentionResponse(
             snoozedUntilUtc: snoozedUntilUtc,
-            attentionItemAnchorAtUtc: attentionItemAnchorAtUtc
+            attentionItemAnchorAtUtc: nil
         )
     }
 

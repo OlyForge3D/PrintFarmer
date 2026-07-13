@@ -18,12 +18,17 @@ protocol AttentionServiceProtocol: Sendable {
     func getFeed(cursor: String?, limit: Int?) async throws -> AttentionFeed
 
     /// Snoozes an attention item for the current user until the given UTC
-    /// instant. `anchorAtUtc` should be the item's `occurredAt` at snooze
-    /// time to enable fresh-occurrence bypass.
+    /// instant.
+    ///
+    /// The client does not send a fresh-occurrence anchor. The backend
+    /// derives an exact anchor from the item's current `occurredAt`
+    /// server-side; sending one from the client would round-trip through
+    /// the JSON encoder's `.iso8601` strategy and truncate fractional
+    /// seconds, silently bypassing the server's strict
+    /// `item.OccurredAt > anchor` check on the very next occurrence.
     func snooze(
         itemId: String,
-        snoozedUntilUtc: Date,
-        attentionItemAnchorAtUtc: Date?
+        snoozedUntilUtc: Date
     ) async throws -> SnoozeAttentionResponse
 
     /// Clears a previously-created snooze for the current user.

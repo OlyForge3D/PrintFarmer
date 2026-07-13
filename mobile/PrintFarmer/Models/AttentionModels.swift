@@ -4,7 +4,7 @@ import Foundation
 //
 // Mirrors the backend contract merged in PR #731 (issue #707):
 //   - Route: GET /api/attention?cursor=&limit= → AttentionFeed
-//   - Route: POST /api/attention/{id}/snooze { snoozedUntilUtc, attentionItemAnchorAtUtc }
+//   - Route: POST /api/attention/{id}/snooze { snoozedUntilUtc }
 //   - Route: DELETE /api/attention/{id}/snooze
 //   - Route: POST /api/attention/{id}/actions/{actionKind}
 // Wire enums are lowercase/camelCase strings; property names are camelCase.
@@ -169,15 +169,22 @@ struct AttentionFeed: Codable, Sendable, Equatable {
 
 /// Request body for `POST /api/attention/{id}/snooze`.
 ///
-/// Setting ``attentionItemAnchorAtUtc`` to the item's current `occurredAt`
-/// at snooze time enables fresh-occurrence bypass: a later occurrence with a
-/// strictly greater `occurredAt` will surface again despite the snooze.
+/// The client intentionally does NOT send a fresh-occurrence anchor. The
+/// backend derives an exact anchor from the current item's `occurredAt`
+/// server-side when the field is omitted, and the mobile JSON encoder
+/// serialises `Date` with `.iso8601` (no fractional seconds), which would
+/// truncate any anchor the client tried to supply and defeat the strict
+/// `item.OccurredAt > anchor` bypass check.
 struct SnoozeAttentionRequest: Codable, Sendable, Equatable {
     let snoozedUntilUtc: Date
-    let attentionItemAnchorAtUtc: Date?
 }
 
 /// Response body for a successful `POST /api/attention/{id}/snooze`.
+///
+/// The server echoes back the anchor it derived (from the item's current
+/// `occurredAt`) so the client can display or log it. This is a decoded
+/// value only — the client never round-trips it back into a subsequent
+/// snooze request.
 struct SnoozeAttentionResponse: Codable, Sendable, Equatable {
     let snoozedUntilUtc: Date
     let attentionItemAnchorAtUtc: Date?

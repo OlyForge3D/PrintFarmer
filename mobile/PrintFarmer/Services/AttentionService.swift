@@ -41,12 +41,10 @@ actor AttentionService: AttentionServiceProtocol {
 
     func snooze(
         itemId: String,
-        snoozedUntilUtc: Date,
-        attentionItemAnchorAtUtc: Date? = nil
+        snoozedUntilUtc: Date
     ) async throws -> SnoozeAttentionResponse {
         let request = SnoozeAttentionRequest(
-            snoozedUntilUtc: snoozedUntilUtc,
-            attentionItemAnchorAtUtc: attentionItemAnchorAtUtc
+            snoozedUntilUtc: snoozedUntilUtc
         )
         let path = "/api/attention/\(Self.encodePathSegment(itemId))/snooze"
         return try await apiClient.post(path, body: request)
