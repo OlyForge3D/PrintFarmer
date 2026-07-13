@@ -95,20 +95,17 @@ public class PrintStatsSyncHostedService(
         _serviceMonitor.ReportStopped(ServiceId);
     }
 
-    private async Task SyncPrinterStatisticsAsync(PrintStatsSyncSettings settings, CancellationToken ct)
+    internal async Task SyncPrinterStatisticsAsync(PrintStatsSyncSettings settings, CancellationToken ct)
     {
         try
         {
-            // Create a scope to get the scoped repositories
-            using IServiceScope scope = _serviceProvider.CreateScope();
-            IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-            IPrinterStatisticsRepository statsRepo = scope.ServiceProvider.GetRequiredService<IPrinterStatisticsRepository>();
-            IToolheadStatisticsRepository toolheadStatsRepo = scope.ServiceProvider.GetRequiredService<IToolheadStatisticsRepository>();
-            IPrintJobStatisticsRepository jobStatsRepo = scope.ServiceProvider.GetRequiredService<IPrintJobStatisticsRepository>();
-            IOperatorFeatureGate featureGate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
-
-            // Get all printers
-            List<Printer> printers = await printersRepo.GetAllAsync(ct);
+            List<Printer> printers;
+            using (IServiceScope printerListScope = _serviceProvider.CreateScope())
+            {
+                IPrintersRepository printersRepo =
+                    printerListScope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+                printers = await printersRepo.GetAllAsync(ct);
+            }
 
             if (printers.Count == 0)
             {
@@ -131,6 +128,20 @@ public class PrintStatsSyncHostedService(
 
                 try
                 {
+                    // A printer owns one scoped AppDbContext/unit of work. If any operation fails
+                    // after mutating its tracked baseline, disposing this scope discards those
+                    // mutations while later printers continue in fresh scopes.
+                    using IServiceScope printerScope = _serviceProvider.CreateScope();
+                    IServiceProvider scopedServices = printerScope.ServiceProvider;
+                    IPrinterStatisticsRepository statsRepo =
+                        scopedServices.GetRequiredService<IPrinterStatisticsRepository>();
+                    IToolheadStatisticsRepository toolheadStatsRepo =
+                        scopedServices.GetRequiredService<IToolheadStatisticsRepository>();
+                    IPrintJobStatisticsRepository jobStatsRepo =
+                        scopedServices.GetRequiredService<IPrintJobStatisticsRepository>();
+                    IOperatorFeatureGate featureGate =
+                        scopedServices.GetRequiredService<IOperatorFeatureGate>();
+
                     await SyncPrinterStatisticsAsync(
                         printer,
                         settings,
@@ -138,8 +149,12 @@ public class PrintStatsSyncHostedService(
                         toolheadStatsRepo,
                         jobStatsRepo,
                         featureGate,
-                        scope.ServiceProvider,
+                        scopedServices,
                         ct);
+
+                    // Persist only after the complete per-printer flow succeeds. This atomically
+                    // commits the external baseline, aggregate totals, and toolhead wear.
+                    await statsRepo.SaveChangesAsync(ct);
                 }
                 catch (Exception ex)
                 {
@@ -151,9 +166,6 @@ public class PrintStatsSyncHostedService(
                         (PrinterBackend)printer.Backend);
                 }
             }
-
-            // Save all changes
-            await statsRepo.SaveChangesAsync(ct);
 
             _logger.LogDebug("Print statistics sync completed successfully");
         }
@@ -308,7 +320,8 @@ public class PrintStatsSyncHostedService(
                 externalDelta,
                 toolheadStatsRepo,
                 ct,
-                _logger);
+                _logger,
+                serviceProvider.GetService<IPrinterStatusCacheReader>());
             if (credited.Count > 0)
             {
                 _logger.LogDebug(
@@ -343,7 +356,8 @@ public class PrintStatsSyncHostedService(
         double externalDelta,
         IToolheadStatisticsRepository toolheadStatsRepo,
         CancellationToken ct,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        IPrinterStatusCacheReader? statusCache = null)
     {
         if (!statsExisted
             || !externalSyncSuccess
@@ -353,18 +367,47 @@ public class PrintStatsSyncHostedService(
             return [];
         }
 
-        // No backend currently reports per-tool consumption for the external history delta, so wear
-        // is approximated by an equal split across the printer's active physical toolheads. Emit an
-        // operator-visible diagnostic so it is clear the per-toolhead wear for this delta is only an
-        // estimate (issue #711, round-7 Finding 3). When a backend gains per-tool telemetry, build a
-        // ToolheadHourAttribution.FromWeights(...) and call ApplyToolheadHoursAsync instead.
-        logger?.LogInformation(
-            "Per-toolhead wear for printer {PrinterId} is approximated by equal split: no per-tool " +
-            "consumption telemetry is available for the {Delta:F2}h external history delta (issue #711).",
-            printerId,
-            externalDelta);
+        IReadOnlyDictionary<int, Guid> physicalToolheads =
+            await toolheadStatsRepo.GetPhysicalToolheadIdsByIndexAsync(printerId, ct);
+        if (physicalToolheads.Count == 0)
+        {
+            return [];
+        }
 
-        return await toolheadStatsRepo.IncrementActiveToolheadHoursAsync(printerId, externalDelta, ct);
+        ToolheadHourAttribution attribution;
+        PrinterStatusCacheSnapshot? snapshot = statusCache?.GetSnapshot(printerId);
+        MmuStatusDto? mmuStatus = PrinterStatusFreshness.IsFreshOnline(snapshot, DateTime.UtcNow)
+            ? snapshot!.Status.MmuStatus
+            : null;
+        int? activeToolIndex = mmuStatus is { Enabled: true, ActiveTool: >= 0 }
+            ? mmuStatus.ActiveTool
+            : mmuStatus is { Enabled: true, ActiveGate: >= 0 }
+                ? mmuStatus.ActiveGate
+                : null;
+
+        if (activeToolIndex.HasValue
+            && physicalToolheads.TryGetValue(activeToolIndex.Value, out Guid activeToolheadId))
+        {
+            attribution = ToolheadHourAttribution.FromWeights(
+                new Dictionary<Guid, double> { [activeToolheadId] = 1.0 },
+                externalDelta);
+        }
+        else
+        {
+            // TODO(#711): derive Moonraker external-history deltas from accumulated per-tool
+            // activity rather than a last-known status snapshot.
+            // TODO(#711): add equivalent per-tool activity telemetry for OctoPrint history.
+            attribution = ToolheadHourAttribution.EqualSplit(
+                [.. physicalToolheads.Values],
+                externalDelta);
+            logger?.LogInformation(
+                "Per-toolhead wear for printer {PrinterId} is approximated by equal split: no fresh " +
+                "active-tool telemetry maps the {Delta:F2}h external history delta (issue #711).",
+                printerId,
+                externalDelta);
+        }
+
+        return await toolheadStatsRepo.ApplyToolheadHoursAsync(printerId, attribution, ct);
     }
 
     private async Task<ExternalSyncOutcome> SyncExternalPrinterStatisticsAsync(
@@ -534,6 +577,7 @@ public class PrintStatsSyncHostedService(
                 ex,
                 "Failed to sync PrintFarmer job statistics for printer '{Name}'",
                 printer.Name);
+            throw;
         }
     }
 }

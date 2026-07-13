@@ -50,6 +50,16 @@ public class EfToolheadStatisticsRepository : IToolheadStatisticsRepository
         return toolhead?.CumulativePrintHours;
     }
 
+    public async Task<IReadOnlyDictionary<int, Guid>> GetPhysicalToolheadIdsByIndexAsync(
+        Guid printerId,
+        CancellationToken ct = default)
+    {
+        return await _context.Toolheads
+            .AsNoTracking()
+            .Where(t => t.PrinterId == printerId && t.ToolheadType == ToolheadType.Physical)
+            .ToDictionaryAsync(t => t.Index, t => t.Id, ct);
+    }
+
     public async Task<IReadOnlyList<Guid>> IncrementActiveToolheadHoursAsync(Guid printerId, double deltaHours, CancellationToken ct = default)
     {
         // Load the printer's physical toolheads TRACKED so mutations are captured by the

@@ -3,6 +3,7 @@ using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.Maintenance;
@@ -395,6 +396,156 @@ public class PrintStatsExternalBaselineTests
             "the second cycle must be idempotent and NOT double the total");
         stats.TotalJobsCompleted.Should().Be(afterCycle1Jobs,
             "the second cycle must be idempotent and NOT double the job count");
+    }
+
+    [Fact]
+    public async Task SyncPrinterStatisticsAsync_MidSyncFailure_RollsBackPrinterAndContinuesBatch()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        Guid failingPrinterId = Guid.NewGuid();
+        Guid healthyPrinterId = Guid.NewGuid();
+        Guid failingModelId = Guid.NewGuid();
+        Guid healthyModelId = Guid.NewGuid();
+        Guid failingToolheadId = Guid.NewGuid();
+        Guid healthyToolheadId = Guid.NewGuid();
+        Printer failingPrinter = new()
+        {
+            Id = failingPrinterId,
+            Name = "Fails after baseline",
+            Backend = (int)PrinterBackend.Moonraker,
+            ModelId = failingModelId,
+            ServerUrl = "http://failing-printer.local"
+        };
+        Printer healthyPrinter = new()
+        {
+            Id = healthyPrinterId,
+            Name = "Healthy printer",
+            Backend = (int)PrinterBackend.Moonraker,
+            ModelId = healthyModelId,
+            ServerUrl = "http://healthy-printer.local"
+        };
+
+        Mock<IPrintersRepository> printers = new(MockBehavior.Strict);
+        printers.Setup(repository => repository.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([failingPrinter, healthyPrinter]);
+
+        Mock<IPrintJobStatisticsRepository> jobStats = new(MockBehavior.Strict);
+        jobStats.Setup(repository => repository.GetByPrinterModelAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<bool>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((Guid modelId, bool _, DateTime? _, CancellationToken _) =>
+                modelId == failingModelId
+                    ? Task.FromException<List<PrintJobStatistics>>(new TimeoutException("injected after baseline"))
+                    : Task.FromResult(new List<PrintJobStatistics>()));
+
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsHistory>()
+            .Setup(history => history.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string url, PrinterCredential? _, CancellationToken _) => new HistoryTotals
+            {
+                JobTotals = new JobTotals
+                {
+                    TotalPrintTime = (url.Contains("failing", StringComparison.Ordinal) ? 110 : 210) * 3600,
+                    TotalJobs = 10
+                }
+            });
+        Mock<IBackendClientFactory> clientFactory = new();
+        clientFactory.Setup(factory => factory.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+
+        Mock<IOperatorFeatureGate> featureGate = new();
+        featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        ServiceCollection services = new();
+        services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(dbName));
+        services.AddSingleton<IPrintersRepository>(printers.Object);
+        services.AddScoped<IPrinterStatisticsRepository, EfPrinterStatisticsRepository>();
+        services.AddScoped<IToolheadStatisticsRepository, EfToolheadStatisticsRepository>();
+        services.AddSingleton<IPrintJobStatisticsRepository>(jobStats.Object);
+        services.AddSingleton<IBackendClientFactory>(clientFactory.Object);
+        services.AddSingleton<IOperatorFeatureGate>(featureGate.Object);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        await using (AsyncServiceScope seedScope = provider.CreateAsyncScope())
+        {
+            AppDbContext seed = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            seed.PrinterStatisticsSet.AddRange(
+                new PrinterStatistics
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = failingPrinterId,
+                    TotalPrintHours = 100,
+                    ExternalPrintHours = 100,
+                    ExternalBaselineInitializedUtc = DateTime.UtcNow
+                },
+                new PrinterStatistics
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = healthyPrinterId,
+                    TotalPrintHours = 200,
+                    ExternalPrintHours = 200,
+                    ExternalBaselineInitializedUtc = DateTime.UtcNow
+                });
+            seed.Toolheads.AddRange(
+                new Toolhead
+                {
+                    Id = failingToolheadId,
+                    PrinterId = failingPrinterId,
+                    Name = "T0",
+                    Index = 0,
+                    ToolheadType = ToolheadType.Physical
+                },
+                new Toolhead
+                {
+                    Id = healthyToolheadId,
+                    PrinterId = healthyPrinterId,
+                    Name = "T0",
+                    Index = 0,
+                    ToolheadType = ToolheadType.Physical
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        PrintStatsSyncHostedService service = CreateService(provider);
+        await service.SyncPrinterStatisticsAsync(
+            new PrintStatsSyncSettings
+            {
+                IncludePrintFarmerJobs = true,
+                MaxPrintersPerIteration = 2,
+                ApiTimeoutSeconds = 30
+            },
+            CancellationToken.None);
+
+        await using AsyncServiceScope verifyScope = provider.CreateAsyncScope();
+        AppDbContext verify = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        PrinterStatistics failingStats = await verify.PrinterStatisticsSet
+            .AsNoTracking()
+            .SingleAsync(stats => stats.PrinterId == failingPrinterId);
+        Toolhead failingToolhead = await verify.Toolheads
+            .AsNoTracking()
+            .SingleAsync(toolhead => toolhead.Id == failingToolheadId);
+        PrinterStatistics healthyStats = await verify.PrinterStatisticsSet
+            .AsNoTracking()
+            .SingleAsync(stats => stats.PrinterId == healthyPrinterId);
+        Toolhead healthyToolhead = await verify.Toolheads
+            .AsNoTracking()
+            .SingleAsync(toolhead => toolhead.Id == healthyToolheadId);
+
+        failingStats.ExternalPrintHours.Should().Be(100,
+            "disposing the failed printer scope must discard its tracked baseline advance");
+        failingToolhead.CumulativePrintHours.Should().Be(0);
+        healthyStats.ExternalPrintHours.Should().Be(210,
+            "a later printer must still complete in its independent scope");
+        healthyToolhead.CumulativePrintHours.Should().Be(10);
+        jobStats.Verify(repository => repository.GetByPrinterModelAsync(
+            healthyModelId,
+            true,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static PrintStatsSyncHostedService CreateService(IServiceProvider provider)

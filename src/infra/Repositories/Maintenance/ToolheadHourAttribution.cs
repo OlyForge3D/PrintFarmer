@@ -8,16 +8,22 @@
 /// Before this type, external-history print-hour deltas were split equally across every physical
 /// toolhead, which silently advanced the wear of idle toolheads (for example T1 while only T0 was
 /// printing) and under-credited the toolhead that actually did the work. Callers that DO have
-/// per-tool consumption telemetry can now build a weighted attribution via <see cref="FromWeights"/>;
+/// per-tool consumption telemetry can now build a weighted attribution via <c>FromWeights</c>;
 /// callers that do not fall back to <see cref="EqualSplit"/>, which flags the result as
 /// <see cref="IsApproximated"/> so the sync pipeline can emit an operator-visible diagnostic.
 /// </para>
 /// </summary>
 public sealed class ToolheadHourAttribution
 {
-    private ToolheadHourAttribution(IReadOnlyDictionary<Guid, double> hours, bool isApproximated)
+    private ToolheadHourAttribution(
+        IReadOnlyDictionary<Guid, double> hours,
+        IReadOnlyDictionary<Guid, double> weights,
+        double sourceHours,
+        bool isApproximated)
     {
         Hours = hours;
+        Weights = weights;
+        SourceHours = sourceHours;
         IsApproximated = isApproximated;
     }
 
@@ -26,6 +32,18 @@ public sealed class ToolheadHourAttribution
     /// <see cref="IToolheadStatisticsRepository.ApplyToolheadHoursAsync"/>.
     /// </summary>
     public IReadOnlyDictionary<Guid, double> Hours { get; }
+
+    /// <summary>
+    /// Toolhead ID → fraction of <see cref="SourceHours"/> attributed to that toolhead. The sum
+    /// may be less than one when telemetry identifies only part of the work; the unknown residual
+    /// is intentionally left uncredited rather than assigned to an idle head.
+    /// </summary>
+    public IReadOnlyDictionary<Guid, double> Weights { get; }
+
+    /// <summary>
+    /// Total printer hours from which <see cref="Weights"/> were derived.
+    /// </summary>
+    public double SourceHours { get; }
 
     /// <summary>
     /// <c>true</c> when the distribution is an equal-split estimate rather than derived from
@@ -46,7 +64,40 @@ public sealed class ToolheadHourAttribution
     public static ToolheadHourAttribution FromWeights(IReadOnlyDictionary<Guid, double> hours)
     {
         ArgumentNullException.ThrowIfNull(hours);
-        return new ToolheadHourAttribution(hours, isApproximated: false);
+        double sourceHours = hours.Values.Where(h => h > 0).Sum();
+        IReadOnlyDictionary<Guid, double> weights = sourceHours > 0
+            ? hours.ToDictionary(kvp => kvp.Key, kvp => Math.Max(0, kvp.Value) / sourceHours)
+            : new Dictionary<Guid, double>();
+        return new ToolheadHourAttribution(hours, weights, sourceHours, isApproximated: false);
+    }
+
+    /// <summary>
+    /// Builds an attribution from normalized per-tool fractions of
+    /// <paramref name="sourceHours"/>. Each weight must be between zero and one and their sum must
+    /// not exceed one. A sum below one leaves the unknown residual uncredited.
+    /// </summary>
+    public static ToolheadHourAttribution FromWeights(
+        IReadOnlyDictionary<Guid, double> weights,
+        double sourceHours)
+    {
+        ArgumentNullException.ThrowIfNull(weights);
+        ArgumentOutOfRangeException.ThrowIfNegative(sourceHours);
+
+        if (weights.Values.Any(weight => weight is < 0 or > 1))
+        {
+            throw new ArgumentOutOfRangeException(nameof(weights), "Attribution weights must be between zero and one.");
+        }
+
+        double totalWeight = weights.Values.Sum();
+        if (totalWeight > 1.0 + 1e-9)
+        {
+            throw new ArgumentException("Attribution weights must not sum to more than one.", nameof(weights));
+        }
+
+        Dictionary<Guid, double> hours = weights.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value * sourceHours);
+        return new ToolheadHourAttribution(hours, weights, sourceHours, isApproximated: false);
     }
 
     /// <summary>
@@ -61,16 +112,23 @@ public sealed class ToolheadHourAttribution
 
         if (toolheadIds.Count == 0 || totalHours <= 0)
         {
-            return new ToolheadHourAttribution(new Dictionary<Guid, double>(), isApproximated: true);
+            return new ToolheadHourAttribution(
+                new Dictionary<Guid, double>(),
+                new Dictionary<Guid, double>(),
+                Math.Max(0, totalHours),
+                isApproximated: true);
         }
 
         double perToolhead = totalHours / toolheadIds.Count;
+        double perToolheadWeight = 1.0 / toolheadIds.Count;
         Dictionary<Guid, double> hours = new(toolheadIds.Count);
+        Dictionary<Guid, double> weights = new(toolheadIds.Count);
         foreach (Guid id in toolheadIds)
         {
             hours[id] = perToolhead;
+            weights[id] = perToolheadWeight;
         }
 
-        return new ToolheadHourAttribution(hours, isApproximated: true);
+        return new ToolheadHourAttribution(hours, weights, totalHours, isApproximated: true);
     }
 }

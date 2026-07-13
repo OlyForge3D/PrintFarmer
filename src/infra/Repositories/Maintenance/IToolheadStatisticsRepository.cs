@@ -33,6 +33,14 @@ public interface IToolheadStatisticsRepository
     Task<double?> GetCumulativeHoursAsync(Guid toolheadId, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns the printer's physical toolheads mapped from their backend/G-code tool index to ID.
+    /// MMU/AMS gates are excluded because they are filament sources, not wear-bearing hotends.
+    /// </summary>
+    Task<IReadOnlyDictionary<int, Guid>> GetPhysicalToolheadIdsByIndexAsync(
+        Guid printerId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Splits <paramref name="deltaHours"/> equally across every physical toolhead of the
     /// printer. Loads the toolheads tracked on the shared scoped <c>AppDbContext</c> and
     /// mutates them, but does NOT call
