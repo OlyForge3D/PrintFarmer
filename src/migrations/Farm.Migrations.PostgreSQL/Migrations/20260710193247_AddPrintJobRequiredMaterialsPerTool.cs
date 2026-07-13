@@ -2,27 +2,26 @@
 
 #nullable disable
 
-namespace Farm.Migrations.PostgreSQL.Migrations
+namespace Farm.Migrations.PostgreSQL.Migrations;
+
+/// <inheritdoc />
+public partial class AddPrintJobRequiredMaterialsPerTool : Migration
 {
     /// <inheritdoc />
-    public partial class AddPrintJobRequiredMaterialsPerTool : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.AddColumn<string>(
-                name: "RequiredMaterialsPerToolJson",
-                table: "PrintJobs",
-                type: "text",
-                nullable: true);
-        }
+        migrationBuilder.AddColumn<string>(
+            name: "RequiredMaterialsPerToolJson",
+            table: "PrintJobs",
+            type: "text",
+            nullable: true);
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropColumn(
-                name: "RequiredMaterialsPerToolJson",
-                table: "PrintJobs");
-        }
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropColumn(
+            name: "RequiredMaterialsPerToolJson",
+            table: "PrintJobs");
     }
 }
