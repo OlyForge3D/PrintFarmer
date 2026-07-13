@@ -38,7 +38,10 @@ public sealed class MoonrakerSubscriptionService(
     private readonly IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _loopCancellationSources = new();
     private readonly ConcurrentDictionary<Guid, ConnectionMetrics> _connectionMetrics = new();
+
+    internal Func<Printer, CancellationToken, Task>? SubscriptionLoopOverride { get; set; }
 
     // Persistent state tracking for each printer
     private readonly ConcurrentDictionary<Guid, PrinterState> _printerStates = new();
@@ -137,6 +140,16 @@ public sealed class MoonrakerSubscriptionService(
             // Don't fail stop on background task errors
             _logger.LogDebug(ex, "Ignoring background task error during StopAsync");
         }
+
+        foreach ((Guid printerId, CancellationTokenSource source) in _loopCancellationSources.ToArray())
+        {
+            if (_loopCancellationSources.TryRemove(printerId, out _))
+            {
+                source.Dispose();
+            }
+        }
+
+        _loops.Clear();
     }
 
     /// <summary>
@@ -154,6 +167,14 @@ public sealed class MoonrakerSubscriptionService(
         }
         catch
         { /* ignore during dispose */
+        }
+
+        foreach ((Guid printerId, CancellationTokenSource source) in _loopCancellationSources.ToArray())
+        {
+            if (_loopCancellationSources.TryRemove(printerId, out _))
+            {
+                source.Dispose();
+            }
         }
 
         _cts.Dispose();
@@ -268,7 +289,7 @@ public sealed class MoonrakerSubscriptionService(
     /// Restarts subscription loops for printers that have exhausted reconnection attempts.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
-    private async Task EnumerateAndStartSubscriptionsAsync(CancellationToken ct)
+    internal async Task EnumerateAndStartSubscriptionsAsync(CancellationToken ct)
     {
         // Using an async scope while awaiting EF Core ToListAsync is intentional here.
         // The scope lifetime matches the query and is disposed immediately after.
@@ -282,6 +303,15 @@ public sealed class MoonrakerSubscriptionService(
         // PrusaLink and SDCP are polled via HTTP on-demand, not continuously
         List<Printer> allPrinters = await printersRepo.GetByBackendAsync(PrinterBackend.Moonraker, ct);
         List<Printer> enabledPrinters = allPrinters.Where(p => p.IsEnabled).ToList();
+        HashSet<Guid> activePrinterIds = enabledPrinters.Select(printer => printer.Id).ToHashSet();
+        HashSet<Guid> trackedPrinterIds = _loops.Keys
+            .Concat(_loopCancellationSources.Keys)
+            .ToHashSet();
+
+        foreach (Guid removedPrinterId in trackedPrinterIds.Except(activePrinterIds))
+        {
+            await StopSubscriptionLoopAsync(removedPrinterId, discardRuntimeState: true);
+        }
 
         foreach (Printer? p in enabledPrinters)
         {
@@ -292,16 +322,116 @@ public sealed class MoonrakerSubscriptionService(
                 // remove it so we can start a fresh subscription loop with reset retry count
                 if (existingTask.IsCompleted)
                 {
-                    _loops.TryRemove(p.Id, out _);
+                    await StopSubscriptionLoopAsync(p.Id, discardRuntimeState: false);
                     _connectionMetrics.TryRemove(p.Id, out _); // Reset metrics (reconnect attempts) too
                     _logger.LogInformation(
                         "Restarting subscription loop for printer {PName} ({PId}) - previous loop completed", p.Name, p.Id);
                 }
             }
 
-            _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
+            if (!_loops.ContainsKey(p.Id))
+            {
+                await StartSubscriptionLoopAsync(p, ct);
+            }
         }
 #pragma warning restore IDISP013
+    }
+
+    private async Task StartSubscriptionLoopAsync(Printer printer, CancellationToken serviceToken)
+    {
+        CancellationTokenSource printerCts =
+            CancellationTokenSource.CreateLinkedTokenSource(serviceToken);
+        if (!_loopCancellationSources.TryAdd(printer.Id, printerCts))
+        {
+            // TryAdd failed, so ownership was not transferred and no task captured this source.
+#pragma warning disable IDISP016 // Don't use disposed instance
+            printerCts.Dispose();
+#pragma warning restore IDISP016 // Don't use disposed instance
+            return;
+        }
+
+        Func<Printer, CancellationToken, Task> loop =
+            SubscriptionLoopOverride ?? SubscribePrinterLoopAsync;
+        CancellationToken printerToken = printerCts.Token;
+        Task loopTask = Task.Run(
+            () => loop(printer, printerToken),
+            CancellationToken.None);
+
+        if (_loops.TryAdd(printer.Id, loopTask))
+        {
+            return;
+        }
+
+        await printerCts.CancelAsync();
+        try
+        {
+            await loopTask;
+        }
+        catch (OperationCanceledException) when (printerCts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _loopCancellationSources.TryRemove(printer.Id, out _);
+            printerCts.Dispose();
+        }
+    }
+
+    private async Task StopSubscriptionLoopAsync(Guid printerId, bool discardRuntimeState)
+    {
+        _loopCancellationSources.TryGetValue(
+            printerId,
+            out CancellationTokenSource? printerCts);
+        if (printerCts is not null && !printerCts.IsCancellationRequested)
+        {
+            await printerCts.CancelAsync();
+        }
+
+        if (_loops.TryGetValue(printerId, out Task? loopTask))
+        {
+            try
+            {
+                await loopTask;
+            }
+            catch (OperationCanceledException) when (printerCts?.IsCancellationRequested == true)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Ignoring subscription loop error while stopping printer {PrinterId}",
+                    printerId);
+            }
+        }
+
+        _loops.TryRemove(printerId, out _);
+        if (_loopCancellationSources.TryRemove(
+            printerId,
+            out CancellationTokenSource? removedCts))
+        {
+            removedCts.Dispose();
+        }
+
+        if (discardRuntimeState)
+        {
+            ClearPrinterRuntimeState(printerId);
+        }
+    }
+
+    private void ClearPrinterRuntimeState(Guid printerId)
+    {
+        CancelOfflineGraceTimer(printerId);
+        _connectionMetrics.TryRemove(printerId, out _);
+        _printerStates.TryRemove(printerId, out _);
+        _parseErrorCounts.TryRemove(printerId, out _);
+        _lastHttpPollTimes.TryRemove(printerId, out _);
+        _lastStatusUpdateTimes.TryRemove(printerId, out _);
+        _pollingModes.TryRemove(printerId, out _);
+        _klippyReadyState.TryRemove(printerId, out _);
+        _connectionHealth.TryRemove(printerId, out _);
+        _spoolInfoCache.TryRemove(printerId, out _);
+        _activityAccumulator?.Reset(printerId);
     }
 
     /// <summary>
@@ -1101,10 +1231,31 @@ public sealed class MoonrakerSubscriptionService(
         // round-14). The accumulator credits the elapsed time since the previous sample to the tool
         // that was active while printing; the statistics sync later drains and attributes it.
         DateTime nowUtc = DateTime.UtcNow;
-        _activityAccumulator?.Sample(printerId, ResolveActivePhysicalToolIndex(state), IsPrinting(state));
+        _ = TrySampleActiveToolTelemetry(
+            printerId,
+            ResolveActivePhysicalToolIndex(state),
+            IsPrinting(state));
 
         // Track successful status update time
         _lastStatusUpdateTimes[printerId] = nowUtc;
+    }
+
+    internal bool TrySampleActiveToolTelemetry(
+        Guid printerId,
+        int? activeToolIndex,
+        bool isPrinting)
+    {
+        if (_activityAccumulator is null
+            || !_loopCancellationSources.TryGetValue(
+                printerId,
+                out CancellationTokenSource? printerCts)
+            || printerCts.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        _activityAccumulator.Sample(printerId, activeToolIndex, isPrinting);
+        return true;
     }
 
     /// <summary>
