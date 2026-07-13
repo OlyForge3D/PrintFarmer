@@ -3616,28 +3616,31 @@ export enum NotificationFrequency {
 }
 
 export enum NotificationPreferenceEventType {
-  // Wire tokens are camelCase per #708 shared web preference contract
-  // (JsonStringEnumConverter with camelCase naming policy). Adding new tokens
-  // requires updating operatorCategories.ts + the backend enum in
-  // NotificationsController.cs simultaneously — see #708/#750.
-  JobStarted = 'jobStarted',
-  JobCompleted = 'jobCompleted',
-  JobFailed = 'jobFailed',
-  JobPaused = 'jobPaused',
+  // Wire tokens are PascalCase per #708 shared web preference contract.
+  // Backend uses `new JsonStringEnumConverter()` with NO naming policy
+  // override (src/api/Startup/ControllerStartup.cs), so enum members
+  // serialize as their raw C# names. Sending camelCase would 400.
+  // Adding new tokens requires updating operatorCategories.ts + the
+  // backend enum in NotificationsController.cs simultaneously — see #708.
+  JobStarted = 'JobStarted',
+  JobCompleted = 'JobCompleted',
+  JobFailed = 'JobFailed',
+  JobPaused = 'JobPaused',
   // Operator alert categories introduced by F3 (#708). Legacy servers that do
-  // not advertise these tokens in GET /notifications/preferences/capabilities
-  // must never receive them — see features/notifications/preferencesAdapter.
+  // not advertise these tokens in
+  // GET /notifications/preferences/capabilities must never receive them —
+  // see features/notifications/preferencesAdapter.
   //
   // PrinterFailure is intentionally NOT rendered as a visible row in the
   // #716 UI scope (see OPERATOR_EVENT_ROWS in operatorCategories.ts), but is
   // enumerated here so hydrate can pass its server-returned row through
   // opaquely and buildSavePayload will forward it back verbatim when the
   // server advertises support.
-  PrinterFailure = 'printerFailure',
-  FilamentRunout = 'filamentRunout',
-  HarvestReady = 'harvestReady',
-  MaintenanceDue = 'maintenanceDue',
-  PrinterOffline = 'printerOffline'
+  PrinterFailure = 'PrinterFailure',
+  FilamentRunout = 'FilamentRunout',
+  HarvestReady = 'HarvestReady',
+  MaintenanceDue = 'MaintenanceDue',
+  PrinterOffline = 'PrinterOffline'
 }
 
 /**

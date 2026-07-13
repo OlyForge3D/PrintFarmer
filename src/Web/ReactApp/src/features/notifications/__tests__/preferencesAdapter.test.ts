@@ -309,21 +309,23 @@ describe('preferencesAdapter.buildSavePayload', () => {
     expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
   });
 
-  it('sends the exact camelCase wire tokens the #708 contract publishes', () => {
+  it('sends the exact PascalCase wire tokens the #708 contract publishes', () => {
     const payload = buildSavePayload(formWithOperatorChanges(), CAPABLE_CAPABILITIES);
     const wireTokens = (payload.eventChannelPreferences ?? []).map(r => String(r.eventType));
-    // Sanity: enum members carry the exact camelCase wire string values.
+    // Sanity: enum members carry the exact PascalCase wire string values.
+    // Backend uses JsonStringEnumConverter without a naming policy, so
+    // camelCase would 400.
     expect(wireTokens).toEqual(
       expect.arrayContaining([
-        'jobStarted',
-        'jobCompleted',
-        'jobFailed',
-        'jobPaused',
-        'printerFailure',
-        'filamentRunout',
-        'harvestReady',
-        'maintenanceDue',
-        'printerOffline',
+        'JobStarted',
+        'JobCompleted',
+        'JobFailed',
+        'JobPaused',
+        'PrinterFailure',
+        'FilamentRunout',
+        'HarvestReady',
+        'MaintenanceDue',
+        'PrinterOffline',
       ]),
     );
   });
