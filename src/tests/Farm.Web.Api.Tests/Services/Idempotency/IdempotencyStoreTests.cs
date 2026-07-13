@@ -1,3 +1,4 @@
+﻿using System.Data.Common;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Idempotency;
@@ -51,6 +52,8 @@ public class IdempotencyStoreTests : IDisposable
     }
 
     private IdempotencyStore CreateSut() => new(_factory, NullLogger<IdempotencyStore>.Instance);
+
+    private IdempotencyStore CreateSut(IdempotencyOptions options) => new(_factory, NullLogger<IdempotencyStore>.Instance, options);
 
     [Fact]
     public async Task TryBegin_FirstRequest_Inserts()
@@ -230,52 +233,81 @@ public class IdempotencyStoreTests : IDisposable
     {
         IdempotencyStore sut = CreateSut();
         DateTime now = DateTime.UtcNow;
+        TimeSpan window = IIdempotencyStore.RetentionWindow;
 
         using (AppDbContext seed = new(_options))
         {
             seed.IdempotencyRecords.AddRange(
                 new IdempotencyRecord
                 {
+                    // One tick BEYOND the window → strictly older than cutoff → pruned.
                     Id = Guid.NewGuid(),
                     UserId = "u",
                     RouteKey = "r",
-                    IdempotencyKey = "old",
+                    IdempotencyKey = "beyond",
                     RequestHash = "h",
                     Status = IdempotencyRecordStatus.Completed,
-                    CreatedAt = now - TimeSpan.FromDays(8),
-                    UpdatedAt = now - TimeSpan.FromDays(8),
+                    CreatedAt = now - window - TimeSpan.FromTicks(1),
+                    UpdatedAt = now - window - TimeSpan.FromTicks(1),
                 },
                 new IdempotencyRecord
                 {
+                    // EXACTLY at the cutoff. The boundary is exclusive
+                    // (CreatedAt < cutoff), so this row is RETAINED.
                     Id = Guid.NewGuid(),
                     UserId = "u",
                     RouteKey = "r",
-                    IdempotencyKey = "onEdge",
+                    IdempotencyKey = "atCutoff",
                     RequestHash = "h",
                     Status = IdempotencyRecordStatus.Completed,
-                    CreatedAt = now - TimeSpan.FromDays(7) + TimeSpan.FromMinutes(1),
-                    UpdatedAt = now,
+                    CreatedAt = now - window,
+                    UpdatedAt = now - window,
                 },
                 new IdempotencyRecord
                 {
+                    // One tick INSIDE the window → retained.
                     Id = Guid.NewGuid(),
                     UserId = "u",
                     RouteKey = "r",
-                    IdempotencyKey = "fresh",
+                    IdempotencyKey = "inside",
                     RequestHash = "h",
                     Status = IdempotencyRecordStatus.Completed,
-                    CreatedAt = now - TimeSpan.FromDays(1),
-                    UpdatedAt = now - TimeSpan.FromDays(1),
+                    CreatedAt = now - window + TimeSpan.FromTicks(1),
+                    UpdatedAt = now - window + TimeSpan.FromTicks(1),
                 });
             _ = await seed.SaveChangesAsync(CancellationToken.None);
         }
 
         int removed = await sut.PruneExpiredAsync(now, CancellationToken.None);
-        _ = removed.Should().Be(1);
+        _ = removed.Should().Be(1, "only the row strictly older than the cutoff is expired");
 
         using AppDbContext verify = new(_options);
-        int remaining = await verify.IdempotencyRecords.CountAsync(CancellationToken.None);
-        _ = remaining.Should().Be(2);
+        List<string> remaining = await verify.IdempotencyRecords
+            .Select(r => r.IdempotencyKey)
+            .OrderBy(k => k)
+            .ToListAsync(CancellationToken.None);
+        _ = remaining.Should().BeEquivalentTo(new[] { "atCutoff", "inside" },
+            "the exact-cutoff row is retained under the exclusive boundary and the inside row is well within the window");
+    }
+
+    [Fact]
+    public void IsExpired_BoundaryIsExclusive_AtExactTicks()
+    {
+        DateTime now = DateTime.UtcNow;
+        TimeSpan window = IIdempotencyStore.RetentionWindow;
+
+        // Exactly at the cutoff → NOT expired (exclusive boundary): read, begin, and
+        // prune must all agree that a row whose age equals the window is still valid.
+        _ = IdempotencyStore.IsExpired(now - window, now)
+            .Should().BeFalse("a record exactly at the retention cutoff is retained (exclusive boundary)");
+
+        // One tick beyond the window → expired.
+        _ = IdempotencyStore.IsExpired(now - window - TimeSpan.FromTicks(1), now)
+            .Should().BeTrue("a record one tick past the cutoff is expired");
+
+        // One tick inside the window → retained.
+        _ = IdempotencyStore.IsExpired(now - window + TimeSpan.FromTicks(1), now)
+            .Should().BeFalse("a record one tick inside the cutoff is retained");
     }
 
     [Fact]
@@ -315,23 +347,262 @@ public class IdempotencyStoreTests : IDisposable
     [Fact]
     public async Task TryBegin_ConcurrentRacers_OnlyOneInsertsRestObserveInProgress()
     {
-        IdempotencyStore sut = CreateSut();
+        // Determinism: the previous version raced Task.Run over a single shared
+        // SQLite connection, which serialized ADO commands and made the race
+        // artificial (~25% flaky per Bishop). Here each racer gets its OWN
+        // connection to a shared-cache in-memory database and all racers are
+        // released simultaneously by a Barrier, so they genuinely contend on the
+        // composite unique index at the database.
+        const int racerCount = 8;
+        string dbName = $"idemp-race-{Guid.NewGuid():N}";
+        string connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
 
-        // Fire five parallel first-request attempts against the same key. Exactly
-        // one must observe Inserted; the rest must fall to a defined non-Insert outcome.
-        Task<IdempotencyLookupResult>[] racers = Enumerable.Range(0, 5)
-            .Select(_ => Task.Run(() => sut.TryBeginAsync(
-                "user-A", IdempotencyRouteKeys.TaskComplete, "race-key", "hash-A", CancellationToken.None)))
+        // Keep-alive connection: a shared-cache in-memory database is destroyed when
+        // its LAST connection closes, so we hold one open for the whole test.
+        await using SqliteConnection keepAlive = new(connectionString);
+        await keepAlive.OpenAsync();
+
+        await using (AppDbContext create = new(
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(keepAlive).Options))
+        {
+            _ = await create.Database.EnsureCreatedAsync();
+        }
+
+        SharedCacheContextFactory factory = new(connectionString);
+        IdempotencyStore sut = new(factory, NullLogger<IdempotencyStore>.Instance);
+
+        using Barrier gate = new(racerCount);
+        async Task<IdempotencyLookupResult> RaceAsync()
+        {
+            // Hop onto a pool thread first, then rendezvous so every racer calls
+            // TryBeginAsync at the same instant.
+            await Task.Yield();
+            gate.SignalAndWait();
+            return await sut.TryBeginAsync(
+                "user-A", IdempotencyRouteKeys.TaskComplete, "race-key", "hash-A", CancellationToken.None);
+        }
+
+        Task<IdempotencyLookupResult>[] racers = Enumerable.Range(0, racerCount)
+            .Select(_ => Task.Run(RaceAsync))
             .ToArray();
 
         IdempotencyLookupResult[] results = await Task.WhenAll(racers);
+
         int inserted = results.Count(r => r.Outcome == IdempotencyLookupOutcome.Inserted);
         _ = inserted.Should().Be(1, "the composite unique index must serialize first-request winners");
 
         _ = results.Where(r => r.Outcome != IdempotencyLookupOutcome.Inserted)
-            .All(r => r.Outcome is IdempotencyLookupOutcome.InProgress
-                or IdempotencyLookupOutcome.ReplayCompleted
-                or IdempotencyLookupOutcome.Bypassed)
-            .Should().BeTrue("losers must fall through to a defined non-Inserted state");
+            .Should().OnlyContain(
+                r => r.Outcome == IdempotencyLookupOutcome.InProgress
+                    || r.Outcome == IdempotencyLookupOutcome.ReplayCompleted,
+                "losers must observe the winner's row as in-progress or completed — never Bypassed and never raising");
+    }
+
+    [Fact]
+    public async Task TryBegin_StaleProcessingRow_IsReclaimed()
+    {
+        // A Processing row whose owning request died is reclaimed once it is older
+        // than ProcessingStaleness, so a crashed request cannot wedge the key until
+        // it ages out of the 7-day retention window.
+        IdempotencyOptions options = new() { ProcessingStaleness = TimeSpan.FromMinutes(5) };
+        IdempotencyStore sut = CreateSut(options);
+
+        Guid staleId = Guid.NewGuid();
+        using (AppDbContext seed = new(_options))
+        {
+            _ = seed.IdempotencyRecords.Add(new IdempotencyRecord
+            {
+                Id = staleId,
+                UserId = "user-A",
+                RouteKey = IdempotencyRouteKeys.TaskComplete,
+                IdempotencyKey = "stuck-key",
+                RequestHash = "hash-A",
+                Status = IdempotencyRecordStatus.Processing,
+                CreatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(6),
+                UpdatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(6),
+            });
+            _ = await seed.SaveChangesAsync(CancellationToken.None);
+        }
+
+        IdempotencyLookupResult result = await sut.TryBeginAsync(
+            "user-A", IdempotencyRouteKeys.TaskComplete, "stuck-key", "hash-A", CancellationToken.None);
+
+        _ = result.Outcome.Should().Be(IdempotencyLookupOutcome.Inserted,
+            "a Processing row older than ProcessingStaleness is abandoned and reclaimed");
+        _ = result.Record!.Id.Should().NotBe(staleId, "the stale row is deleted and a brand-new row inserted");
+
+        using AppDbContext verify = new(_options);
+        int rows = await verify.IdempotencyRecords
+            .CountAsync(r => r.UserId == "user-A" && r.IdempotencyKey == "stuck-key", CancellationToken.None);
+        _ = rows.Should().Be(1, "the stale row must be replaced, not duplicated");
+        _ = (await verify.IdempotencyRecords.AnyAsync(r => r.Id == staleId, CancellationToken.None))
+            .Should().BeFalse("the stale row must have been deleted");
+    }
+
+    [Fact]
+    public async Task TryBegin_FreshProcessingRow_StillInProgress()
+    {
+        // A Processing row younger than ProcessingStaleness is a genuine in-flight
+        // request and must be reported as InProgress, not reclaimed.
+        IdempotencyOptions options = new() { ProcessingStaleness = TimeSpan.FromMinutes(5) };
+        IdempotencyStore sut = CreateSut(options);
+
+        using (AppDbContext seed = new(_options))
+        {
+            _ = seed.IdempotencyRecords.Add(new IdempotencyRecord
+            {
+                Id = Guid.NewGuid(),
+                UserId = "user-A",
+                RouteKey = IdempotencyRouteKeys.TaskComplete,
+                IdempotencyKey = "live-key",
+                RequestHash = "hash-A",
+                Status = IdempotencyRecordStatus.Processing,
+                CreatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(1),
+                UpdatedAt = DateTime.UtcNow - TimeSpan.FromMinutes(1),
+            });
+            _ = await seed.SaveChangesAsync(CancellationToken.None);
+        }
+
+        IdempotencyLookupResult result = await sut.TryBeginAsync(
+            "user-A", IdempotencyRouteKeys.TaskComplete, "live-key", "hash-A", CancellationToken.None);
+
+        _ = result.Outcome.Should().Be(IdempotencyLookupOutcome.InProgress,
+            "a fresh Processing row represents a genuine in-flight request");
+    }
+
+    [Theory]
+    // SQLite primary code SQLITE_CONSTRAINT and its PK/UNIQUE extended codes.
+    [InlineData(null, null, 19, 19, true)]
+    [InlineData(null, null, 19, 1555, true)]
+    [InlineData(null, null, 19, 2067, true)]
+    // PostgreSQL unique_violation SQLSTATE.
+    [InlineData("23505", null, null, null, true)]
+    // SQL Server duplicate-key / unique-constraint engine error numbers.
+    [InlineData(null, 2601, null, null, true)]
+    [InlineData(null, 2627, null, null, true)]
+    // Non-unique failures for each provider must NOT match.
+    [InlineData("23503", null, null, null, false)] // PG foreign_key_violation
+    [InlineData(null, 547, null, null, false)]      // SQL Server FK/CHECK violation
+    [InlineData(null, null, 20, 20, false)]         // SQLITE_MISMATCH
+    [InlineData(null, null, null, null, false)]     // no signal at all
+    public void MatchesUniqueViolation_ClassifiesEachProviderSignature(
+        string? sqlState,
+        int? sqlServerErrorNumber,
+        int? sqliteErrorCode,
+        int? sqliteExtendedErrorCode,
+        bool expected)
+    {
+        _ = IdempotencyStore.MatchesUniqueViolation(
+                sqlState, sqlServerErrorNumber, sqliteErrorCode, sqliteExtendedErrorCode)
+            .Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task IsUniqueViolation_FiresForRealSqliteDuplicateInsert()
+    {
+        // Drive a genuine unique-index violation through EF's DbUpdateException so
+        // the typed SQLite detection (SqliteException code 19 / extended 2067) is
+        // exercised end-to-end — not just the pure classifier.
+        IdempotencyStore sut = CreateSut();
+        IdempotencyLookupResult first = await sut.TryBeginAsync(
+            "user-A", IdempotencyRouteKeys.TaskComplete, "dup-key", "hash-A", CancellationToken.None);
+        _ = first.Outcome.Should().Be(IdempotencyLookupOutcome.Inserted);
+
+        DbUpdateException captured = await Assert.ThrowsAsync<DbUpdateException>(async () =>
+        {
+            await using AppDbContext db = new(_options);
+            _ = db.IdempotencyRecords.Add(new IdempotencyRecord
+            {
+                Id = Guid.NewGuid(),
+                UserId = "user-A",
+                RouteKey = IdempotencyRouteKeys.TaskComplete,
+                IdempotencyKey = "dup-key", // same triple → violates the composite unique index
+                RequestHash = "hash-B",
+                Status = IdempotencyRecordStatus.Processing,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = await db.SaveChangesAsync(CancellationToken.None);
+        });
+
+        _ = IdempotencyStore.IsUniqueViolation(captured)
+            .Should().BeTrue("a real SQLite composite-unique-index violation must be recognised by typed detection");
+    }
+
+    [Fact]
+    public void IsUniqueViolation_UnwrapsInnerPostgresException_ViaSqlState()
+    {
+        // Npgsql surfaces the SQLSTATE on the base DbException, so the guard can
+        // recognise a Postgres unique_violation without an Npgsql type reference.
+        DbUpdateException uniqueViolation = new(
+            "update failed", new FakeSqlStateException("23505"));
+        _ = IdempotencyStore.IsUniqueViolation(uniqueViolation).Should().BeTrue();
+
+        // A different SQLSTATE (foreign_key_violation) must NOT be mistaken for it.
+        DbUpdateException fkViolation = new(
+            "update failed", new FakeSqlStateException("23503"));
+        _ = IdempotencyStore.IsUniqueViolation(fkViolation).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Minimal <see cref="DbException"/> stand-in that surfaces a chosen SQLSTATE on
+    /// the base <see cref="DbException.SqlState"/> property, mirroring how Npgsql
+    /// exposes PostgreSQL error codes without requiring an Npgsql dependency in the
+    /// test assembly.
+    /// </summary>
+    private sealed class FakeSqlStateException(string sqlState) : DbException("simulated provider failure")
+    {
+        public override string SqlState { get; } = sqlState;
+    }
+
+    /// <summary>
+    /// <see cref="IDbContextFactory{TContext}"/> that hands each caller its own
+    /// connection to a shared-cache in-memory SQLite database with a generous
+    /// <c>busy_timeout</c>, so concurrent racers genuinely contend at the database
+    /// instead of being serialized onto one shared connection. The returned context
+    /// owns and disposes its connection.
+    /// </summary>
+    private sealed class SharedCacheContextFactory(string connectionString) : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext()
+        {
+            SqliteConnection connection = new(connectionString);
+            connection.Open();
+            using (SqliteCommand pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA busy_timeout=10000;";
+                _ = pragma.ExecuteNonQuery();
+            }
+
+            DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connection)
+                .Options;
+            return new OwnedConnectionAppDbContext(options, connection);
+        }
+
+        public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateDbContext());
+    }
+
+    /// <summary>
+    /// <see cref="AppDbContext"/> that disposes the externally supplied connection
+    /// it was constructed with, so the per-context connection created by
+    /// <see cref="SharedCacheContextFactory"/> does not leak.
+    /// </summary>
+    private sealed class OwnedConnectionAppDbContext(
+        DbContextOptions<AppDbContext> options,
+        SqliteConnection connection) : AppDbContext(options)
+    {
+        public override void Dispose()
+        {
+            base.Dispose();
+            connection.Dispose();
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await base.DisposeAsync();
+            await connection.DisposeAsync();
+        }
     }
 }

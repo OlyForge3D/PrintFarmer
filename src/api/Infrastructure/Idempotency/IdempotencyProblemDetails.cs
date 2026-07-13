@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Infrastructure.Idempotency;
@@ -21,6 +21,9 @@ public static class IdempotencyProblemDetails
 
     /// <summary>Code emitted when a prior request with the same key is still in-flight.</summary>
     public const string CodeInProgress = "idempotencyKeyInProgress";
+
+    /// <summary>Code emitted when the request body is too large to buffer for hashing.</summary>
+    public const string CodePayloadTooLarge = "idempotencyRequestTooLarge";
 
     /// <summary>
     /// <c>400 Bad Request</c>: the client supplied a malformed <c>Idempotency-Key</c>
@@ -72,5 +75,24 @@ public static class IdempotencyProblemDetails
         };
         problem.Extensions["code"] = CodeInProgress;
         return new ConflictObjectResult(problem);
+    }
+
+    /// <summary>
+    /// <c>413 Payload Too Large</c>: the request body exceeded the size the filter
+    /// can buffer for hashing, so the idempotency contract cannot be honoured. The
+    /// request is rejected rather than silently bypassing replay protection, which
+    /// would let an oversized retry double-apply against the backend.
+    /// </summary>
+    public static ObjectResult PayloadTooLarge()
+    {
+        ProblemDetails problem = new()
+        {
+            Status = StatusCodes.Status413PayloadTooLarge,
+            Title = "Request body too large for idempotent replay",
+            Detail = $"The request body exceeds the {IdempotencyFilter.MaxBufferedRequestBytes}-byte limit for idempotent endpoints. Reduce the payload or omit the Idempotency-Key header.",
+            Type = TypeUri,
+        };
+        problem.Extensions["code"] = CodePayloadTooLarge;
+        return new ObjectResult(problem) { StatusCode = StatusCodes.Status413PayloadTooLarge };
     }
 }

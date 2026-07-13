@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Idempotency;
 using FluentAssertions;
@@ -86,12 +86,13 @@ public class IdempotencyRecordCleanupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RunOnce_SwallowsExceptions()
+    public async Task RunOnce_SwallowsDbExceptions()
     {
-        // Build a provider where the store throws — the service must not propagate.
+        // A transient database failure (outage, timeout) must not tear down the
+        // host: the sweep is retried on the next tick. Only DbException is tolerated.
         Mock<IIdempotencyStore> throwing = new();
         _ = throwing.Setup(s => s.PruneExpiredAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("transient"));
+            .ThrowsAsync(new SqliteException("database is locked", 5));
 
         ServiceCollection services = new();
         _ = services.AddScoped(_ => throwing.Object);
@@ -103,6 +104,30 @@ public class IdempotencyRecordCleanupServiceTests : IDisposable
             TimeSpan.FromMinutes(1));
 
         Func<Task> act = () => svc.RunOnceAsync(CancellationToken.None);
-        _ = await act.Should().NotThrowAsync("the cleanup loop must tolerate transient store failures");
+        _ = await act.Should().NotThrowAsync("the cleanup loop must tolerate transient database failures");
+    }
+
+    [Fact]
+    public async Task RunOnce_Rethrows_NonDbExceptions()
+    {
+        // A programmer error (e.g. a bug surfacing as InvalidOperationException) must
+        // NOT be silently swallowed every hour — it surfaces via the BackgroundService
+        // pipeline so it is visible and fixable.
+        Mock<IIdempotencyStore> throwing = new();
+        _ = throwing.Setup(s => s.PruneExpiredAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("programmer error"));
+
+        ServiceCollection services = new();
+        _ = services.AddScoped(_ => throwing.Object);
+        using ServiceProvider sp = services.BuildServiceProvider();
+
+        IdempotencyRecordCleanupService svc = new(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<IdempotencyRecordCleanupService>.Instance,
+            TimeSpan.FromMinutes(1));
+
+        Func<Task> act = () => svc.RunOnceAsync(CancellationToken.None);
+        _ = await act.Should().ThrowAsync<InvalidOperationException>(
+            "non-database failures must not be swallowed by the cleanup catch");
     }
 }

@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.AspNetCore.Http;
@@ -33,9 +33,11 @@ namespace Farm.Web.Api.Infrastructure.Idempotency;
 /// <para>
 /// Ownership contract: the filter never wraps the response body for
 /// unauthenticated requests, requests without the header, or bypassed requests.
-/// Response-body substitution is scoped to a narrow try/finally around
-/// <c>await next()</c> so a downstream exception cannot leak the swapped
-/// <see cref="MemoryStream"/> back to the framework.
+/// Response-body substitution is scoped to <c>await next()</c>; both the action
+/// call and the entire post-<c>next()</c> region (restore, flush, record) are
+/// guarded so a downstream exception restores the original stream and abandons
+/// the Processing row rather than leaking the swapped <see cref="MemoryStream"/>
+/// or wedging the key as in-progress.
 /// </para>
 /// </summary>
 public sealed class IdempotencyFilter : IAsyncResourceFilter
@@ -45,8 +47,11 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
     /// All four gated routes accept small JSON payloads (well under 64 KB). We cap
     /// at 1 MiB defensively so a malformed or malicious client cannot force the
     /// filter to allocate arbitrary memory before the model binder rejects the body.
-    /// Requests over the limit fall through to the pipeline without idempotency
-    /// support (the action or model binder will still enforce its own size checks).
+    /// A request over the limit that also carries an <c>Idempotency-Key</c> is
+    /// rejected with <c>413 Payload Too Large</c> (see
+    /// <see cref="IdempotencyProblemDetails.PayloadTooLarge"/>) rather than silently
+    /// bypassing the replay contract — a silent bypass would let an oversized retry
+    /// double-apply against the backend.
     /// </remarks>
     public const int MaxBufferedRequestBytes = 1 * 1024 * 1024;
 
@@ -134,22 +139,34 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
         byte[]? bodyBytes = await BufferRequestBodyAsync(http, ct);
         if (bodyBytes is null)
         {
-            // Body was too large to safely buffer; skip the replay contract so
-            // the pipeline can return its normal too-large error. Do not persist.
+            // Body exceeded the buffering limit, so we cannot compute a stable request
+            // hash. Reject with 413 rather than silently bypassing replay protection
+            // (Bishop #NB1): a silent bypass would let an oversized retry slip past the
+            // idempotency guard and double-apply. No record is persisted.
             _logger.LogInformation(
-                "Idempotency filter bypassed for route={RouteKey}: request body exceeded {Limit} bytes.",
+                "Idempotency filter rejected route={RouteKey}: request body exceeded {Limit} bytes.",
                 metadata.RouteKey,
                 MaxBufferedRequestBytes);
-            _ = await next();
+            context.Result = IdempotencyProblemDetails.PayloadTooLarge();
             return;
         }
 
-        string requestHash = IdempotencyKeyUtilities.ComputeRequestHash(metadata.RouteKey, bodyBytes);
+        // Fold the *resolved* request path into the identity so that a single client
+        // key reused across different {id}/{sku}/{toolheadIndex} values cannot silently
+        // replay one resource's response for another (or, for empty-body actions like
+        // TaskComplete, silently drop the second mutation). The route-key constant is a
+        // static template shared by every id, so on its own it is only a prefix.
+        // Request.Path is the already-resolved path — we use it directly rather than
+        // RouteData.Values because value ordering is not guaranteed across templates.
+        string resolvedPath = http.Request.Path.HasValue ? http.Request.Path.Value! : string.Empty;
+        string effectiveRouteKey = $"{metadata.RouteKey}|{resolvedPath}";
+
+        string requestHash = IdempotencyKeyUtilities.ComputeRequestHash(effectiveRouteKey, bodyBytes);
 
         // ---- Store lookup / insert ----
         IdempotencyLookupResult lookup = await _store.TryBeginAsync(
             userId,
-            metadata.RouteKey,
+            effectiveRouteKey,
             idempotencyKey,
             requestHash,
             ct);
@@ -176,7 +193,7 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
                 return;
 
             case IdempotencyLookupOutcome.Inserted when lookup.Record is not null:
-                await ExecuteWithCaptureAsync(context, next, lookup.Record.Id, ct);
+                await ExecuteWithCaptureAsync(context, next, lookup.Record.Id);
                 return;
 
             default:
@@ -193,14 +210,15 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
 
     /// <summary>
     /// Executes the remaining pipeline while buffering the response body so we
-    /// can persist it verbatim for future replays. Uses a narrow try/finally to
-    /// guarantee the original response stream is restored even under exception.
+    /// can persist it verbatim for future replays. The post-<c>next()</c> region
+    /// (restore, flush, record) is itself wrapped so that a failure while writing
+    /// the response or recording the outcome abandons the Processing row instead
+    /// of leaving the key wedged as in-progress.
     /// </summary>
     private async Task ExecuteWithCaptureAsync(
         ResourceExecutingContext context,
         ResourceExecutionDelegate next,
-        Guid recordId,
-        CancellationToken ct)
+        Guid recordId)
     {
         HttpResponse response = context.HttpContext.Response;
         Stream originalBody = response.Body;
@@ -223,44 +241,67 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
             throw;
         }
 
-        // Restore the original body BEFORE we perform any I/O onto it, so any
-        // downstream code that inspects Response.Body sees the real stream.
-        response.Body = originalBody;
-
-        int statusCode = response.StatusCode;
-        bool isServerError = statusCode >= 500;
-        bool hadException = executed.Exception is not null && !executed.ExceptionHandled;
-
-        // Always flush what the action wrote to the real response so the client
-        // sees an unchanged first-response body.
-        buffer.Position = 0;
-        if (buffer.Length > 0)
+        // Post-next() safety net: restoring the body, flushing the buffered bytes,
+        // and recording the outcome must all succeed together. If ANY step throws
+        // (client disconnected mid-flush, store write failed, ...) abandon the
+        // Processing row so a retry with the same key is not permanently blocked as
+        // in-progress, then rethrow so the framework's error handling still fires.
+        try
         {
-            await buffer.CopyToAsync(originalBody, ct);
+            // Restore the original body BEFORE we perform any I/O onto it, so any
+            // downstream code that inspects Response.Body sees the real stream.
+            response.Body = originalBody;
+
+            int statusCode = response.StatusCode;
+            bool isServerError = statusCode >= 500;
+            bool hadException = executed.Exception is not null && !executed.ExceptionHandled;
+
+            // Always flush what the action wrote to the real response so the client
+            // sees an unchanged first-response body. The bytes are already buffered in
+            // memory, so we deliberately flush with CancellationToken.None: a client
+            // disconnect must not skip the persistence bookkeeping below and strand the
+            // Processing row.
+            buffer.Position = 0;
+            if (buffer.Length > 0)
+            {
+                await buffer.CopyToAsync(originalBody, CancellationToken.None);
+            }
+
+            if (hadException || isServerError)
+            {
+                // Do not persist a failed mutation as a replayable result — the client
+                // must be free to retry the same key against a healed backend.
+                await _store.AbandonProcessingAsync(recordId, CancellationToken.None);
+                return;
+            }
+
+            byte[] captured = buffer.ToArray();
+            string? contentType = response.ContentType;
+            await _store.CompleteAsync(recordId, statusCode, contentType, captured, CancellationToken.None);
         }
-
-        if (hadException || isServerError)
+        catch
         {
-            // Do not persist a failed mutation as a replayable result — the client
-            // must be free to retry the same key against a healed backend.
             await _store.AbandonProcessingAsync(recordId, CancellationToken.None);
-            return;
+            throw;
         }
-
-        byte[] captured = buffer.ToArray();
-        string? contentType = response.ContentType;
-        await _store.CompleteAsync(recordId, statusCode, contentType, captured, CancellationToken.None);
     }
 
     /// <summary>
     /// Buffers the request body into memory (up to <see cref="MaxBufferedRequestBytes"/>)
     /// and rewinds the stream so downstream model binding sees an untouched view.
-    /// Returns <c>null</c> when the body exceeds the limit.
+    /// Returns <c>null</c> when the body exceeds the limit so the caller can emit a
+    /// clean 413 instead of silently bypassing the replay contract.
     /// </summary>
     private static async Task<byte[]?> BufferRequestBodyAsync(HttpContext http, CancellationToken ct)
     {
-        // Enable buffering: subsequent reads will replay the same bytes.
-        http.Request.EnableBuffering(bufferThreshold: 64 * 1024, bufferLimit: MaxBufferedRequestBytes);
+        // Enable buffering with headroom above MaxBufferedRequestBytes so our own size
+        // check (below) trips and returns null *before* EnableBuffering's internal spool
+        // limit is reached. Without headroom the FileBufferingReadStream throws an
+        // IOException at exactly the limit before our manual check can run (Bishop #NB1);
+        // we still catch that IOException below as a belt-and-braces fallback.
+        http.Request.EnableBuffering(
+            bufferThreshold: 64 * 1024,
+            bufferLimit: MaxBufferedRequestBytes + (64 * 1024));
 
         // If Content-Length is present and over the limit, short-circuit.
         long? contentLength = http.Request.ContentLength;
@@ -281,21 +322,31 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
         await using MemoryStream mem = new();
         byte[] chunk = new byte[8192];
         int total = 0;
-        while (true)
+        try
         {
-            int read = await body.ReadAsync(chunk.AsMemory(0, chunk.Length), ct);
-            if (read <= 0)
+            while (true)
             {
-                break;
-            }
+                int read = await body.ReadAsync(chunk.AsMemory(0, chunk.Length), ct);
+                if (read <= 0)
+                {
+                    break;
+                }
 
-            total += read;
-            if (total > MaxBufferedRequestBytes)
-            {
-                return null;
-            }
+                total += read;
+                if (total > MaxBufferedRequestBytes)
+                {
+                    return null;
+                }
 
-            await mem.WriteAsync(chunk.AsMemory(0, read), ct);
+                await mem.WriteAsync(chunk.AsMemory(0, read), ct);
+            }
+        }
+        catch (IOException)
+        {
+            // The buffering spool exceeded its hard limit before our own size check
+            // tripped (e.g. a chunked upload with no Content-Length). Treat it as
+            // "too large" so the caller emits a clean 413 rather than a 500.
+            return null;
         }
 
         if (body.CanSeek)
@@ -331,6 +382,12 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
 /// Kept internal to the filter because callers should never manually construct
 /// a replay outside of the store lookup path.
 /// </summary>
+/// <remarks>
+/// TODO (#715 non-blocking): replay fidelity currently restores status, content
+/// type, and body only. Response headers that carried resource identity on the
+/// original 201 — notably <c>Location</c> and <c>ETag</c> — are not captured or
+/// replayed. Persist and re-emit them for full byte-for-byte replay parity.
+/// </remarks>
 internal sealed class IdempotencyReplayResult(int statusCode, string? contentType, byte[] body) : IActionResult
 {
     /// <inheritdoc />

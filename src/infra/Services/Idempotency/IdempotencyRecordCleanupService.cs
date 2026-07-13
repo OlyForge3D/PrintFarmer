@@ -1,3 +1,4 @@
+﻿using System.Data.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -103,8 +104,13 @@ public sealed class IdempotencyRecordCleanupService : BackgroundService
         {
             // Graceful shutdown; suppress.
         }
-        catch (Exception ex)
+        catch (DbException ex)
         {
+            // Transient database failures (outage, timeout, transient connection
+            // error) must not tear down the host — log and retry on the next tick.
+            // Non-DbException failures are deliberately NOT caught here so genuine
+            // programmer errors surface via the BackgroundService pipeline instead
+            // of being silently swallowed every hour.
             _logger.LogError(ex, "Idempotency prune sweep failed; will retry on the next tick.");
         }
     }

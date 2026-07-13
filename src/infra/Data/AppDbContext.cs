@@ -324,6 +324,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     v => new DateTimeOffset(v, TimeSpan.Zero));
         }
 
+        // Fix (#715): SQL Server's default catalog collation
+        // (SQL_Latin1_General_CP1_CI_AS) is case-INSENSITIVE, which would let
+        // Idempotency-Key values "ABC" and "abc" collide on the composite unique
+        // index — diverging from PostgreSQL and SQLite, whose text comparison is
+        // already binary/case-sensitive. Force the three identity columns to a
+        // binary, culture-invariant, case-sensitive collation so the key contract
+        // behaves identically across every provider.
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer")
+        {
+            const string caseSensitiveCollation = "Latin1_General_100_BIN2";
+            _ = modelBuilder.Entity<IdempotencyRecord>(entity =>
+            {
+                _ = entity.Property(r => r.UserId).UseCollation(caseSensitiveCollation);
+                _ = entity.Property(r => r.RouteKey).UseCollation(caseSensitiveCollation);
+                _ = entity.Property(r => r.IdempotencyKey).UseCollation(caseSensitiveCollation);
+            });
+        }
+
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
         {

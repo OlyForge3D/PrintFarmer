@@ -102,6 +102,7 @@ public static class FeatureServicesStartup
         // registered scoped because it uses IDbContextFactory internally and is
         // resolved per-request from the filter (and per-sweep from the cleanup
         // hosted service via its own scope). See docs/OFFLINE_WRITE_REPLAY.md.
+        services.AddSingleton(Farm.Infrastructure.Services.Idempotency.IdempotencyOptions.Default);
         services.AddScoped<Farm.Infrastructure.Services.Idempotency.IIdempotencyStore,
             Farm.Infrastructure.Services.Idempotency.IdempotencyStore>();
         services.AddScoped<Farm.Web.Api.Infrastructure.Idempotency.IdempotencyFilter>();

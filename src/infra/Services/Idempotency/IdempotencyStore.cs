@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -25,10 +25,34 @@ namespace Farm.Infrastructure.Services.Idempotency;
 /// the cleanup service prunes it.
 /// </para>
 /// </summary>
-public sealed class IdempotencyStore(
-    IDbContextFactory<AppDbContext> dbFactory,
-    ILogger<IdempotencyStore> logger) : IIdempotencyStore
+public sealed class IdempotencyStore : IIdempotencyStore
 {
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly ILogger<IdempotencyStore> _logger;
+    private readonly IdempotencyOptions _options;
+
+    /// <summary>
+    /// Constructs the store with the default tuning options
+    /// (<see cref="IdempotencyOptions.Default"/>).
+    /// </summary>
+    public IdempotencyStore(
+        IDbContextFactory<AppDbContext> dbFactory,
+        ILogger<IdempotencyStore> logger)
+        : this(dbFactory, logger, IdempotencyOptions.Default)
+    {
+    }
+
+    /// <summary>Constructs the store with explicit tuning options.</summary>
+    public IdempotencyStore(
+        IDbContextFactory<AppDbContext> dbFactory,
+        ILogger<IdempotencyStore> logger,
+        IdempotencyOptions options)
+    {
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+    }
+
     /// <inheritdoc />
     public async Task<IdempotencyLookupResult> TryBeginAsync(
         string userId,
@@ -43,9 +67,8 @@ public sealed class IdempotencyStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(requestHash);
 
         DateTime now = DateTime.UtcNow;
-        DateTime cutoff = now - IIdempotencyStore.RetentionWindow;
 
-        await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
+        await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
 
         IdempotencyRecord? existing = await db.IdempotencyRecords
             .AsNoTracking()
@@ -57,9 +80,17 @@ public sealed class IdempotencyStore(
 
         if (existing is not null)
         {
-            if (existing.CreatedAt < cutoff)
+            bool expired = IsExpired(existing.CreatedAt, now);
+            bool staleProcessing = !expired
+                && existing.Status == IdempotencyRecordStatus.Processing
+                && existing.CreatedAt < now - _options.ProcessingStaleness;
+
+            if (expired || staleProcessing)
             {
-                // Expired: purge before attempting a fresh insert. If a concurrent
+                // Expired (past the retention window) OR a Processing row whose owning
+                // request appears to have died before completing (older than
+                // ProcessingStaleness): purge it before attempting a fresh insert so a
+                // crashed request cannot block the key until it ages out. If a concurrent
                 // caller beat us to the delete or the row is already gone, ExecuteDeleteAsync
                 // simply returns 0 — no error.
                 _ = await db.IdempotencyRecords
@@ -102,13 +133,12 @@ public sealed class IdempotencyStore(
         {
             // A concurrent first-request won the race. Reload the winning row and
             // interpret it exactly as we would in the initial-read path.
-            logger.LogInformation(
+            _logger.LogDebug(
                 ex,
-                "Idempotency-Key race resolved by unique index for route={RouteKey} user={UserId}; reloading winner.",
-                routeKey,
-                userId);
+                "Idempotency-Key race resolved by unique index for route={RouteKey}; reloading winner.",
+                routeKey);
 
-            await using AppDbContext readDb = await dbFactory.CreateDbContextAsync(ct);
+            await using AppDbContext readDb = await _dbFactory.CreateDbContextAsync(ct);
             IdempotencyRecord? winner = await readDb.IdempotencyRecords
                 .AsNoTracking()
                 .FirstOrDefaultAsync(
@@ -116,7 +146,7 @@ public sealed class IdempotencyStore(
                         && r.RouteKey == routeKey
                         && r.IdempotencyKey == idempotencyKey,
                     ct);
-            if (winner is null || winner.CreatedAt < cutoff)
+            if (winner is null || IsExpired(winner.CreatedAt, now))
             {
                 // The winning row vanished or is itself expired. Rather than looping
                 // (which risks livelock under sustained contention) we fall back to
@@ -146,7 +176,7 @@ public sealed class IdempotencyStore(
     {
         ArgumentNullException.ThrowIfNull(responseBody);
 
-        await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
+        await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
         IdempotencyRecord? record = await db.IdempotencyRecords
             .FirstOrDefaultAsync(r => r.Id == recordId, ct);
         if (record is null)
@@ -174,7 +204,7 @@ public sealed class IdempotencyStore(
     /// <inheritdoc />
     public async Task AbandonProcessingAsync(Guid recordId, CancellationToken ct)
     {
-        await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
+        await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
         _ = await db.IdempotencyRecords
             .Where(r => r.Id == recordId && r.Status == IdempotencyRecordStatus.Processing)
             .ExecuteDeleteAsync(ct);
@@ -184,7 +214,7 @@ public sealed class IdempotencyStore(
     public async Task<int> PruneExpiredAsync(DateTime now, CancellationToken ct)
     {
         DateTime cutoff = now - IIdempotencyStore.RetentionWindow;
-        await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
+        await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
 
         // Bulk delete-by-predicate: concurrency-safe because it does not enumerate
         // and each row is deleted in a single statement using the same predicate.
@@ -193,44 +223,118 @@ public sealed class IdempotencyStore(
             .ExecuteDeleteAsync(ct);
         if (removed > 0)
         {
-            logger.LogInformation("Pruned {Count} expired idempotency records older than {Cutoff:O}.", removed, cutoff);
+            _logger.LogInformation("Pruned {Count} expired idempotency records older than {Cutoff:O}.", removed, cutoff);
         }
 
         return removed;
     }
 
     /// <summary>
-    /// True when the exception represents a unique-constraint violation across
-    /// the supported providers. Matches the same heuristic as the printed-parts
-    /// service so the store stays provider-neutral.
+    /// Threshold check for retention expiry. A record is expired iff its
+    /// <see cref="IdempotencyRecord.CreatedAt"/> is strictly earlier than
+    /// <paramref name="now"/> minus <see cref="IIdempotencyStore.RetentionWindow"/>.
+    /// The boundary is <b>exclusive</b>: a record whose age is exactly the
+    /// retention window is still considered valid. This single predicate is shared
+    /// by <see cref="TryBeginAsync"/> (initial read and winner-reload) and mirrors
+    /// the <c>CreatedAt &lt; cutoff</c> filter used by <see cref="PruneExpiredAsync"/>,
+    /// so read, begin, and prune all agree on the exact-tick boundary.
     /// </summary>
-    /// <remarks>
-    /// The <c>constraint failed</c> match covers SQLite (error code 19,
-    /// <c>SQLITE_CONSTRAINT</c>), whose default message does not include the
-    /// literal string <c>UNIQUE</c> when raised from a batched insert. This is
-    /// safe here because <c>IdempotencyRecords</c> only has the composite
-    /// unique index — the table has no CHECK constraints or foreign keys that
-    /// could produce a competing constraint failure.
-    /// </remarks>
-    private static bool IsUniqueViolation(DbUpdateException ex)
+    internal static bool IsExpired(DateTime createdAt, DateTime now)
+        => createdAt < now - IIdempotencyStore.RetentionWindow;
+
+    // --- Provider-specific unique-constraint error codes -----------------------
+    // SQLite primary result code SQLITE_CONSTRAINT and its PK/unique extended codes.
+    private const int SqliteConstraint = 19;
+    private const int SqliteConstraintPrimaryKey = 1555;
+    private const int SqliteConstraintUnique = 2067;
+
+    // PostgreSQL SQLSTATE for unique_violation (surfaced via DbException.SqlState).
+    private const string PostgresUniqueViolation = "23505";
+
+    // SQL Server engine error numbers: 2601 duplicate key row in a unique index,
+    // 2627 unique/primary-key constraint violation.
+    private const int SqlServerDuplicateKeyRow = 2601;
+    private const int SqlServerUniqueConstraint = 2627;
+
+    /// <summary>
+    /// True when <paramref name="ex"/> wraps a provider unique-constraint violation.
+    /// Detection is <b>typed and code-based</b> — never message-string matching — so
+    /// it is robust across locales and provider message wording changes:
+    /// <list type="bullet">
+    /// <item><description>SQLite: <see cref="Microsoft.Data.Sqlite.SqliteException"/> with
+    /// primary code 19 (<c>SQLITE_CONSTRAINT</c>) or extended code 1555/2067. The
+    /// <c>IdempotencyRecords</c> table carries only the composite unique index (no FKs
+    /// or CHECK constraints), so a constraint failure here is unambiguously the unique
+    /// violation.</description></item>
+    /// <item><description>PostgreSQL: <see cref="System.Data.Common.DbException.SqlState"/>
+    /// == <c>23505</c>. Npgsql surfaces the SQLSTATE on the base <c>DbException</c>, so no
+    /// direct Npgsql dependency is required.</description></item>
+    /// <item><description>SQL Server: <c>Microsoft.Data.SqlClient.SqlException.Number</c>
+    /// in {2601, 2627}, read reflectively to avoid a hard SqlClient dependency in the
+    /// infrastructure assembly.</description></item>
+    /// </list>
+    /// </summary>
+    internal static bool IsUniqueViolation(DbUpdateException ex)
     {
-        Exception? inner = ex.InnerException;
-        while (inner is not null)
+        ArgumentNullException.ThrowIfNull(ex);
+
+        for (Exception? inner = ex.InnerException; inner is not null; inner = inner.InnerException)
         {
-            string message = inner.Message ?? string.Empty;
-            if (message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("constraint failed", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("23505", StringComparison.Ordinal)
-                || message.Contains("2601", StringComparison.Ordinal)
-                || message.Contains("2627", StringComparison.Ordinal))
+            if (IsUniqueViolationInner(inner))
             {
                 return true;
             }
-
-            inner = inner.InnerException;
         }
 
         return false;
+    }
+
+    private static bool IsUniqueViolationInner(Exception inner)
+    {
+        int? sqliteErrorCode = null;
+        int? sqliteExtendedErrorCode = null;
+        if (inner is Microsoft.Data.Sqlite.SqliteException sqlite)
+        {
+            sqliteErrorCode = sqlite.SqliteErrorCode;
+            sqliteExtendedErrorCode = sqlite.SqliteExtendedErrorCode;
+        }
+
+        // PostgreSQL (and any ADO provider honouring the SQLSTATE contract) exposes
+        // the SQLSTATE on the base DbException — no Npgsql type reference required.
+        string? sqlState = (inner as System.Data.Common.DbException)?.SqlState;
+
+        int? sqlServerNumber = null;
+        string? typeName = inner.GetType().FullName;
+        if (typeName is "Microsoft.Data.SqlClient.SqlException" or "System.Data.SqlClient.SqlException")
+        {
+            sqlServerNumber = inner.GetType().GetProperty("Number")?.GetValue(inner) as int?;
+        }
+
+        return MatchesUniqueViolation(sqlState, sqlServerNumber, sqliteErrorCode, sqliteExtendedErrorCode);
+    }
+
+    /// <summary>
+    /// Pure classifier over the coded signals extracted from a provider exception.
+    /// Exposed to tests so each provider's unique-violation signature can be
+    /// asserted without constructing a live provider exception.
+    /// </summary>
+    internal static bool MatchesUniqueViolation(
+        string? sqlState,
+        int? sqlServerErrorNumber,
+        int? sqliteErrorCode,
+        int? sqliteExtendedErrorCode)
+    {
+        if (sqliteErrorCode == SqliteConstraint
+            || sqliteExtendedErrorCode is SqliteConstraintPrimaryKey or SqliteConstraintUnique)
+        {
+            return true;
+        }
+
+        if (string.Equals(sqlState, PostgresUniqueViolation, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return sqlServerErrorNumber is SqlServerDuplicateKeyRow or SqlServerUniqueConstraint;
     }
 }

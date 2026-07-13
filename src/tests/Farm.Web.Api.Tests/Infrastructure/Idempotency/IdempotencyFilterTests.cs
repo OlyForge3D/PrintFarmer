@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
@@ -69,11 +69,12 @@ public class IdempotencyFilterTests : IDisposable
         string? idempotencyKey,
         byte[]? body,
         string? userId = "user-42",
-        string? contentType = "application/json")
+        string? contentType = "application/json",
+        string path = "/test")
     {
         DefaultHttpContext http = new();
         http.Request.Method = HttpMethods.Post;
-        http.Request.Path = "/test";
+        http.Request.Path = path;
         if (idempotencyKey is not null)
         {
             http.Request.Headers[IdempotencyKeyUtilities.HeaderName] = idempotencyKey;
@@ -268,18 +269,127 @@ public class IdempotencyFilterTests : IDisposable
     }
 
     [Fact]
-    public async Task AnonymousRequest_Executes_WithoutPersistence()
+    public async Task SameKey_SameBody_DifferentResolvedPath_BothExecute_AsSeparateRows()
     {
+        // Cross-resource replay guard: the same client key reused against two
+        // different resolved paths (e.g. two different {id}s) must NOT replay one
+        // resource's response for the other. Both mutations execute and persist
+        // independent rows because the resolved path is folded into the identity.
         IdempotencyFilter filter = CreateFilter();
-        ResourceExecutingContext ctx = CreateContext(
-            IdempotencyRouteKeys.TaskComplete, "anon-key",
-            Encoding.UTF8.GetBytes("{}"),
-            userId: null);
+        byte[] body = Encoding.UTF8.GetBytes("{\"a\":1}");
 
-        await RunAsync(filter, ctx, 200, "{\"ok\":true}");
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "shared-key", body,
+            path: "/api/tasks/11111111-1111-1111-1111-111111111111/complete");
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "shared-key", body,
+            path: "/api/tasks/22222222-2222-2222-2222-222222222222/complete");
+
+        bool secondPipelineRan = false;
+        await RunAsync(filter, first, 200, "{\"task\":\"one\"}");
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            secondPipelineRan = true;
+            second.HttpContext.Response.StatusCode = 200;
+            second.HttpContext.Response.ContentType = "application/json";
+            byte[] bytes = Encoding.UTF8.GetBytes("{\"task\":\"two\"}");
+            second.HttpContext.Response.Body.Write(bytes, 0, bytes.Length);
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+
+        _ = secondPipelineRan.Should().BeTrue("a different resolved path must execute its own mutation, not replay");
+        _ = second.Result.Should().BeNull("the second call is a fresh mutation, not a short-circuited replay");
 
         using Farm.Infrastructure.Data.AppDbContext db = new(_options);
         _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
-            .Should().Be(0, "anonymous requests must bypass persistence; [Authorize] will 401 separately");
+            .Should().Be(2, "each resolved path is a distinct idempotency identity");
+    }
+
+    [Fact]
+    public async Task SameKey_EmptyBody_DifferentId_BothExecute_NoSilentDataLoss()
+    {
+        // TaskComplete-shape: empty request body. Without the resolved path in the
+        // identity, an empty body would hash identically for every {id}, so reusing
+        // one key across two task ids would silently drop the second completion.
+        IdempotencyFilter filter = CreateFilter();
+
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "same-key", Array.Empty<byte>(),
+            path: "/api/tasks/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/complete");
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "same-key", Array.Empty<byte>(),
+            path: "/api/tasks/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/complete");
+
+        bool secondPipelineRan = false;
+        await RunAsync(filter, first, 204, string.Empty);
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            secondPipelineRan = true;
+            second.HttpContext.Response.StatusCode = 204;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+
+        _ = secondPipelineRan.Should().BeTrue("the second task completion must not be silently dropped");
+        _ = second.Result.Should().BeNull();
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(2, "two distinct task ids must each get their own completion record");
+    }
+
+    [Fact]
+    public async Task SameKey_SameBody_SamePath_Replays()
+    {
+        // The classic replay case: identical key, body, AND resolved path → the
+        // second call must short-circuit to the stored response.
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"a\":1}");
+        const string path = "/api/tasks/33333333-3333-3333-3333-333333333333/complete";
+
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "replay-key", body, path: path);
+        await RunAsync(filter, first, 201, "{\"result\":\"created\"}");
+
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, "replay-key", body, path: path);
+        bool pipelineRan = false;
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            pipelineRan = true;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+
+        _ = pipelineRan.Should().BeFalse("an identical key+body+path must replay, not re-execute");
+        _ = second.Result.Should().BeOfType<IdempotencyReplayResult>();
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "an exact replay must not create a second record");
+    }
+
+    [Fact]
+    public async Task OversizedBody_WithKey_Returns_413_AndPersistsNothing()
+    {
+        // A body over the buffering limit cannot be hashed for the replay contract.
+        // The filter must reject it with 413 rather than silently bypassing
+        // protection (which would let an oversized retry double-apply).
+        IdempotencyFilter filter = CreateFilter();
+        byte[] huge = new byte[(3 * IdempotencyFilter.MaxBufferedRequestBytes) / 2]; // 1.5 MiB
+        Array.Fill(huge, (byte)'x');
+
+        ResourceExecutingContext ctx = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, "big-key", huge,
+            path: "/api/parts-inventory/RD-500/adjust");
+
+        await filter.OnResourceExecutionAsync(ctx,
+            () => throw new InvalidOperationException("pipeline must not run for an oversized body"));
+
+        ObjectResult result = ctx.Result.Should().BeOfType<ObjectResult>().Subject;
+        _ = result.StatusCode.Should().Be(StatusCodes.Status413PayloadTooLarge);
+        _ = result.Value.Should().BeOfType<ProblemDetails>();
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(0, "a rejected oversized request must not persist an idempotency record");
     }
 }
