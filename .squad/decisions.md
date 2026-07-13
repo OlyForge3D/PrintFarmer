@@ -4450,3 +4450,30 @@ issue: 274
 
 
 
+
+---
+## Merged from Inbox: 2026-07-12T17:17:53.916-07:00
+
+# Decision Inbox: Hicks reviewer model refresh directive
+
+**Requested by:** Jeff Papiez
+**Date:** 2026-07-12T17:17:53.916-07:00
+**Agent:** Scribe
+**Status:** Merged from inbox
+
+## Directive
+
+The GPT code reviewer is Hicks. Update Hicks persistently from GPT-5.5/older GPT-5.x references to model `gpt-5.6-sol` with reasoning effort `max`.
+
+## Scope
+
+- `.squad/team.md`
+- `.squad/routing.md`
+- `.squad/config.json`
+- `.squad/casting/registry.json`
+- `.squad/agents/hicks/charter.md`
+
+## Notes
+
+- No application code, GitHub issues, or PR #741.
+- Append-only record captured from `.squad/decisions/inbox/hicks-model-refresh.md`.
