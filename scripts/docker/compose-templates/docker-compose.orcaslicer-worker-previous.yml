@@ -1,0 +1,85 @@
+# OrcaSlicer Worker Addon Service — Previous Version (issue #578 dual-engine)
+# This service is conditionally included via compose-generator.sh when
+# ENABLE_ORCA_WORKER_PREVIOUS is set. It runs the previous OrcaSlicer engine
+# (default 2.3.1) alongside the current engine so version-pinned slice jobs
+# can be routed to a compatible worker.
+#
+# Registration uses a distinct Host / ServiceName / WorkerId / InstanceId so
+# SlicersService.RegisterAsync does not upsert onto the current worker's row.
+
+x-orcaslicer-previous-build: &orcaslicer-previous-build
+  context: .
+  dockerfile: Dockerfile.multistage
+  target: orcaslicer-worker
+  args:
+    SDK_TAG: ${SDK_TAG}
+    ASPNET_TAG: ${ASPNET_TAG}
+    NODE_TAG: ${NODE_TAG}
+    NGINX_TAG: ${NGINX_TAG}
+    UBUNTU_TAG: ${UBUNTU_TAG}
+    GIT_SHA: ${GIT_SHA:-unknown}
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION_PREVIOUS:-2.3.1}
+    ALLOW_STUB: ${ALLOW_STUB:-0}
+    ORCA_ASSET_PATH: ${ORCA_ASSET_PATH_PREVIOUS:-}
+    _SKIP_ORCA_BINARY_BUILD: ${_SKIP_ORCA_BINARY_BUILD:-0}
+
+x-orca-previous-healthcheck: &orca-previous-healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 90s
+
+x-orca-previous-volumes: &orca-previous-volumes
+  - ${EXTERNAL_ORCA_WORKER_PREVIOUS_TEMP:-.volumes/printfarmer-orcaslicer-previous-temp}:/app/temp
+  - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models:ro
+  - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode:ro
+
+x-orca-previous-security: &orca-previous-security {}
+
+x-orca-previous-deployment: &orca-previous-deployment
+  resources:
+    limits:
+      cpus: '${ORCA_WORKER_PREVIOUS_CPU_LIMIT:-1}'
+      memory: ${ORCA_WORKER_PREVIOUS_MEMORY_LIMIT:-1gb}
+    reservations:
+      cpus: '${ORCA_WORKER_PREVIOUS_CPU_REQUEST:-0.5}'
+      memory: ${ORCA_WORKER_PREVIOUS_MEMORY_REQUEST:-512m}
+
+services:
+  orcaslicer-worker-previous:
+    build:
+      <<: *orcaslicer-previous-build
+    image: printfarmer-orcaslicer-worker-previous
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - SlicerApi__BaseUrl=${SLICER_SERVICE_URL:-http://slicer-host:5246}
+      - SlicerRegistry__ApiBaseUrl=${SLICER_SERVICE_URL:-http://slicer-host:5246}
+      # Distinct identity so SlicersService does not upsert onto the current worker's row.
+      - SlicerRegistry__ServiceName=orcaslicer-worker-previous
+      - SlicerRegistry__Host=http://orcaslicer-worker-previous:8080
+      - SlicerRegistry__Version=${ORCASLICER_VERSION_PREVIOUS:-2.3.1}
+      - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://slicer-host:5246}
+      - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
+      - Worker__WorkingDirectory=/app/temp
+      - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
+      - Worker__WorkerId=orcaslicer-worker-previous-1
+      - Worker__InstanceId=${ORCA_WORKER_PREVIOUS_INSTANCE_ID:-orcaslicer-worker-previous-1}
+      - Worker__MaxConcurrentJobs=1
+      - Worker__MaxMemoryMb=1024
+      # Version-aware routing (issue #578): worker advertises orcaslicer:<v>
+      # and refuses to accept jobs pinned to a different version.
+      - Worker__EngineVersion=${ORCASLICER_VERSION_PREVIOUS:-2.3.1}
+      - Worker__VerifyBinaryVersion=true
+      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
+    volumes: *orca-previous-volumes
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - printfarmer-network
+    healthcheck: *orca-previous-healthcheck
+    restart: unless-stopped
+    <<: *orca-previous-security
+    deploy: *orca-previous-deployment

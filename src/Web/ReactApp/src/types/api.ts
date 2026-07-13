@@ -4084,6 +4084,11 @@ export interface ProfileFieldMetadata {
   unit?: string;
   options?: EnumOption[];
   isAdvanced: boolean;
+  // Engine-version awareness (issue #578). All optional — legacy backends may omit them.
+  minEngineVersion?: string;
+  maxEngineVersion?: string;
+  renamedFromKey?: string;
+  renamedInVersion?: string;
 }
 
 export interface EnumOption {

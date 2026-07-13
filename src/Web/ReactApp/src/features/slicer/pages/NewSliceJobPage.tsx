@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
+import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
 import { 
   slicerProfilesService,
   type CustomProfile,
@@ -23,6 +24,7 @@ import {
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
 import { resolveProcessSettingsBaseline } from '@/features/slicer/components/settings/processSettingsBaseline';
+import { scrubSettingsForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
 import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
@@ -228,6 +230,98 @@ export const NewSliceJobPage: React.FC = () => {
 
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
+  /**
+   * Issue #578 dual-engine: user-selected pin for the OrcaSlicer engine version.
+   * Undefined = unpinned (server picks latest / any worker may claim). Only
+   * shown in the UI when 2+ versions are registered.
+   */
+  const [selectedEngineVersion, setSelectedEngineVersion] = useState<string | undefined>(undefined);
+  const { data: registeredEngines } = useQuery<SlicerEngineInfo[]>({
+    queryKey: ['slicer-engines-registry'],
+    queryFn: () => slicerService.listEngines(),
+    staleTime: 300_000,
+  });
+  const engineName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
+  const engineInfo = useMemo(
+    () => registeredEngines?.find(e => (e?.engine ?? '').toLowerCase() === engineName.toLowerCase()),
+    [registeredEngines, engineName],
+  );
+  const versionsForEngine = useMemo(() => engineInfo?.versions ?? [], [engineInfo]);
+  const versionEntriesForEngine = useMemo(() => engineInfo?.versionEntries ?? [], [engineInfo]);
+  // Backend-computed "newest online-available" version. The backend returns
+  // `null` in the legacy-single-worker case (no SlicerService rows registered
+  // at all), which is the signal to LEAVE JOBS UNPINNED so the legacy worker's
+  // generic "orcaslicer" capability can still claim them. Do NOT synthesize a
+  // fallback from availableVersionsForEngine here — that would defeat the null
+  // signal and force a pin that breaks legacy deployments (Vasquez R3).
+  const latestAvailableForEngine = useMemo(
+    () => engineInfo?.latest ?? undefined,
+    [engineInfo],
+  );
+  useEffect(() => {
+    // Reset the pin whenever engine changes so a stale pin doesn't survive.
+    // Also cascade profile selections (issue #578): a v2.3.1 machine or filament
+    // profile will not be valid for v2.4.0 and vice versa. Same treatment when
+    // switching between Orca and Prusa. Printer selection stays intact because
+    // it is orthogonal to the slicer engine. Multi-extruder mappings must clear
+    // too — they hold profile NAMES that are equally version-bound.
+    setSelectedEngineVersion(undefined);
+    setSelectedMachineProfileId('');
+    setSelectedNozzleFilter('');
+    setSelectedFilamentProfileId('');
+    setSelectedFilamentMaterial('');
+    setExtruderFilamentProfileIds({});
+    setExtruderFilamentColours({});
+  }, [selectedSlicerId]);
+
+  // Track first mount so the initial undefined→undefined render doesn't wipe
+  // user selections, but any subsequent transition (including pinned→undefined
+  // "back to Latest") still cascades a reset — the resolved effective version
+  // has changed, so the profile set the user was staring at may no longer apply.
+  const engineVersionInitialRenderRef = useRef(true);
+  useEffect(() => {
+    if (engineVersionInitialRenderRef.current) {
+      engineVersionInitialRenderRef.current = false;
+      return;
+    }
+    setSelectedMachineProfileId('');
+    setSelectedNozzleFilter('');
+    setSelectedFilamentProfileId('');
+    setSelectedFilamentMaterial('');
+    setExtruderFilamentProfileIds({});
+    setExtruderFilamentColours({});
+  }, [selectedEngineVersion]);
+
+  // Version-scoped settings scrub (issue #578). When the pinned engine version
+  // changes, drop keys that don't exist in the new version's metadata and
+  // migrate renamed keys to their target-version equivalents across ALL
+  // in-flight settings state: `advancedProcessSettings` (dynamic dict),
+  // `slicerSettings` (typed OrcaProcessSettings) and `originalProcessSettings`
+  // (baseline snapshot used by `diffProcessOverrides` at submit time). This
+  // guarantees that added fields appear, removed fields disappear and are
+  // omitted from the submit payload's `overrides`, and renamed fields only
+  // submit under the new key regardless of which state object the user's
+  // edits landed in.
+  const effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine;
+  useEffect(() => {
+    const scrubDict = (prev: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+      if (!prev || Object.keys(prev).length === 0) return prev;
+      const scrubbed = scrubSettingsForVersion(prev, 'process', effectiveEngineVersion);
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(scrubbed);
+      if (prevKeys.length === nextKeys.length && prevKeys.every((k) => k in scrubbed && scrubbed[k] === prev[k])) {
+        return prev;
+      }
+      return scrubbed;
+    };
+    setAdvancedProcessSettings((prev) => scrubDict(prev) ?? prev);
+    setSlicerSettings((prev) => {
+      const scrubbed = scrubDict(prev as unknown as Record<string, unknown>);
+      return (scrubbed as unknown as OrcaProcessSettings) ?? prev;
+    });
+    setOriginalProcessSettings((prev) => scrubDict(prev) ?? prev);
+  }, [effectiveEngineVersion]);
+
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>(() => {
     try {
       return localStorage.getItem(STORAGE_KEYS.printerId) ?? '';
@@ -668,10 +762,14 @@ export const NewSliceJobPage: React.FC = () => {
              (selectedSlicerId === 2 && typeName === 'PrusaSlicer');
     });
     const typeName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
+    // Map the UI slicer id (1=Orca, 2=Prusa) to the SlicerEngineType enum value
+    // (OrcaSlicer=0, PrusaSlicer=1) expected by the server. Issue #578 dual-engine
+    // dispatch depends on the correct engine name to build capability tags.
+    const engineEnum = selectedSlicerId === 1 ? 0 : 1;
     return {
       name: typeName,
       version: slicer?.version || 'Unknown',
-      engine: selectedSlicerId
+      engine: engineEnum
     };
   }, [selectedSlicerId, availableSlicers, getSlicerTypeName]);
 
@@ -816,8 +914,8 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Fetch machine profiles for the selected printer's model
   const { data: machineProfilesData = [], isLoading: isMachineProfilesLoading } = useQuery<OrcaMachineProfile[]>({
-    queryKey: ['machineProfilesForModel', selectedPrinterModelId],
-    queryFn: () => slicerProfilesService.getMachineProfilesForModel(selectedPrinterModelId!),
+    queryKey: ['machineProfilesForModel', selectedPrinterModelId, selectedEngineVersion ?? latestAvailableForEngine ?? null],
+    queryFn: () => slicerProfilesService.getMachineProfilesForModel(selectedPrinterModelId!, selectedEngineVersion ?? latestAvailableForEngine),
     enabled: !!selectedPrinterModelId,
     staleTime: 30_000
   });
@@ -865,16 +963,16 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Fetch filament profiles compatible with selected machine
   const { data: filamentProfilesData = [], isLoading: isFilamentProfilesLoading } = useQuery<OrcaFilamentProfile[]>({
-    queryKey: ['filamentProfilesForMachines', selectedMachineNames],
-    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(selectedMachineNames),
+    queryKey: ['filamentProfilesForMachines', selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine ?? null],
+    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine),
     enabled: selectedMachineNames.length > 0,
     staleTime: 30_000
   });
 
   // Fetch process profiles compatible with selected machine
   const { data: processProfilesData = [], isLoading: isProcessProfilesLoading } = useQuery<OrcaProcessProfile[]>({
-    queryKey: ['processProfilesForMachines', selectedMachineNames],
-    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(selectedMachineNames),
+    queryKey: ['processProfilesForMachines', selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine ?? null],
+    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine),
     enabled: selectedMachineNames.length > 0,
     staleTime: 30_000
   });
@@ -1579,6 +1677,47 @@ export const NewSliceJobPage: React.FC = () => {
   const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
 
+    // Issue #578 dual-engine (Hicks R3, refined R4): reject submission until
+    // the engine registry has resolved. Otherwise Latest-mode would build
+    // profile queries against `effectiveEngineVersion === undefined` and
+    // dispatch an unpinned Orca job that any installed version could claim —
+    // re-opening the profile/worker version mismatch H#3/H#R4 flagged.
+    if (registeredEngines === undefined) {
+      setError('Slicer registry not yet loaded. Please retry in a moment.');
+      return;
+    }
+
+    // Backend returns latest=null in TWO shapes (Hicks R4 #3, Vasquez R4):
+    //   1. Legacy / fresh-install: NO SlicerService rows — every
+    //      versionEntry.available is true so we leave the job UNPINNED so
+    //      a generic-capability legacy worker can claim it.
+    //   2. All-offline: rows exist but none fresh+online — every
+    //      versionEntry.available is false so the job would sit
+    //      unclaimable. In both cases `engineInfo.latest` is null; only the
+    //      per-entry availability signal distinguishes them.
+    // The Latest-mode submit guard fires ONLY when we can prove all versions
+    // are unavailable. Manually pinning a version is separately validated by
+    // the dropdown's `disabled` state, and a legacy submission (fresh
+    // install) is legitimately unpinned.
+    const engineHasAnyAvailable = engineInfo
+      ? versionEntriesForEngine.some(v => v.available)
+      : true;
+    if (
+      selectedEngineVersion === undefined
+      && engineInfo
+      && engineInfo.versions.length > 0
+      && !engineInfo.latest
+      && !engineHasAnyAvailable
+    ) {
+      setError(`No online ${engineName} worker is available to accept this job.`);
+      return;
+    }
+
+    // Legacy / fresh-install path is served naturally: `latestAvailableForEngine`
+    // is undefined (backend `latest=null`), no user pin is set, so
+    // `slicerEngineVersion` stays undefined below and a legacy single-worker
+    // deployment can claim the job with its generic "orcaslicer" capability.
+
     // Plate-aware slicing: only the ACTIVE plate's models are sliced. The IDs
     // are passed synchronously from the workspace's Slice button so we never
     // depend on a (potentially stale) copy of plate state.
@@ -1668,6 +1807,12 @@ export const NewSliceJobPage: React.FC = () => {
       modelFileUrl: effectiveModelFileUrl,
       modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
+      // Issue #578 dual-engine: when the user leaves the dropdown on "Latest"
+      // (undefined pin), resolve to the backend-computed newest AVAILABLE
+      // version so the job is deterministically routed to a worker that can
+      // actually claim it. When nothing is registered/available, remain
+      // unpinned so legacy single-worker deployments still work.
+      slicerEngineVersion: selectedEngineVersion ?? latestAvailableForEngine,
       slicerProfileJson: JSON.stringify({
             machineProfileName: selectedMachineProfileId,
             filamentProfileName: selectedFilamentProfileId,
@@ -1681,10 +1826,14 @@ export const NewSliceJobPage: React.FC = () => {
               : selectedProcessPresetId.startsWith('custom:')
               ? selectedProcessPresetId.slice('custom:'.length)
               : selectedProcessPresetId,
-            overrides: {
-              ...advancedProcessSettings,
-              ...modifiedProcessOverrides,
-            },
+            overrides: scrubSettingsForVersion(
+              {
+                ...advancedProcessSettings,
+                ...modifiedProcessOverrides,
+              },
+              'process',
+              selectedEngineVersion ?? latestAvailableForEngine,
+            ),
           }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
@@ -1732,6 +1881,12 @@ export const NewSliceJobPage: React.FC = () => {
     selectedFilamentProfileId,
     selectedMachineProfileId,
     selectedProcessPresetId,
+    selectedEngineVersion,
+    latestAvailableForEngine,
+    engineInfo,
+    engineName,
+    registeredEngines,
+    versionEntriesForEngine,
     slicerInfo.engine,
     slicerSettings,
     submitMutation,
@@ -1914,6 +2069,37 @@ export const NewSliceJobPage: React.FC = () => {
             onSlicerChange={setSelectedSlicerId}
             engineOptions={engineOptions}
           />
+
+          {/* ENGINE VERSION PIN (issue #578) — shown when 2+ versions are registered.
+               Unavailable versions (no online worker) are rendered disabled so a
+               user cannot pin a job that will hang in the queue forever. */}
+          {versionsForEngine.length > 1 && (
+            <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5">
+              <label htmlFor="slicer-engine-version" className="block text-sm font-semibold text-pf-text-primary mb-1.5">
+                Engine version
+              </label>
+              <Select
+                id="slicer-engine-version"
+                value={selectedEngineVersion ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSelectedEngineVersion(v === '' ? undefined : v);
+                }}
+              >
+                <option value="">Latest ({latestAvailableForEngine ?? '—'})</option>
+                {versionEntriesForEngine.map(entry => (
+                  <option key={entry.version} value={entry.version} disabled={!entry.available}>
+                    {entry.version}{entry.available ? '' : ' (offline)'}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-pf-text-muted">
+                Pins the slice job to a specific {engineName} engine. Leave on Latest
+                unless you need a particular version for compatibility. Versions
+                marked "offline" have no worker currently registered and cannot claim jobs.
+              </p>
+            </div>
+          )}
 
           {/* PRINTER + MACHINE SELECTION - one compact flow */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5 space-y-2">
@@ -2592,6 +2778,7 @@ export const NewSliceJobPage: React.FC = () => {
                 advancedSettings={advancedProcessSettings}
                 onAdvancedSettingsChange={setAdvancedProcessSettings}
                 originalSettings={originalProcessSettings}
+                engineVersion={effectiveEngineVersion}
               />
             </div>
           )}

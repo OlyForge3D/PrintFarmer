@@ -486,8 +486,8 @@ describe('NewSliceJobPage', () => {
         expect(machineProfileSelect).toBeVisible();
         expect(nozzleFilter).toHaveValue('0.4');
         expect(machineProfileSelect).toHaveValue('Prusa MK4 0.4 nozzle');
-        expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle']);
-        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle']);
+        expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], undefined);
+        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], undefined);
       });
 
       fireEvent.change(nozzleFilter, { target: { value: '0.6' } });

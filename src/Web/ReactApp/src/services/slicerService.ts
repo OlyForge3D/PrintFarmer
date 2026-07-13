@@ -168,6 +168,47 @@ class SlicerService {
   async deleteModel(modelId: string): Promise<void> {
     await apiClient.delete(`/3d-models/${modelId}`);
   }
+
+  /**
+   * List all slicer engines currently registered in the plugin registry,
+   * including all installed versions per engine. Fed by the API endpoint
+   * added for issue #578 dual-engine support.
+   */
+  async listEngines(): Promise<SlicerEngineInfo[]> {
+    const response = await apiClient.get<SlicerEngineInfo[]>('/slicers/engines');
+    return response.data ?? [];
+  }
+}
+
+/**
+ * A slicer engine surface with all installed versions (issue #578).
+ * Emitted by GET /api/slicers/engines.
+ */
+export interface SlicerEngineInfo {
+  /** Canonical engine name (e.g. "OrcaSlicer", "PrusaSlicer"). */
+  engine: string;
+  /** All installed versions, newest first (System.Version sort). */
+  versions: string[];
+  /**
+   * Per-version availability. `available` is `true` only when at least one
+   * Online SlicerService currently advertises that (engine, version) pair.
+   * When no SlicerService rows exist yet (fresh install), the backend marks
+   * every entry available so the version selector is still usable.
+   * The UI MUST use this to disable unavailable versions in the selector —
+   * a job pinned to an unavailable version will otherwise hang in the queue.
+   */
+  versionEntries: SlicerEngineVersionEntry[];
+  /**
+   * The newest AVAILABLE version (never returns an unavailable version unless
+   * every entry is unavailable). Prefer this over `versions[0]` when
+   * defaulting an unpinned submission to "latest".
+   */
+  latest: string | null;
+}
+
+export interface SlicerEngineVersionEntry {
+  version: string;
+  available: boolean;
 }
 
 export const slicerService = new SlicerService();

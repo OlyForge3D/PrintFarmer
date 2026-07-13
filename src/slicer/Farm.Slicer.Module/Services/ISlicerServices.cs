@@ -278,6 +278,15 @@ public class SlicerEngineInfo
     public IReadOnlyList<string> SupportedExtensions { get; set; } = Array.Empty<string>();
 
     public TimeSpan? EstimatedWaitTime { get; set; }
+
+    /// <summary>
+    /// All registered library versions for this engine, sorted newest-first
+    /// (issue #578). The React version selector renders these; the first
+    /// entry is the "current" engine and any additional entries are the
+    /// retained "previous" engines. Empty when the engine is compiled in
+    /// but no plugin is present at runtime.
+    /// </summary>
+    public IReadOnlyList<string> AvailableVersions { get; set; } = Array.Empty<string>();
 }
 
 /// <summary>

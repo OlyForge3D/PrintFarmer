@@ -221,7 +221,8 @@ parse_args() {
     INCLUDE_SPOOLMAN="false"
     INCLUDE_OBICO_ML="false"
     INCLUDE_GO2RTC="false"
-    ENABLE_ORCA_WORKER=""
+    ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-}"
+    ENABLE_ORCA_WORKER_PREVIOUS="${ENABLE_ORCA_WORKER_PREVIOUS:-}"
     ENABLE_PGADMIN="false"
     API_PORT=""
     DB_PROVIDER="${DB_PROVIDER:-postgres}"
@@ -261,6 +262,8 @@ parse_args() {
                 INCLUDE_GO2RTC="true"; shift ;;
             --enable-orca-worker)
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
+            --enable-orca-worker-previous)
+                ENABLE_ORCA_WORKER_PREVIOUS="$2"; shift 2 ;;
             --enable-pgadmin)
                 ENABLE_PGADMIN="true"; shift ;;
             --db-provider)
@@ -281,6 +284,7 @@ parse_args() {
 
     OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT}"
     ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+    ENABLE_ORCA_WORKER_PREVIOUS="${ENABLE_ORCA_WORKER_PREVIOUS:-no}"
 }
 
 # Function to validate port numbers
@@ -757,6 +761,17 @@ generate_compose() {
                 log_info "Switched nginx config to nginx-proxy-split.conf for slicer routing"
             else
                 log_warning "Failed to merge slicer-host service, continuing without it"
+            fi
+
+            # Optional previous-version OrcaSlicer worker for dual-engine support (issue #578)
+            local need_orca_worker_previous="${ENABLE_ORCA_WORKER_PREVIOUS:-no}"
+            if [[ "$need_orca_worker_previous" =~ ^(yes|true|1)$ ]]; then
+                if merge_addon_services "$compose_file" "orcaslicer-worker-previous"; then
+                    log_info "Merged previous-version OrcaSlicer worker (ENABLE_ORCA_WORKER_PREVIOUS=$need_orca_worker_previous, version=${ORCASLICER_VERSION_PREVIOUS:-2.3.1})"
+                    addons_merged=true
+                else
+                    log_warning "Failed to merge previous-version OrcaSlicer worker, continuing without it"
+                fi
             fi
         else
             log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
