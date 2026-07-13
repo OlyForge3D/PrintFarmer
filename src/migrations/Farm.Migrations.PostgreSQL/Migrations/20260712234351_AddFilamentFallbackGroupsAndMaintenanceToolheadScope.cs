@@ -171,6 +171,26 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(
+                """
+                DELETE FROM "PrinterMaintenanceSchedules"
+                WHERE "Id" IN (
+                    SELECT ranked."Id"
+                    FROM (
+                        SELECT
+                            "Id",
+                            ROW_NUMBER() OVER (
+                                PARTITION BY "MaintenancePlanId", "PrinterId"
+                                ORDER BY
+                                    CASE WHEN "ToolheadId" IS NULL THEN 0 ELSE 1 END,
+                                    "CreatedAt",
+                                    "Id") AS "DuplicateRank"
+                        FROM "PrinterMaintenanceSchedules"
+                    ) AS ranked
+                    WHERE ranked."DuplicateRank" > 1
+                );
+                """);
+
             migrationBuilder.DropForeignKey(
                 name: "FK_MaintenanceAlerts_Toolheads_ToolheadId",
                 table: "MaintenanceAlerts");
