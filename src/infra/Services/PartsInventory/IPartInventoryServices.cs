@@ -45,7 +45,21 @@ public record CreatePartResult(
     PartInventory? Part,
     string? Message);
 
-/// <summary>Adjust request as consumed by <see cref="IPartInventoryService"/>.</summary>
+/// <summary>
+/// Adjust request as consumed by <see cref="IPartInventoryService"/>.
+/// <para>
+/// Operation-key idempotency arrives on two distinct channels (issue #715, Hicks r3 blocker 2).
+/// <see cref="OperationKey"/> is the <b>client-supplied</b> value and is policed: a value in the
+/// reserved <c>idem:</c> namespace
+/// (<see cref="Farm.Infrastructure.Services.Idempotency.IdempotencyKeyUtilities.SynthesizedOperationKeyPrefix"/>)
+/// is rejected so a crafted client key can never collide with a server-synthesized key and
+/// silently dedup a distinct mutation. <see cref="SynthesizedOperationKey"/> is the <b>trusted</b>
+/// value the idempotency filter synthesizes when the client omitted its own key; it legitimately
+/// uses the reserved prefix and is honored only when <see cref="OperationKey"/> is absent. Keeping
+/// them on separate fields lets the service reserve the prefix without breaking the synthesized
+/// backstop.
+/// </para>
+/// </summary>
 public record AdjustCommand(
     int Delta,
     PartAdjustmentReason Reason,
@@ -53,7 +67,8 @@ public record AdjustCommand(
     string? BinCode,
     string? Notes,
     string? OperationKey,
-    string? UserId);
+    string? UserId,
+    string? SynthesizedOperationKey = null);
 
 /// <summary>
 /// Command to atomically create a new printed-part SKU and (optionally) seed

@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Idempotency;
 
 namespace Farm.Infrastructure.Dtos.PartsInventory;
 
@@ -128,7 +129,7 @@ public record AdjustPartInventoryRequest(
     Guid? JobId = null,
     string? BinCode = null,
     string? Notes = null,
-    string? OperationKey = null);
+    [ReservedOperationKeyPrefix] string? OperationKey = null);
 
 /// <summary>Request body for creating a printed-part SKU.</summary>
 public record CreatePartInventoryRequest(

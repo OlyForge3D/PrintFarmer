@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Infrastructure.Idempotency;
@@ -161,25 +162,25 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
             return;
         }
 
-        // Fold the *resolved* request identity into the idempotency identity so that a
-        // single client key reused across different {id}/{sku}/{toolheadIndex} values cannot
-        // silently replay one resource's response for another (or, for empty-body actions
-        // like TaskComplete, silently drop the second mutation). The route-key constant is a
-        // static template shared by every id, so on its own it is only a prefix.
+        // Fold the *typed* resource identity into the idempotency identity so that a single
+        // client key reused across different {id}/{sku}/{toolheadIndex} values cannot silently
+        // replay one resource's response for another (or, for empty-body actions like
+        // TaskComplete, silently drop the second mutation). The route-key constant is a static
+        // template shared by every id, so on its own it is only a prefix.
         //
-        // For parts-adjust specifically (Hicks r2 blocker 1) the discriminator must be the
-        // *normalized* SKU rather than the raw path: the domain resolves the target entity by
-        // case-insensitive SKU, so /abc/adjust and /ABC/adjust are the same resource and must
-        // share one idempotency record — otherwise a same-key retry with different SKU casing
-        // double-applies the delta. BuildEffectiveIdentity centralizes that per-route rule.
+        // The discriminator is built from the matched route VALUES, not the raw path (Hicks
+        // r3 blocker 1): route constraints validate but do not canonicalize, so GUID casing
+        // ({id:guid}) and integer form ({toolheadIndex:int}) can vary while binding to the
+        // exact same action arguments. Passing the route values lets BuildEffectiveIdentity
+        // canonicalize each route (normalized SKU, "D"-form GUID, invariant int) so
+        // format-only variants share one record. resolvedPath remains the defensive fallback
+        // for any route value that is absent or unparseable.
         string resolvedPath = http.Request.Path.HasValue ? http.Request.Path.Value! : string.Empty;
-        string? partsInventorySku = context.RouteData.Values.TryGetValue("sku", out object? skuRouteValue)
-            ? skuRouteValue as string
-            : null;
+        Dictionary<string, string?> routeValues = ExtractRouteValues(context.RouteData.Values);
         string effectiveRouteKey = IdempotencyRouteKeys.BuildEffectiveIdentity(
             metadata.RouteKey,
             resolvedPath,
-            partsInventorySku);
+            routeValues);
 
         string requestHash = IdempotencyKeyUtilities.ComputeRequestHash(effectiveRouteKey, bodyBytes);
 
@@ -246,6 +247,24 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
                 _ = await next();
                 return;
         }
+    }
+
+    /// <summary>
+    /// Projects the matched <see cref="RouteData"/> values to their string form (case-insensitive
+    /// keys) so <see cref="IdempotencyRouteKeys.BuildEffectiveIdentity"/> can fold typed resource
+    /// identity — GUID, int, normalized SKU — into the idempotency key without the infrastructure
+    /// layer taking a dependency on ASP.NET Core routing types. URL-derived route values are
+    /// already strings; any non-string value is rendered defensively via <c>ToString()</c>.
+    /// </summary>
+    private static Dictionary<string, string?> ExtractRouteValues(RouteValueDictionary routeValues)
+    {
+        Dictionary<string, string?> values = new(routeValues.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, object?> entry in routeValues)
+        {
+            values[entry.Key] = entry.Value as string ?? entry.Value?.ToString();
+        }
+
+        return values;
     }
 
     /// <summary>

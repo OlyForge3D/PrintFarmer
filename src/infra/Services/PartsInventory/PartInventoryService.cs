@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -52,7 +53,29 @@ public class PartInventoryService(
         }
 
         string trimmedSku = PartInventoryIdentity.NormalizeSku(sku);
-        string? operationKey = PartInventoryIdentity.NormalizeOperationKey(command.OperationKey);
+
+        // Reserved-namespace guard (issue #715, Hicks r3 blocker 2): the "idem:" prefix is
+        // reserved for the operationKey the idempotency filter synthesizes on the client's
+        // behalf (which arrives via command.SynthesizedOperationKey). A client must never supply
+        // an operationKey in that namespace, or a crafted value could collide with a future
+        // synthesized key and dedup a genuinely distinct mutation. Only the client-supplied
+        // channel is policed; the synthesized channel is trusted. Enforced here — not only at
+        // the API boundary — as defense-in-depth for any caller of the service.
+        string? clientOperationKey = PartInventoryIdentity.NormalizeOperationKey(command.OperationKey);
+        if (clientOperationKey is not null
+            && clientOperationKey.StartsWith(IdempotencyKeyUtilities.SynthesizedOperationKeyPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return new AdjustResult(
+                PartInventoryOutcome.InvalidRequest,
+                null,
+                0,
+                $"Operation key must not begin with the reserved '{IdempotencyKeyUtilities.SynthesizedOperationKeyPrefix}' prefix, which is reserved for server-side idempotency backstopping.");
+        }
+
+        // Prefer the client's key; fall back to the trusted synthesized backstop only when the
+        // client omitted its own. The synthesized key is exempt from the reserved-prefix guard.
+        string? operationKey = clientOperationKey
+            ?? PartInventoryIdentity.NormalizeOperationKey(command.SynthesizedOperationKey);
         if (operationKey?.Length > 128)
         {
             return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, 0, "Operation key must be 128 characters or fewer.");

@@ -459,6 +459,171 @@ public class IdempotencyFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task TaskComplete_SameKey_SameBody_DifferentGuidCasing_Replays_NotReExecutes()
+    {
+        // Hicks r3 blocker 1: the {id:guid} route constraint validates but does NOT canonicalize,
+        // so /api/tasks/{GUID-UPPER}/complete and its lowercase form bind to the SAME parsed Guid
+        // and the SAME action — yet their raw paths differ by case. The idempotency identity must
+        // fold in the CANONICAL ("D"-form) GUID rather than the raw path, or a same-key retry that
+        // differs only in GUID casing would mint a distinct record and double-execute the
+        // completion. Distinct raw paths here prove it is the canonical GUID (not the path
+        // fallback) driving the replay.
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"a\":1}");
+        const string key = "task-guid-casing";
+        const string upper = "ABCDEF01-2345-6789-ABCD-EF0123456789";
+        const string lower = "abcdef01-2345-6789-abcd-ef0123456789";
+
+        int executionCount = 0;
+
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, key, body,
+            path: $"/api/tasks/{upper}/complete",
+            routeValues: new Dictionary<string, object?> { ["id"] = upper });
+        await RunAsync(filter, first, 200, "{\"task\":\"done\"}", () => executionCount++);
+        _ = first.HttpContext.Response.StatusCode.Should().Be(200);
+
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, key, body,
+            path: $"/api/tasks/{lower}/complete",
+            routeValues: new Dictionary<string, object?> { ["id"] = lower });
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            executionCount++;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+
+        _ = second.Result.Should().BeOfType<IdempotencyReplayResult>(
+            "a same-key retry that differs only in GUID casing must replay, not re-execute");
+        _ = executionCount.Should().Be(1, "only the first completion may run; the casing variant must replay");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "both GUID casings must share ONE idempotency record");
+    }
+
+    [Fact]
+    public async Task JobQueueHarvest_SameKey_SameBody_DifferentGuidFormat_Replays_NotReExecutes()
+    {
+        // Hicks r3 blocker 1 (format tolerance beyond casing): the {id:guid} constraint uses
+        // Guid.TryParse, which also accepts the braced ("B") form, so /{id} and /{braced-id} bind
+        // to the same Guid. Canonicalizing to the "D" form collapses braced/hyphenless variants
+        // onto one idempotency record so a same-key retry cannot double-execute the harvest. The
+        // two raw paths differ, isolating the canonicalization from the path fallback.
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"h\":1}");
+        const string key = "harvest-guid-format";
+        const string plain = "11111111-2222-3333-4444-555555555555";
+        const string braced = "{11111111-2222-3333-4444-555555555555}";
+
+        int executionCount = 0;
+
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.JobQueueHarvest, key, body,
+            path: $"/api/job-queue/{plain}/harvest",
+            routeValues: new Dictionary<string, object?> { ["id"] = plain });
+        await RunAsync(filter, first, 200, "{\"harvest\":\"ok\"}", () => executionCount++);
+
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.JobQueueHarvest, key, body,
+            path: $"/api/job-queue/{braced}/harvest",
+            routeValues: new Dictionary<string, object?> { ["id"] = braced });
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            executionCount++;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+
+        _ = second.Result.Should().BeOfType<IdempotencyReplayResult>(
+            "the braced GUID form must canonicalize to the same identity and replay");
+        _ = executionCount.Should().Be(1, "only the first harvest may run; the format variant must replay");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "braced and plain GUID forms must share ONE idempotency record");
+    }
+
+    [Fact]
+    public async Task SpoolBind_SameKey_SameBody_DifferentGuidCasingAndIntForm_Replays_NotReExecutes()
+    {
+        // Hicks r3 blocker 1: the {id:guid}/toolheads/{toolheadIndex:int} route has TWO typed
+        // values. GUID casing and integer leading-zeros ("1" vs "01") both bind to identical
+        // parsed arguments but differ in raw path text. Canonicalizing the GUID ("D" form) AND the
+        // integer (invariant parse) collapses those variants onto ONE idempotency record so a
+        // same-key retry cannot double-execute the spool bind.
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"spoolId\":7}");
+        const string key = "spool-bind-canon";
+        const string upper = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
+        const string lower = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+        int executionCount = 0;
+
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.PrinterToolheadSpoolBind, key, body,
+            path: $"/api/printers/{upper}/toolheads/1/spool",
+            routeValues: new Dictionary<string, object?> { ["id"] = upper, ["toolheadIndex"] = "1" });
+        await RunAsync(filter, first, 200, "{\"bound\":true}", () => executionCount++);
+
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.PrinterToolheadSpoolBind, key, body,
+            path: $"/api/printers/{lower}/toolheads/01/spool",
+            routeValues: new Dictionary<string, object?> { ["id"] = lower, ["toolheadIndex"] = "01" });
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            executionCount++;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+
+        _ = second.Result.Should().BeOfType<IdempotencyReplayResult>(
+            "GUID casing and integer leading-zero variants must canonicalize to one identity and replay");
+        _ = executionCount.Should().Be(1, "only the first spool bind may run; the canonical variant must replay");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "GUID casing + int form variants must share ONE idempotency record");
+    }
+
+    [Fact]
+    public async Task TaskComplete_SameKey_DifferentGuids_BothExecute_AsSeparateRows()
+    {
+        // Guard against over-collapsing: canonicalizing GUID FORMAT must not merge genuinely
+        // DIFFERENT ids. Two distinct task GUIDs under one client key must each execute and
+        // persist their own record — the canonicalization narrows format variance without eroding
+        // the cross-resource replay guard.
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"a\":1}");
+        const string key = "distinct-guids";
+        const string idA = "11111111-1111-1111-1111-111111111111";
+        const string idB = "22222222-2222-2222-2222-222222222222";
+
+        int executionCount = 0;
+
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, key, body,
+            path: $"/api/tasks/{idA}/complete",
+            routeValues: new Dictionary<string, object?> { ["id"] = idA });
+        await RunAsync(filter, first, 200, "{\"task\":\"a\"}", () => executionCount++);
+
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.TaskComplete, key, body,
+            path: $"/api/tasks/{idB}/complete",
+            routeValues: new Dictionary<string, object?> { ["id"] = idB });
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            executionCount++;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+
+        _ = second.Result.Should().BeNull("distinct GUIDs are distinct resources and must not replay");
+        _ = executionCount.Should().Be(2, "each distinct task id must execute its own completion");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(2, "two distinct task ids must each get their own record");
+    }
+
+    [Fact]
     public async Task OversizedBody_WithKey_Returns_413_AndPersistsNothing()
     {
         // A body over the buffering limit cannot be hashed for the replay contract.

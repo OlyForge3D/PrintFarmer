@@ -141,19 +141,20 @@ public class PartInventoryAdjustDoubleApplicationTests : IDisposable
     {
         HttpContext http = context.HttpContext;
 
-        // request.OperationKey is null (client omitted it) → fall back to the synthesized key.
-        string? operationKey = null;
-        if (string.IsNullOrWhiteSpace(operationKey)
-            && http.Items.TryGetValue(IdempotencyFilter.SynthesizedOperationKeyItemKey, out object? synthesized)
+        // request.OperationKey is null (client omitted it) → forward the filter's synthesized
+        // key on the dedicated SynthesizedOperationKey channel, exactly as the real controller
+        // does after the r3 channel-split. The client OperationKey field stays null.
+        string? synthesizedOperationKey = null;
+        if (http.Items.TryGetValue(IdempotencyFilter.SynthesizedOperationKeyItemKey, out object? synthesized)
             && synthesized is string synthesizedKey
             && !string.IsNullOrWhiteSpace(synthesizedKey))
         {
-            operationKey = synthesizedKey;
+            synthesizedOperationKey = synthesizedKey;
         }
 
         AdjustResult result = await _service.AdjustAsync(
             Sku,
-            new AdjustCommand(1, PartAdjustmentReason.Manual, null, null, null, operationKey, UserId),
+            new AdjustCommand(1, PartAdjustmentReason.Manual, null, null, null, null, UserId, synthesizedOperationKey),
             CancellationToken.None);
 
         http.Response.StatusCode = 200;

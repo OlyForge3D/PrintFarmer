@@ -237,20 +237,20 @@ public class PartsInventoryController(
             return BadRequest(new { message = "Request body is required." });
         }
 
-        // Idempotency backstop (issue #715, Hicks r2 blocker 2): when the client omits the
-        // body operationKey, fall back to the deterministic key the idempotency filter
-        // synthesized for this route. That guarantees the domain's natural
-        // (PartInventoryId, OperationKey) dedup always backstops the filter — so even if a
-        // post-mutation flush failure leaves the Processing row to be reclaimed, a retry of
-        // the same Idempotency-Key cannot double-apply the delta. When the client DID supply
-        // an operationKey we honor it unchanged.
-        string? operationKey = request.OperationKey;
-        if (string.IsNullOrWhiteSpace(operationKey)
-            && HttpContext.Items.TryGetValue(IdempotencyFilter.SynthesizedOperationKeyItemKey, out object? synthesized)
+        // Idempotency backstop (issue #715, Hicks r2 blocker 2 + r3 blocker 2): when the client
+        // omits the body operationKey, the idempotency filter stashes a deterministic synthesized
+        // key for this route in HttpContext.Items. We forward it on the DEDICATED
+        // SynthesizedOperationKey channel — never merged into the client OperationKey field — so
+        // the service can (a) reject any client value in the reserved "idem:" namespace while
+        // (b) still honoring the trusted synthesized backstop, guaranteeing the domain's natural
+        // (PartInventoryId, OperationKey) dedup applies even if a post-mutation flush failure
+        // leaves the Processing row to be reclaimed and the same Idempotency-Key is retried.
+        string? synthesizedOperationKey = null;
+        if (HttpContext.Items.TryGetValue(IdempotencyFilter.SynthesizedOperationKeyItemKey, out object? synthesized)
             && synthesized is string synthesizedKey
             && !string.IsNullOrWhiteSpace(synthesizedKey))
         {
-            operationKey = synthesizedKey;
+            synthesizedOperationKey = synthesizedKey;
         }
 
         AdjustResult result = await partInventoryService.AdjustAsync(
@@ -261,8 +261,9 @@ public class PartsInventoryController(
                 request.JobId,
                 request.BinCode,
                 request.Notes,
-                operationKey,
-                GetActorId()),
+                request.OperationKey,
+                GetActorId(),
+                synthesizedOperationKey),
             ct);
 
         return result.Outcome switch
