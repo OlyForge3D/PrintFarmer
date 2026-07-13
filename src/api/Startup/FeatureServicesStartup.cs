@@ -98,9 +98,27 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
+        // Printed-part inventory (see #714). Distinct from MaintenanceComponents
+        // (replacement parts) — this module tracks parts produced by prints.
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartInventoryRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartInventoryRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IBinRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfBinRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartInventoryAdjustmentRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartInventoryAdjustmentRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartOutputMappingRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartOutputMappingRepository>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartInventoryService,
+            Farm.Infrastructure.Services.PartsInventory.PartInventoryService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService,
+            Farm.Infrastructure.Services.PartsInventory.PartHarvestService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartOutputSnapshotService,
+            Farm.Infrastructure.Services.PartsInventory.PartOutputSnapshotService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IReorderEvaluationService,
+            Farm.Infrastructure.Services.PartsInventory.ReorderEvaluationService>();
+
         // Attention Feed (issue #707) — unified operator feed composed from failure,
-        // maintenance, and offline sources. Harvest items join after the #714 ledger exists;
-        // runout items join via #709.
+        // maintenance, offline, harvest, and runout sources.
         services.AddScoped<Farm.Infrastructure.Repositories.Attention.IAttentionSnoozeRepository,
             Farm.Infrastructure.Repositories.Attention.EfAttentionSnoozeRepository>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
@@ -109,10 +127,8 @@ public static class FeatureServicesStartup
             Farm.Infrastructure.Services.Attention.Sources.MaintenanceAttentionSource>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
             Farm.Infrastructure.Services.Attention.Sources.OfflineAttentionSource>();
-
-        // Harvest attention items are deferred until the #714 harvest ledger exists; the
-        // HarvestAttentionSource is intentionally NOT registered so no harvest cards are
-        // composed and no Harvest action path is reachable from a feed item (review R4).
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.HarvestAttentionSource>();
         services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionService,
             Farm.Infrastructure.Services.Attention.AttentionService>();
         services.AddSingleton<Farm.Infrastructure.Services.Attention.IAttentionBroadcaster,

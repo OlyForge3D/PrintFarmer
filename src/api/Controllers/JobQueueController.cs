@@ -1,12 +1,18 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Infrastructure.OperatorFeatures;
+using Farm.Web.Api.Infrastructure.PartsInventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -28,6 +34,8 @@ public class JobQueueController(
     IBatchDispatchService batchDispatchService,
     IPrinterStatusCacheReader printerStatusCache,
     IPrintFarmerTelemetryService telemetryService,
+    IPartHarvestService partHarvestService,
+    IOperatorFeatureGate operatorFeatureGate,
     ILogger<JobQueueController> logger) : ControllerBase
 {
     /// <summary>
@@ -309,6 +317,60 @@ public class JobQueueController(
             logger.LogError(ex, "Error rerunning print job {Id}", id);
             return Problem("An error occurred while rerunning the job", statusCode: 500);
         }
+    }
+
+    /// <summary>
+    /// Harvest a completed print job into printed-part stock.
+    /// Atomically stamps the job as harvested, increments the mapped SKU(s),
+    /// and records ledger entries. Idempotent: replaying against an already
+    /// harvested job returns the original result without applying deltas twice.
+    /// </summary>
+    /// <param name="id">Completed print job to harvest.</param>
+    /// <param name="request">Optional bin code, quantity override, or manual SKU mapping fallback.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("{id:guid}/harvest")]
+    [ProducesResponseType(typeof(HarvestJobResponse), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<HarvestJobResponse>> HarvestJobAsync(
+        Guid id,
+        [FromBody] HarvestJobRequest? request,
+        CancellationToken ct)
+    {
+        if (!operatorFeatureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        {
+            return OperatorFeatureProblemDetails.NotFound(
+                operatorFeatureGate,
+                OperatorFeature.PrintedPartsInventory);
+        }
+
+        HarvestJobRequest payload = request ?? new HarvestJobRequest();
+        string? userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("oid");
+
+        HarvestResult result = await partHarvestService.HarvestJobAsync(id, payload, userId, ct);
+        return result.Outcome switch
+        {
+            PartInventoryOutcome.Ok => Ok(result.Response),
+            PartInventoryOutcome.IdempotentReplay => Ok(result.Response),
+            PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
+            PartInventoryOutcome.JobNotCompleted => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
+            PartInventoryOutcome.WrongBin when result.WrongBin is not null
+                => PartsInventoryProblemDetails.WrongBin(result.WrongBin),
+            PartInventoryOutcome.NoMappings when result.MappingRequired is not null
+                => PartsInventoryProblemDetails.PartMappingRequired(result.MappingRequired),
+            PartInventoryOutcome.PartNotFound => NotFound(new { message = result.Message }),
+            PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
+            PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.FeatureDisabled => OperatorFeatureProblemDetails.NotFound(
+                operatorFeatureGate,
+                OperatorFeature.PrintedPartsInventory),
+            _ => Problem(result.Message ?? "Harvest failed.", statusCode: 500),
+        };
     }
 
     /// <summary>

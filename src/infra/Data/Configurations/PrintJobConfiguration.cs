@@ -72,6 +72,16 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         builder.Ignore(pj => pj.RemainingCopies);
         builder.Ignore(pj => pj.IsMultiCopy);
 
+        // Printed-part harvest metadata. Harvest is orthogonal to lifecycle status.
+        builder.Property(pj => pj.HarvestOperationKey).HasMaxLength(128);
+        builder.Property(pj => pj.HarvestedByUserId).HasMaxLength(450);
+        builder.HasIndex(pj => pj.HarvestedAt);
+        builder.HasIndex(pj => pj.HarvestOperationKey).IsUnique();
+        builder.HasOne<Bin>()
+            .WithMany()
+            .HasForeignKey(pj => pj.HarvestedIntoBinId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // Per-tool material requirements: RequiredMaterialsPerToolJson is stored as text;
         // the typed RequiredMaterialsPerTool accessor is [NotMapped] but declared explicitly
         // here so the mapping remains obvious to future readers.

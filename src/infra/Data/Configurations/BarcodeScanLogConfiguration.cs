@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -24,5 +24,7 @@ public class BarcodeScanLogConfiguration : IEntityTypeConfiguration<BarcodeScanL
         _ = builder.HasIndex(l => l.Barcode);
         _ = builder.HasIndex(l => l.Action);
         _ = builder.HasIndex(l => l.Outcome);
+        _ = builder.HasIndex(l => l.BinId);
+        _ = builder.HasIndex(l => l.PartInventoryId);
     }
 }
