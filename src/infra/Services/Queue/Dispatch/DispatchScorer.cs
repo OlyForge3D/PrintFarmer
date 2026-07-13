@@ -203,7 +203,12 @@ public class DispatchScorer(
         IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
         if (multiSlotEnabled && perToolReqs is { Count: > 0 })
         {
-            foreach (PrintJobToolMaterialRequirement req in perToolReqs)
+            // Printer-wide grams ledger (Finding H4): each source/fallback toolhead's usable
+            // coverage is a finite shared pool. Allocating it per requirement in a deterministic
+            // order (by G-code tool index) prevents two requirements from each claiming the full
+            // grams of the same spool.
+            Dictionary<Guid, double> gramsLedger = [];
+            foreach (PrintJobToolMaterialRequirement req in perToolReqs.OrderBy(r => r.Tool))
             {
                 PerToolGramsContext? gramsContext = null;
                 gramsContexts?.TryGetValue((printer.Id, req.Tool), out gramsContext);
@@ -211,7 +216,8 @@ public class DispatchScorer(
                     printer,
                     req,
                     gramsAware,
-                    gramsContext);
+                    gramsContext,
+                    gramsLedger);
                 breakdown[$"PerToolLoadout.T{req.Tool}"] = toolFactor;
             }
         }
@@ -448,6 +454,7 @@ public class DispatchScorer(
                         }
 
                         fallbackMembers.Add(new FallbackGramsMember(
+                            memberToolhead.Id,
                             memberToolhead.Name,
                             TryGetUsableGrams(
                                 coverageByToolheadId,
@@ -458,7 +465,7 @@ public class DispatchScorer(
                 }
 
                 contexts[(printer.Id, req.Tool)] =
-                    new PerToolGramsContext(sourceUsable, fallbackMembers);
+                    new PerToolGramsContext(matched.Id, sourceUsable, fallbackMembers);
             }
         }
 
@@ -503,7 +510,8 @@ public class DispatchScorer(
         Printer printer,
         PrintJobToolMaterialRequirement req,
         bool gramsAware,
-        PerToolGramsContext? gramsContext)
+        PerToolGramsContext? gramsContext,
+        Dictionary<Guid, double> gramsLedger)
     {
         string factorName = $"PerToolLoadout.T{req.Tool}";
 
@@ -522,7 +530,7 @@ public class DispatchScorer(
             && string.Equals(indexed.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase))
         {
             return ApplyGramsOverlay(
-                factorName, 100, req, gramsAware, gramsContext);
+                factorName, 100, req, gramsAware, gramsContext, gramsLedger);
         }
 
         // Fall back: any physical toolhead or MMU gate currently loaded with the material.
@@ -532,7 +540,7 @@ public class DispatchScorer(
             // A different-toolhead match is already partial credit, so it never consumes the
             // fallback-group path — only the proportional grams penalty applies here.
             return ApplyGramsOverlay(
-                factorName, 75, req, gramsAware, gramsContext);
+                factorName, 75, req, gramsAware, gramsContext, gramsLedger);
         }
 
         // No toolhead has this material loaded — soft penalty, still non-hard so the operator
@@ -548,13 +556,17 @@ public class DispatchScorer(
     /// F6, Finding 4). A slot short of the estimated grams is discounted proportionally, credited
     /// at a reduced weight when a configured fallback member covers the shortfall, or left at the
     /// material-only score with a "coverage unknown" note when grams cannot be verified.
+    /// A printer-wide <paramref name="gramsLedger"/> tracks grams already committed to earlier
+    /// requirements so a spool shared as a source or fallback member is never double-counted
+    /// across the printer's requirement set (Finding H4).
     /// </summary>
     private static FactorScore ApplyGramsOverlay(
         string factorName,
         double baseScore,
         PrintJobToolMaterialRequirement req,
         bool gramsAware,
-        PerToolGramsContext? gramsContext)
+        PerToolGramsContext? gramsContext,
+        Dictionary<Guid, double> gramsLedger)
     {
         double baseWeighted = baseScore * WeightPerToolLoadout;
 
@@ -577,12 +589,25 @@ public class DispatchScorer(
                 $"T{req.Tool} coverage unknown (need {FormatGrams(estimated)}g)");
         }
 
-        double sourceConsumed = Math.Min(Math.Max(0, sourceUsable), estimated);
+        // Subtract grams already committed to earlier requirements from the shared source pool.
+        double sourceUsableRemaining = sourceUsable;
+        if (gramsContext.SourceToolheadId is Guid sourceId)
+        {
+            sourceUsableRemaining = Math.Max(0, sourceUsable - gramsLedger.GetValueOrDefault(sourceId));
+        }
+
+        double sourceConsumed = Math.Min(Math.Max(0, sourceUsableRemaining), estimated);
+        if (gramsContext.SourceToolheadId is Guid chargedSourceId)
+        {
+            gramsLedger[chargedSourceId] =
+                gramsLedger.GetValueOrDefault(chargedSourceId) + sourceConsumed;
+        }
+
         double shortfallRemaining = estimated - sourceConsumed;
         if (shortfallRemaining <= 1e-6)
         {
             string sufficientCoverage =
-                $"T{req.Tool} source usable {FormatGrams(sourceUsable)}g covers " +
+                $"T{req.Tool} source usable {FormatGrams(sourceUsableRemaining)}g covers " +
                 $"{FormatGrams(estimated)}g; shortfall remaining 0g; fallback closed gap: not needed";
             return new FactorScore(
                 factorName,
@@ -603,11 +628,16 @@ public class DispatchScorer(
                 continue;
             }
 
-            double consumed = Math.Min(Math.Max(0, memberUsable), shortfallRemaining);
+            // Members are also shared pools — only their unallocated remainder is available.
+            double memberUsableRemaining =
+                Math.Max(0, memberUsable - gramsLedger.GetValueOrDefault(member.ToolheadId));
+            double consumed = Math.Min(memberUsableRemaining, shortfallRemaining);
             fallbackConsumed += consumed;
             shortfallRemaining -= consumed;
+            gramsLedger[member.ToolheadId] =
+                gramsLedger.GetValueOrDefault(member.ToolheadId) + consumed;
             memberDetails.Add(
-                $"{member.Name} usable {FormatGrams(memberUsable)}g, consumed {FormatGrams(consumed)}g");
+                $"{member.Name} usable {FormatGrams(memberUsableRemaining)}g, consumed {FormatGrams(consumed)}g");
             if (shortfallRemaining <= 1e-6)
             {
                 shortfallRemaining = 0;
@@ -625,7 +655,7 @@ public class DispatchScorer(
             ? "no usable configured fallback members"
             : string.Join("; ", memberDetails);
         string explanation =
-            $"T{req.Tool} source usable {FormatGrams(sourceUsable)}g, consumed " +
+            $"T{req.Tool} source usable {FormatGrams(sourceUsableRemaining)}g, consumed " +
             $"{FormatGrams(sourceConsumed)}g; {fallbackDetails}; shortfall remaining " +
             $"{FormatGrams(shortfallRemaining)}g; fallback closed gap: " +
             $"{(fallbackClosedGap ? "yes" : "no")}";
@@ -644,10 +674,11 @@ public class DispatchScorer(
     }
 
     private sealed record PerToolGramsContext(
+        Guid? SourceToolheadId,
         double? SourceUsableGrams,
         IReadOnlyList<FallbackGramsMember> FallbackMembers);
 
-    private sealed record FallbackGramsMember(string Name, double? UsableGrams);
+    private sealed record FallbackGramsMember(Guid ToolheadId, string Name, double? UsableGrams);
 
     private static string FormatGrams(double grams) =>
         grams.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);

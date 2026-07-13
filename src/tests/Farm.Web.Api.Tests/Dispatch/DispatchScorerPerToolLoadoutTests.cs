@@ -642,6 +642,118 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         s.Eliminated.Should().BeFalse();
     }
 
+    // ---- Finding H4: printer-wide grams allocation ledger (no double-counting) ----
+
+    [Fact]
+    public async Task ScorePrinters_SharedFallbackMember_AllocatedOncePerPrinter_SecondRequirementShorted()
+    {
+        // Chain T0→T1→T2 with only T2 holding grams (100g). Two 80g requirements (tools 0 and 1)
+        // both fall back to the shared T2 tail. Without a ledger each would claim the full 100g
+        // (160g "covered"); with the ledger the first takes 80g and the second only sees 20g.
+        (Printer printer, Toolhead t0, Toolhead t1) =
+            SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PLA");
+        Toolhead t2 = AddToolhead(printer, index: 2, material: "PLA");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 80.0),
+            new PrintJobToolMaterialRequirement(1, "PLA", null, 80.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        FilamentFallbackGroupService fallback =
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+        await fallback.CreateAsync(
+            printer.Id,
+            new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id, t2.Id]),
+            CancellationToken.None);
+
+        FleetFilamentCoverageDto fleet = CoverageFor(printer.Id, (0, 0.0), (1, 0.0), (2, 100.0));
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            coverageService: new StubCoverageService(fleet),
+            fallbackService: fallback);
+
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        FactorScore t0Factor = s.ScoreBreakdown["PerToolLoadout.T0"];
+        FactorScore t1Factor = s.ScoreBreakdown["PerToolLoadout.T1"];
+        // First requirement consumes 80g of the shared tail and is covered.
+        t0Factor.EliminationReason.Should().Contain("T2 usable 100g, consumed 80g");
+        t0Factor.EliminationReason.Should().Contain("fallback closed gap: yes");
+        // Second requirement only sees the remaining 20g — the shared spool is not double-counted.
+        t1Factor.EliminationReason.Should().Contain("T2 usable 20g, consumed 20g");
+        t1Factor.EliminationReason.Should().Contain("shortfall remaining 60g");
+        t1Factor.EliminationReason.Should().Contain("insufficient usable coverage");
+        t1Factor.Score.Should().BeLessThan(t0Factor.Score);
+    }
+
+    [Fact]
+    public async Task ScorePrinters_TwoRequirementsShareSourceToolhead_SumAgainstItsCoverage()
+    {
+        // T0 loaded PLA (100g), T1 empty. Tool 0 matches T0 exactly; tool 1 finds the same PLA on
+        // T0. Both requirements draw grams from the single T0 spool, so the second must see it
+        // already partly allocated rather than a fresh 100g.
+        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: null);
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 80.0),
+            new PrintJobToolMaterialRequirement(1, "PLA", null, 80.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        FleetFilamentCoverageDto fleet = CoverageFor(printer.Id, (0, 100.0), (1, 0.0));
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            coverageService: new StubCoverageService(fleet));
+
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        // Tool 0 (exact) consumes 80g of the 100g source and stays fully covered.
+        s.ScoreBreakdown["PerToolLoadout.T0"].Score.Should().Be(100);
+        // Tool 1 shares the same source spool and only sees the remaining 20g.
+        FactorScore t1 = s.ScoreBreakdown["PerToolLoadout.T1"];
+        t1.EliminationReason.Should().Contain("source usable 20g");
+        t1.EliminationReason.Should().Contain("shortfall remaining 60g");
+        t1.EliminationReason.Should().Contain("insufficient usable coverage");
+    }
+
+    [Fact]
+    public async Task ScorePrinters_SharedFallbackAllocation_IsDeterministicAcrossCalls()
+    {
+        (Printer printer, Toolhead t0, Toolhead t1) =
+            SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PLA");
+        Toolhead t2 = AddToolhead(printer, index: 2, material: "PLA");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 80.0),
+            new PrintJobToolMaterialRequirement(1, "PLA", null, 80.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        FilamentFallbackGroupService fallback =
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+        await fallback.CreateAsync(
+            printer.Id,
+            new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id, t2.Id]),
+            CancellationToken.None);
+
+        FleetFilamentCoverageDto fleet = CoverageFor(printer.Id, (0, 0.0), (1, 0.0), (2, 100.0));
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            coverageService: new StubCoverageService(fleet),
+            fallbackService: fallback);
+
+        DispatchScore first = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+        DispatchScore second = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        first.ScoreBreakdown["PerToolLoadout.T0"].Score
+            .Should().Be(second.ScoreBreakdown["PerToolLoadout.T0"].Score);
+        first.ScoreBreakdown["PerToolLoadout.T1"].Score
+            .Should().Be(second.ScoreBreakdown["PerToolLoadout.T1"].Score);
+        first.ScoreBreakdown["PerToolLoadout.T1"].EliminationReason
+            .Should().Be(second.ScoreBreakdown["PerToolLoadout.T1"].EliminationReason);
+    }
+
     private static FleetFilamentCoverageDto CoverageFor(
         Guid printerId,
         params (int Index, double? Remaining)[] toolheads)
