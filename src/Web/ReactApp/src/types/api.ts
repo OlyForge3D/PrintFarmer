@@ -1934,6 +1934,14 @@ export interface ApiError {
   message: string;
   details?: string;
   statusCode: number;
+  /**
+   * Raw response body preserved from `AxiosError.response.data`. Carries the
+   * canonical `application/problem+json` payload (e.g. `{ code, detail, ... }`)
+   * so callers can inspect structured error details that the flattened
+   * `message`/`details` fields cannot represent. Optional so existing
+   * consumers are unaffected.
+   */
+  data?: unknown;
 }
 
 // Authentication types

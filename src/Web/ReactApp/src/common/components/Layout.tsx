@@ -27,6 +27,7 @@ import {
   PlayIcon,
   CalendarIcon,
   LocationIcon,
+  PackageIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -182,6 +183,15 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin',
     anchored: true,
     matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
+  },
+  {
+    id: 'parts-inventory',
+    name: 'Printed Parts',
+    href: '/parts-inventory',
+    icon: PackageIcon,
+    requiredRole: 'farm_admin',
+    anchored: true,
+    matches: (pathname) => pathname === '/parts-inventory' || pathname.startsWith('/parts-inventory/')
   },
   {
     id: 'locations',
