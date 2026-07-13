@@ -1,6 +1,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Web.Api.Tests.Builders;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -8,6 +9,7 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Dispatch;
@@ -234,5 +236,51 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
 
         s.ScoreBreakdown["PerToolLoadout.T0"].Score.Should().Be(60);
+    }
+
+    [Fact]
+    public async Task ScorePrinters_MultiSlotFallbackDisabled_OmitsPerToolFactors()
+    {
+        // Issue #711, FIX E: when the multi-slot-fallback operator feature is OFF, the scorer
+        // must not emit any per-tool loadout factors even though the job carries per-tool reqs.
+        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 25.0),
+            new PrintJobToolMaterialRequirement(1, "PETG", null, 10.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Loose);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+
+        DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance, gate.Object);
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        s.ScoreBreakdown.Should().NotContainKey("PerToolLoadout.T0");
+        s.ScoreBreakdown.Should().NotContainKey("PerToolLoadout.T1");
+        // Core factors still score — gating only removes the per-tool explainability.
+        s.ScoreBreakdown.Should().ContainKey("MaterialMatch");
+        s.Eliminated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ScorePrinters_MultiSlotFallbackEnabled_EmitsPerToolFactors()
+    {
+        // Complement of the gate-off test: an explicitly enabled gate matches default behavior.
+        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 25.0),
+            new PrintJobToolMaterialRequirement(1, "PETG", null, 10.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = new(MockBehavior.Loose);
+        gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+
+        DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance, gate.Object);
+        DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
+
+        s.ScoreBreakdown.Should().ContainKey("PerToolLoadout.T0");
+        s.ScoreBreakdown.Should().ContainKey("PerToolLoadout.T1");
     }
 }

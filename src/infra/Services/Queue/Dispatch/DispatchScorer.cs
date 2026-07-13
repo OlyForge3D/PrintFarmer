@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoTagging;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -10,7 +11,16 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// Scores and ranks candidate printers for a print job using weighted multi-factor analysis.
 /// Hard requirements eliminate printers; soft factors produce a weighted average score.
 /// </summary>
-public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : IDispatchScorer
+/// <remarks>
+/// The per-tool loadout factor (issue #711, F6) is only applied when the
+/// <see cref="OperatorFeature.MultiSlotFallback"/> operator feature is enabled. The gate is
+/// optional so unit tests can construct the scorer directly without a gate (treated as
+/// enabled); production DI always supplies it (issue #711, FIX E).
+/// </remarks>
+public class DispatchScorer(
+    AppDbContext db,
+    ILogger<DispatchScorer> logger,
+    IOperatorFeatureGate? featureGate = null) : IDispatchScorer
 {
     // Factor weight constants
     private const double WeightMaterialMatch = 100;
@@ -149,7 +159,8 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         // filament — but it explains why the raw material match may over- or under-score
         // multi-material jobs.
         IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
-        if (perToolReqs is { Count: > 0 })
+        bool multiSlotEnabled = featureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
+        if (multiSlotEnabled && perToolReqs is { Count: > 0 })
         {
             foreach (PrintJobToolMaterialRequirement req in perToolReqs)
             {

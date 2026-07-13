@@ -20,6 +20,17 @@ public class FilamentFallbackGroup
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
+    /// Case-folded (trimmed, lower-invariant) copy of <see cref="Name"/> used to enforce
+    /// case-insensitive per-printer name uniqueness at the database level. The service-layer
+    /// duplicate check compares names case-insensitively; without a normalized column the raw
+    /// unique index on PostgreSQL/SQL Server sees "PLA Chain" and "pla chain" as distinct, so
+    /// two concurrent inserts could both pass the service check AND the DB index. The unique
+    /// index is defined over (PrinterId, NameNormalized) so the database is the final arbiter.
+    /// Populated by the service on every create/update. Issue #711 (F6 remediation, FIX A).
+    /// </summary>
+    public string NameNormalized { get; set; } = string.Empty;
+
+    /// <summary>
     /// Canonical material family the chain is scoped to (e.g. "PLA"). Members that do not
     /// currently carry a compatible material remain in the chain but are reported as
     /// mismatched by the dispatch/attention layer — the group definition itself is not

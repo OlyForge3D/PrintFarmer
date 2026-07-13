@@ -23,7 +23,8 @@ public class MaintenanceAlertEngine(
     IHubContext<MaintenanceHub> hubContext,
     IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor,
     ILogger<MaintenanceAlertEngine> logger,
-    IAttentionBroadcaster? attentionBroadcaster = null) : IMaintenanceAlertService
+    IAttentionBroadcaster? attentionBroadcaster = null,
+    IToolheadStatisticsRepository? toolheadStatsRepo = null) : IMaintenanceAlertService
 {
     private readonly IPrinterStatisticsRepository _statsRepo = statsRepo ?? throw new ArgumentNullException(nameof(statsRepo));
     private readonly IPrinterMaintenanceScheduleRepository _deploymentRepo = deploymentRepo ?? throw new ArgumentNullException(nameof(deploymentRepo));
@@ -35,6 +36,11 @@ public class MaintenanceAlertEngine(
 
     // Attention feed invalidation (issue #707). Optional to preserve existing test constructors.
     private readonly IAttentionBroadcaster? _attentionBroadcaster = attentionBroadcaster;
+
+    // Per-toolhead cumulative hours for per-tool schedule accrual (issue #711, FIX B).
+    // Optional to preserve existing test constructors; when null, per-tool schedules fall
+    // back to printer-wide hours (previous behavior).
+    private readonly IToolheadStatisticsRepository? _toolheadStatsRepo = toolheadStatsRepo;
 
     public async Task<int> EvaluatePrinterMaintenanceAsync(
         Guid printerId,
@@ -76,6 +82,14 @@ public class MaintenanceAlertEngine(
                 g => g.Key,
                 g => g.Aggregate((latest, current) => current.PerformedAt > latest.PerformedAt ? current : latest));
 
+        // Per-toolhead cumulative hours so per-tool schedules accrue against their own
+        // toolhead, not the printer-wide counter (issue #711, FIX B). Empty when the optional
+        // repository is not wired (test constructors) → per-tool schedules fall back to
+        // printer-wide hours.
+        IReadOnlyDictionary<Guid, double> toolheadHours = _toolheadStatsRepo is not null
+            ? await _toolheadStatsRepo.GetCumulativeHoursByPrinterAsync(printerId, cancellationToken)
+            : EmptyToolheadHours;
+
         int alertsGenerated = 0;
         List<MaintenanceAlert> createdAlerts = new();
 
@@ -105,7 +119,7 @@ public class MaintenanceAlertEngine(
                 }
 
                 lastLogByTaskAndToolhead.TryGetValue((task.Id, deployment.ToolheadId), out MaintenanceLog? lastLog);
-                bool shouldAlert = ShouldGenerateAlert(stats, task.TaskName, effectiveHours, effectiveDays, lastLog, deployment.DeployedAt, settings);
+                bool shouldAlert = ShouldGenerateAlert(stats, task.TaskName, effectiveHours, effectiveDays, lastLog, deployment.DeployedAt, settings, deployment.ToolheadId, toolheadHours);
 
                 if (shouldAlert)
                 {
@@ -118,7 +132,7 @@ public class MaintenanceAlertEngine(
 
                     if (!hasActiveAlert)
                     {
-                        MaintenanceAlert created = await GenerateAlertAsync(stats, deployment, task, effectiveHours, effectiveDays, lastLog, cancellationToken);
+                        MaintenanceAlert created = await GenerateAlertAsync(stats, deployment, task, effectiveHours, effectiveDays, lastLog, toolheadHours, cancellationToken);
                         createdAlerts.Add(created);
                         alertsGenerated++;
                     }
@@ -160,14 +174,16 @@ public class MaintenanceAlertEngine(
         int? intervalDays,
         MaintenanceLog? lastLog,
         DateTime deployedAt,
-        MaintenanceAlertSettings settings)
+        MaintenanceAlertSettings settings,
+        Guid? toolheadId,
+        IReadOnlyDictionary<Guid, double> toolheadHours)
     {
         // Check hour-based interval
         if (intervalHours.HasValue)
         {
             double thresholdHours = intervalHours.Value * (settings.ThresholdPercentage / 100.0);
 
-            double hoursSinceLast = ComputeHoursSinceLastMaintenance(stats, lastLog);
+            double hoursSinceLast = ComputeHoursSinceLastMaintenance(stats, lastLog, toolheadId, toolheadHours);
 
             if (hoursSinceLast >= thresholdHours)
             {
@@ -210,10 +226,11 @@ public class MaintenanceAlertEngine(
         double? effectiveHours,
         int? effectiveDays,
         MaintenanceLog? lastLog,
+        IReadOnlyDictionary<Guid, double> toolheadHours,
         CancellationToken cancellationToken)
     {
         double? hoursSinceLast = effectiveHours.HasValue
-            ? ComputeHoursSinceLastMaintenance(stats, lastLog)
+            ? ComputeHoursSinceLastMaintenance(stats, lastLog, deployment.ToolheadId, toolheadHours)
             : null;
 
         int? daysSinceLast = effectiveDays.HasValue
@@ -290,11 +307,29 @@ public class MaintenanceAlertEngine(
         return $"{taskName} is due. {fallbackMessage}";
     }
 
-    private static double ComputeHoursSinceLastMaintenance(PrinterStatistics stats, MaintenanceLog? lastLog)
+    private static readonly IReadOnlyDictionary<Guid, double> EmptyToolheadHours = new Dictionary<Guid, double>();
+
+    private static double ComputeHoursSinceLastMaintenance(
+        PrinterStatistics stats,
+        MaintenanceLog? lastLog,
+        Guid? toolheadId,
+        IReadOnlyDictionary<Guid, double> toolheadHours)
     {
-        // Preferred baseline is the printer's total hours at the last maintenance log.
-        // If historical logs don't contain printer hours yet, fall back to total hours
-        // (maintains previous behavior until new logs populate PrinterHoursAtMaintenance).
+        // Per-toolhead scope (issue #711, FIX B): when the schedule targets a specific toolhead
+        // and per-toolhead hours are available, accrue against that toolhead's cumulative hours
+        // using the log's captured per-toolhead baseline. Per-tool tracking starts at 0 at
+        // migration time, so a schedule with no prior per-tool log measures from when tracking
+        // began (baseline 0).
+        if (toolheadId.HasValue && toolheadHours.TryGetValue(toolheadId.Value, out double currentToolheadHours))
+        {
+            double toolheadBaseline = lastLog?.ToolheadHoursAtMaintenance ?? 0;
+            return Math.Max(0, currentToolheadHours - toolheadBaseline);
+        }
+
+        // Printer-wide scope (or no per-toolhead data): preferred baseline is the printer's
+        // total hours at the last maintenance log. If historical logs don't contain printer
+        // hours yet, fall back to total hours (maintains previous behavior until new logs
+        // populate PrinterHoursAtMaintenance).
         if (lastLog?.PrinterHoursAtMaintenance is double baselineHours)
         {
             return Math.Max(0, stats.TotalPrintHours - baselineHours);

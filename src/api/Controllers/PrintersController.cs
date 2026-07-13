@@ -874,6 +874,7 @@ public class PrintersController(
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="fallbackGroupService">Injected fallback-group service used to include per-printer fallback chains in the details payload.</param>
+    /// <param name="featureGate">Operator feature gate consulted to decide whether multi-slot fallback chains are exposed (issue #711, FIX E).</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>Detailed printer information including manufacturer, model, purchase information, settings, and configured fallback groups.</returns>
     /// <response code="200">Returns detailed printer information.</response>
@@ -885,6 +886,7 @@ public class PrintersController(
     public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(
         Guid id,
         [FromServices] Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService fallbackGroupService,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
         Printer? p = await _printersService.FindByIdWithIncludesAsync(id, ct);
@@ -946,6 +948,14 @@ public class PrintersController(
             t.CurrentMaterial,
             t.CurrentFilamentColor)).ToArray();
 
+        // Only expose fallback chains when the multi-slot-fallback operator feature is on
+        // (issue #711, FIX E); otherwise return an empty list so gated-off clients never
+        // see fallback config.
+        IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto> fallbackGroups =
+            featureGate.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback)
+                ? await fallbackGroupService.ListForPrinterAsync(id, ct)
+                : [];
+
         return new PrinterDetailsDto(
             p.Id,
             p.Name,
@@ -982,7 +992,7 @@ public class PrintersController(
             p.BuddyCameraIp,
             p.NozzleDiameter,
             p.HasMmu,
-            await fallbackGroupService.ListForPrinterAsync(id, ct));
+            fallbackGroups);
     }
 
     /// <summary>

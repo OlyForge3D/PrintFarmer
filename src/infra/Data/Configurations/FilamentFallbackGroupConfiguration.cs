@@ -11,6 +11,7 @@ public class FilamentFallbackGroupConfiguration : IEntityTypeConfiguration<Filam
         _ = builder.HasKey(g => g.Id);
 
         _ = builder.Property(g => g.Name).IsRequired().HasMaxLength(128);
+        _ = builder.Property(g => g.NameNormalized).IsRequired().HasMaxLength(128);
         _ = builder.Property(g => g.MaterialType).IsRequired().HasMaxLength(64);
 
         _ = builder.HasOne(g => g.Printer)
@@ -24,9 +25,13 @@ public class FilamentFallbackGroupConfiguration : IEntityTypeConfiguration<Filam
             .OnDelete(DeleteBehavior.Cascade);
 
         _ = builder.HasIndex(g => g.PrinterId);
-        _ = builder.HasIndex(g => new { g.PrinterId, g.Name })
+
+        // Unique over the case-folded name so per-printer name uniqueness is enforced
+        // case-insensitively at the database level (matches the service-layer ToLower check).
+        // See FilamentFallbackGroup.NameNormalized. Issue #711 (F6 remediation, FIX A).
+        _ = builder.HasIndex(g => new { g.PrinterId, g.NameNormalized })
             .IsUnique()
-            .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_Name");
+            .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_NameNormalized");
     }
 }
 

@@ -102,6 +102,7 @@ public class PrintStatsSyncHostedService(
             using IServiceScope scope = _serviceProvider.CreateScope();
             IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
             IPrinterStatisticsRepository statsRepo = scope.ServiceProvider.GetRequiredService<IPrinterStatisticsRepository>();
+            IToolheadStatisticsRepository toolheadStatsRepo = scope.ServiceProvider.GetRequiredService<IToolheadStatisticsRepository>();
             IPrintJobStatisticsRepository jobStatsRepo = scope.ServiceProvider.GetRequiredService<IPrintJobStatisticsRepository>();
 
             // Get all printers
@@ -128,7 +129,7 @@ public class PrintStatsSyncHostedService(
 
                 try
                 {
-                    await SyncPrinterStatisticsAsync(printer, settings, statsRepo, jobStatsRepo, scope.ServiceProvider, ct);
+                    await SyncPrinterStatisticsAsync(printer, settings, statsRepo, toolheadStatsRepo, jobStatsRepo, scope.ServiceProvider, ct);
                 }
                 catch (Exception ex)
                 {
@@ -156,6 +157,7 @@ public class PrintStatsSyncHostedService(
         Printer printer,
         PrintStatsSyncSettings settings,
         IPrinterStatisticsRepository statsRepo,
+        IToolheadStatisticsRepository toolheadStatsRepo,
         IPrintJobStatisticsRepository jobStatsRepo,
         IServiceProvider serviceProvider,
         CancellationToken ct)
@@ -168,6 +170,15 @@ public class PrintStatsSyncHostedService(
 
         // Get or create printer statistics
         PrinterStatistics? stats = await statsRepo.GetByPrinterIdAsync(printer.Id, ct);
+
+        // Capture whether this printer already had a statistics row and its prior total hours.
+        // Per-toolhead attribution (issue #711, FIX B) only credits INCREMENTAL hours to a
+        // toolhead once a baseline exists. A brand-new statistics row dumps the full backend
+        // history into the printer-wide counter but NOT onto any toolhead, so per-tool tracking
+        // effectively "starts fresh" from the next sync forward.
+        bool statsExisted = stats != null;
+        double previousTotalPrintHours = stats?.TotalPrintHours ?? 0;
+
         if (stats == null)
         {
             stats = new PrinterStatistics
@@ -196,6 +207,24 @@ public class PrintStatsSyncHostedService(
         {
             stats.LastSyncTime = DateTime.UtcNow;
             await statsRepo.UpsertAsync(stats, ct);
+
+            // Attribute the incremental printer-wide hour delta to the active/primary physical
+            // toolhead (issue #711, FIX B). Only when a baseline already existed and hours
+            // advanced. The increment is left uncommitted here and persisted by the outer
+            // SaveChangesAsync on the same scoped context.
+            double delta = stats.TotalPrintHours - previousTotalPrintHours;
+            if (statsExisted && delta > 0.0001)
+            {
+                Guid? credited = await toolheadStatsRepo.IncrementActiveToolheadHoursAsync(printer.Id, delta, ct);
+                if (credited is not null)
+                {
+                    _logger.LogDebug(
+                        "Attributed {Delta:F2}h to toolhead {ToolheadId} on printer '{Name}'",
+                        delta,
+                        credited,
+                        printer.Name);
+                }
+            }
         }
     }
 

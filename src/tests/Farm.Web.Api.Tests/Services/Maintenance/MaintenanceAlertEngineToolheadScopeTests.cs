@@ -178,4 +178,61 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
         captured.Should().Contain(a => a.ToolheadId == toolheadA);
         captured.Should().Contain(a => a.ToolheadId == toolheadB);
     }
+
+    [Fact]
+    public async Task EvaluatePrinter_PerToolheadHours_AccrueIndependentlyOfPrinterWide()
+    {
+        // Issue #711, FIX B: hour accrual for per-tool schedules uses per-TOOLHEAD cumulative
+        // hours, not the printer-wide counter. Printer-wide hours are 0 here (would NOT trip
+        // the 10h interval), yet toolhead A has printed 100h and toolhead B none — so ONLY the
+        // schedule scoped to toolhead A should alert.
+        Guid printerId = Guid.NewGuid();
+        Guid taskId = Guid.NewGuid();
+        Guid toolheadA = Guid.NewGuid();
+        Guid toolheadB = Guid.NewGuid();
+
+        _stats.Setup(s => s.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new PrinterStatistics { PrinterId = printerId, TotalPrintHours = 0 });
+        _deployment.Setup(d => d.GetActiveWithTasksAsync(printerId, It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new List<PrinterMaintenanceSchedule>
+                   {
+                       BuildSchedule(printerId, taskId, toolheadA),
+                       BuildSchedule(printerId, taskId, toolheadB)
+                   });
+        _logs.Setup(l => l.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+             .ReturnsAsync(new List<MaintenanceLog>());
+        _alerts.Setup(a => a.HasActiveAlertAsync(printerId, taskId, It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+               .ReturnsAsync(false);
+
+        List<MaintenanceAlert> captured = new();
+        _alerts.Setup(a => a.AddAsync(It.IsAny<MaintenanceAlert>(), It.IsAny<CancellationToken>()))
+               .Callback<MaintenanceAlert, CancellationToken>((alert, _) => captured.Add(alert))
+               .Returns(Task.CompletedTask);
+
+        Mock<IToolheadStatisticsRepository> toolheadStats = new(MockBehavior.Loose);
+        toolheadStats.Setup(t => t.GetCumulativeHoursByPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+                     .ReturnsAsync(new Dictionary<Guid, double> { [toolheadA] = 100, [toolheadB] = 0 });
+
+        _settings.SetupGet(s => s.CurrentValue)
+                 .Returns(new MaintenanceAlertSettings { EnableSignalRNotifications = false });
+        _broadcaster.Setup(b => b.NotifyChangedAsync(It.IsAny<AttentionChangedPayload>(), It.IsAny<CancellationToken>()))
+                    .Returns(Task.CompletedTask);
+
+        MaintenanceAlertEngine engine = new(
+            _stats.Object,
+            _deployment.Object,
+            _alerts.Object,
+            _logs.Object,
+            _hub.Object,
+            _settings.Object,
+            NullLogger<MaintenanceAlertEngine>.Instance,
+            _broadcaster.Object,
+            toolheadStats.Object);
+
+        int generated = await engine.EvaluatePrinterMaintenanceAsync(printerId, CancellationToken.None);
+
+        generated.Should().Be(1);
+        captured.Should().ContainSingle();
+        captured[0].ToolheadId.Should().Be(toolheadA);
+    }
 }

@@ -26,6 +26,7 @@ public class MaintenanceControllerStatisticsTests
             logRepository: Mock.Of<IMaintenanceLogRepository>(),
             deploymentRepository: Mock.Of<IPrinterMaintenanceScheduleRepository>(),
             statisticsRepository: _statisticsRepository.Object,
+            toolheadStatisticsRepository: Mock.Of<IToolheadStatisticsRepository>(),
             alertService: Mock.Of<IMaintenanceAlertService>(),
             printersService: _printersService.Object,
             maintenanceHub: Mock.Of<IHubContext<MaintenanceHub>>(),

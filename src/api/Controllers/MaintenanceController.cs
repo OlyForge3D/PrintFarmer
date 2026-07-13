@@ -29,6 +29,7 @@ public class MaintenanceController(
     IMaintenanceLogRepository logRepository,
     IPrinterMaintenanceScheduleRepository deploymentRepository,
     IPrinterStatisticsRepository statisticsRepository,
+    IToolheadStatisticsRepository toolheadStatisticsRepository,
     IMaintenanceAlertService alertService,
     IPrintersService printersService,
     IHubContext<MaintenanceHub> maintenanceHub,
@@ -40,6 +41,7 @@ public class MaintenanceController(
     private readonly IMaintenanceLogRepository _logRepository = logRepository;
     private readonly IPrinterMaintenanceScheduleRepository _deploymentRepository = deploymentRepository;
     private readonly IPrinterStatisticsRepository _statisticsRepository = statisticsRepository;
+    private readonly IToolheadStatisticsRepository _toolheadStatisticsRepository = toolheadStatisticsRepository;
     private readonly IMaintenanceAlertService _alertService = alertService;
     private readonly IPrintersService _printersService = printersService;
     private readonly IHubContext<MaintenanceHub> _maintenanceHub = maintenanceHub;
@@ -178,6 +180,12 @@ public class MaintenanceController(
             // Capture current printer hours for accurate hour-based maintenance baselines.
             PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(alert.PrinterId, ct);
 
+            // For per-toolhead-scoped alerts, also capture the toolhead's cumulative hours so
+            // the next accrual measures from this point (issue #711, FIX B).
+            double? toolheadHoursAtMaintenance = alert.ToolheadId.HasValue
+                ? await _toolheadStatisticsRepository.GetCumulativeHoursAsync(alert.ToolheadId.Value, ct)
+                : null;
+
             // Create maintenance log
             var maintenanceLog = new MaintenanceLog
             {
@@ -193,7 +201,8 @@ public class MaintenanceController(
                 DurationMinutes = request.DurationMinutes,
                 Cost = request.Cost,
                 PartsReplaced = request.PartsReplaced,
-                PrinterHoursAtMaintenance = stats?.TotalPrintHours
+                PrinterHoursAtMaintenance = stats?.TotalPrintHours,
+                ToolheadHoursAtMaintenance = toolheadHoursAtMaintenance
             };
 
             MaintenanceLog createdLog = await _logRepository.AddAsync(maintenanceLog, ct);
@@ -342,6 +351,12 @@ public class MaintenanceController(
             ILookup<Guid, PrinterMaintenanceSchedule> deploymentsByPrinter = allDeployments
                 .ToLookup(d => d.PrinterId);
 
+            // Per-toolhead cumulative hours (toolhead ID → hours) so per-tool schedules project
+            // their remaining time against their own toolhead, not the printer-wide counter
+            // (issue #711, FIX B).
+            IReadOnlyDictionary<Guid, double> toolheadHours = await _toolheadStatisticsRepository
+                .GetCumulativeHoursByPrintersAsync(printerIds, ct);
+
             foreach (Printer printer in printers)
             {
                 statsByPrinter.TryGetValue(printer.Id, out PrinterStatistics? stats);
@@ -400,21 +415,37 @@ public class MaintenanceController(
                             ? (int)(dueDate.Value.Date - now.Date).TotalDays
                             : null;
 
-                        // Compute hour-based remaining time (no synthetic date)
+                        // Compute hour-based remaining time (no synthetic date). Per-tool
+                        // schedules accrue against their own toolhead's cumulative hours
+                        // (issue #711, FIX B); printer-wide schedules use TotalPrintHours.
                         double? hoursUntilDue = null;
                         if (effectiveHours.HasValue)
                         {
-                            if (stats == null && !effectiveDays.HasValue)
+                            bool perToolScope = deployment.ToolheadId.HasValue
+                                && toolheadHours.ContainsKey(deployment.ToolheadId.Value);
+
+                            if (stats == null && !effectiveDays.HasValue && !perToolScope)
                             {
                                 continue;
                             }
 
-                            if (stats != null)
+                            double? hoursSinceLast = null;
+                            if (perToolScope)
                             {
-                                double hoursSinceLast = lastLog?.PrinterHoursAtMaintenance is double baselineHours
+                                double currentToolheadHours = toolheadHours[deployment.ToolheadId!.Value];
+                                double toolheadBaseline = lastLog?.ToolheadHoursAtMaintenance ?? 0;
+                                hoursSinceLast = Math.Max(0, currentToolheadHours - toolheadBaseline);
+                            }
+                            else if (stats != null)
+                            {
+                                hoursSinceLast = lastLog?.PrinterHoursAtMaintenance is double baselineHours
                                     ? Math.Max(0, stats.TotalPrintHours - baselineHours)
                                     : stats.TotalPrintHours;
-                                hoursUntilDue = effectiveHours.Value - hoursSinceLast;
+                            }
+
+                            if (hoursSinceLast.HasValue)
+                            {
+                                hoursUntilDue = effectiveHours.Value - hoursSinceLast.Value;
                             }
                         }
 
@@ -592,23 +623,59 @@ public class MaintenanceController(
         {
             PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(request.PrinterId, ct);
 
-            // Validate optional per-toolhead scope (issue #711, F6). Null = printer-wide log.
-            // When set, the toolhead must be a physical dock on the target printer; MMU/AMS
-            // gates are not eligible for maintenance scope.
-            if (request.ToolheadId.HasValue)
+            // Resolve the authoritative toolhead scope (issue #711, FIX C). When a deployment
+            // (schedule) is referenced, its ToolheadId is authoritative: load it, verify it
+            // belongs to the same printer, and reject a client-supplied ToolheadId that
+            // contradicts the deployment's scope. This prevents a log that claims one toolhead
+            // while pointing at a schedule scoped to another.
+            Guid? effectiveToolheadId = request.ToolheadId;
+            if (request.DeploymentId.HasValue)
+            {
+                PrinterMaintenanceSchedule? deployment = await _deploymentRepository.GetByIdAsync(request.DeploymentId.Value, ct);
+                if (deployment is null)
+                {
+                    return BadRequest($"Deployment {request.DeploymentId} was not found.");
+                }
+
+                if (deployment.PrinterId != request.PrinterId)
+                {
+                    return BadRequest($"Deployment {request.DeploymentId} belongs to printer {deployment.PrinterId}, not {request.PrinterId}.");
+                }
+
+                if (request.ToolheadId.HasValue && request.ToolheadId != deployment.ToolheadId)
+                {
+                    return BadRequest(
+                        $"Toolhead {request.ToolheadId} contradicts deployment {request.DeploymentId} " +
+                        $"(scope: {deployment.ToolheadId?.ToString() ?? "printer-wide"}).");
+                }
+
+                // Deployment scope wins so the log is always consistent with its schedule.
+                effectiveToolheadId = deployment.ToolheadId;
+            }
+
+            // Validate the (resolved) per-toolhead scope (issue #711, F6). Null = printer-wide
+            // log. When set, the toolhead must be a physical dock on the target printer;
+            // MMU/AMS gates are not eligible for maintenance scope.
+            if (effectiveToolheadId.HasValue)
             {
                 Printer? printer = await _printersService.FindByIdWithIncludesAsync(request.PrinterId, ct);
-                Toolhead? toolhead = printer?.Toolheads.FirstOrDefault(t => t.Id == request.ToolheadId.Value);
+                Toolhead? toolhead = printer?.Toolheads.FirstOrDefault(t => t.Id == effectiveToolheadId.Value);
                 if (toolhead is null)
                 {
-                    return BadRequest($"Toolhead {request.ToolheadId} does not belong to printer {request.PrinterId}.");
+                    return BadRequest($"Toolhead {effectiveToolheadId} does not belong to printer {request.PrinterId}.");
                 }
 
                 if (toolhead.ToolheadType != ToolheadType.Physical)
                 {
-                    return BadRequest($"Toolhead {request.ToolheadId} is not a physical toolhead and is not eligible for maintenance scope.");
+                    return BadRequest($"Toolhead {effectiveToolheadId} is not a physical toolhead and is not eligible for maintenance scope.");
                 }
             }
+
+            // For per-toolhead-scoped logs, capture the toolhead's cumulative hours so the next
+            // accrual measures from this point (issue #711, FIX B).
+            double? toolheadHoursAtMaintenance = effectiveToolheadId.HasValue
+                ? await _toolheadStatisticsRepository.GetCumulativeHoursAsync(effectiveToolheadId.Value, ct)
+                : null;
 
             var log = new MaintenanceLog
             {
@@ -616,7 +683,7 @@ public class MaintenanceController(
                 PrinterId = request.PrinterId,
                 PrinterMaintenanceScheduleId = request.DeploymentId,
                 MaintenanceTaskId = request.TaskId,
-                ToolheadId = request.ToolheadId,
+                ToolheadId = effectiveToolheadId,
                 TaskName = request.TaskName ?? "Manual Maintenance",
                 Component = request.ComponentName,
                 PerformedAt = request.PerformedAt ?? DateTime.UtcNow,
@@ -625,7 +692,8 @@ public class MaintenanceController(
                 DurationMinutes = request.DurationMinutes,
                 Cost = request.Cost,
                 PartsReplaced = request.PartsReplaced,
-                PrinterHoursAtMaintenance = stats?.TotalPrintHours
+                PrinterHoursAtMaintenance = stats?.TotalPrintHours,
+                ToolheadHoursAtMaintenance = toolheadHoursAtMaintenance
             };
 
             MaintenanceLog createdLog = await _logRepository.AddAsync(log, ct);

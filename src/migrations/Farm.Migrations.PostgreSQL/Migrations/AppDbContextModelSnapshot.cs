@@ -875,6 +875,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("NameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
@@ -885,9 +890,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("PrinterId");
 
-                    b.HasIndex("PrinterId", "Name")
+                    b.HasIndex("PrinterId", "NameNormalized")
                         .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_Name");
+                        .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_NameNormalized");
 
                     b.ToTable("FilamentFallbackGroups");
                 });
@@ -2149,6 +2154,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<double?>("ToolheadHoursAtMaintenance")
+                        .HasColumnType("double precision");
 
                     b.Property<Guid?>("ToolheadId")
                         .HasColumnType("uuid");
@@ -5091,6 +5099,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<double>("CumulativePrintHours")
+                        .HasColumnType("double precision");
 
                     b.Property<string>("CurrentFilamentColor")
                         .HasMaxLength(32)

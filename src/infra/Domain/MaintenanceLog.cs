@@ -114,6 +114,15 @@ public class MaintenanceLog
     public double? PrinterHoursAtMaintenance { get; set; }
 
     /// <summary>
+    /// The scoped toolhead's cumulative print-hours at time of maintenance. Null for
+    /// printer-wide logs (<see cref="ToolheadId"/> is null) or for legacy logs recorded
+    /// before per-toolhead accrual existed. When set, the alert engine uses this as the
+    /// per-tool baseline instead of <see cref="PrinterHoursAtMaintenance"/> so a per-tool
+    /// schedule accrues independently of printer-wide hours (issue #711, F6, FIX B).
+    /// </summary>
+    public double? ToolheadHoursAtMaintenance { get; set; }
+
+    /// <summary>
     /// When this record was created
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

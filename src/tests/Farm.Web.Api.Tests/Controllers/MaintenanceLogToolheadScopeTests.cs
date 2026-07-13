@@ -135,4 +135,63 @@ public class MaintenanceLogToolheadScopeTests : IAsyncLifetime
 
         result.Result.Should().BeOfType<BadRequestObjectResult>();
     }
+
+    [Fact]
+    public async Task CreateLog_WithDeploymentContradictingToolhead_ReturnsBadRequest()
+    {
+        // Issue #711, FIX C: a log that references a deployment (schedule) scoped to toolhead A
+        // but claims a DIFFERENT toolhead must be rejected — the schedule scope is authoritative.
+        (Printer p, Toolhead t0, _) = await SeedAsync();
+        Toolhead t1 = new() { Id = Guid.NewGuid(), PrinterId = p.Id, Index = 2, Name = "T1", ToolheadType = ToolheadType.Physical };
+        MaintenancePlan plan = new() { Id = Guid.NewGuid(), Name = $"Plan-{Guid.NewGuid():N}", IsActive = true };
+        PrinterMaintenanceSchedule deployment = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = p.Id,
+            MaintenancePlanId = plan.Id,
+            ToolheadId = t0.Id,
+            IsActive = true,
+            DeployedAt = DateTime.UtcNow,
+        };
+        _db.Toolheads.Add(t1);
+        _db.MaintenancePlans.Add(plan);
+        _db.Set<PrinterMaintenanceSchedule>().Add(deployment);
+        await _db.SaveChangesAsync();
+
+        CreateMaintenanceLogRequest request = LogRequest(p.Id, t1.Id) with { DeploymentId = deployment.Id };
+
+        ActionResult<MaintenanceLog> result = await _controller.CreateMaintenanceLogAsync(request, CancellationToken.None);
+
+        BadRequestObjectResult bad = result.Result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        bad.Value!.ToString().Should().Contain("contradicts");
+    }
+
+    [Fact]
+    public async Task CreateLog_WithDeploymentScopeAndNoToolhead_InheritsDeploymentToolhead()
+    {
+        // Issue #711, FIX C: when the client omits ToolheadId but references a toolhead-scoped
+        // deployment, the deployment's scope wins so the log stays consistent with its schedule.
+        (Printer p, Toolhead t0, _) = await SeedAsync();
+        MaintenancePlan plan = new() { Id = Guid.NewGuid(), Name = $"Plan-{Guid.NewGuid():N}", IsActive = true };
+        PrinterMaintenanceSchedule deployment = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = p.Id,
+            MaintenancePlanId = plan.Id,
+            ToolheadId = t0.Id,
+            IsActive = true,
+            DeployedAt = DateTime.UtcNow,
+        };
+        _db.MaintenancePlans.Add(plan);
+        _db.Set<PrinterMaintenanceSchedule>().Add(deployment);
+        await _db.SaveChangesAsync();
+
+        CreateMaintenanceLogRequest request = LogRequest(p.Id, toolheadId: null) with { DeploymentId = deployment.Id };
+
+        ActionResult<MaintenanceLog> result = await _controller.CreateMaintenanceLogAsync(request, CancellationToken.None);
+
+        CreatedAtActionResult created = result.Result.Should().BeOfType<CreatedAtActionResult>().Subject;
+        MaintenanceLog body = created.Value.Should().BeOfType<MaintenanceLog>().Subject;
+        body.ToolheadId.Should().Be(t0.Id);
+    }
 }

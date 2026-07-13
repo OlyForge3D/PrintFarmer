@@ -87,6 +87,7 @@ public static class FeatureServicesStartup
 
         // Maintenance Module - Repositories
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IToolheadStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfToolheadStatisticsRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceAlertRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceAlertRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceLogRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceLogRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenancePlanRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenancePlanRepository>();

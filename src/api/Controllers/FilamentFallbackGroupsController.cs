@@ -1,6 +1,8 @@
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -12,18 +14,36 @@ namespace Farm.Web.Api.Controllers;
 /// CRUD for per-printer filament fallback groups (issue #711, F6).
 /// Ordered same-material chains over existing toolhead IDs.
 /// </summary>
+/// <remarks>
+/// Every endpoint is gated by the <see cref="OperatorFeature.MultiSlotFallback"/> operator
+/// feature. When the operator has switched multi-slot fallback off, all endpoints return
+/// 404 (mirroring <c>FilamentCoverageController</c>) and no <c>fallbackgroupsupdated</c>
+/// SignalR event is emitted (issue #711, FIX E).
+/// </remarks>
 [ApiController]
 [Route("api/printers/{printerId:guid}/fallback-groups")]
 [Authorize]
 public class FilamentFallbackGroupsController(
     IFilamentFallbackGroupService service,
+    IOperatorFeatureGate featureGate,
     IHubContext<PrinterHub> printerHub,
     ILogger<FilamentFallbackGroupsController> logger) : ControllerBase
 {
+    private bool FallbackEnabled => featureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+
+    private NotFoundObjectResult FeatureDisabled()
+        => OperatorFeatureProblemDetails.NotFound(featureGate, OperatorFeature.MultiSlotFallback);
+
     [HttpGet]
     [ProducesResponseType(typeof(IReadOnlyList<FilamentFallbackGroupDto>), 200)]
+    [ProducesResponseType(404)]
     public async Task<ActionResult<IReadOnlyList<FilamentFallbackGroupDto>>> ListAsync(Guid printerId, CancellationToken ct)
     {
+        if (!FallbackEnabled)
+        {
+            return FeatureDisabled();
+        }
+
         IReadOnlyList<FilamentFallbackGroupDto> groups = await service.ListForPrinterAsync(printerId, ct);
         return Ok(groups);
     }
@@ -33,8 +53,43 @@ public class FilamentFallbackGroupsController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<FilamentFallbackGroupDto>> GetAsync(Guid printerId, Guid groupId, CancellationToken ct)
     {
+        if (!FallbackEnabled)
+        {
+            return FeatureDisabled();
+        }
+
         FilamentFallbackGroupDto? dto = await service.GetAsync(printerId, groupId, ct);
         return dto is null ? NotFound() : Ok(dto);
+    }
+
+    /// <summary>
+    /// Resolves a currently-available fallback slot (physical dock or MMU/AMS gate) on the
+    /// printer that carries the requested material, excluding the source toolhead. Read-only
+    /// evidence for runout-attention downgrade logic and external callers (issue #711, FIX D).
+    /// </summary>
+    [HttpGet("available")]
+    [ProducesResponseType(typeof(AvailableFallbackMember), 200)]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<AvailableFallbackMember>> GetAvailableFallbackAsync(
+        Guid printerId,
+        [FromQuery] Guid sourceToolheadId,
+        [FromQuery] string material,
+        CancellationToken ct)
+    {
+        if (!FallbackEnabled)
+        {
+            return FeatureDisabled();
+        }
+
+        if (string.IsNullOrWhiteSpace(material))
+        {
+            return BadRequest(new ProblemDetails { Title = "Invalid request", Detail = "The 'material' query parameter is required.", Status = 400 });
+        }
+
+        AvailableFallbackMember? member = await service.FindAvailableFallbackAsync(printerId, sourceToolheadId, material, ct);
+        return member is null ? NoContent() : Ok(member);
     }
 
     [HttpPost]
@@ -46,6 +101,11 @@ public class FilamentFallbackGroupsController(
         [FromBody] CreateFilamentFallbackGroupRequest request,
         CancellationToken ct)
     {
+        if (!FallbackEnabled)
+        {
+            return FeatureDisabled();
+        }
+
         try
         {
             FilamentFallbackGroupDto dto = await service.CreateAsync(printerId, request, ct);
@@ -73,6 +133,11 @@ public class FilamentFallbackGroupsController(
         [FromBody] UpdateFilamentFallbackGroupRequest request,
         CancellationToken ct)
     {
+        if (!FallbackEnabled)
+        {
+            return FeatureDisabled();
+        }
+
         try
         {
             FilamentFallbackGroupDto dto = await service.UpdateAsync(printerId, groupId, request, ct);
@@ -92,8 +157,14 @@ public class FilamentFallbackGroupsController(
 
     [HttpDelete("{groupId:guid}")]
     [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteAsync(Guid printerId, Guid groupId, CancellationToken ct)
     {
+        if (!FallbackEnabled)
+        {
+            return FeatureDisabled();
+        }
+
         await service.DeleteAsync(printerId, groupId, ct);
         await BroadcastAsync(printerId, ct);
         return NoContent();

@@ -12,8 +12,8 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 
 /// <summary>
 /// Integration tests for <see cref="IFilamentFallbackGroupService"/> — issue #711 (F6).
-/// Covers ownership, min-2 members, unique members, physical-only, unique names, and
-/// the fallback resolver used for auto-switch severity downgrade evidence.
+/// Covers ownership, min-2 members, unique members, MMU/AMS-gate acceptance, unique names,
+/// and the fallback resolver used for auto-switch severity downgrade evidence.
 /// </summary>
 [Collection(IntegrationTestCollection.Name)]
 public class FilamentFallbackGroupServiceTests : IAsyncLifetime
@@ -89,17 +89,20 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CreateAsync_WithMmuGateMember_Throws()
+    public async Task CreateAsync_WithMmuGateMember_Succeeds()
     {
+        // Issue #711 (FIX D): AMS/MMU multi-slot fallback chains are the primary use case,
+        // so MMU/AMS gates ARE eligible fallback-group members (unlike maintenance scope,
+        // which remains physical-only). A physical dock + an MMU gate is a valid chain.
         (Printer p, Toolhead t0, _, Toolhead mmu) = await SeedPrinterWithToolheadsAsync();
 
-        Func<Task> act = () => _service.CreateAsync(
+        FilamentFallbackGroupDto dto = await _service.CreateAsync(
             p.Id,
-            new CreateFilamentFallbackGroupRequest("Bad", "PLA", null, [t0.Id, mmu.Id]),
+            new CreateFilamentFallbackGroupRequest("AMS Chain", "PLA", null, [t0.Id, mmu.Id]),
             CancellationToken.None);
 
-        await act.Should().ThrowAsync<FilamentFallbackGroupValidationException>()
-            .WithMessage("*not a physical toolhead*");
+        dto.Members.Should().HaveCount(2);
+        dto.Members.Select(m => m.ToolheadId).Should().Contain(mmu.Id);
     }
 
     [Fact]
@@ -227,5 +230,31 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
             CancellationToken.None);
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FindAvailableFallbackAsync_ResolvesMmuGateSlot()
+    {
+        // Issue #711 (FIX D): an MMU/AMS gate loaded with the requested material is a valid
+        // fallback slot and must be resolvable so the runout-attention flow can point at it.
+        (Printer p, Toolhead t0, _, Toolhead mmu) = await SeedPrinterWithToolheadsAsync();
+        mmu.CurrentMaterial = "PLA";
+        mmu.CurrentSpoolId = 7;
+        await _db.SaveChangesAsync();
+
+        await _service.CreateAsync(
+            p.Id,
+            new CreateFilamentFallbackGroupRequest("AMS Chain", "PLA", null, [t0.Id, mmu.Id]),
+            CancellationToken.None);
+
+        AvailableFallbackMember? result = await _service.FindAvailableFallbackAsync(
+            p.Id,
+            sourceToolheadId: t0.Id,
+            materialType: "PLA",
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.ToolheadId.Should().Be(mmu.Id);
+        result.LoadedSpoolId.Should().Be(7);
     }
 }

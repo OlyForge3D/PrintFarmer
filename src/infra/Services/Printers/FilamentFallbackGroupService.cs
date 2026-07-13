@@ -1,6 +1,9 @@
+using System.Data.Common;
+using System.Reflection;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -24,13 +27,25 @@ public interface IFilamentFallbackGroupService
     Task DeleteAsync(Guid printerId, Guid groupId, CancellationToken ct);
 
     /// <summary>
-    /// Attempts to find a same-printer physical toolhead configured as a fallback that
-    /// currently has a spool loaded matching the requested material. Returns <c>null</c>
-    /// when no such backup exists. The caller MUST NOT infer a successful auto-switch from
-    /// this result alone — configuration existence is not proof that a switch occurred.
-    /// This method exists so filament-runout severity downgrade paths can require both
-    /// confirmed telemetry AND a truly available configured backup (issue #711, F6).
+    /// Attempts to find a same-printer toolhead (physical dock or MMU/AMS gate) configured as
+    /// a fallback that currently has a spool loaded matching the requested material. Returns
+    /// <c>null</c> when no such backup exists. The caller MUST NOT infer a successful
+    /// auto-switch from this result alone — configuration existence is not proof that a switch
+    /// occurred. This method exists so filament-runout severity downgrade paths can require
+    /// both confirmed telemetry AND a truly available configured backup (issue #711, F6).
     /// </summary>
+    /// <remarks>
+    /// Exposed to external callers via
+    /// <c>GET /api/printers/{printerId}/fallback-groups/available</c> (gated by the
+    /// multi-slot-fallback operator feature). TODO(#711): wire this resolver into the
+    /// filament runout attention source (see <c>FilamentRunoutAttentionSource</c>) so that when
+    /// auto-switch telemetry is unavailable, an informational attention item can point the
+    /// operator at an available fallback slot. That integration is deferred because it requires
+    /// resolving a runout warning's toolhead <em>index</em> to a toolhead <em>id</em> per
+    /// printer inside the attention pipeline and reconciling two independent feature gates
+    /// (filament-coverage vs multi-slot-fallback); the read-only API endpoint gives the
+    /// resolver a production caller in the meantime.
+    /// </remarks>
     /// <param name="printerId">Owning printer.</param>
     /// <param name="sourceToolheadId">The toolhead that ran out; excluded from the search.</param>
     /// <param name="materialType">Material required to keep printing (case-insensitive).</param>
@@ -101,10 +116,10 @@ public sealed class FilamentFallbackGroupService(
             .FirstOrDefaultAsync(p => p.Id == printerId, ct)
             ?? throw new KeyNotFoundException($"Printer {printerId} not found.");
 
-        // Enforce toolhead ownership (all members belong to this printer) and physical-only
-        // membership. MMU virtual gates are not eligible as fallback destinations; the fallback
-        // chain represents alternative physical extruders/hotends that can carry the same
-        // material. See issue #711 (F6).
+        // Enforce toolhead ownership (all members belong to this printer). Both physical tool
+        // docks AND MMU/AMS gates are eligible fallback-chain members: issue #711 is about
+        // AMS/MMU multi-slot fallback chains, so MMU gates are a primary use case here (unlike
+        // maintenance scope, which remains physical-only). See issue #711 (F6, FIX D).
         Dictionary<Guid, Toolhead> printerToolheadsById = printer.Toolheads.ToDictionary(t => t.Id);
         foreach (Guid id in request.ToolheadIds)
         {
@@ -114,10 +129,10 @@ public sealed class FilamentFallbackGroupService(
                     $"Toolhead {id} does not belong to printer {printerId}.");
             }
 
-            if (th.ToolheadType != ToolheadType.Physical)
+            if (th.ToolheadType is not (ToolheadType.Physical or ToolheadType.MmuGate))
             {
                 throw new FilamentFallbackGroupValidationException(
-                    $"Toolhead {id} is not a physical toolhead and cannot participate in a fallback group.");
+                    $"Toolhead {id} is not a spool-carrying toolhead and cannot participate in a fallback group.");
             }
         }
 
@@ -141,6 +156,7 @@ public sealed class FilamentFallbackGroupService(
             Id = Guid.NewGuid(),
             PrinterId = printerId,
             Name = trimmedName,
+            NameNormalized = trimmedNameLower,
             MaterialType = request.MaterialType.Trim(),
             DisplayOrder = request.DisplayOrder ?? await NextDisplayOrderAsync(printerId, ct),
             CreatedAt = DateTime.UtcNow,
@@ -194,10 +210,11 @@ public sealed class FilamentFallbackGroupService(
                     $"Toolhead {id} does not belong to printer {printerId}.");
             }
 
-            if (th.ToolheadType != ToolheadType.Physical)
+            // Both physical docks and MMU/AMS gates are eligible fallback members (issue #711, FIX D).
+            if (th.ToolheadType is not (ToolheadType.Physical or ToolheadType.MmuGate))
             {
                 throw new FilamentFallbackGroupValidationException(
-                    $"Toolhead {id} is not a physical toolhead and cannot participate in a fallback group.");
+                    $"Toolhead {id} is not a spool-carrying toolhead and cannot participate in a fallback group.");
             }
         }
 
@@ -216,6 +233,7 @@ public sealed class FilamentFallbackGroupService(
         }
 
         group.Name = trimmedName;
+        group.NameNormalized = trimmedNameLower;
         group.MaterialType = request.MaterialType.Trim();
         if (request.DisplayOrder.HasValue)
         {
@@ -297,8 +315,10 @@ public sealed class FilamentFallbackGroupService(
                 }
 
                 Toolhead? th = member.Toolhead;
-                if (th is null || th.ToolheadType != ToolheadType.Physical)
+                if (th is null)
                 {
+                    // Physical docks and MMU/AMS gates are both valid fallback spool sources
+                    // (issue #711, FIX D); only skip members whose toolhead failed to load.
                     continue;
                 }
 
@@ -355,18 +375,22 @@ public sealed class FilamentFallbackGroupService(
 
     private static FilamentFallbackGroupValidationException? TryTranslateUniqueViolation(DbUpdateException ex, string groupName)
     {
+        // Only translate genuine UNIQUE-constraint violations. Matching on inner-exception
+        // message tokens alone risks false positives — e.g. SQL Server 2628 (string-or-binary
+        // truncation) also names the offending column and would be mistaken for "already
+        // exists". First confirm the provider reported a unique violation via its numeric
+        // error code / SQLSTATE, THEN use the constraint/index name to select the specific
+        // message. If the error is not a unique violation, return null so the caller rethrows
+        // the original DbUpdateException. Issue #711 (F6 remediation, FIX F).
+        if (!IsUniqueConstraintViolation(ex))
+        {
+            return null;
+        }
+
         string detail = $"{ex.InnerException?.Message} {ex.Message}";
 
         bool Mentions(params string[] tokens) =>
             tokens.All(t => detail.Contains(t, StringComparison.OrdinalIgnoreCase));
-
-        // Name collision within the printer.
-        if (detail.Contains("UX_FilamentFallbackGroups_PrinterId_Name", StringComparison.OrdinalIgnoreCase)
-            || Mentions("FilamentFallbackGroups", "Name"))
-        {
-            return new FilamentFallbackGroupValidationException(
-                $"A fallback group named '{groupName}' already exists on this printer.");
-        }
 
         // Two members claim the same ordered position within the group.
         if (detail.Contains("UX_FilamentFallbackGroupMembers_GroupId_Position", StringComparison.OrdinalIgnoreCase)
@@ -384,7 +408,55 @@ public sealed class FilamentFallbackGroupService(
                 "Fallback group members must reference each toolhead at most once.");
         }
 
-        return null;
+        // Name collision within the printer (case-insensitive, enforced via the NameNormalized
+        // unique index). This is the default for a confirmed unique violation that is not one
+        // of the member-index conflicts handled above — the normalized-name index is the
+        // operator-facing uniqueness rule.
+        return new FilamentFallbackGroupValidationException(
+            $"A fallback group named '{groupName}' already exists on this printer.");
+    }
+
+    /// <summary>
+    /// Walks the inner-exception chain and returns <c>true</c> only when a provider reported a
+    /// UNIQUE-constraint violation, identified by provider-specific error codes rather than
+    /// message text. SQLite is matched by its extended error code; PostgreSQL by SQLSTATE
+    /// (surfaced on the ADO.NET base <see cref="DbException.SqlState"/> by Npgsql); SQL Server
+    /// by its numeric error number (read reflectively so this core project needs no direct
+    /// SqlClient reference). Issue #711 (F6, FIX F).
+    /// </summary>
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        for (Exception? e = ex.InnerException; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                // SQLite (local dev / tests): SQLITE_CONSTRAINT (19) with extended
+                // SQLITE_CONSTRAINT_UNIQUE (2067).
+                case SqliteException sqlite
+                    when sqlite.SqliteErrorCode == 19 && sqlite.SqliteExtendedErrorCode == 2067:
+                    return true;
+
+                // PostgreSQL: SQLSTATE 23505 (unique_violation).
+                case DbException pg when string.Equals(pg.SqlState, "23505", StringComparison.Ordinal):
+                    return true;
+
+                // SQL Server: 2601 (unique index) or 2627 (unique/PK constraint).
+                case DbException sql when TryGetSqlServerErrorNumber(sql) is 2601 or 2627:
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int? TryGetSqlServerErrorNumber(DbException ex)
+    {
+        // Microsoft.Data.SqlClient.SqlException exposes a `Number` (int) property that is not on
+        // the ADO.NET base type. Read it reflectively so the infrastructure project does not
+        // need a direct SqlClient package reference (provider packages live in the migration
+        // projects to keep infra provider-agnostic).
+        PropertyInfo? prop = ex.GetType().GetProperty("Number", typeof(int));
+        return prop?.GetValue(ex) as int?;
     }
 
     private static void ValidateBasic(string name, string materialType, IReadOnlyList<Guid> toolheadIds)

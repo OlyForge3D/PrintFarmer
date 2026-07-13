@@ -62,6 +62,10 @@ public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetim
     {
         (Guid printerId, Guid t0, Guid t1) = await SeedPrinterAsync();
 
+        // The racer inserts the canonical-case name; the service request below uses a DIFFERENT
+        // case ("pla chain"). Both normalize to "pla chain", so the collision is only caught by
+        // the case-folded NameNormalized unique index — exactly the race FIX A closes on
+        // PostgreSQL, where the raw Name index would treat the two casings as distinct.
         OneShotInterceptor interceptor = new(() =>
         {
             using AppDbContext racer = CreateContext();
@@ -70,6 +74,7 @@ public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetim
                 Id = Guid.NewGuid(),
                 PrinterId = printerId,
                 Name = "PLA Chain",
+                NameNormalized = "pla chain",
                 MaterialType = "PLA",
                 DisplayOrder = 0,
             });
@@ -81,11 +86,12 @@ public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetim
 
         Func<Task> act = () => service.CreateAsync(
             printerId,
-            new CreateFilamentFallbackGroupRequest("PLA Chain", "PLA", null, [t0, t1]),
+            new CreateFilamentFallbackGroupRequest("pla chain", "PLA", null, [t0, t1]),
             CancellationToken.None);
 
         // The racing insert bypasses the case-insensitive pre-check, so the DB unique index
-        // is the last line of defense. FIX 3 must translate the resulting DbUpdateException.
+        // is the last line of defense. FIX F must translate the resulting DbUpdateException
+        // (confirmed unique violation) into a validation error, not a 500.
         _ = await act.Should().ThrowAsync<FilamentFallbackGroupValidationException>()
             .WithMessage("*already exists*");
     }
