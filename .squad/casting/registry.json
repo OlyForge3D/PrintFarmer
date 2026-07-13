@@ -70,7 +70,7 @@
     "created_at": "2026-04-01T19:00:00Z",
     "legacy_named": false,
     "status": "active",
-    "model": "gpt-5.4"
+    "model": "claude-opus-4.8"
   },
   {
     "persistent_name": "Hicks",
@@ -88,7 +88,7 @@
     "created_at": "2026-04-01T19:00:00Z",
     "legacy_named": false,
     "status": "active",
-    "model": "claude-opus-4.6"
+    "model": "gemini-3.1-pro-preview"
   },
   {
     "persistent_name": "Hudson",

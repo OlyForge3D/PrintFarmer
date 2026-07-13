@@ -38,6 +38,15 @@
 - **Team root:** `/Users/jpapiez/s/PFarm1` (shared `.squad/`)
 - **API reference:** `/Users/jpapiez/s/PFarm1/src/api/`
 
+## Model
+
+- **Preferred:** auto
+- **Rationale:** Coordinator selects the best model based on task type — cost first unless writing code
+
+## Machine-Local Execution Policy (this worktree)
+
+On this machine, Gorman uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
+
 ## STANDING RULE — PR ISSUE LINKAGE GATE (effective 2026-05-31)
 
 When opening a PR with `gh pr create`, the `--body` MUST contain `Closes #<issue-number>` for every GitHub issue this PR resolves. Parenthetical refs in the title (`(#350)`), bead-style footers (`[closes PFarm1-350]`), or `relates to #N` are NOT acceptable — GitHub does not auto-close on those. For multiple issues, use one `Closes #N` per line. Verify after creation: `gh pr view <num> --json closingIssuesReferences` should list the issue(s).
