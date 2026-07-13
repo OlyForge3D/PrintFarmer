@@ -31,7 +31,6 @@ import {
   type ToolheadScopeValue,
 } from '../components/toolheadScope';
 import { selectMaintenanceEligibleToolheads } from '@/features/printers/utils/isEligibleMaintenanceToolhead';
-import { usePerToolMaintenanceEnabled } from '@/common/hooks/usePerToolMaintenanceEnabled';
 
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
@@ -92,19 +91,19 @@ export function PrinterMaintenancePage() {
     [printerDetails?.toolheads]
   );
 
-  // #711 gates per-toolhead maintenance behind two independent signals:
-  //   1. Global operator flag `operatorFeatures.multiSlotFallbackEnabled`
-  //      (H5 finding, commits fcd37b37f + a24f14250) — off ⇒ scoped
-  //      alerts / deployments / analytics are stripped server-side.
-  //   2. Per-printer `PrinterDetailsDto.supportsPerToolAttribution` — off
-  //      ⇒ backend rejects hour-scoped schedules with HTTP 400 and never
-  //      populates per-tool cumulative hours.
-  // The per-tool UI only lights up when both are on (or the field is
-  // omitted on an older backend, which we treat as "unknown → hide the
-  // odometer surface but keep any scoped legacy data readable elsewhere").
-  const { enabled: perToolEnabled } = usePerToolMaintenanceEnabled();
+  // Per-tool UI is gated on the **server-composed** flag alone.
+  // #711 stable contract at 0428c66a63511b840034d66fcf7526e4c9b95634:
+  // `PrinterDetailsDto.supportsPerToolAttribution` is always serialized
+  // as a bool; it is true only when the global operator flag
+  // `multiSlotFallbackEnabled` AND the persisted per-printer capability
+  // are both true; otherwise false. Server does the composition, so we
+  // trust its output and do NOT client-side double-gate — that would
+  // race a stale capabilities cache and could hide UI the server just
+  // enabled. Optional (`?`) on the type is deliberate old-server
+  // tolerance; strict `=== true` collapses undefined/false to the
+  // printer-wide surface.
   const printerSupportsPerTool = printerDetails?.supportsPerToolAttribution === true;
-  const perToolAllowed = perToolEnabled && printerSupportsPerTool;
+  const perToolAllowed = printerSupportsPerTool;
   const eligibleToolheads = perToolAllowed ? eligibleToolheadsRaw : [];
 
   // Fetch printer statistics

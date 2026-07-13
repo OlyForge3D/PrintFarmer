@@ -308,7 +308,11 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     expect(screen.queryByTestId('printer-maintenance-scope')).not.toBeInTheDocument();
   });
 
-  it('hides odometer row and scope picker when multiSlotFallbackEnabled is false (#711 H5)', async () => {
+  it('trusts the server-composed supportsPerToolAttribution bool: shows UI when true even if client capabilities cache says otherwise', async () => {
+    // #711 stable contract at 0428c66a6: server composes
+    // `multiSlotFallbackEnabled AND persisted capability`; when it
+    // returns true the client MUST NOT double-gate on its own stale
+    // capability flag.
     seedDefaults({
       capabilities: {
         architecture: 'x64',
@@ -318,33 +322,58 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
         gcodeUploadEnabled: true,
         operatorFeatures: { multiSlotFallbackEnabled: false },
       },
+      // Printer projection still reports the server-composed bool true.
     });
     renderPage();
 
-    // Legacy printer-wide alert is still shown.
-    await waitFor(() => expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument());
-    // If the backend accidentally sends a scoped record, we still render it
-    // (defensive), but the per-toolhead UI (picker + odometer row) must not
-    // appear. Per the H5 fix, backend actually strips scoped rows server-side
-    // when the flag is off, so this is belt-and-suspenders.
-    expect(screen.queryByRole('region', { name: /per-toolhead odometers/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId('printer-maintenance-scope')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+    expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument();
   });
 
-  it('treats missing operatorFeatures block as enabled (older backend fallback)', async () => {
+  it('collapses per-tool UI when server-composed supportsPerToolAttribution is false even if client cache says enabled', async () => {
     seedDefaults({
+      details: printerDetailsMultiUnattributed,
       capabilities: {
         architecture: 'x64',
         slicingEnabled: true,
         modelFilesEnabled: true,
         thumbnailGenerationEnabled: true,
         gcodeUploadEnabled: true,
-        // No operatorFeatures — pre-#711 backend.
+        operatorFeatures: { multiSlotFallbackEnabled: true },
       },
     });
     renderPage();
 
-    await waitFor(() => expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument());
-    expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument());
+    expect(screen.queryByRole('region', { name: /per-toolhead odometers/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('printer-maintenance-scope')).not.toBeInTheDocument();
+  });
+
+  it('distinguishes cumulativePrintHours=null (dash) from cumulativePrintHours=0 (renders "0.0 h")', async () => {
+    // #711 semantics: null = supported-but-unknown ⇒ dash; 0 = supported
+    // with zero accrued hours ⇒ must render as zero, not missing.
+    const t0Zero: ToolheadDto = { ...physicalT0, cumulativePrintHours: 0 };
+    const t1Null: ToolheadDto = { ...physicalT1, cumulativePrintHours: null };
+    seedDefaults({
+      details: {
+        ...printerDetailsMulti,
+        toolheads: [t0Zero, t1Null],
+      } as PrinterDetails,
+    });
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+    const zeroCard = screen.getByTestId('toolhead-odometer-th-0');
+    const nullCard = screen.getByTestId('toolhead-odometer-th-1');
+    // Zero-hours toolhead: exact "0.0 h", NOT the dash placeholder.
+    expect(zeroCard).toHaveTextContent(/0\.0 h/);
+    expect(zeroCard).not.toHaveTextContent(/—/);
+    // Null-hours toolhead: dash placeholder, NOT "0.0 h".
+    expect(nullCard).toHaveTextContent(/—/);
+    expect(nullCard).not.toHaveTextContent(/0\.0 h/);
   });
 });
