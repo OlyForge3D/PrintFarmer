@@ -29,6 +29,9 @@ import type {
 import { listParts, generateHarvestOperationKey, HarvestServiceError } from '@/services/partsHarvest';
 import { useHarvestJob } from '@/features/harvest/hooks/useHarvestJob';
 
+const MAX_HARVEST_QUANTITY_PER_SKU = 10_000;
+const MAX_OVERRIDE_REASON_LENGTH = 1000;
+
 export interface HarvestJobDialogProps {
   /** Whether the dialog is open. */
   isOpen: boolean;
@@ -138,8 +141,9 @@ function HarvestJobDialogInner({
   const [sharedBinCode, setSharedBinCode] = useState<string>('');
   const [uniformQuantity, setUniformQuantity] = useState<number>(1);
   const [useUniformQuantity, setUseUniformQuantity] = useState<boolean>(false);
-  // Audit reason required by the backend when `quantityOverride` is supplied
-  // (PartHarvestService rejects a copies override without one).
+  // UX gate: we require an audit reason whenever the operator overrides the
+  // completed-copies count, even though the backend permits mapped quantityOverride
+  // without one. Explicit outputs and wrong-bin overrides are backend-required.
   const [copiesOverrideReason, setCopiesOverrideReason] = useState<string>('');
   // Optional per-SKU destination bins collected via the preview disclosure.
   const [assignPerSkuBins, setAssignPerSkuBins] = useState<boolean>(false);
@@ -262,7 +266,8 @@ function HarvestJobDialogInner({
     if (bin) request.binCode = bin;
     if (useUniformQuantity) {
       // `quantityOverride` is a copy multiplier, not a per-SKU final quantity.
-      // The backend requires an audit reason whenever it is supplied.
+      // Requiring its audit reason is an intentionally stricter frontend UX gate;
+      // the backend requires reasons only for explicit outputs and wrong-bin overrides.
       request.quantityOverride = uniformQuantity;
       request.overrideReason = copiesOverrideReason.trim();
     }
@@ -416,23 +421,36 @@ function HarvestJobDialogInner({
                 value={uniformQuantity}
                 onChange={setUniformQuantity}
                 min={1}
-                max={10000}
+                max={MAX_HARVEST_QUANTITY_PER_SKU}
                 step={1}
               />
               <p id="harvest-uniform-qty-help" className="mt-1 text-xs text-pf-text-secondary">
                 Multiplied by each mapped SKU's per-print quantity to compute stock added.
               </p>
             </FormField>
-            <FormField label="Override reason (required)" htmlFor="harvest-copies-reason">
+            <FormField
+              label="Override reason (required)"
+              htmlFor="harvest-copies-reason"
+              helper={
+                <span id="harvest-copies-reason-counter">
+                  {copiesOverrideReason.length}/{MAX_OVERRIDE_REASON_LENGTH}
+                </span>
+              }
+            >
               <Textarea
                 id="harvest-copies-reason"
                 value={copiesOverrideReason}
                 onChange={(e) => setCopiesOverrideReason(e.target.value)}
                 rows={2}
+                maxLength={MAX_OVERRIDE_REASON_LENGTH}
                 placeholder="Explain why the completed copy count differs from the job (audited)."
                 invalid={copiesReasonMissing}
                 aria-invalid={copiesReasonMissing}
-                aria-describedby={copiesReasonMissing ? 'harvest-copies-reason-error' : undefined}
+                aria-describedby={
+                  copiesReasonMissing
+                    ? 'harvest-copies-reason-counter harvest-copies-reason-error'
+                    : 'harvest-copies-reason-counter'
+                }
               />
               {copiesReasonMissing && (
                 <p id="harvest-copies-reason-error" className="text-xs text-pf-error-text" role="alert">
@@ -561,16 +579,29 @@ function HarvestJobDialogInner({
             </li>
           ))}
         </ul>
-        <FormField label="Override reason (required)" htmlFor="harvest-override-reason">
+        <FormField
+          label="Override reason (required)"
+          htmlFor="harvest-override-reason"
+          helper={
+            <span id="harvest-override-reason-counter">
+              {overrideReason.length}/{MAX_OVERRIDE_REASON_LENGTH}
+            </span>
+          }
+        >
           <Textarea
             id="harvest-override-reason"
             value={overrideReason}
             onChange={(e) => setOverrideReason(e.target.value)}
             rows={3}
+            maxLength={MAX_OVERRIDE_REASON_LENGTH}
             placeholder="Explain why the scanned bin is acceptable (audited)."
             invalid={overrideReasonMissing}
             aria-invalid={overrideReasonMissing}
-            aria-describedby={overrideReasonMissing ? 'harvest-override-reason-error' : undefined}
+            aria-describedby={
+              overrideReasonMissing
+                ? 'harvest-override-reason-counter harvest-override-reason-error'
+                : 'harvest-override-reason-counter'
+            }
           />
           {overrideReasonMissing && (
             <p id="harvest-override-reason-error" className="text-xs text-pf-error-text" role="alert">
@@ -622,6 +653,7 @@ function HarvestJobDialogInner({
                   value={row.quantity}
                   onChange={(v) => updateRow(row.id, { quantity: v })}
                   min={1}
+                  max={MAX_HARVEST_QUANTITY_PER_SKU}
                   step={1}
                 />
               </FormField>
@@ -667,16 +699,29 @@ function HarvestJobDialogInner({
           />
         </FormField>
 
-        <FormField label="Audit reason for manual outputs (required)" htmlFor="harvest-manual-reason">
+        <FormField
+          label="Audit reason for manual outputs (required)"
+          htmlFor="harvest-manual-reason"
+          helper={
+            <span id="harvest-manual-reason-counter">
+              {manualReason.length}/{MAX_OVERRIDE_REASON_LENGTH}
+            </span>
+          }
+        >
           <Textarea
             id="harvest-manual-reason"
             value={manualReason}
             onChange={(e) => setManualReason(e.target.value)}
             rows={2}
+            maxLength={MAX_OVERRIDE_REASON_LENGTH}
             placeholder="Explain why outputs are being entered manually (audited)."
             invalid={manualReasonMissing}
             aria-invalid={manualReasonMissing}
-            aria-describedby={manualReasonMissing ? 'harvest-manual-reason-error' : undefined}
+            aria-describedby={
+              manualReasonMissing
+                ? 'harvest-manual-reason-counter harvest-manual-reason-error'
+                : 'harvest-manual-reason-counter'
+            }
           />
           {manualReasonMissing && (
             <p id="harvest-manual-reason-error" className="text-xs text-pf-error-text" role="alert">

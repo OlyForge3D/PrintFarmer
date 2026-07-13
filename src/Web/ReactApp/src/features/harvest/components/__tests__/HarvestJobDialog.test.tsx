@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within, act } from '@testing-library/react';
+import { render, screen, waitFor, within, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -142,14 +142,19 @@ describe('HarvestJobDialog', () => {
     expect(within(region).getByText(/BIN-9/)).toBeInTheDocument();
 
     // V1/V5: focus moves to the override-reason field after the transition.
-    await waitFor(() => expect(screen.getByLabelText(/override reason/i)).toHaveFocus());
+    const overrideReasonField = screen.getByLabelText(/override reason/i);
+    await waitFor(() => expect(overrideReasonField).toHaveFocus());
+    expect(overrideReasonField).toHaveAttribute('maxLength', '1000');
+    expect(within(region).getByText('0/1000')).toBeInTheDocument();
 
     const overrideBtn = screen.getByRole('button', { name: /override & harvest/i });
     expect(overrideBtn).toBeDisabled();
     // V3: destructive styling (danger variant token) rather than primary.
     expect(overrideBtn.className).toContain('pf-button-danger-bg');
 
-    await user.type(screen.getByLabelText(/override reason/i), 'Bin relabeled today');
+    const overrideReason = 'Bin relabeled today';
+    await user.type(overrideReasonField, overrideReason);
+    expect(within(region).getByText(`${overrideReason.length}/1000`)).toBeInTheDocument();
     expect(overrideBtn).toBeEnabled();
 
     stub.post.mockResolvedValueOnce({
@@ -205,7 +210,12 @@ describe('HarvestJobDialog', () => {
     // until one is provided.
     const manualSubmit = screen.getByRole('button', { name: /confirm manual harvest/i });
     expect(manualSubmit).toBeDisabled();
-    await user.type(screen.getByLabelText(/audit reason for manual outputs/i), 'Salvaged from failed plate');
+    const manualReasonField = screen.getByLabelText(/audit reason for manual outputs/i);
+    expect(manualReasonField).toHaveAttribute('maxLength', '1000');
+    expect(screen.getByText('0/1000')).toBeInTheDocument();
+    const manualReason = 'Salvaged from failed plate';
+    await user.type(manualReasonField, manualReason);
+    expect(screen.getByText(`${manualReason.length}/1000`)).toBeInTheDocument();
     expect(manualSubmit).toBeEnabled();
 
     stub.post.mockResolvedValueOnce({
@@ -223,7 +233,49 @@ describe('HarvestJobDialog', () => {
     await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
     const secondCall = stub.post.mock.calls[1][1];
     expect(secondCall.outputs).toEqual([{ sku: 'SKU-Z', quantity: 1 }]);
-    expect(secondCall.overrideReason).toBe('Salvaged from failed plate');
+    expect(secondCall.overrideReason).toBe(manualReason);
+  });
+
+  it('accepts a manual output quantity above 100 and posts it unchanged', async () => {
+    const user = userEvent.setup();
+    stub.post
+      .mockRejectedValueOnce(
+        axiosError(409, {
+          code: 'partMappingRequired',
+          detail: 'No mapping.',
+          jobId: 'job-1',
+          guidance: 'Enter outputs manually.',
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: {
+          printJobId: 'job-1',
+          harvestedAt: '2026-01-01T00:00:00Z',
+          alreadyHarvested: false,
+          adjustments: [],
+          outputs: [],
+        },
+      });
+
+    renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+    await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId('harvest-mapping-required')).toBeInTheDocument(),
+    );
+
+    const row = screen.getByTestId('harvest-manual-row');
+    await user.type(within(row).getByLabelText(/SKU #1/i), 'SKU-Z');
+    const quantityField = within(row).getByRole('spinbutton', { name: /quantity/i });
+    fireEvent.change(quantityField, { target: { value: '500' } });
+    expect(quantityField).toHaveValue(500);
+    await user.type(
+      screen.getByLabelText(/audit reason for manual outputs/i),
+      'Verified high-volume batch',
+    );
+
+    await user.click(screen.getByRole('button', { name: /confirm manual harvest/i }));
+    await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+    expect(stub.post.mock.calls[1][1].outputs).toEqual([{ sku: 'SKU-Z', quantity: 500 }]);
   });
 
   it('supports adding and removing multiple SKU rows in manual mode', async () => {
@@ -351,11 +403,16 @@ describe('HarvestJobDialog', () => {
     // H4: the checkbox is a copy multiplier, relabelled accordingly.
     await user.click(screen.getByLabelText(/override completed copies/i));
 
-    // Backend requires a reason whenever quantityOverride is supplied, so the
-    // confirm button stays disabled until one is entered.
+    // Intentional UX gate: mapped quantityOverride is accepted without a reason
+    // by the backend, but the client requires one for a stronger audit trail.
     const confirm = screen.getByRole('button', { name: /confirm harvest/i });
     expect(confirm).toBeDisabled();
-    await user.type(screen.getByLabelText(/override reason/i), 'Two plates failed mid-run');
+    const copiesReasonField = screen.getByLabelText(/override reason/i);
+    expect(copiesReasonField).toHaveAttribute('maxLength', '1000');
+    expect(screen.getByText('0/1000')).toBeInTheDocument();
+    const copiesReason = 'Two plates failed mid-run';
+    await user.type(copiesReasonField, copiesReason);
+    expect(screen.getByText(`${copiesReason.length}/1000`)).toBeInTheDocument();
     expect(confirm).toBeEnabled();
 
     await user.click(confirm);
@@ -364,7 +421,7 @@ describe('HarvestJobDialog', () => {
     const body = stub.post.mock.calls[0][1];
     expect(body.binCode).toBe('BIN-7');
     expect(body.quantityOverride).toBe(1);
-    expect(body.overrideReason).toBe('Two plates failed mid-run');
+    expect(body.overrideReason).toBe(copiesReason);
   });
 
   it('replays the failed override request (not an empty preview) when retrying after an error (#722 B2)', async () => {
