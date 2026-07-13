@@ -1,5 +1,6 @@
 ﻿using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -15,9 +16,43 @@ namespace Farm.Slicer.Module.Api.Controllers;
 
 // Slicer workers authenticate through the slicer API-key filters, not PrintFarmer bearer tokens.
 [AllowAnonymous]
-public class SlicersController(ISlicersService service) : ControllerBase
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "SonarAnalyzer",
+    "S6960:This controller has multiple responsibilities",
+    Justification = "SlicersController owns both slicer worker registration and the read-only engines-list endpoint (issue #578). Splitting would fragment a small, cohesive surface.")]
+public class SlicersController(ISlicersService service, ISlicerRegistry registry) : ControllerBase
 {
     private readonly ISlicersService _service = service ?? throw new ArgumentNullException(nameof(service));
+    private readonly ISlicerRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+
+    /// <summary>
+    /// Lists all slicer engines available in the plugin registry, including all
+    /// installed versions per engine (issue #578). Used by the React version
+    /// selector.
+    /// </summary>
+    [HttpGet("engines")]
+    [AllowAnonymous]
+    public IActionResult ListEngines()
+    {
+        IReadOnlyList<ISlicerLibrary> libraries = _registry.ListAllLibraries().ToList();
+
+        var engines = libraries
+            .GroupBy(l => l.SlicerName, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                string[] versions = g.Select(l => l.SlicerVersion).ToArray();
+                return new
+                {
+                    engine = g.Key,
+                    versions,
+                    latest = versions.FirstOrDefault(),
+                };
+            })
+            .OrderBy(e => e.engine, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return Ok(engines);
+    }
 
     /// <summary>
     /// Lists all registered slicer services.

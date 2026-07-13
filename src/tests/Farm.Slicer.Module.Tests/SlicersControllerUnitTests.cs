@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,7 +22,7 @@ public class SlicersControllerUnitTests
         _ = mockService.Setup(s => s.RegisterAsync(It.IsAny<RegisterSlicerDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((newId, apiKey));
 
-        SlicersController controller = new SlicersController(mockService.Object);
+        SlicersController controller = new SlicersController(mockService.Object, new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object);
         controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
         RegisterSlicerDto dto = new RegisterSlicerDto
@@ -51,7 +51,7 @@ public class SlicersControllerUnitTests
         _ = mockService.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SlicerService> { new SlicerService { Id = Guid.NewGuid(), Name = "s1" } });
 
-        SlicersController controller = new SlicersController(mockService.Object);
+        SlicersController controller = new SlicersController(mockService.Object, new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object);
         controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
         IActionResult res = await controller.ListAsync();
@@ -70,7 +70,7 @@ public class SlicersControllerUnitTests
         _ = mockService.Setup(s => s.HeartbeatAsync(id, It.IsAny<HeartbeatDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
-        SlicersController controller = new SlicersController(mockService.Object);
+        SlicersController controller = new SlicersController(mockService.Object, new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object);
         controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
         HeartbeatDto hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
@@ -92,7 +92,7 @@ public class SlicersControllerUnitTests
         _ = mockService.Setup(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
-        SlicersController controller = new SlicersController(mockService.Object);
+        SlicersController controller = new SlicersController(mockService.Object, new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object);
         controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
         IActionResult res = await controller.DeregisterAsync(id);
@@ -101,3 +101,4 @@ public class SlicersControllerUnitTests
         mockService.Verify(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()), Times.Once);
     }
 }
+

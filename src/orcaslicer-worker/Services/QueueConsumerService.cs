@@ -17,8 +17,11 @@ public class QueueConsumerService(
     IServiceProvider services,
     ILogger<QueueConsumerService> logger,
     IWorkerStateService state,
-    IConfiguration config) : HttpJobPollerService(httpClientFactory, services, logger, state, config)
+    IConfiguration config,
+    WorkerCapabilityProvider capabilityProvider) : HttpJobPollerService(httpClientFactory, services, logger, state, config)
 {
+    private readonly WorkerCapabilityProvider _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
+
     protected override Task<SlicingResult> ExecutePipelineAsync(DistributedSlicingJob job, IServiceProvider scopeServices, CancellationToken ct)
     {
         ISlicingPipelineService pipeline = scopeServices.GetRequiredService<ISlicingPipelineService>();
@@ -26,5 +29,5 @@ public class QueueConsumerService(
     }
 
     protected override string[] GetWorkerCapabilities()
-        => ["orcaslicer", "stl-processing", "gcode-generation"];
+        => _capabilityProvider.GetCapabilities();
 }

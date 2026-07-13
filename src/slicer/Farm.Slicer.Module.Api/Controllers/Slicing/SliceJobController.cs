@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -29,6 +30,7 @@ public class SliceJobController(
     SliceJobMetrics metrics,
     IWorkerAuthService workerAuth,
     IWorkerRepository workerRepository,
+    ISlicerRegistry slicerRegistry,
     IWorkerCircuitBreakerService? circuitBreaker = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;
@@ -39,6 +41,7 @@ public class SliceJobController(
     private readonly SliceJobMetrics _metrics = metrics;
     private readonly IWorkerAuthService _workerAuth = workerAuth;
     private readonly IWorkerRepository _workerRepository = workerRepository;
+    private readonly ISlicerRegistry _slicerRegistry = slicerRegistry ?? throw new ArgumentNullException(nameof(slicerRegistry));
     private readonly IWorkerCircuitBreakerService? _circuitBreaker = circuitBreaker;
 
     /// <summary>
@@ -125,7 +128,11 @@ public class SliceJobController(
             SlicerEngine = request.SlicerEngine,
             SlicerProfileJson = EmbedExtruderFilamentNames(request.SlicerProfileJson, request.ExtruderFilamentProfileNames),
             SlicerProfileId = request.SlicerProfileId,
-            RequiredCapabilitiesJson = request.RequiredCapabilitiesJson,
+
+            // Server derives RequiredCapabilitiesJson from the (engine, version) tuple below.
+            // Client-supplied values are intentionally ignored so a bad/malicious client cannot
+            // force the wrong worker to claim the job (issue #578).
+            RequiredCapabilitiesJson = null,
             Priority = request.Priority,
             ModelTransformJson = request.ModelTransformJson,
             ExtruderFilamentProfileNamesJson = request.ExtruderFilamentProfileNames is { Count: > 0 }
@@ -142,6 +149,33 @@ public class SliceJobController(
             UpdatedAt = DateTime.UtcNow,
         };
 
+        // Resolve engine version pin. When null/empty the job is unpinned (legacy
+        // behaviour) — any worker for the engine claims it via the generic
+        // capability tag. When set, validate against the plugin registry so we
+        // never accept a version no worker can serve.
+        string engineName = ResolveEngineName(request.SlicerEngine);
+        string? requestedVersion = string.IsNullOrWhiteSpace(request.SlicerEngineVersion)
+            ? null
+            : request.SlicerEngineVersion.Trim();
+
+        if (requestedVersion is not null)
+        {
+            ISlicerLibrary? matched = _slicerRegistry.GetLibrary(engineName, requestedVersion);
+            if (matched is null)
+            {
+                IEnumerable<string> registered = _slicerRegistry.GetLibraries(engineName).Select(l => l.SlicerVersion);
+                return BadRequest($"Slicer engine version '{requestedVersion}' is not registered for {engineName}. Registered versions: [{string.Join(", ", registered)}].");
+            }
+
+            job.SlicerEngineVersion = requestedVersion;
+            job.RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { $"{engineName.ToLowerInvariant()}:{requestedVersion}" });
+        }
+        else
+        {
+            job.SlicerEngineVersion = null;
+            job.RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { engineName.ToLowerInvariant() });
+        }
+
         await _jobRepository.AddAsync(job, ct);
         await _eventService.NotifyJobQueuedAsync(job, ct);
 
@@ -150,6 +184,17 @@ public class SliceJobController(
             JobId = job.Id,
             Status = job.Status,
         });
+    }
+
+    private static string ResolveEngineName(int engine)
+    {
+        // Mirrors SlicerEngineType — keep in sync when adding engines.
+        return engine switch
+        {
+            0 => "OrcaSlicer",
+            1 => "PrusaSlicer",
+            _ => "OrcaSlicer",
+        };
     }
 
     /// <summary>
@@ -565,6 +610,7 @@ public class SliceJobController(
             ModelFileUrl = job.ModelFileUrl,
             ModelFileName = job.ModelFileName,
             SlicerEngine = job.SlicerEngine,
+            SlicerEngineVersion = job.SlicerEngineVersion,
             SlicerProfileJson = job.SlicerProfileJson,
             ModelTransformJson = job.ModelTransformJson,
             ModelFileUrls = modelUrls,

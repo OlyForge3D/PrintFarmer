@@ -21,6 +21,20 @@ public class SubmitSliceJobRequest
     [Required]
     public int SlicerEngine { get; set; }
 
+    /// <summary>
+    /// Optional slicer engine version pin (issue #578). When set, the job is routed
+    /// to a worker advertising the matching versioned capability tag
+    /// (e.g. <c>orcaslicer:2.4.0</c>) and the version is persisted on the
+    /// resulting <c>SliceJob</c>. When null/empty, the job carries the
+    /// generic engine capability (<c>orcaslicer</c>) and any registered worker
+    /// for that engine may claim it (backwards-compatible default).
+    /// The server validates the value against the plugin registry and
+    /// derives <see cref="RequiredCapabilitiesJson"/> — clients may not
+    /// forge a capability tag.
+    /// </summary>
+    [MaxLength(32)]
+    public string? SlicerEngineVersion { get; set; }
+
     public string? SlicerProfileJson { get; set; }
 
     public Guid? SlicerProfileId { get; set; }
@@ -105,6 +119,11 @@ public class SliceJobStatusResponse
     public string ModelFileName { get; set; } = string.Empty;
 
     public int SlicerEngine { get; set; }
+
+    /// <summary>
+    /// Resolved engine version pin (issue #578). Null for legacy / unpinned jobs.
+    /// </summary>
+    public string? SlicerEngineVersion { get; set; }
 
     public string? SlicerProfileJson { get; set; }
 

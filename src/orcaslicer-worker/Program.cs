@@ -12,6 +12,9 @@ namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
+    // Legacy static capability list — retained for the diagnostic root endpoint.
+    // Live routing uses WorkerCapabilityProvider so the version-specific tag
+    // (issue #578) is emitted from configuration.
     public static readonly string[] Capabilities = ["orcaslicer", "stl-processing", "gcode-generation"];
 }
 
@@ -39,6 +42,7 @@ public static class Program
         _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
         _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
+        _ = builder.Services.AddSingleton<WorkerCapabilityProvider>(); // versioned capability advertising (issue #578)
 
         // Profile services - use SQLite-cached service for fast queries
         _ = builder.Services.AddSingleton<CachedOrcaProfilesService>(sp =>
