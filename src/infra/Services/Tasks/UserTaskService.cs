@@ -200,6 +200,67 @@ public class UserTaskService(
         return createdDto;
     }
 
+    /// <inheritdoc />
+    public async Task<ShiftPlanDto> GetShiftPlanAsync(CancellationToken ct = default)
+    {
+        IReadOnlyList<UserTask> pending = await _taskRepository.GetPendingTasksAsync(null, ct);
+
+        // Legacy tasks that pre-date the shift-plan compiler carry
+        // AnchorKind = Unspecified — keep them visible in AnytimeToday so no
+        // task disappears from the operator view.
+        static UserTaskAnchorKind BucketOf(UserTaskAnchorKind kind) => kind switch
+        {
+            UserTaskAnchorKind.Now => UserTaskAnchorKind.Now,
+            UserTaskAnchorKind.At => UserTaskAnchorKind.At,
+            UserTaskAnchorKind.Window => UserTaskAnchorKind.Window,
+            _ => UserTaskAnchorKind.AnytimeToday,
+        };
+
+        // Group order: Now → At/Window interleaved by earliest boundary asc → AnytimeToday.
+        // We compute a synthetic "primary boundary" per task for stable ordering.
+        static DateTime PrimaryBoundary(UserTask t)
+        {
+            UserTaskAnchorKind b = BucketOf(t.AnchorKind);
+            return b switch
+            {
+                UserTaskAnchorKind.Now => DateTime.MinValue,
+                UserTaskAnchorKind.At => t.AnchorAtUtc ?? DateTime.MaxValue,
+                UserTaskAnchorKind.Window => t.WindowStartUtc ?? t.AnchorAtUtc ?? DateTime.MaxValue,
+                _ => DateTime.MaxValue,
+            };
+        }
+
+        // Deterministic per-group ordering: primary boundary asc,
+        // priority desc, created asc, id asc.
+        List<UserTask> ordered = [.. pending
+            .OrderBy(t => PrimaryBoundary(t))
+            .ThenByDescending(t => t.Priority)
+            .ThenBy(t => t.CreatedAt)
+            .ThenBy(t => t.Id)];
+
+        List<ShiftPlanGroupDto> groups = new(4);
+        foreach (UserTaskAnchorKind bucket in new[]
+        {
+            UserTaskAnchorKind.Now,
+            UserTaskAnchorKind.At,
+            UserTaskAnchorKind.Window,
+            UserTaskAnchorKind.AnytimeToday,
+        })
+        {
+            List<UserTaskDto> tasksInGroup = ordered
+                .Where(t => BucketOf(t.AnchorKind) == bucket)
+                .Select(MapToDto)
+                .ToList();
+
+            if (tasksInGroup.Count > 0)
+            {
+                groups.Add(new ShiftPlanGroupDto(bucket, tasksInGroup));
+            }
+        }
+
+        return new ShiftPlanDto(groups, DateTime.UtcNow);
+    }
+
     private static UserTaskDto MapToDto(UserTask task)
     {
         int relatedCount = ParseRelatedEntityIds(task.RelatedEntityIdsJson).Count;
@@ -217,7 +278,13 @@ public class UserTaskService(
             task.DueAt,
             task.CompletedAt,
             relatedCount,
-            task.MetadataJson);
+            task.MetadataJson,
+            task.AnchorKind,
+            task.AnchorAtUtc,
+            task.WindowStartUtc,
+            task.WindowEndUtc,
+            task.SourceKind,
+            task.SourceId);
     }
 
     private static List<Guid> ParseRelatedEntityIds(string? json)

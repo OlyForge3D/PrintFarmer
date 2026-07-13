@@ -56,6 +56,32 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
+    public async Task<UserTask?> GetOpenBySourceAsync(UserTaskSourceKind sourceKind, string sourceId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            return null;
+        }
+
+        return await _db.UserTasks
+            .Where(t =>
+                t.SourceKind == sourceKind &&
+                t.SourceId == sourceId &&
+                (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UserTask>> GetOpenCompilerTasksAsync(CancellationToken ct = default)
+    {
+        return await _db.UserTasks
+            .Where(t =>
+                t.SourceKind != UserTaskSourceKind.Unspecified &&
+                (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc />
     public async Task<int> GetPendingCountAsync(UserTaskType? taskType = null, CancellationToken ct = default)
     {
         IQueryable<UserTask> query = _db.UserTasks

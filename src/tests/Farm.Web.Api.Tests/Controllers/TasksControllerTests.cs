@@ -43,10 +43,10 @@ public class TasksControllerTests
             .ReturnsAsync(tasks);
 
         // Act
-        ActionResult<IReadOnlyList<UserTaskDto>> result = await _controller.GetPendingTasksAsync(CancellationToken.None);
+        IActionResult result = await _controller.GetPendingTasksAsync(view: null, CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(tasks, okResult.Value);
         _taskServiceMock.Verify(s => s.GetPendingTasksAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -61,10 +61,10 @@ public class TasksControllerTests
             .ReturnsAsync(emptyTasks);
 
         // Act
-        ActionResult<IReadOnlyList<UserTaskDto>> result = await _controller.GetPendingTasksAsync(CancellationToken.None);
+        IActionResult result = await _controller.GetPendingTasksAsync(view: null, CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         IReadOnlyList<UserTaskDto> returnedTasks = Assert.IsAssignableFrom<IReadOnlyList<UserTaskDto>>(okResult.Value);
         Assert.Empty(returnedTasks);
     }
@@ -327,7 +327,13 @@ public class TasksControllerTests
             DueAt: null,
             CompletedAt: null,
             RelatedEntityCount: 1,
-            MetadataJson: null);
+            MetadataJson: null,
+            AnchorKind: UserTaskAnchorKind.Unspecified,
+            AnchorAtUtc: null,
+            WindowStartUtc: null,
+            WindowEndUtc: null,
+            SourceKind: UserTaskSourceKind.Unspecified,
+            SourceId: null);
     }
 
     #endregion

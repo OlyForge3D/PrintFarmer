@@ -18,12 +18,24 @@ public class TasksController(IUserTaskService taskService, IValidator<CreateManu
     private readonly IValidator<CreateManualTaskDto> _createManualTaskValidator = createManualTaskValidator ?? throw new ArgumentNullException(nameof(createManualTaskValidator));
 
     /// <summary>
-    /// Gets all pending tasks.
+    /// Gets all pending tasks, or the shift-plan grouped view when <c>view=shift</c>.
     /// </summary>
+    /// <remarks>
+    /// The default (no <c>view</c> parameter) preserves the existing flat list contract.
+    /// <c>view=shift</c> returns a <see cref="ShiftPlanDto"/> with anchor-grouped/ordered
+    /// tasks per issue #713. Unknown <c>view</c> values fall back to the flat list.
+    /// </remarks>
     [HttpGet]
     [ProducesResponseType(typeof(IReadOnlyList<UserTaskDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<UserTaskDto>>> GetPendingTasksAsync(CancellationToken ct)
+    [ProducesResponseType(typeof(ShiftPlanDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPendingTasksAsync([FromQuery] string? view, CancellationToken ct)
     {
+        if (string.Equals(view, "shift", StringComparison.OrdinalIgnoreCase))
+        {
+            ShiftPlanDto plan = await _taskService.GetShiftPlanAsync(ct);
+            return Ok(plan);
+        }
+
         IReadOnlyList<UserTaskDto> tasks = await _taskService.GetPendingTasksAsync(ct);
         return Ok(tasks);
     }

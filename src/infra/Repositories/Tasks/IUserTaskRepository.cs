@@ -29,6 +29,22 @@ public interface IUserTaskRepository
     Task<UserTask?> GetByEntityAsync(UserTaskType taskType, string entityType, Guid entityId, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets the open (Pending or InProgress) task matching a canonical shift-plan
+    /// source. Returns <c>null</c> when no such task exists. Used by the
+    /// shift-plan compiler to dedupe by (<see cref="UserTaskSourceKind"/>,
+    /// <see cref="UserTask.SourceId"/>).
+    /// </summary>
+    Task<UserTask?> GetOpenBySourceAsync(UserTaskSourceKind sourceKind, string sourceId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns every open task materialized by the shift-plan compiler
+    /// (SourceKind ≠ <see cref="UserTaskSourceKind.Unspecified"/>). Used by the
+    /// compiler to detect tasks whose source has since resolved so they can be
+    /// auto-completed.
+    /// </summary>
+    Task<IReadOnlyList<UserTask>> GetOpenCompilerTasksAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Gets the count of pending tasks, optionally filtered by type.
     /// </summary>
     Task<int> GetPendingCountAsync(UserTaskType? taskType = null, CancellationToken ct = default);
