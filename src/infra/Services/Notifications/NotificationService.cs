@@ -127,12 +127,22 @@ public interface INotificationService
     Task<NotificationPreferences?> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Update user notification preferences
+    /// Update user notification preferences.
     /// </summary>
     /// <param name="userId">The unique identifier of the user.</param>
     /// <param name="preferences">The notification preferences to update.</param>
+    /// <param name="preserveAttentionFields">
+    /// When <c>true</c>, the 20 attention-row columns on the persisted entity are left
+    /// untouched (issue #708 H2-v5). Legacy PUTs that carry only the four job rows set
+    /// this so a concurrent newer-client attention update cannot be clobbered by a stale
+    /// snapshot. When <c>false</c>, all 20 attention fields on <paramref name="preferences"/>
+    /// are written through. Master flag columns (<c>EnablePushNotifications</c>, …) are
+    /// derived from the final nine-row state either way and mirrored onto
+    /// <paramref name="preferences"/> so callers building a response DTO see the actual
+    /// persisted values.
+    /// </param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, CancellationToken cancellationToken = default);
+    Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Cleanup old notifications based on retention policy
@@ -450,7 +460,7 @@ public class NotificationService(
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
     }
 
-    public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, CancellationToken cancellationToken = default)
+    public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default)
     {
         var existing = await dbContext.NotificationPreferences
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
@@ -462,14 +472,15 @@ public class NotificationService(
             preferences.InAppOnJobFailed = true;
             preferences.CreatedAt = DateTime.UtcNow;
             preferences.UpdatedAt = DateTime.UtcNow;
+
+            // Derive master flags from the final nine-row state. For a new
+            // row the caller-supplied `preferences` IS the final state, so we
+            // derive directly onto it.
+            ApplyMasterFlagsFromMatrix(preferences);
             dbContext.NotificationPreferences.Add(preferences);
         }
         else
         {
-            existing.EnableEmailNotifications = preferences.EnableEmailNotifications;
-            existing.EnablePushNotifications = preferences.EnablePushNotifications;
-            existing.EnableInAppNotifications = preferences.EnableInAppNotifications;
-            existing.EnableTelegramNotifications = preferences.EnableTelegramNotifications;
             existing.NotifyOnCompletion = preferences.NotifyOnCompletion;
             existing.NotifyOnFailure = preferences.NotifyOnFailure;
             existing.NotifyOnStart = preferences.NotifyOnStart;
@@ -493,37 +504,127 @@ public class NotificationService(
             existing.Frequency = preferences.Frequency;
             existing.RetentionDays = preferences.RetentionDays;
 
-            // Issue #708: persist attention-row preferences alongside the job
-            // rows. Without this the controller's ApplyEventChannelPreferences
-            // sets the values on the transient DTO but they never reach the
-            // database because the service copies the ORIGINAL entity's
-            // fields back onto itself (Hicks v3 blocker 4).
-            existing.InAppOnPrinterFailure = preferences.InAppOnPrinterFailure;
-            existing.EmailOnPrinterFailure = preferences.EmailOnPrinterFailure;
-            existing.PushOnPrinterFailure = preferences.PushOnPrinterFailure;
-            existing.TelegramOnPrinterFailure = preferences.TelegramOnPrinterFailure;
-            existing.InAppOnFilamentRunout = preferences.InAppOnFilamentRunout;
-            existing.EmailOnFilamentRunout = preferences.EmailOnFilamentRunout;
-            existing.PushOnFilamentRunout = preferences.PushOnFilamentRunout;
-            existing.TelegramOnFilamentRunout = preferences.TelegramOnFilamentRunout;
-            existing.InAppOnHarvestReady = preferences.InAppOnHarvestReady;
-            existing.EmailOnHarvestReady = preferences.EmailOnHarvestReady;
-            existing.PushOnHarvestReady = preferences.PushOnHarvestReady;
-            existing.TelegramOnHarvestReady = preferences.TelegramOnHarvestReady;
-            existing.InAppOnMaintenanceDue = preferences.InAppOnMaintenanceDue;
-            existing.EmailOnMaintenanceDue = preferences.EmailOnMaintenanceDue;
-            existing.PushOnMaintenanceDue = preferences.PushOnMaintenanceDue;
-            existing.TelegramOnMaintenanceDue = preferences.TelegramOnMaintenanceDue;
-            existing.InAppOnPrinterOffline = preferences.InAppOnPrinterOffline;
-            existing.EmailOnPrinterOffline = preferences.EmailOnPrinterOffline;
-            existing.PushOnPrinterOffline = preferences.PushOnPrinterOffline;
-            existing.TelegramOnPrinterOffline = preferences.TelegramOnPrinterOffline;
+            // Issue #708 H2-v5: attention-row preservation lives here — the
+            // single tracked read is authoritative. Legacy PUTs that omit
+            // attention rows must set `preserveAttentionFields=true` so a
+            // concurrent newer-client attention update cannot be overwritten
+            // by a stale controller snapshot. Modern requests that address
+            // attention rows leave the flag `false` and all 20 columns are
+            // written through, preserving pre-fix modern-client semantics.
+            if (!preserveAttentionFields)
+            {
+                existing.InAppOnPrinterFailure = preferences.InAppOnPrinterFailure;
+                existing.EmailOnPrinterFailure = preferences.EmailOnPrinterFailure;
+                existing.PushOnPrinterFailure = preferences.PushOnPrinterFailure;
+                existing.TelegramOnPrinterFailure = preferences.TelegramOnPrinterFailure;
+                existing.InAppOnFilamentRunout = preferences.InAppOnFilamentRunout;
+                existing.EmailOnFilamentRunout = preferences.EmailOnFilamentRunout;
+                existing.PushOnFilamentRunout = preferences.PushOnFilamentRunout;
+                existing.TelegramOnFilamentRunout = preferences.TelegramOnFilamentRunout;
+                existing.InAppOnHarvestReady = preferences.InAppOnHarvestReady;
+                existing.EmailOnHarvestReady = preferences.EmailOnHarvestReady;
+                existing.PushOnHarvestReady = preferences.PushOnHarvestReady;
+                existing.TelegramOnHarvestReady = preferences.TelegramOnHarvestReady;
+                existing.InAppOnMaintenanceDue = preferences.InAppOnMaintenanceDue;
+                existing.EmailOnMaintenanceDue = preferences.EmailOnMaintenanceDue;
+                existing.PushOnMaintenanceDue = preferences.PushOnMaintenanceDue;
+                existing.TelegramOnMaintenanceDue = preferences.TelegramOnMaintenanceDue;
+                existing.InAppOnPrinterOffline = preferences.InAppOnPrinterOffline;
+                existing.EmailOnPrinterOffline = preferences.EmailOnPrinterOffline;
+                existing.PushOnPrinterOffline = preferences.PushOnPrinterOffline;
+                existing.TelegramOnPrinterOffline = preferences.TelegramOnPrinterOffline;
+            }
 
+            // Issue #708 H1-v5: master flags are derived data — the OR of the
+            // final nine event×channel rows on the tracked entity, computed
+            // AFTER attention-row preservation. Deriving here (rather than in
+            // the controller) is the single source of truth so a legacy PUT
+            // whose caller doesn't know the persisted attention state still
+            // ends up with an accurate master flag.
+            ApplyMasterFlagsFromMatrix(existing);
             existing.UpdatedAt = DateTime.UtcNow;
+
+            // Mirror the final persisted state back onto the caller's DTO so
+            // the controller's response body reflects reality (all 20 attention
+            // fields + the four master flags) instead of the pre-service
+            // snapshot the controller assembled from the request.
+            MirrorAttentionAndMasterFlags(existing, preferences);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Updated notification preferences for user {UserId}", userId);
+    }
+
+    private static void ApplyMasterFlagsFromMatrix(NotificationPreferences prefs)
+    {
+        prefs.EnableInAppNotifications =
+            prefs.InAppOnJobStarted
+            || prefs.InAppOnJobCompleted
+            || prefs.InAppOnJobFailed
+            || prefs.InAppOnJobPaused
+            || prefs.InAppOnPrinterFailure
+            || prefs.InAppOnFilamentRunout
+            || prefs.InAppOnHarvestReady
+            || prefs.InAppOnMaintenanceDue
+            || prefs.InAppOnPrinterOffline;
+        prefs.EnableEmailNotifications =
+            prefs.EmailOnJobStarted
+            || prefs.EmailOnJobCompleted
+            || prefs.EmailOnJobFailed
+            || prefs.EmailOnJobPaused
+            || prefs.EmailOnPrinterFailure
+            || prefs.EmailOnFilamentRunout
+            || prefs.EmailOnHarvestReady
+            || prefs.EmailOnMaintenanceDue
+            || prefs.EmailOnPrinterOffline;
+        prefs.EnablePushNotifications =
+            prefs.PushOnJobStarted
+            || prefs.PushOnJobCompleted
+            || prefs.PushOnJobFailed
+            || prefs.PushOnJobPaused
+            || prefs.PushOnPrinterFailure
+            || prefs.PushOnFilamentRunout
+            || prefs.PushOnHarvestReady
+            || prefs.PushOnMaintenanceDue
+            || prefs.PushOnPrinterOffline;
+        prefs.EnableTelegramNotifications =
+            prefs.TelegramOnJobStarted
+            || prefs.TelegramOnJobCompleted
+            || prefs.TelegramOnJobFailed
+            || prefs.TelegramOnJobPaused
+            || prefs.TelegramOnPrinterFailure
+            || prefs.TelegramOnFilamentRunout
+            || prefs.TelegramOnHarvestReady
+            || prefs.TelegramOnMaintenanceDue
+            || prefs.TelegramOnPrinterOffline;
+    }
+
+    private static void MirrorAttentionAndMasterFlags(NotificationPreferences source, NotificationPreferences target)
+    {
+        target.EnableInAppNotifications = source.EnableInAppNotifications;
+        target.EnableEmailNotifications = source.EnableEmailNotifications;
+        target.EnablePushNotifications = source.EnablePushNotifications;
+        target.EnableTelegramNotifications = source.EnableTelegramNotifications;
+        target.InAppOnPrinterFailure = source.InAppOnPrinterFailure;
+        target.EmailOnPrinterFailure = source.EmailOnPrinterFailure;
+        target.PushOnPrinterFailure = source.PushOnPrinterFailure;
+        target.TelegramOnPrinterFailure = source.TelegramOnPrinterFailure;
+        target.InAppOnFilamentRunout = source.InAppOnFilamentRunout;
+        target.EmailOnFilamentRunout = source.EmailOnFilamentRunout;
+        target.PushOnFilamentRunout = source.PushOnFilamentRunout;
+        target.TelegramOnFilamentRunout = source.TelegramOnFilamentRunout;
+        target.InAppOnHarvestReady = source.InAppOnHarvestReady;
+        target.EmailOnHarvestReady = source.EmailOnHarvestReady;
+        target.PushOnHarvestReady = source.PushOnHarvestReady;
+        target.TelegramOnHarvestReady = source.TelegramOnHarvestReady;
+        target.InAppOnMaintenanceDue = source.InAppOnMaintenanceDue;
+        target.EmailOnMaintenanceDue = source.EmailOnMaintenanceDue;
+        target.PushOnMaintenanceDue = source.PushOnMaintenanceDue;
+        target.TelegramOnMaintenanceDue = source.TelegramOnMaintenanceDue;
+        target.InAppOnPrinterOffline = source.InAppOnPrinterOffline;
+        target.EmailOnPrinterOffline = source.EmailOnPrinterOffline;
+        target.PushOnPrinterOffline = source.PushOnPrinterOffline;
+        target.TelegramOnPrinterOffline = source.TelegramOnPrinterOffline;
     }
 
     public async Task CleanupOldNotificationsAsync(CancellationToken cancellationToken = default)

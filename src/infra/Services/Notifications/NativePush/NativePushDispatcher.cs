@@ -156,6 +156,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     continue;
                 }
 
+                // Hicks v5 H1 master gate: a persisted preferences row with
+                // EnablePushNotifications=false is the shared "no push at all"
+                // opt-out; every attention native push MUST honour it. Missing
+                // row falls back to CLR default (true) so the pre-#708 opt-in
+                // behaviour is preserved for users who never touched the
+                // preference UI. This gate runs BEFORE the per-kind check so
+                // preserved PushOn{Kind} values cannot leak past a global
+                // opt-out.
+                if (prefs is not null && !prefs.EnablePushNotifications)
+                {
+                    _metrics.SkippedCategoryOptOut.Add(1);
+                    continue;
+                }
+
                 // Hicks v4 blocker 3: the shared web preference matrix exposes
                 // per-kind push toggles (PushOnPrinterFailure / FilamentRunout /
                 // HarvestReady / MaintenanceDue / PrinterOffline) that #716 uses

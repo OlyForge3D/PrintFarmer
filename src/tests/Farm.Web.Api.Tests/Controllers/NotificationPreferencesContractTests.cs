@@ -539,4 +539,230 @@ public sealed class NotificationPreferencesContractTests
                 $"null prefs must allow {kind} (matches CLR defaults + pre-#708 behaviour)");
         }
     }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdatePreferences_MasterFlagDerivedFromAllNineRows_WhenOnlyAttentionPushEnabled()
+    {
+        // Hicks v5 H1 regression: the shared-preference write projection was
+        // OR'ing only the four legacy job rows. That silently reset the four
+        // Enable{Channel}Notifications master flags to `false` whenever a
+        // user disabled every job row even though attention rows were still
+        // sending. Post-fix: master flags derive from all nine rows.
+        var (dbContext, userId) = await BuildInMemoryDbWithUserAsync();
+        await using Farm.Infrastructure.Data.AppDbContext _ = dbContext;
+
+        // Seed a row where every job Push is false but attention Push is true.
+        dbContext.NotificationPreferences.Add(
+            new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+            {
+                UserId = userId,
+                EnablePushNotifications = false,
+                PushOnJobStarted = false,
+                PushOnJobCompleted = false,
+                PushOnJobFailed = false,
+                PushOnJobPaused = false,
+            });
+        await dbContext.SaveChangesAsync();
+
+        var service = new Farm.Infrastructure.Services.Notifications.NotificationService(
+            notificationRepository: null!,
+            usersRepository: null!,
+            logger: Microsoft.Extensions.Logging.Abstractions
+                .NullLogger<Farm.Infrastructure.Services.Notifications.NotificationService>
+                .Instance,
+            dbContext: dbContext);
+
+        // Simulate a modern PUT: matrix addresses attention rows, every push
+        // job row is false, PrinterFailure has push=true.
+        var incoming = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            PushOnJobStarted = false,
+            PushOnJobCompleted = false,
+            PushOnJobFailed = false,
+            PushOnJobPaused = false,
+            PushOnPrinterFailure = true,
+            PushOnFilamentRunout = false,
+            PushOnHarvestReady = false,
+            PushOnMaintenanceDue = false,
+            PushOnPrinterOffline = false,
+        };
+
+        await service.UpdatePreferencesAsync(userId, incoming, preserveAttentionFields: false);
+
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.EnablePushNotifications.Should()
+            .BeTrue("PushOnPrinterFailure alone must lift the master flag; the OR must span all nine rows");
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdatePreferences_MasterFlagDerivedFromAllNineRows_WhenAllPushRowsFalse()
+    {
+        // Symmetric: every push row false across all nine event types must
+        // produce EnablePushNotifications=false. Guards against a broken OR
+        // that leaves the master flag `true` when nothing is enabled.
+        var (dbContext, userId) = await BuildInMemoryDbWithUserAsync();
+        await using Farm.Infrastructure.Data.AppDbContext _ = dbContext;
+
+        dbContext.NotificationPreferences.Add(
+            new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+            {
+                UserId = userId,
+                EnablePushNotifications = true,
+            });
+        await dbContext.SaveChangesAsync();
+
+        var service = new Farm.Infrastructure.Services.Notifications.NotificationService(
+            notificationRepository: null!,
+            usersRepository: null!,
+            logger: Microsoft.Extensions.Logging.Abstractions
+                .NullLogger<Farm.Infrastructure.Services.Notifications.NotificationService>
+                .Instance,
+            dbContext: dbContext);
+
+        var incoming = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            PushOnJobStarted = false,
+            PushOnJobCompleted = false,
+            PushOnJobFailed = false,
+            PushOnJobPaused = false,
+            PushOnPrinterFailure = false,
+            PushOnFilamentRunout = false,
+            PushOnHarvestReady = false,
+            PushOnMaintenanceDue = false,
+            PushOnPrinterOffline = false,
+        };
+
+        await service.UpdatePreferencesAsync(userId, incoming, preserveAttentionFields: false);
+
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.EnablePushNotifications.Should()
+            .BeFalse("with every push row off, EnablePushNotifications must be off");
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        LegacyPut_WithConcurrentAttentionCommit_PreservesConcurrentUpdate()
+    {
+        // Hicks v5 H2 regression: prior to the fix, the controller performed
+        // an AsNoTracking pre-read of the preferences row and copied its 20
+        // attention columns onto a transient DTO before calling the service.
+        // If a newer-client attention update landed AFTER the pre-read but
+        // BEFORE the service's tracked read, the service would overwrite the
+        // concurrent update with the stale pre-read snapshot on save. The
+        // fix moves attention-row preservation into the service's single
+        // authoritative tracked read/write unit; a `preserveAttentionFields`
+        // flag tells the service to leave those columns untouched. This test
+        // simulates a concurrent commit through a second DbContext to prove
+        // the newer attention update survives a legacy PUT.
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+
+        System.Guid userId = System.Guid.NewGuid();
+
+        // Bootstrap the initial persisted row via its own short-lived context.
+        await using (var seedCtx = new Farm.Infrastructure.Data.AppDbContext(options))
+        {
+            seedCtx.Users.Add(new Farm.Infrastructure.Domain.User
+            {
+                Id = userId,
+                Username = "concurrent-user",
+                Email = "u@example.com",
+                PasswordHash = "x",
+                CreatedAt = System.DateTime.UtcNow,
+            });
+            seedCtx.NotificationPreferences.Add(
+                new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+                {
+                    UserId = userId,
+                    EnablePushNotifications = true,
+                    PushOnPrinterFailure = true,
+                });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        // Context A: the legacy PUT request path. It will be handed to the
+        // service AFTER a concurrent commit lands via context B.
+        var serviceCtx = new Farm.Infrastructure.Data.AppDbContext(options);
+        await using Farm.Infrastructure.Data.AppDbContext _ = serviceCtx;
+
+        // Context B: the concurrent newer-client attention update. Commit a
+        // change that flips PushOnPrinterFailure to false.
+        await using (var concurrentCtx = new Farm.Infrastructure.Data.AppDbContext(options))
+        {
+            Farm.Infrastructure.Domain.Notifications.NotificationPreferences concurrent =
+                (await concurrentCtx.NotificationPreferences
+                    .FirstOrDefaultAsync(p => p.UserId == userId))!;
+            concurrent.PushOnPrinterFailure = false;
+            await concurrentCtx.SaveChangesAsync();
+        }
+
+        // Now invoke the service on context A with preserveAttentionFields=true
+        // — the legacy PUT contract. The stale in-memory value on the passed
+        // preferences DTO is PushOnPrinterFailure=true, matching the value the
+        // legacy pre-read WOULD have captured before the concurrent commit.
+        var service = new Farm.Infrastructure.Services.Notifications.NotificationService(
+            notificationRepository: null!,
+            usersRepository: null!,
+            logger: Microsoft.Extensions.Logging.Abstractions
+                .NullLogger<Farm.Infrastructure.Services.Notifications.NotificationService>
+                .Instance,
+            dbContext: serviceCtx);
+
+        var stale = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            PushOnJobStarted = false,
+            PushOnJobCompleted = true,
+            PushOnJobFailed = true,
+            PushOnJobPaused = false,
+            PushOnPrinterFailure = true,
+        };
+
+        await service.UpdatePreferencesAsync(userId, stale, preserveAttentionFields: true);
+
+        // Re-read via a fresh context so we see the true persisted state.
+        await using var verifyCtx = new Farm.Infrastructure.Data.AppDbContext(options);
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await verifyCtx.NotificationPreferences
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.PushOnPrinterFailure.Should()
+            .BeFalse("the concurrent newer-client attention update must survive a legacy PUT");
+    }
+
+    private static async System.Threading.Tasks.Task<
+        (Farm.Infrastructure.Data.AppDbContext DbContext, System.Guid UserId)> BuildInMemoryDbWithUserAsync()
+    {
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+        System.Guid userId = System.Guid.NewGuid();
+        dbContext.Users.Add(new Farm.Infrastructure.Domain.User
+        {
+            Id = userId,
+            Username = "u",
+            Email = "u@example.com",
+            PasswordHash = "x",
+            CreatedAt = System.DateTime.UtcNow,
+        });
+        await dbContext.SaveChangesAsync();
+        return (dbContext, userId);
+    }
 }

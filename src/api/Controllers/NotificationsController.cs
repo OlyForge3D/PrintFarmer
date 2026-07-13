@@ -270,7 +270,7 @@ public class NotificationsController(INotificationService notificationService) :
     /// Update notification preferences for the current user.
     /// </summary>
     /// <param name="request">The preferences to update.</param>
-    /// <param name="dbContext">DB context resolved from DI, used to hydrate the existing preferences row so unspecified fields are not clobbered.</param>
+    /// <param name="dbContext">DB context accepted for backward-compatible parameter binding; the notification service owns the tracked read/write.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated notification preferences.</returns>
     [HttpPut("preferences")]
@@ -281,6 +281,8 @@ public class NotificationsController(INotificationService notificationService) :
         [FromServices] AppDbContext dbContext,
         CancellationToken cancellationToken = default)
     {
+        _ = dbContext;
+
         try
         {
             Guid userId = GetUserIdFromClaims();
@@ -290,19 +292,15 @@ public class NotificationsController(INotificationService notificationService) :
                 return BadRequest(new { error = "Request body cannot be empty" });
             }
 
-            // Hicks v4 blocker 2: the transient `preferences` object is passed to
-            // NotificationService.UpdatePreferencesAsync which copies ALL fields
-            // over the persisted entity. If we constructed it with only the 24
-            // legacy fields, the 20 attention columns would revert to CLR
-            // defaults every PUT — silently clobbering any attention prefs the
-            // user set via a newer client. Load the existing row (if any) and
-            // seed attention fields from it; ApplyEventChannelPreferences below
-            // will still override them when the incoming matrix contains
-            // attention rows (V1 guard).
-            NotificationPreferences? existing = await dbContext.NotificationPreferences
-                .AsNoTracking()
-                .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-
+            // Issue #708 H2-v5: attention-row preservation MUST happen inside
+            // NotificationService's single tracked read/write unit so a
+            // concurrent newer-client attention update cannot be overwritten
+            // by a stale pre-read snapshot. The controller no longer touches
+            // the persisted row up-front; it only builds the transient
+            // request-view of preferences and hands the service a signal for
+            // whether the incoming matrix addressed any attention row. The
+            // service then either overwrites the 20 attention columns or
+            // leaves them untouched.
             var preferences = new NotificationPreferences
             {
                 UserId = userId,
@@ -318,32 +316,9 @@ public class NotificationsController(INotificationService notificationService) :
                 RetentionDays = request.RetentionDays ?? 30,
             };
 
-            if (existing is not null)
-            {
-                preferences.InAppOnPrinterFailure = existing.InAppOnPrinterFailure;
-                preferences.EmailOnPrinterFailure = existing.EmailOnPrinterFailure;
-                preferences.PushOnPrinterFailure = existing.PushOnPrinterFailure;
-                preferences.TelegramOnPrinterFailure = existing.TelegramOnPrinterFailure;
-                preferences.InAppOnFilamentRunout = existing.InAppOnFilamentRunout;
-                preferences.EmailOnFilamentRunout = existing.EmailOnFilamentRunout;
-                preferences.PushOnFilamentRunout = existing.PushOnFilamentRunout;
-                preferences.TelegramOnFilamentRunout = existing.TelegramOnFilamentRunout;
-                preferences.InAppOnHarvestReady = existing.InAppOnHarvestReady;
-                preferences.EmailOnHarvestReady = existing.EmailOnHarvestReady;
-                preferences.PushOnHarvestReady = existing.PushOnHarvestReady;
-                preferences.TelegramOnHarvestReady = existing.TelegramOnHarvestReady;
-                preferences.InAppOnMaintenanceDue = existing.InAppOnMaintenanceDue;
-                preferences.EmailOnMaintenanceDue = existing.EmailOnMaintenanceDue;
-                preferences.PushOnMaintenanceDue = existing.PushOnMaintenanceDue;
-                preferences.TelegramOnMaintenanceDue = existing.TelegramOnMaintenanceDue;
-                preferences.InAppOnPrinterOffline = existing.InAppOnPrinterOffline;
-                preferences.EmailOnPrinterOffline = existing.EmailOnPrinterOffline;
-                preferences.PushOnPrinterOffline = existing.PushOnPrinterOffline;
-                preferences.TelegramOnPrinterOffline = existing.TelegramOnPrinterOffline;
-            }
-
             ApplyEventChannelPreferences(preferences, request);
-            await notificationService.UpdatePreferencesAsync(userId, preferences, cancellationToken);
+            bool preserveAttentionFields = !RequestMatrixIncludesAttentionRow(request);
+            await notificationService.UpdatePreferencesAsync(userId, preferences, preserveAttentionFields, cancellationToken);
             return Ok(ToDto(preferences));
         }
         catch (InvalidOperationException)
@@ -821,12 +796,7 @@ public class NotificationsController(INotificationService notificationService) :
         // defaults first so that omitted attention rows land at defaults
         // rather than stale values, then per-row overrides in the loop below
         // apply the sender's actual choices.
-        bool matrixIncludesAttentionRow = matrix.Any(item => item is not null
-            && item.EventType is NotificationPreferenceEventType.PrinterFailure
-                or NotificationPreferenceEventType.FilamentRunout
-                or NotificationPreferenceEventType.HarvestReady
-                or NotificationPreferenceEventType.MaintenanceDue
-                or NotificationPreferenceEventType.PrinterOffline);
+        bool matrixIncludesAttentionRow = RequestMatrixIncludesAttentionRow(request);
 
         if (matrixIncludesAttentionRow)
         {
@@ -918,31 +888,44 @@ public class NotificationsController(INotificationService notificationService) :
             }
         }
 
-        preferences.EnableInAppNotifications =
-            preferences.InAppOnJobStarted
-            || preferences.InAppOnJobCompleted
-            || preferences.InAppOnJobFailed
-            || preferences.InAppOnJobPaused;
-        preferences.EnableEmailNotifications =
-            preferences.EmailOnJobStarted
-            || preferences.EmailOnJobCompleted
-            || preferences.EmailOnJobFailed
-            || preferences.EmailOnJobPaused;
-        preferences.EnablePushNotifications =
-            preferences.PushOnJobStarted
-            || preferences.PushOnJobCompleted
-            || preferences.PushOnJobFailed
-            || preferences.PushOnJobPaused;
-        preferences.EnableTelegramNotifications =
-            preferences.TelegramOnJobStarted
-            || preferences.TelegramOnJobCompleted
-            || preferences.TelegramOnJobFailed
-            || preferences.TelegramOnJobPaused;
-
+        // Master flags (EnableInAppNotifications, EnableEmailNotifications,
+        // EnablePushNotifications, EnableTelegramNotifications) are derived
+        // in NotificationService from the OR of all nine event rows on the
+        // tracked entity (issue #708 H1-v5). Deriving them here would be
+        // wrong for legacy PUTs because the controller does not see the
+        // persisted attention rows any more.
         preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted || preferences.TelegramOnJobStarted;
         preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted || preferences.TelegramOnJobCompleted;
         preferences.NotifyOnFailure = true;
         preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused || preferences.TelegramOnJobPaused;
+    }
+
+    private static bool RequestMatrixIncludesAttentionRow(UpdateNotificationPreferencesRequest request)
+    {
+        List<NotificationEventChannelPreferenceDto>? matrix = request.EventChannelPreferences;
+        if (matrix is null || matrix.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (NotificationEventChannelPreferenceDto item in matrix)
+        {
+            if (item is null)
+            {
+                continue;
+            }
+
+            if (item.EventType is NotificationPreferenceEventType.PrinterFailure
+                or NotificationPreferenceEventType.FilamentRunout
+                or NotificationPreferenceEventType.HarvestReady
+                or NotificationPreferenceEventType.MaintenanceDue
+                or NotificationPreferenceEventType.PrinterOffline)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
