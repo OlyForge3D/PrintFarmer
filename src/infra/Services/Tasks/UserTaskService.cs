@@ -25,6 +25,15 @@ public class UserTaskService(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<UserTaskDto>> GetPendingTasksAsync(bool isAdmin, CancellationToken ct = default)
+    {
+        // Fix 8/B: non-admin callers must not receive maintenance-sourced tasks
+        // (whose title/description carry alert content) from the flat list either.
+        IReadOnlyList<UserTask> tasks = await _taskRepository.GetPendingTasksAsync(null, includeMaintenance: isAdmin, ct);
+        return tasks.Select(MapToDto).ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<UserTaskDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         UserTask? task = await _taskRepository.GetByIdAsync(id, ct);
@@ -35,6 +44,14 @@ public class UserTaskService(
     public async Task<int> GetPendingCountAsync(CancellationToken ct = default)
     {
         return await _taskRepository.GetPendingCountAsync(null, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> GetPendingCountAsync(bool isAdmin, CancellationToken ct = default)
+    {
+        // Fix 8/B: the count returned to a non-admin must exclude maintenance tasks
+        // so it agrees with the filtered list.
+        return await _taskRepository.GetPendingCountAsync(null, includeMaintenance: isAdmin, ct);
     }
 
     /// <inheritdoc />
@@ -230,15 +247,22 @@ public class UserTaskService(
             _ => UserTaskAnchorKind.AnytimeToday,
         };
 
-        // Primary boundary for interleaved ordering: At tasks use AnchorAtUtc,
-        // Window tasks use WindowStartUtc, Now tasks float to the top, Anytime to the bottom.
+        // Primary boundary for interleaved ordering. Fix H: key by the task's own
+        // AnchorKind so a Window task that also happens to carry AnchorAtUtc still
+        // sorts by its window-start boundary, not the point anchor. Now floats to the
+        // top, Anytime sinks to the bottom.
         static DateTime PrimaryBoundary(UserTask t)
         {
             UserTaskAnchorKind b = BucketOf(t.AnchorKind);
             return b switch
             {
                 UserTaskAnchorKind.Now => DateTime.MinValue,
-                UserTaskAnchorKind.Timeline => t.AnchorAtUtc ?? t.WindowStartUtc ?? DateTime.MaxValue,
+                UserTaskAnchorKind.Timeline => t.AnchorKind switch
+                {
+                    UserTaskAnchorKind.At => t.AnchorAtUtc ?? t.WindowStartUtc ?? t.DueAt ?? t.CreatedAt,
+                    UserTaskAnchorKind.Window => t.WindowStartUtc ?? t.AnchorAtUtc ?? t.DueAt ?? t.CreatedAt,
+                    _ => t.AnchorAtUtc ?? t.WindowStartUtc ?? DateTime.MaxValue,
+                },
                 _ => DateTime.MaxValue,
             };
         }

@@ -123,6 +123,36 @@ public class UserTaskShiftPlanTests
         Assert.Contains(allTasks, t => t.Title == "maint");
     }
 
+    /// <summary>
+    /// Fix H: a Window task that also carries an (earlier) AnchorAtUtc must sort by its
+    /// WindowStartUtc boundary, not the point anchor — otherwise it jumps ahead of
+    /// earlier-window tasks in the Timeline.
+    /// </summary>
+    [Fact]
+    public async Task GetShiftPlanAsync_WindowTaskWithAnchorAt_SortsByWindowStart()
+    {
+        DateTime baseUtc = new(2026, 07, 12, 12, 00, 00, DateTimeKind.Utc);
+
+        // Window task's point anchor (10min) is earlier than its window-start (60min).
+        UserTask win = Task("win", UserTaskAnchorKind.Window,
+            anchorAt: baseUtc.AddMinutes(10),
+            windowStart: baseUtc.AddMinutes(60),
+            windowEnd: baseUtc.AddMinutes(90));
+        UserTask at = Task("at", UserTaskAnchorKind.At, anchorAt: baseUtc.AddMinutes(40));
+
+        _repo.Setup(r => r.GetPendingTasksAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { win, at });
+
+        ShiftPlanDto plan = await _service.GetShiftPlanAsync();
+
+        // Correct ordering keys the Window task by its 60min window-start, so the 40min
+        // At task precedes it. The pre-fix bug keyed Window by its 10min anchor.
+        Assert.Collection(
+            plan.Groups.Single().Tasks,
+            t => Assert.Equal("at", t.Title),
+            t => Assert.Equal("win", t.Title));
+    }
+
     private static UserTask Task(
         string title,
         UserTaskAnchorKind anchor,

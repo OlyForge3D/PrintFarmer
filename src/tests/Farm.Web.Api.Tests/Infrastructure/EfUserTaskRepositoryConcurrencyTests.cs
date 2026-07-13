@@ -1,0 +1,177 @@
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Tasks;
+using Farm.Infrastructure.Services.ShiftPlan;
+using FluentAssertions;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Infrastructure;
+
+/// <summary>
+/// Concurrency guards for the shift-plan compiler persistence (issue #713 round 2):
+/// Fix D (no lost-update when a user mutates a task mid-compile), Fix E (the unique
+/// filtered index prevents duplicate open compiler tasks and the in-process gate
+/// serializes passes). These use two <see cref="AppDbContext"/> instances over one
+/// open SQLite connection so both see the same rows.
+/// </summary>
+public class EfUserTaskRepositoryConcurrencyTests
+{
+    /// <summary>
+    /// Fix D: the compiler holds a tracked task and writes only anchor fields. A user
+    /// who completes the task during the pass must not have their Status clobbered, and
+    /// the compiler's anchor change must still persist.
+    /// </summary>
+    [Fact]
+    public async Task TrackUpdateAsync_ConcurrentUserStatusChange_IsNotClobbered()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        Guid taskId = Guid.NewGuid();
+
+        await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
+        {
+            _ = seed.UserTasks.Add(NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:1", UserTaskStatus.Pending, taskId));
+            _ = await seed.SaveChangesAsync();
+        }
+
+        // Compiler context loads the tracked entity (mirrors GetOpenCompilerTasksAsync).
+        await using AppDbContext compilerCtx = TestInfrastructure.TestHelpers.CreateContext(connection);
+        EfUserTaskRepository compilerRepo = new(compilerCtx);
+        UserTask compilerTask = Assert.Single(await compilerRepo.GetOpenCompilerTasksAsync());
+
+        // Meanwhile, a user completes the task in a separate context and saves.
+        await using (AppDbContext userCtx = TestInfrastructure.TestHelpers.CreateContext(connection))
+        {
+            UserTask userTask = await userCtx.UserTasks.SingleAsync(t => t.Id == taskId);
+            userTask.Status = UserTaskStatus.Completed;
+            userTask.CompletedAt = DateTime.UtcNow;
+            _ = await userCtx.SaveChangesAsync();
+        }
+
+        // Compiler mutates only anchor fields, then saves via the fixed TrackUpdateAsync.
+        DateTime newWindowStart = DateTime.UtcNow.AddHours(3);
+        compilerTask.WindowStartUtc = newWindowStart;
+        await compilerRepo.TrackUpdateAsync(compilerTask);
+        await compilerRepo.SaveChangesAsync();
+
+        await using AppDbContext verifyCtx = TestInfrastructure.TestHelpers.CreateContext(connection);
+        UserTask finalTask = await verifyCtx.UserTasks.AsNoTracking().SingleAsync(t => t.Id == taskId);
+
+        // No lost update either direction: user's status survives AND compiler's anchor persists.
+        finalTask.Status.Should().Be(UserTaskStatus.Completed);
+        finalTask.WindowStartUtc.Should().BeCloseTo(newWindowStart, TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>Fix E: two open tasks with the same (SourceKind, SourceId) violate the unique filtered index.</summary>
+    [Fact]
+    public async Task UniqueSourceIndex_TwoOpenTasksSameSource_ThrowsOnInsert()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        await using AppDbContext ctx = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true);
+
+        _ = ctx.UserTasks.Add(NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:dup", UserTaskStatus.Pending));
+        _ = ctx.UserTasks.Add(NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:dup", UserTaskStatus.Pending));
+
+        Func<Task> act = async () => await ctx.SaveChangesAsync();
+        _ = await act.Should().ThrowAsync<DbUpdateException>();
+    }
+
+    /// <summary>Fix E: the filter excludes terminal statuses, so an open + completed pair for one source is allowed.</summary>
+    [Fact]
+    public async Task UniqueSourceIndex_OpenPlusTerminalSameSource_IsAllowed()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        await using AppDbContext ctx = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true);
+
+        _ = ctx.UserTasks.Add(NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:s", UserTaskStatus.Pending));
+        _ = ctx.UserTasks.Add(NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:s", UserTaskStatus.Completed));
+
+        Func<Task> act = async () => await ctx.SaveChangesAsync();
+        _ = await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>Fix E: legacy tasks with a null SourceId are excluded from the filtered unique index.</summary>
+    [Fact]
+    public async Task UniqueSourceIndex_NullSourceId_IsAllowed()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        await using AppDbContext ctx = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true);
+
+        _ = ctx.UserTasks.Add(NewOpenTask(UserTaskSourceKind.Unspecified, null, UserTaskStatus.Pending));
+        _ = ctx.UserTasks.Add(NewOpenTask(UserTaskSourceKind.Unspecified, null, UserTaskStatus.Pending));
+
+        Func<Task> act = async () => await ctx.SaveChangesAsync();
+        _ = await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>
+    /// Fix E: two compile passes for the same source spec produce exactly one open row.
+    /// The in-process gate serializes them, and the unique index is the cross-process backstop.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_TwoConcurrentPasses_SameSource_CreatesExactlyOneOpenRow()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        await using AppDbContext ctx = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true);
+        EfUserTaskRepository repo = new(ctx);
+
+        ShiftPlanTaskSpec spec = new(
+            TaskType: UserTaskType.MaintenanceDue,
+            SourceKind: UserTaskSourceKind.Maintenance,
+            SourceId: "maintenancealert:race",
+            Title: "idle",
+            Description: null,
+            Priority: UserTaskPriority.Normal,
+            AnchorKind: UserTaskAnchorKind.Window,
+            AnchorAtUtc: null,
+            WindowStartUtc: DateTime.UtcNow.AddHours(1),
+            WindowEndUtc: null,
+            EntityType: "Printer",
+            EntityId: Guid.NewGuid());
+
+        ShiftPlanCompiler compiler = new(
+            new[] { new SingleSpecSource(spec) },
+            repo,
+            NullLogger<ShiftPlanCompiler>.Instance);
+
+        await Task.WhenAll(compiler.CompileAsync(), compiler.CompileAsync());
+
+        int open = await ctx.UserTasks.CountAsync(t =>
+            t.SourceKind == UserTaskSourceKind.Maintenance &&
+            t.SourceId == "maintenancealert:race" &&
+            (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress));
+
+        open.Should().Be(1);
+    }
+
+    private static UserTask NewOpenTask(
+        UserTaskSourceKind sourceKind,
+        string? sourceId,
+        UserTaskStatus status,
+        Guid? id = null) => new()
+        {
+            Id = id ?? Guid.NewGuid(),
+            Title = "task",
+            TaskType = UserTaskType.MaintenanceDue,
+            Status = status,
+            Priority = UserTaskPriority.Normal,
+            SourceKind = sourceKind,
+            SourceId = sourceId,
+            AnchorKind = UserTaskAnchorKind.Window,
+            WindowStartUtc = DateTime.UtcNow.AddHours(1),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+    private sealed class SingleSpecSource(ShiftPlanTaskSpec spec) : IShiftPlanTaskSource
+    {
+        private readonly ShiftPlanTaskSpec _spec = spec;
+
+        public string SourceName => "single";
+        public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = [UserTaskSourceKind.Maintenance];
+        public Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ShiftPlanTaskSpec>>([_spec]);
+    }
+}

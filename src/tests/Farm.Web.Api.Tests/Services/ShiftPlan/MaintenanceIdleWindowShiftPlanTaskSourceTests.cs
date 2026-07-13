@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.ShiftPlan;
 using Farm.Infrastructure.Services.ShiftPlan.Sources;
@@ -151,6 +151,28 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
         Assert.Equal(expectedMessage, spec.Description);
         Assert.Equal(UserTaskSourceKind.Maintenance, spec.SourceKind);
         Assert.Equal($"maintenancealert:{AlertId}", spec.SourceId);
+    }
+
+    /// <summary>
+    /// Fix A (issue #713 round 2): a repository failure must propagate out of
+    /// ProduceAsync rather than being swallowed into an empty spec set. If it were
+    /// swallowed, the compiler would treat Maintenance as successfully evaluated and
+    /// auto-complete every open maintenance task. Propagation lets the compiler
+    /// isolate the failure and suppress auto-complete for this pass.
+    /// </summary>
+    [Fact]
+    public async Task ProduceAsync_AlertRepositoryThrows_PropagatesInsteadOfReturningEmpty()
+    {
+        SetupSettings();
+        InvalidOperationException boom = new("alert store offline");
+        _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(boom);
+
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+
+        InvalidOperationException thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => source.ProduceAsync(CancellationToken.None));
+        Assert.Same(boom, thrown);
     }
 
     /// <summary>

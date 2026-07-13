@@ -50,4 +50,38 @@ public static class TestHelpers
         _ = ctx.Database.EnsureCreated();
         return ctx;
     }
+
+    /// <summary>
+    /// Open a SQLite in-memory connection the caller owns. Keeping the connection open
+    /// keeps the database alive across multiple <see cref="AppDbContext"/> instances,
+    /// which is required for concurrency/lost-update tests that need two contexts to see
+    /// the same rows. Caller disposes the connection when done.
+    /// </summary>
+    public static SqliteConnection CreateOpenSqliteConnection()
+    {
+        SqliteConnection connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        return connection;
+    }
+
+    /// <summary>
+    /// Build an <see cref="AppDbContext"/> over an already-open connection. Set
+    /// <paramref name="ensureCreated"/> for the first context so the schema (including
+    /// the shift-plan unique filtered index) is created exactly once.
+    /// Caller disposes the returned context.
+    /// </summary>
+    public static AppDbContext CreateContext(SqliteConnection connection, bool ensureCreated = false)
+    {
+        DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        AppDbContext ctx = new AppDbContext(opts);
+        if (ensureCreated)
+        {
+            _ = ctx.Database.EnsureCreated();
+        }
+
+        return ctx;
+    }
 }

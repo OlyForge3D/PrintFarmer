@@ -52,16 +52,14 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
         TimeSpan minWindow = TimeSpan.FromMinutes(Math.Max(1, settings.MinIdleWindowMinutes));
         TimeSpan lead = TimeSpan.FromMinutes(Math.Max(0, settings.MaintenanceLeadMinutes));
 
-        List<MaintenanceAlert> active;
-        try
-        {
-            active = await _alerts.GetAllActiveAlertsAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "Maintenance alert repository failed in shift-plan compile");
-            return Array.Empty<ShiftPlanTaskSpec>();
-        }
+        // Fix A: fail closed. Let a repository failure propagate — the compiler's
+        // per-source isolation (ShiftPlanCompiler.CompileAsync) catches it, increments
+        // its failure counter, and crucially does NOT add Maintenance to the successful
+        // kinds, so open maintenance tasks are preserved instead of mass auto-completed.
+        // Swallowing the exception here would masquerade a repo outage as "no active
+        // alerts" and auto-complete every open maintenance task (IShiftPlanTaskSource
+        // contract, "fail closed").
+        List<MaintenanceAlert> active = await _alerts.GetAllActiveAlertsAsync(ct).ConfigureAwait(false);
 
         if (active.Count == 0)
         {

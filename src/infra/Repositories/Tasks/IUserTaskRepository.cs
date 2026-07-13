@@ -18,6 +18,14 @@ public interface IUserTaskRepository
     Task<IReadOnlyList<UserTask>> GetPendingTasksAsync(UserTaskType? taskType = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets all pending tasks, optionally filtered by type, optionally excluding
+    /// maintenance-sourced tasks. Non-admin callers must pass
+    /// <paramref name="includeMaintenance"/> = <c>false</c> so maintenance alert
+    /// content is never surfaced to them (issue #713 Fix 8).
+    /// </summary>
+    Task<IReadOnlyList<UserTask>> GetPendingTasksAsync(UserTaskType? taskType, bool includeMaintenance, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets all tasks with specified statuses.
     /// </summary>
     Task<IReadOnlyList<UserTask>> GetByStatusAsync(IEnumerable<UserTaskStatus> statuses, CancellationToken ct = default);
@@ -48,6 +56,23 @@ public interface IUserTaskRepository
     /// Gets the count of pending tasks, optionally filtered by type.
     /// </summary>
     Task<int> GetPendingCountAsync(UserTaskType? taskType = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the count of pending tasks, optionally filtered by type, optionally
+    /// excluding maintenance-sourced tasks. Non-admin callers must pass
+    /// <paramref name="includeMaintenance"/> = <c>false</c> so the count matches
+    /// the filtered list they are allowed to see (issue #713 Fix 8).
+    /// </summary>
+    Task<int> GetPendingCountAsync(UserTaskType? taskType, bool includeMaintenance, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the (SourceKind, SourceId) keys of compiler-owned tasks a user
+    /// recently Skipped or Dismissed (UpdatedAt &gt;= <paramref name="updatedAfterUtc"/>).
+    /// The shift-plan compiler consults this set to avoid resurrecting a task the
+    /// user explicitly cleared until the suppression window lapses (issue #713 Fix F).
+    /// </summary>
+    Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetSuppressedSourceKeysAsync(
+        DateTime updatedAfterUtc, CancellationToken ct = default);
 
     /// <summary>
     /// Adds a new task.

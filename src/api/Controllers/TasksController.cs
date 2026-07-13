@@ -62,7 +62,7 @@ public class TasksController(
             return Ok(plan);
         }
 
-        IReadOnlyList<UserTaskDto> tasks = await _taskService.GetPendingTasksAsync(ct);
+        IReadOnlyList<UserTaskDto> tasks = await _taskService.GetPendingTasksAsync(IsAdmin, ct);
         return Ok(tasks);
     }
 
@@ -114,7 +114,9 @@ public class TasksController(
     [ProducesResponseType(typeof(PendingTaskCountDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<PendingTaskCountDto>> GetPendingCountAsync(CancellationToken ct)
     {
-        int count = await _taskService.GetPendingCountAsync(ct);
+        // Fix 8/B: non-admin callers get a count that excludes maintenance tasks so
+        // it matches the list they can actually see.
+        int count = await _taskService.GetPendingCountAsync(IsAdmin, ct);
         return Ok(new PendingTaskCountDto(count));
     }
 

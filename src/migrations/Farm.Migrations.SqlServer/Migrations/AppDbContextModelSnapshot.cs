@@ -5537,7 +5537,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("DismissedByUserId");
 
                     b.HasIndex("SourceKind", "SourceId")
-                        .HasDatabaseName("IX_UserTasks_SourceKind_SourceId");
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserTasks_SourceKind_SourceId")
+                        .HasFilter("[SourceId] IS NOT NULL AND [Status] IN (0, 1)");
 
                     b.HasIndex("Status", "AnchorKind", "AnchorAtUtc")
                         .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");

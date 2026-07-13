@@ -334,6 +334,94 @@ public class EfUserTaskRepositoryTests : IDisposable
 
     #endregion
 
+    #region Fix B: includeMaintenance filtering
+
+    /// <summary>Fix B: non-admin list requests exclude maintenance-sourced tasks.</summary>
+    [Fact]
+    public async Task GetPendingTasksAsync_IncludeMaintenanceFalse_ExcludesMaintenanceTasks()
+    {
+        var normal = CreateUserTask("Normal", UserTaskType.ProfileImport, UserTaskStatus.Pending);
+        var maintenance = CreateUserTask("Maint", UserTaskType.MaintenanceDue, UserTaskStatus.Pending);
+        maintenance.SourceKind = UserTaskSourceKind.Maintenance;
+        maintenance.SourceId = "maintenancealert:1";
+
+        _context.UserTasks.AddRange(normal, maintenance);
+        _ = await _context.SaveChangesAsync();
+
+        IReadOnlyList<UserTask> included = await _repository.GetPendingTasksAsync(null, includeMaintenance: true);
+        IReadOnlyList<UserTask> excluded = await _repository.GetPendingTasksAsync(null, includeMaintenance: false);
+
+        included.Should().HaveCount(2);
+        _ = excluded.Should().ContainSingle().Which.SourceKind.Should().NotBe(UserTaskSourceKind.Maintenance);
+    }
+
+    /// <summary>Fix B: non-admin count excludes maintenance-sourced tasks so it matches the visible list.</summary>
+    [Fact]
+    public async Task GetPendingCountAsync_IncludeMaintenanceFalse_ExcludesMaintenanceTasks()
+    {
+        var normal = CreateUserTask("Normal", UserTaskType.ProfileImport, UserTaskStatus.Pending);
+        var maintenance = CreateUserTask("Maint", UserTaskType.MaintenanceDue, UserTaskStatus.Pending);
+        maintenance.SourceKind = UserTaskSourceKind.Maintenance;
+        maintenance.SourceId = "maintenancealert:1";
+
+        _context.UserTasks.AddRange(normal, maintenance);
+        _ = await _context.SaveChangesAsync();
+
+        int included = await _repository.GetPendingCountAsync(null, includeMaintenance: true);
+        int excluded = await _repository.GetPendingCountAsync(null, includeMaintenance: false);
+
+        included.Should().Be(2);
+        excluded.Should().Be(1);
+    }
+
+    #endregion
+
+    #region Fix F: GetSuppressedSourceKeysAsync
+
+    /// <summary>
+    /// Fix F: only recently Skipped/Dismissed compiler tasks suppress re-creation.
+    /// Completed tasks (recurrence is legitimate) and stale rows are excluded.
+    /// </summary>
+    [Fact]
+    public async Task GetSuppressedSourceKeysAsync_ReturnsRecentSkippedAndDismissed_ExcludesCompletedAndStale()
+    {
+        DateTime now = DateTime.UtcNow;
+
+        var skipped = CreateUserTask("Skipped", UserTaskType.MaintenanceDue, UserTaskStatus.Skipped);
+        skipped.SourceKind = UserTaskSourceKind.Maintenance;
+        skipped.SourceId = "maintenancealert:skip";
+        skipped.UpdatedAt = now;
+
+        var dismissed = CreateUserTask("Dismissed", UserTaskType.FailureClear, UserTaskStatus.Dismissed);
+        dismissed.SourceKind = UserTaskSourceKind.FailureIncident;
+        dismissed.SourceId = "failure:dismiss";
+        dismissed.UpdatedAt = now;
+
+        var completed = CreateUserTask("Completed", UserTaskType.MaintenanceDue, UserTaskStatus.Completed);
+        completed.SourceKind = UserTaskSourceKind.Maintenance;
+        completed.SourceId = "maintenancealert:done";
+        completed.UpdatedAt = now;
+
+        var stale = CreateUserTask("Stale", UserTaskType.MaintenanceDue, UserTaskStatus.Skipped);
+        stale.SourceKind = UserTaskSourceKind.Maintenance;
+        stale.SourceId = "maintenancealert:stale";
+        stale.UpdatedAt = now.AddHours(-2);
+
+        _context.UserTasks.AddRange(skipped, dismissed, completed, stale);
+        _ = await _context.SaveChangesAsync();
+
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> result =
+            await _repository.GetSuppressedSourceKeysAsync(now.AddHours(-1));
+
+        result.Should().HaveCount(2);
+        result.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:skip"));
+        result.Should().Contain((UserTaskSourceKind.FailureIncident, "failure:dismiss"));
+        result.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:done"));
+        result.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:stale"));
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static UserTask CreateUserTask(

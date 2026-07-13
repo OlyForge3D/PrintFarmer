@@ -88,6 +88,13 @@ public interface IUserTaskService
     Task<IReadOnlyList<UserTaskDto>> GetPendingTasksAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Gets all pending tasks. When <paramref name="isAdmin"/> is <c>false</c>,
+    /// maintenance-sourced tasks are excluded so their alert content is not
+    /// surfaced to non-admin callers (issue #713 Fix 8).
+    /// </summary>
+    Task<IReadOnlyList<UserTaskDto>> GetPendingTasksAsync(bool isAdmin, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets a task by its ID.
     /// </summary>
     Task<UserTaskDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
@@ -96,6 +103,13 @@ public interface IUserTaskService
     /// Gets the count of pending tasks.
     /// </summary>
     Task<int> GetPendingCountAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the count of pending tasks. When <paramref name="isAdmin"/> is
+    /// <c>false</c>, maintenance-sourced tasks are excluded so the count agrees
+    /// with the filtered list a non-admin can see (issue #713 Fix 8).
+    /// </summary>
+    Task<int> GetPendingCountAsync(bool isAdmin, CancellationToken ct = default);
 
     /// <summary>
     /// Creates or updates a profile import task for a printer model.

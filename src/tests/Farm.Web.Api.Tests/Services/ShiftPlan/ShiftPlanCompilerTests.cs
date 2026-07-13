@@ -31,6 +31,9 @@ public class ShiftPlanCompilerTests
             .Returns(Task.CompletedTask);
         _tasks.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        // Fix F: default to no suppressed source keys so existing tests behave as before.
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
     }
 
     [Fact]
@@ -199,8 +202,103 @@ public class ShiftPlanCompilerTests
         Assert.Empty(_tracked);
     }
 
+    /// <summary>Fix F: a source key the user recently skipped/dismissed is not re-created.</summary>
+    [Fact]
+    public async Task CompileAsync_SuppressedSourceKey_DoesNotRecreateTask()
+    {
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { (UserTaskSourceKind.FailureIncident, "failure:1") });
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], Spec("failure:1")));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(0, result.Created);
+        Assert.Empty(_tracked);
+    }
+
+    /// <summary>Fix G: sub-tolerance window-start drift on an otherwise-identical task is not written.</summary>
+    [Fact]
+    public async Task CompileAsync_WindowStartDriftWithinTolerance_DoesNotUpdate()
+    {
+        DateTime windowStart = DateTime.UtcNow.AddHours(2);
+        ShiftPlanTaskSpec spec = WindowSpec(windowStart);
+        // Existing task's window-start lags by 2 minutes (< 5 min tolerance).
+        UserTask existing = ExistingFromSpec(spec, windowStart.AddMinutes(-2));
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { existing });
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("maint",
+            [UserTaskSourceKind.Maintenance], spec));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(0, result.Updated);
+        Assert.Empty(_trackedUpdated);
+        // The stored window-start is preserved (not rewritten to the drifted value).
+        Assert.Equal(windowStart.AddMinutes(-2), existing.WindowStartUtc);
+    }
+
+    /// <summary>Fix G: window-start drift beyond tolerance is written.</summary>
+    [Fact]
+    public async Task CompileAsync_WindowStartDriftBeyondTolerance_Updates()
+    {
+        DateTime windowStart = DateTime.UtcNow.AddHours(2);
+        ShiftPlanTaskSpec spec = WindowSpec(windowStart);
+        // Existing task's window-start lags by 10 minutes (> 5 min tolerance).
+        UserTask existing = ExistingFromSpec(spec, windowStart.AddMinutes(-10));
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { existing });
+
+        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("maint",
+            [UserTaskSourceKind.Maintenance], spec));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(1, result.Updated);
+        Assert.Single(_trackedUpdated);
+        Assert.Equal(windowStart, existing.WindowStartUtc);
+    }
+
     private ShiftPlanCompiler BuildCompiler(params IShiftPlanTaskSource[] sources) =>
         new(sources, _tasks.Object, NullLogger<ShiftPlanCompiler>.Instance);
+
+    private static ShiftPlanTaskSpec WindowSpec(DateTime windowStart, string sourceId = "maintenance:1") => new(
+        TaskType: UserTaskType.MaintenanceDue,
+        SourceKind: UserTaskSourceKind.Maintenance,
+        SourceId: sourceId,
+        Title: "idle",
+        Description: null,
+        Priority: UserTaskPriority.Normal,
+        AnchorKind: UserTaskAnchorKind.Window,
+        AnchorAtUtc: null,
+        WindowStartUtc: windowStart,
+        WindowEndUtc: null,
+        EntityType: "Printer",
+        EntityId: PrinterId);
+
+    private static UserTask ExistingFromSpec(ShiftPlanTaskSpec spec, DateTime windowStart) => new()
+    {
+        Id = Guid.NewGuid(),
+        CreatedAt = DateTime.UtcNow.AddHours(-1),
+        Status = UserTaskStatus.Pending,
+        TaskType = spec.TaskType,
+        SourceKind = spec.SourceKind,
+        SourceId = spec.SourceId,
+        EntityType = spec.EntityType,
+        EntityId = spec.EntityId,
+        Title = spec.Title,
+        Description = spec.Description,
+        Priority = spec.Priority,
+        AnchorKind = spec.AnchorKind,
+        AnchorAtUtc = spec.AnchorAtUtc,
+        WindowStartUtc = windowStart,
+        WindowEndUtc = spec.WindowEndUtc,
+        DueAt = spec.DueAt,
+    };
 
     private static ShiftPlanTaskSpec Spec(string sourceId = "failure:1", string title = "t") => new(
         TaskType: UserTaskType.FailureClear,

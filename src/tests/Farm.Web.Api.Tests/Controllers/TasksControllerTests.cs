@@ -51,7 +51,7 @@ public class TasksControllerTests
         } as IReadOnlyList<UserTaskDto>;
 
         _taskServiceMock
-            .Setup(s => s.GetPendingTasksAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetPendingTasksAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(tasks);
 
         // Act
@@ -60,7 +60,7 @@ public class TasksControllerTests
         // Assert
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(tasks, okResult.Value);
-        _taskServiceMock.Verify(s => s.GetPendingTasksAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _taskServiceMock.Verify(s => s.GetPendingTasksAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class TasksControllerTests
         // Arrange
         IReadOnlyList<UserTaskDto> emptyTasks = new List<UserTaskDto>();
         _taskServiceMock
-            .Setup(s => s.GetPendingTasksAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetPendingTasksAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(emptyTasks);
 
         // Act
@@ -79,6 +79,43 @@ public class TasksControllerTests
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         IReadOnlyList<UserTaskDto> returnedTasks = Assert.IsAssignableFrom<IReadOnlyList<UserTaskDto>>(okResult.Value);
         Assert.Empty(returnedTasks);
+    }
+
+    /// <summary>Fix B: the default flat list forwards non-admin status so the service
+    /// excludes maintenance-sourced tasks for ordinary callers.</summary>
+    [Fact]
+    public async Task GetPendingTasksAsync_DefaultList_NonAdmin_RequestsWithoutMaintenance()
+    {
+        IReadOnlyList<UserTaskDto> tasks = new List<UserTaskDto> { CreateUserTaskDto("Task", UserTaskType.ProfileImport) };
+        _taskServiceMock
+            .Setup(s => s.GetPendingTasksAsync(false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tasks);
+
+        // Default HttpContext user has no farm_admin role.
+        IActionResult result = await _controller.GetPendingTasksAsync(view: null, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        _taskServiceMock.Verify(s => s.GetPendingTasksAsync(false, It.IsAny<CancellationToken>()), Times.Once);
+        _taskServiceMock.Verify(s => s.GetPendingTasksAsync(true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>Fix B: an admin caller receives the unfiltered flat list (maintenance included).</summary>
+    [Fact]
+    public async Task GetPendingTasksAsync_DefaultList_Admin_RequestsWithMaintenance()
+    {
+        SetAdminUser();
+        IReadOnlyList<UserTaskDto> tasks = new List<UserTaskDto>
+        {
+            CreateUserTaskDto("Maint", UserTaskType.MaintenanceDue, sourceKind: UserTaskSourceKind.Maintenance)
+        };
+        _taskServiceMock
+            .Setup(s => s.GetPendingTasksAsync(true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tasks);
+
+        IActionResult result = await _controller.GetPendingTasksAsync(view: null, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        _taskServiceMock.Verify(s => s.GetPendingTasksAsync(true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>Fix 7: when shift-plan feature is disabled, view=shift returns 404.</summary>
@@ -271,7 +308,7 @@ public class TasksControllerTests
     {
         // Arrange
         _taskServiceMock
-            .Setup(s => s.GetPendingCountAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetPendingCountAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(5);
 
         // Act
@@ -288,7 +325,7 @@ public class TasksControllerTests
     {
         // Arrange
         _taskServiceMock
-            .Setup(s => s.GetPendingCountAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetPendingCountAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(0);
 
         // Act
@@ -298,6 +335,40 @@ public class TasksControllerTests
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         PendingTaskCountDto countDto = Assert.IsType<PendingTaskCountDto>(okResult.Value);
         Assert.Equal(0, countDto.Count);
+    }
+
+    /// <summary>Fix B: non-admin count forwards includeMaintenance=false so it matches the visible list.</summary>
+    [Fact]
+    public async Task GetPendingCountAsync_NonAdmin_ExcludesMaintenance()
+    {
+        _taskServiceMock
+            .Setup(s => s.GetPendingCountAsync(false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
+
+        ActionResult<PendingTaskCountDto> result = await _controller.GetPendingCountAsync(CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        PendingTaskCountDto countDto = Assert.IsType<PendingTaskCountDto>(okResult.Value);
+        Assert.Equal(3, countDto.Count);
+        _taskServiceMock.Verify(s => s.GetPendingCountAsync(false, It.IsAny<CancellationToken>()), Times.Once);
+        _taskServiceMock.Verify(s => s.GetPendingCountAsync(true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>Fix B: admin count includes maintenance tasks.</summary>
+    [Fact]
+    public async Task GetPendingCountAsync_Admin_IncludesMaintenance()
+    {
+        SetAdminUser();
+        _taskServiceMock
+            .Setup(s => s.GetPendingCountAsync(true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(7);
+
+        ActionResult<PendingTaskCountDto> result = await _controller.GetPendingCountAsync(CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        PendingTaskCountDto countDto = Assert.IsType<PendingTaskCountDto>(okResult.Value);
+        Assert.Equal(7, countDto.Count);
+        _taskServiceMock.Verify(s => s.GetPendingCountAsync(true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion

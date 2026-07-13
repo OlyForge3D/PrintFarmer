@@ -16,7 +16,11 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
         await _db.UserTasks.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id, ct);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UserTask>> GetPendingTasksAsync(UserTaskType? taskType = null, CancellationToken ct = default)
+    public Task<IReadOnlyList<UserTask>> GetPendingTasksAsync(UserTaskType? taskType = null, CancellationToken ct = default)
+        => GetPendingTasksAsync(taskType, includeMaintenance: true, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UserTask>> GetPendingTasksAsync(UserTaskType? taskType, bool includeMaintenance, CancellationToken ct = default)
     {
         IQueryable<UserTask> query = _db.UserTasks.AsNoTracking()
             .Where(t => t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress);
@@ -24,6 +28,12 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
         if (taskType.HasValue)
         {
             query = query.Where(t => t.TaskType == taskType.Value);
+        }
+
+        if (!includeMaintenance)
+        {
+            // Fix 8/B: never surface maintenance alert content to non-admin callers.
+            query = query.Where(t => t.SourceKind != UserTaskSourceKind.Maintenance);
         }
 
         return await query
@@ -88,7 +98,11 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
-    public async Task<int> GetPendingCountAsync(UserTaskType? taskType = null, CancellationToken ct = default)
+    public Task<int> GetPendingCountAsync(UserTaskType? taskType = null, CancellationToken ct = default)
+        => GetPendingCountAsync(taskType, includeMaintenance: true, ct);
+
+    /// <inheritdoc />
+    public async Task<int> GetPendingCountAsync(UserTaskType? taskType, bool includeMaintenance, CancellationToken ct = default)
     {
         IQueryable<UserTask> query = _db.UserTasks
             .Where(t => t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress);
@@ -98,7 +112,37 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
             query = query.Where(t => t.TaskType == taskType.Value);
         }
 
+        if (!includeMaintenance)
+        {
+            // Fix 8/B: the count must match the filtered list a non-admin can see.
+            query = query.Where(t => t.SourceKind != UserTaskSourceKind.Maintenance);
+        }
+
         return await query.CountAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetSuppressedSourceKeysAsync(
+        DateTime updatedAfterUtc, CancellationToken ct = default)
+    {
+        // Fix F: user-initiated Skipped/Dismissed compiler tasks suppress re-creation
+        // until the window lapses. Completed is intentionally excluded so a genuinely
+        // recurring condition (e.g. a printer going idle again) can re-materialize.
+        List<UserTask> rows = await _db.UserTasks.AsNoTracking()
+            .Where(t =>
+                (t.Status == UserTaskStatus.Skipped || t.Status == UserTaskStatus.Dismissed) &&
+                t.SourceId != null &&
+                t.SourceKind != UserTaskSourceKind.Unspecified &&
+                t.UpdatedAt >= updatedAfterUtc)
+            .ToListAsync(ct);
+
+        // Post-materialize guard: rows whose persisted SourceKind string is not a known
+        // enum member surface as Unspecified via the value converter — drop them so
+        // unknown/future kinds never suppress a real source key.
+        return rows
+            .Where(t => t.SourceKind != UserTaskSourceKind.Unspecified && !string.IsNullOrEmpty(t.SourceId))
+            .Select(t => (t.SourceKind, t.SourceId!))
+            .ToHashSet();
     }
 
     /// <inheritdoc />
@@ -126,8 +170,19 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     /// <inheritdoc />
     public Task TrackUpdateAsync(UserTask task, CancellationToken ct = default)
     {
+        // Fix D: the compiler passes entities it already tracked via
+        // GetOpenCompilerTasksAsync. Calling Update() marks EVERY column modified,
+        // so a concurrent user change (e.g. Status -> Completed) committed during
+        // the pass would be clobbered on SaveChanges. Rely on the change tracker to
+        // persist only the properties the compiler actually mutated. If a caller ever
+        // hands us a detached entity, attach + mark modified so it still saves.
         task.UpdatedAt = DateTime.UtcNow;
-        _ = _db.UserTasks.Update(task);
+        if (_db.Entry(task).State == EntityState.Detached)
+        {
+            _ = _db.UserTasks.Attach(task);
+            _db.Entry(task).State = EntityState.Modified;
+        }
+
         return Task.CompletedTask;
     }
 

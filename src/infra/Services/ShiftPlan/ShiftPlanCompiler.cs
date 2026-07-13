@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Tasks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.ShiftPlan;
@@ -26,6 +27,32 @@ namespace Farm.Infrastructure.Services.ShiftPlan;
 /// </summary>
 public sealed class ShiftPlanCompiler : IShiftPlanCompiler
 {
+    /// <summary>
+    /// Fix E: serializes compile passes within a single process so a hosted-service
+    /// tick cannot overlap a manually-triggered compile and double-insert the same
+    /// source. Static because the compiler is registered per-scope. Cross-process
+    /// races (multi-instance deploys) are additionally guarded by the unique filtered
+    /// index and the <see cref="DbUpdateException"/> recovery below — a follow-up would
+    /// replace this with a distributed lock.
+    /// </summary>
+    private static readonly SemaphoreSlim CompileGate = new(1, 1);
+
+    /// <summary>
+    /// Fix F: how long a user-cleared (Skipped/Dismissed) compiler task suppresses
+    /// re-creation of the same source key. One hour balances honoring the user's
+    /// dismissal against eventually resurfacing a still-valid condition.
+    /// </summary>
+    private static readonly TimeSpan SuppressionWindow = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Fix G: idle-window starts drift by seconds each tick (IdleWindowService anchors
+    /// them to DateTime.UtcNow). Drift under this tolerance is treated as no change so
+    /// a steady-state idle maintenance task is not rewritten every pass. Idle windows
+    /// are advisory and (for open-ended windows) have no end, so a start that lags by a
+    /// few minutes is immaterial to operators.
+    /// </summary>
+    private static readonly TimeSpan WindowStartDriftTolerance = TimeSpan.FromMinutes(5);
+
     private readonly IEnumerable<IShiftPlanTaskSource> _sources;
     private readonly IUserTaskRepository _tasks;
     private readonly ILogger<ShiftPlanCompiler> _logger;
@@ -44,6 +71,21 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
     }
 
     public async Task<ShiftPlanCompileResult> CompileAsync(CancellationToken ct = default)
+    {
+        // Fix E: serialize passes within the process to prevent overlapping ticks from
+        // both observing "no open task" and inserting duplicates.
+        await CompileGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await CompileCoreAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _ = CompileGate.Release();
+        }
+    }
+
+    private async Task<ShiftPlanCompileResult> CompileCoreAsync(CancellationToken ct)
     {
         DateTime now = _clock.GetUtcNow().UtcDateTime;
         int sourceFailures = 0;
@@ -100,6 +142,14 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             .GroupBy(t => (t.SourceKind, t.SourceId!))
             .ToDictionary(g => g.Key, g => g.First());
 
+        // Fix F: source keys a user recently Skipped/Dismissed. The compiler must not
+        // resurrect a fresh Pending clone for these until the suppression window lapses.
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? suppressedRaw =
+            await _tasks.GetSuppressedSourceKeysAsync(now - SuppressionWindow, ct).ConfigureAwait(false);
+        HashSet<(UserTaskSourceKind, string)> suppressed = suppressedRaw is null
+            ? new()
+            : [.. suppressedRaw.Select(k => (k.SourceKind, k.SourceId))];
+
         int created = 0, updated = 0, autoCompleted = 0;
 
         // 3) Upserts — batch all changes, save once at the end.
@@ -119,6 +169,15 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             }
             else
             {
+                // Fix F: honor a recent user skip/dismiss instead of re-creating.
+                if (suppressed.Contains(kv.Key))
+                {
+                    _logger.LogDebug(
+                        "Suppressing re-creation of {Kind}/{SourceId}: user recently skipped/dismissed it",
+                        kv.Key.Item1, kv.Key.Item2);
+                    continue;
+                }
+
                 UserTask fresh = new()
                 {
                     Id = Guid.NewGuid(),
@@ -157,7 +216,20 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             autoCompleted++;
         }
 
-        await _tasks.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Fix E: a concurrent tick on another instance may have inserted the same
+        // (SourceKind, SourceId) first, tripping the unique filtered index. Recover
+        // gracefully — the next idempotent pass reconciles — instead of crashing the
+        // hosted-service tick.
+        try
+        {
+            await _tasks.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Shift-plan compile save hit a concurrency conflict (likely a racing tick); reconciling next pass");
+        }
 
         _logger.LogInformation(
             "Shift-plan compile: +{Created} ~{Updated} ✓{AutoCompleted} sources_failed={Failures}",
@@ -181,7 +253,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             || task.Priority != spec.Priority
             || task.AnchorKind != spec.AnchorKind
             || task.AnchorAtUtc != spec.AnchorAtUtc
-            || task.WindowStartUtc != spec.WindowStartUtc
+            || WindowStartMateriallyChanged(task.WindowStartUtc, spec.WindowStartUtc)
             || task.WindowEndUtc != spec.WindowEndUtc
             || task.DueAt != spec.DueAt
             || (spec.MetadataJson is not null && task.MetadataJson != spec.MetadataJson)
@@ -202,7 +274,16 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         task.Priority = spec.Priority;
         task.AnchorKind = spec.AnchorKind;
         task.AnchorAtUtc = spec.AnchorAtUtc;
-        task.WindowStartUtc = spec.WindowStartUtc;
+
+        // Fix G: only rewrite the window start when it is new or drifted past the
+        // tolerance, so sub-threshold jitter on an otherwise-unchanged task does not
+        // cause a write. Preserving the earlier value also keeps the displayed start
+        // stable across ticks.
+        if (isNew || WindowStartMateriallyChanged(task.WindowStartUtc, spec.WindowStartUtc))
+        {
+            task.WindowStartUtc = spec.WindowStartUtc;
+        }
+
         task.WindowEndUtc = spec.WindowEndUtc;
         task.DueAt = spec.DueAt;
 
@@ -224,5 +305,24 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Fix G: treats window-start differences under <see cref="WindowStartDriftTolerance"/>
+    /// as no change. Null transitions are always material.
+    /// </summary>
+    private static bool WindowStartMateriallyChanged(DateTime? existing, DateTime? incoming)
+    {
+        if (existing is null && incoming is null)
+        {
+            return false;
+        }
+
+        if (existing is null || incoming is null)
+        {
+            return true;
+        }
+
+        return (existing.Value - incoming.Value).Duration() > WindowStartDriftTolerance;
     }
 }

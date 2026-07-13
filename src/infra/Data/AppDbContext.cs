@@ -254,6 +254,33 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
+        // Fix E/I (issue #713): the shift-plan compiler dedupe index. A UNIQUE
+        // filtered index on (SourceKind, SourceId) restricted to OPEN rows
+        // (SourceId IS NOT NULL AND Status IN (Pending=0, InProgress=1)) guarantees
+        // at most one open compiler task per source even if two compiler ticks race,
+        // and covers GetOpenBySourceAsync's (SourceKind, SourceId, Status) lookup.
+        // The filter SQL is provider-specific, so it must be declared here rather
+        // than in UserTaskConfiguration. Providers that don't support filtered
+        // indexes fall back to a plain non-unique index (best-effort dedupe).
+        Microsoft.EntityFrameworkCore.Metadata.Builders.IndexBuilder<UserTask> sourceDedupeIndex =
+            modelBuilder.Entity<UserTask>()
+                .HasIndex(t => new { t.SourceKind, t.SourceId })
+                .HasDatabaseName("IX_UserTasks_SourceKind_SourceId");
+
+        switch (Database.ProviderName)
+        {
+            case "Npgsql.EntityFrameworkCore.PostgreSQL":
+            case "Microsoft.EntityFrameworkCore.Sqlite":
+                _ = sourceDedupeIndex.IsUnique().HasFilter("\"SourceId\" IS NOT NULL AND \"Status\" IN (0, 1)");
+                break;
+            case "Microsoft.EntityFrameworkCore.SqlServer":
+                _ = sourceDedupeIndex.IsUnique().HasFilter("[SourceId] IS NOT NULL AND [Status] IN (0, 1)");
+                break;
+            default:
+                // MySQL / InMemory / others: no filtered-index support — leave non-unique.
+                break;
+        }
+
         // SQLite does not support DateTimeOffset natively in ORDER BY / WHERE clauses.
         // Apply a transparent UTC DateTime conversion so all DateTimeOffset properties
         // on LoginAuditEntry round-trip correctly through the SQLite text store.

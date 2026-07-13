@@ -20,6 +20,15 @@ public class PrinterHub(
     // Marker hub for broadcasting printer updates and discovery progress.
 
     /// <summary>
+    /// SignalR group that receives maintenance-sourced task broadcasts. Only
+    /// connections whose authenticated principal holds the <c>farm_admin</c> role
+    /// join this group (issue #713 Fix C), so maintenance alert content is never
+    /// pushed to non-admin clients — mirroring the REST gate on
+    /// <c>GET /api/tasks</c>.
+    /// </summary>
+    public const string AdminTaskGroup = "farm_admin";
+
+    /// <summary>
     /// Replays the cached printer statuses to a newly connected client so its UI is
     /// immediately current instead of waiting for the next backend broadcast.
     /// Also runs on automatic reconnects (each reconnect is a new connection),
@@ -28,6 +37,13 @@ public class PrinterHub(
     public override async Task OnConnectedAsync()
     {
         await base.OnConnectedAsync();
+
+        // Fix C: admin connections join the maintenance broadcast group. Anonymous or
+        // non-admin connections never join, so they cannot receive maintenance DTOs.
+        if (Context.User?.IsInRole(AdminTaskGroup) == true)
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, AdminTaskGroup, Context.ConnectionAborted);
+        }
 
         foreach (PrinterStatusDto status in statusCache.GetAllStatuses().Values)
         {
