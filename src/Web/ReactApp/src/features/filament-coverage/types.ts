@@ -78,17 +78,25 @@ export interface FleetFilamentCoverage {
 
 /**
  * Decode a possibly-legacy status string into the canonical lowercase union.
- * `Insufficient` is mapped to `runout` for historical clients; any other
- * unknown value is treated as `unknown` (never `runout`), consistent with
- * the never-claim-runout-when-unknown invariant.
+ * Only exact tokens are accepted: canonical lowercase (`unknown | covers | runout`)
+ * and the exact legacy PascalCase tokens (`Unknown | Covers | Runout | Insufficient`).
+ * `Insufficient` maps to `runout`. Everything else — including arbitrary casings
+ * like `"RUNOUT"` or `"insufficient"` — maps to `"unknown"`, consistent with the
+ * never-claim-runout-when-unknown invariant and `FilamentCoverageStatusJsonConverter`.
  */
 export function decodeFilamentCoverageStatus(
   raw: string | null | undefined,
 ): FilamentCoverageStatus {
   if (typeof raw !== "string") return "unknown";
-  const normalized = raw.toLowerCase();
-  if (normalized === "covers") return "covers";
-  if (normalized === "runout" || normalized === "insufficient") return "runout";
+  // Canonical lowercase tokens
+  if (raw === "unknown") return "unknown";
+  if (raw === "covers") return "covers";
+  if (raw === "runout") return "runout";
+  // Exact legacy PascalCase tokens (as emitted by FilamentCoverageStatusJsonConverter)
+  if (raw === "Unknown") return "unknown";
+  if (raw === "Covers") return "covers";
+  if (raw === "Runout") return "runout";
+  if (raw === "Insufficient") return "runout";
   return "unknown";
 }
 

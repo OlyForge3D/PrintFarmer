@@ -20,9 +20,10 @@ describe("decodeFilamentCoverageStatus", () => {
     expect(decodeFilamentCoverageStatus("Unknown")).toBe("unknown");
   });
 
-  it("maps legacy 'Insufficient' to canonical 'runout'", () => {
+  it("maps legacy 'Insufficient' (exact PascalCase) to canonical 'runout'", () => {
     expect(decodeFilamentCoverageStatus("Insufficient")).toBe("runout");
-    expect(decodeFilamentCoverageStatus("insufficient")).toBe("runout");
+    // Lowercase 'insufficient' is NOT in the exact token set → unknown
+    expect(decodeFilamentCoverageStatus("insufficient")).toBe("unknown");
   });
 
   it("returns 'unknown' for anything else (never invents runout)", () => {
@@ -32,6 +33,16 @@ describe("decodeFilamentCoverageStatus", () => {
     expect(decodeFilamentCoverageStatus("something-else")).toBe("unknown");
     // must not accidentally interpret truthiness as a positive status
     expect(decodeFilamentCoverageStatus("COVERS ")).toBe("unknown");
+  });
+
+  it("rejects arbitrary uppercase/mixed-case variants not in the exact set", () => {
+    // These must not resolve to 'runout' — exact match only
+    expect(decodeFilamentCoverageStatus("INSUFFICIENT")).toBe("unknown");
+    expect(decodeFilamentCoverageStatus("RUNOUT")).toBe("unknown");
+    expect(decodeFilamentCoverageStatus("COVERS")).toBe("unknown");
+    expect(decodeFilamentCoverageStatus("RunOut")).toBe("unknown");
+    expect(decodeFilamentCoverageStatus("rUnOuT")).toBe("unknown");
+    expect(decodeFilamentCoverageStatus("Covers ")).toBe("unknown");
   });
 });
 

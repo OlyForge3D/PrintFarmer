@@ -26,29 +26,11 @@ export function FilamentCoverageBreakdown({
   const { data: coverage, isLoading, isError } = usePrinterFilamentCoverage(printerId);
 
   if (isLoading) {
-    return (
-      <div
-        className={["mb-2 text-xs text-pf-text-tertiary", className ?? ""].join(" ").trim()}
-        role="status"
-        aria-live="polite"
-        aria-busy="true"
-        data-testid="filament-coverage-loading"
-      >
-        Checking filament coverage…
-      </div>
-    );
+    return null;
   }
 
   if (isError) {
-    return (
-      <div
-        className={["mb-2 text-xs text-pf-text-tertiary", className ?? ""].join(" ").trim()}
-        role="status"
-        data-testid="filament-coverage-error"
-      >
-        Filament coverage unavailable.
-      </div>
-    );
+    return null;
   }
 
   // Feature disabled — the sidebar's existing spool card still renders

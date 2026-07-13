@@ -38,12 +38,17 @@ export const filamentCoverageQueryKeys = {
     [...filamentCoverageQueryKeys.all, "printer", printerId] as const,
 };
 
-/** Query clients currently listening for coverage change events. */
-const coverageQueryClients = new Set<QueryClient>();
+/**
+ * Reference-counted map of query clients listening for coverage change events.
+ * A single `QueryClient` singleton (the common case) can be mounted by many hooks
+ * simultaneously; the count tracks how many are active so we only unsubscribe from
+ * SignalR when the last consumer unmounts.
+ */
+const coverageQueryClients = new Map<QueryClient, number>();
 let coverageSignalRUnsubscribe: (() => void) | undefined;
 
 function invalidateCoverageCaches(event: FilamentCoverageChangedEvent) {
-  coverageQueryClients.forEach((qc) => {
+  coverageQueryClients.forEach((_count, qc) => {
     // Fleet cache is always affected — either a single printer changed
     // (its slot in the batch response) or the whole fleet did.
     void qc.invalidateQueries({ queryKey: filamentCoverageQueryKeys.fleet() });
@@ -71,10 +76,16 @@ function ensureCoverageSignalRSubscription() {
 function useCoverageSignalRSync() {
   const queryClient = useQueryClient();
   useEffect(() => {
-    coverageQueryClients.add(queryClient);
+    const prev = coverageQueryClients.get(queryClient) ?? 0;
+    coverageQueryClients.set(queryClient, prev + 1);
     ensureCoverageSignalRSubscription();
     return () => {
-      coverageQueryClients.delete(queryClient);
+      const remaining = (coverageQueryClients.get(queryClient) ?? 1) - 1;
+      if (remaining <= 0) {
+        coverageQueryClients.delete(queryClient);
+      } else {
+        coverageQueryClients.set(queryClient, remaining);
+      }
       if (coverageQueryClients.size === 0 && coverageSignalRUnsubscribe) {
         coverageSignalRUnsubscribe();
         coverageSignalRUnsubscribe = undefined;
@@ -134,14 +145,23 @@ export function usePrinterFilamentCoverage(
       : [...filamentCoverageQueryKeys.all, "printer", "__disabled__"],
     queryFn: async ({ signal }) => {
       if (!enabled) return null;
-      // Reuse the fleet cache when we already have it — avoids duplicate
-      // requests when a card and a details sidebar mount together.
-      const fleet = qc.getQueryData<FleetFilamentCoverage | null>(
-        filamentCoverageQueryKeys.fleet(),
-      );
-      if (fleet && Array.isArray(fleet.printers)) {
-        const hit = fleet.printers.find((p) => p.printerId === printerId);
-        if (hit) return hit;
+      // Only reuse the fleet cache when it is present, fresh, and not mid-flight.
+      // If the fleet query is invalidated or currently fetching its refetch, its
+      // cached data may be stale relative to the event that triggered this call,
+      // so we fall through to the per-printer endpoint to guarantee freshness.
+      const fleetState = qc.getQueryState(filamentCoverageQueryKeys.fleet());
+      if (
+        fleetState &&
+        !fleetState.isInvalidated &&
+        fleetState.fetchStatus !== "fetching"
+      ) {
+        const fleet = qc.getQueryData<FleetFilamentCoverage | null>(
+          filamentCoverageQueryKeys.fleet(),
+        );
+        if (fleet && Array.isArray(fleet.printers)) {
+          const hit = fleet.printers.find((p) => p.printerId === printerId);
+          if (hit) return hit;
+        }
       }
       return filamentCoverageService.getPrinterCoverage(printerId, signal);
     },

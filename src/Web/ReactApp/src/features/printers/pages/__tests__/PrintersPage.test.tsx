@@ -156,6 +156,20 @@ vi.mock('@/common/utils/printerStateDisplay', () => ({
   requiresBedClearConfirmation: () => false,
 }));
 
+vi.mock('@/features/filament-coverage/hooks', () => ({
+  useFleetFilamentCoverage: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    isError: false,
+  })),
+  usePrinterFilamentCoverage: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    isError: false,
+  })),
+  __resetFilamentCoverageSubscriptionForTests: vi.fn(),
+}));
+
 vi.mock('@/common/components/ui', () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>,
 }));

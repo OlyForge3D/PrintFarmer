@@ -198,6 +198,114 @@ describe("filament coverage hooks", () => {
       expect(keys).toContain(JSON.stringify(["filament-coverage", "printer"]));
     });
   });
+
+  it("does NOT unsubscribe SignalR when only one of two hooks sharing the same QueryClient unmounts", async () => {
+    mockGet.mockResolvedValue({
+      data: { printers: [], evaluatedAtUtc: "2025-01-01T00:00:00Z" },
+    });
+    const qc = makeClient();
+
+    // Mount two hooks that share the same singleton QueryClient
+    const { unmount: unmount1 } = renderHook(() => useFleetFilamentCoverage(), {
+      wrapper: wrapper(qc),
+    });
+    const { unmount: unmount2 } = renderHook(() => useFleetFilamentCoverage(), {
+      wrapper: wrapper(qc),
+    });
+
+    await waitFor(() =>
+      expect(hoisted.signalRMock.onFilamentCoverageChanged).toHaveBeenCalled(),
+    );
+
+    // Store the original unsubscribe spy so we can verify it is NOT called yet
+    const unsubscribeSpy = vi.fn();
+    // Patch the callback ref that was captured by onFilamentCoverageChanged
+    // Instead, we verify via onFilamentCoverageChangedCb: after unmount1 the
+    // callback must still be live (not null).
+    const cbBeforeUnmount = hoisted.onFilamentCoverageChangedCb.current;
+    expect(cbBeforeUnmount).not.toBeNull();
+
+    // Unmount the FIRST hook — subscription must remain because the second is still mounted
+    act(() => { unmount1(); });
+
+    // The SignalR callback must still be registered (not nulled by the unsubscribe return value)
+    expect(hoisted.onFilamentCoverageChangedCb.current).not.toBeNull();
+
+    // An event fired now must still cause invalidation (subscription is live)
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    act(() => {
+      hoisted.onFilamentCoverageChangedCb.current?.({
+        printerId: "p-1",
+        reason: "spoolBinding",
+        occurredAt: "2025-01-01T00:00:00Z",
+      });
+    });
+
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
+
+    // Clean up the second hook
+    act(() => { unmount2(); });
+    // Now the subscription should be torn down
+    expect(hoisted.onFilamentCoverageChangedCb.current).toBeNull();
+
+    unsubscribeSpy.mockRestore?.();
+  });
+
+  it("falls through to per-printer API when fleet cache is invalidated (stale guard)", async () => {
+    // Arrange: prime the fleet cache successfully
+    const fleetPayload = {
+      data: {
+        printers: [
+          { printerId: "p-1", printerName: "Alpha", status: "covers", toolheads: [] },
+        ],
+        evaluatedAtUtc: "2025-01-01T00:00:00Z",
+      },
+    };
+    mockGet.mockResolvedValueOnce(fleetPayload); // fleet call
+    const printerPayload = {
+      data: {
+        printerId: "p-1",
+        printerName: "Alpha",
+        status: "runout",
+        toolheads: [],
+        activeJobId: null,
+        activeJobName: null,
+        activeJobProgress: null,
+        earliestPredictedRunoutAt: null,
+        assignedQueuedJobCount: 0,
+        evaluatedAtUtc: "2025-01-01T01:00:00Z",
+      },
+    };
+    mockGet.mockResolvedValueOnce(printerPayload); // per-printer call after invalidation
+
+    const qc = makeClient();
+
+    // Prime fleet cache
+    const { result: fleetResult } = renderHook(() => useFleetFilamentCoverage(), {
+      wrapper: wrapper(qc),
+    });
+    await waitFor(() => expect(fleetResult.current.isSuccess).toBe(true));
+
+    // Invalidate fleet cache without triggering a refetch
+    await act(async () => {
+      await qc.invalidateQueries({
+        queryKey: ["filament-coverage", "fleet"],
+        refetchType: "none",
+      });
+    });
+
+    // Now mount the per-printer hook — it must NOT derive from the invalidated fleet cache
+    const { result: printerResult } = renderHook(
+      () => usePrinterFilamentCoverage("p-1"),
+      { wrapper: wrapper(qc) },
+    );
+    await waitFor(() => expect(printerResult.current.isSuccess).toBe(true));
+
+    // The per-printer service must have been called (2 total: fleet + per-printer)
+    expect(mockGet).toHaveBeenCalledTimes(2);
+    // And the result should be from the fresh per-printer response, not the stale fleet entry
+    expect(printerResult.current.data?.status).toBe("runout");
+  });
 });
 
 // Silence React 19 act warnings from empty renders

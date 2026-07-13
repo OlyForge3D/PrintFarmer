@@ -1,10 +1,20 @@
-import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { QueueJobsTable } from "../QueueJobsTable";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import "@testing-library/jest-dom";
+
+// Hoisted so the vi.mock factory below can safely reference it before imports resolve.
+const mockGetCoverage = vi.hoisted(() =>
+  vi.fn(() => ({
+    data: { printers: [], evaluatedAtUtc: new Date().toISOString() },
+    isSuccess: true,
+    isLoading: false,
+    isError: false,
+  })),
+);
 
 vi.mock("@/services/printer-signalr", () => ({
   printerSignalRService: {
@@ -19,6 +29,12 @@ vi.mock("@/services/api", () => ({
       data: { printers: [], evaluatedAtUtc: new Date().toISOString() },
     }),
   },
+}));
+
+vi.mock("@/features/filament-coverage/hooks", () => ({
+  useFleetFilamentCoverage: () => mockGetCoverage(),
+  usePrinterFilamentCoverage: vi.fn(() => ({ data: null, isLoading: false, isError: false })),
+  __resetFilamentCoverageSubscriptionForTests: vi.fn(),
 }));
 
 function render(ui: ReactElement) {
@@ -465,5 +481,111 @@ describe("QueueJobsTable Component", () => {
     expect(firstBody.style.opacity).toBe("0.4");
 
     rafSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Filament coverage badge visibility (Fix #3: badge for runout only)
+// ---------------------------------------------------------------------------
+
+describe("QueueJobsTable — filament coverage badge", () => {
+  const jobWithPrinter = {
+    id: "badge-job",
+    job: {
+      id: "badge-job",
+      name: "badge-test-print",
+      gcodeFileId: "f-badge",
+      status: "Queued" as const,
+      priority: 0,
+      queuePosition: 1,
+      createdAtUtc: new Date().toISOString(),
+      updatedAtUtc: new Date().toISOString(),
+      queuedAtUtc: new Date().toISOString(),
+      wasSeededFromHistory: false,
+    },
+    gcodeFile: {
+      id: "f-badge",
+      fileName: "badge-test.gcode",
+      fileSizeBytes: 512,
+      createdAtUtc: new Date().toISOString(),
+    },
+    assignedPrinter: {
+      id: "printer-badge",
+      name: "Badge Printer",
+      modelName: "Prusa CORE One",
+      status: "online" as const,
+      isOnline: true,
+    },
+  };
+
+  function fleetWithStatus(status: string) {
+    return {
+      data: {
+        printers: [
+          {
+            printerId: "printer-badge",
+            printerName: "Badge Printer",
+            status,
+            toolheads: [],
+            activeJobId: null,
+            activeJobName: null,
+            activeJobProgress: null,
+            earliestPredictedRunoutAt: null,
+            assignedQueuedJobCount: 0,
+            evaluatedAtUtc: new Date().toISOString(),
+          },
+        ],
+        evaluatedAtUtc: new Date().toISOString(),
+      },
+      isSuccess: true,
+      isLoading: false,
+      isError: false,
+    };
+  }
+
+  beforeEach(() => {
+    mockGetCoverage.mockReturnValue({
+      data: { printers: [], evaluatedAtUtc: new Date().toISOString() },
+      isSuccess: true,
+      isLoading: false,
+      isError: false,
+    });
+  });
+
+  it("shows the runout badge when assigned printer status is 'runout'", async () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus("runout"));
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    const badge = await screen.findByRole("status", { name: /runout risk/i });
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute("data-status", "runout");
+  });
+
+  it("does NOT show a badge when assigned printer status is 'unknown'", async () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus("unknown"));
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does NOT show a badge when assigned printer status is 'covers'", async () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus("covers"));
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does NOT show a badge when the printer is not in the fleet coverage map", async () => {
+    mockGetCoverage.mockReturnValue({
+      data: { printers: [], evaluatedAtUtc: new Date().toISOString() },
+      isSuccess: true,
+      isLoading: false,
+      isError: false,
+    });
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+    );
   });
 });

@@ -416,7 +416,7 @@ export function QueueJobsTable({
                     const printerId = jobWrapper.assignedPrinter?.id;
                     if (!printerId) return null;
                     const cov = coverageByPrinterId.get(printerId);
-                    if (!cov || cov.status === "covers") return null;
+                    if (cov?.status !== "runout") return null;
                     return (
                       <FilamentCoverageBadge
                         status={cov.status}
