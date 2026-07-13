@@ -514,18 +514,34 @@ export class ApiClient {
         }
 
         const responseData = error.response?.data;
+
+        // Legacy string-shape `details`: keep this behavior for existing
+        // callers. Only surface a string when the body itself is a string or
+        // carries `{ error: string }`. Never stringify objects into `details`.
         const detailMessage = typeof responseData === 'string'
           ? responseData
           : (responseData as { error?: string })?.error ?? undefined;
 
-        // Preserve the raw ProblemDetails body and the axios-error flag so
-        // feature callers (e.g. partsHarvest.toHarvestError) can recover the
-        // canonical `code`/`mismatches`/`details` extensions instead of
-        // collapsing every failure into an opaque error. `message`,
-        // `statusCode`, and `details` semantics are unchanged for existing
-        // callers.
+        // Prefer a ProblemDetails-style top-level message from the body:
+        // backend emits `{ message: "..." }` for some endpoints and
+        // `{ detail: "..." }` for `application/problem+json`. Fall back to the
+        // axios error message only when neither exists. Preserve the raw body
+        // and the axios-error flag so feature callers (e.g. partsHarvest,
+        // partsInventory) can recover canonical `code`/`mismatches`/`details`
+        // extensions instead of collapsing every failure into an opaque error.
+        const bodyRecord =
+          responseData && typeof responseData === 'object'
+            ? (responseData as { message?: unknown; detail?: unknown })
+            : undefined;
+        const bodyMessage =
+          typeof bodyRecord?.message === 'string' && bodyRecord.message.length > 0
+            ? bodyRecord.message
+            : typeof bodyRecord?.detail === 'string' && bodyRecord.detail.length > 0
+              ? bodyRecord.detail
+              : undefined;
+
         const apiError: ApiError = {
-          message: error.message,
+          message: bodyMessage ?? error.message,
           statusCode: error.response?.status || 500,
           details: detailMessage,
           data: responseData,

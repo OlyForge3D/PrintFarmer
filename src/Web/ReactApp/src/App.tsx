@@ -67,6 +67,12 @@ const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
 
+const LazyPartsInventoryPage = lazy(() =>
+  import('@/features/parts-inventory/pages/PartsInventoryPage').then(mod => ({
+    default: mod.PartsInventoryPage,
+  }))
+);
+
 function RouteLoader() {
   return (
     <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading">
@@ -233,6 +239,26 @@ function AuthenticatedAppRoutes() {
         <Route path="nfc-devices" element={<Navigate to="/admin/settings?tab=hardware&sub=nfc" replace />} />
         <Route path="nfc-bindings" element={<NfcBindingsPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
+        <Route
+          path="parts-inventory"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <Suspense fallback={<div className="p-6">Loading printed parts inventory…</div>}>
+                <LazyPartsInventoryPage />
+              </Suspense>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="parts-inventory/:tabId"
+          element={
+            <ProtectedRoute requiredRole="farm_admin">
+              <Suspense fallback={<div className="p-6">Loading printed parts inventory…</div>}>
+                <LazyPartsInventoryPage />
+              </Suspense>
+            </ProtectedRoute>
+          }
+        />
         <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
         <Route path="statistics" element={<Navigate to="/analytics?lens=production" replace />} />
         <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
