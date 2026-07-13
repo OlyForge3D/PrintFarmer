@@ -3619,15 +3619,7 @@ export enum NotificationPreferenceEventType {
   JobStarted = 'JobStarted',
   JobCompleted = 'JobCompleted',
   JobFailed = 'JobFailed',
-  JobPaused = 'JobPaused',
-  // Operator alert categories introduced by F3 (#708). Anticipatory tokens: the
-  // backend enum contract in NotificationsController is expected to accept
-  // these string values once #708 lands. Legacy servers that do not know these
-  // tokens must never receive them — see features/notifications/preferencesAdapter.
-  RunoutRisk = 'RunoutRisk',
-  HarvestReady = 'HarvestReady',
-  MaintenanceDue = 'MaintenanceDue',
-  PrinterOffline = 'PrinterOffline'
+  JobPaused = 'JobPaused'
 }
 
 export interface NotificationEventChannelPreferenceDto {
@@ -3683,6 +3675,60 @@ export interface UpdateNotificationPreferencesRequest {
 export interface UnreadCountResponse {
   unreadCount: number;
 }
+
+// Attention push (native + operator UI) contract — issue #708 / #716.
+// Category IDs and action IDs are stable strings shared with iOS APNs categories.
+export enum AttentionKind {
+  Failure = 'failure',
+  Offline = 'offline',
+  Maintenance = 'maintenance',
+  Harvest = 'harvest',
+  Runout = 'runout'
+}
+
+export enum AttentionChangeKind {
+  Created = 'created',
+  Updated = 'updated',
+  Resolved = 'resolved'
+}
+
+/** Canonical APNs category identifiers exposed by the backend. */
+export const ATTENTION_CATEGORY_IDS = [
+  'PRINTER_FAILURE',
+  'PRINTER_OFFLINE',
+  'MAINTENANCE_DUE',
+  'HARVEST_READY',
+  'FILAMENT_RUNOUT',
+] as const;
+
+export type AttentionCategoryId = typeof ATTENTION_CATEGORY_IDS[number];
+
+export interface AttentionCategoryActionDto {
+  id: string;
+  title: string;
+  destructive: boolean;
+  authenticationRequired: boolean;
+  foreground: boolean;
+}
+
+export interface AttentionCategoryDto {
+  id: string;
+  kind: AttentionKind;
+  actions: AttentionCategoryActionDto[];
+  threadIdTemplate: string;
+}
+
+export interface AttentionCategoriesResponse {
+  categories: AttentionCategoryDto[];
+}
+
+export interface AttentionPushPreferencesDto {
+  enabled: boolean;
+  categories: Record<string, boolean>;
+}
+
+export type UpdateAttentionPushPreferencesRequest = AttentionPushPreferencesDto;
+
 
 export interface TelegramSettingsDto {
   enabled: boolean;
