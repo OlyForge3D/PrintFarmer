@@ -64,6 +64,7 @@ public sealed class MoonrakerSubscriptionService(
     // Spool info cache: keeps Spoolman HTTP round-trips out of the WebSocket hot path.
     // Invalidated on print state transitions and post-dispatch refreshes.
     private readonly ConcurrentDictionary<Guid, (PrinterSpoolInfoDto? Info, DateTime FetchedUtc)> _spoolInfoCache = new();
+    private readonly ConcurrentDictionary<Guid, int[]> _knownPhysicalToolheadIndices = new();
     private static readonly TimeSpan SpoolInfoCacheTtl = TimeSpan.FromSeconds(30);
 
     private enum PollingMode
@@ -83,6 +84,7 @@ public sealed class MoonrakerSubscriptionService(
     private static readonly TimeSpan StaleConnectionThreshold = TimeSpan.FromSeconds(60); // Trigger fallback if no status updates for 60 seconds
     private static readonly TimeSpan OfflineGracePeriod = TimeSpan.FromSeconds(5); // Wait before declaring offline on klippy disconnect
     private const int ConsecutiveFailuresBeforeOffline = 2; // Require N failures before broadcasting offline
+    private const int MaxAttributedToolIndexExclusive = 32;
 
     // Client identification for Moonraker
     private const string ClientName = "PrintFarmer";
@@ -301,8 +303,13 @@ public sealed class MoonrakerSubscriptionService(
         // Only subscribe to ENABLED Moonraker-backed printers
         // Note: Only Moonraker supports real-time WebSocket subscriptions
         // PrusaLink and SDCP are polled via HTTP on-demand, not continuously
-        List<Printer> allPrinters = await printersRepo.GetByBackendAsync(PrinterBackend.Moonraker, ct);
+        List<Printer> allPrinters = await printersRepo.GetByBackendWithToolheadsAsync(PrinterBackend.Moonraker, ct);
         List<Printer> enabledPrinters = allPrinters.Where(p => p.IsEnabled).ToList();
+        foreach (Printer printer in enabledPrinters)
+        {
+            UpdateKnownPhysicalToolheadIndices(printer);
+        }
+
         HashSet<Guid> activePrinterIds = enabledPrinters.Select(printer => printer.Id).ToHashSet();
         HashSet<Guid> trackedPrinterIds = _loops.Keys
             .Concat(_loopCancellationSources.Keys)
@@ -431,6 +438,7 @@ public sealed class MoonrakerSubscriptionService(
         _klippyReadyState.TryRemove(printerId, out _);
         _connectionHealth.TryRemove(printerId, out _);
         _spoolInfoCache.TryRemove(printerId, out _);
+        _knownPhysicalToolheadIndices.TryRemove(printerId, out _);
         _activityAccumulator?.Reset(printerId);
     }
 
@@ -1254,9 +1262,36 @@ public sealed class MoonrakerSubscriptionService(
             return false;
         }
 
-        _activityAccumulator.Sample(printerId, activeToolIndex, isPrinting);
-        return true;
+        bool accepted = true;
+        int? sampledToolIndex = activeToolIndex;
+        if (activeToolIndex is int index && !IsKnownPhysicalToolIndex(printerId, index))
+        {
+            sampledToolIndex = null;
+            accepted = false;
+        }
+
+        _activityAccumulator.Sample(printerId, sampledToolIndex, isPrinting);
+        return accepted;
     }
+
+    private void UpdateKnownPhysicalToolheadIndices(Printer printer)
+    {
+        int[] indices =
+        [
+            .. printer.Toolheads
+                .Where(toolhead => toolhead.ToolheadType == ToolheadType.Physical
+                    && toolhead.Index is >= 0 and < MaxAttributedToolIndexExclusive)
+                .Select(toolhead => toolhead.Index)
+                .Distinct()
+                .OrderBy(static index => index)
+        ];
+        _knownPhysicalToolheadIndices[printer.Id] = indices;
+    }
+
+    private bool IsKnownPhysicalToolIndex(Guid printerId, int toolIndex) =>
+        toolIndex is >= 0 and < MaxAttributedToolIndexExclusive
+        && _knownPhysicalToolheadIndices.TryGetValue(printerId, out int[]? knownIndices)
+        && knownIndices.Contains(toolIndex);
 
     /// <summary>
     /// Resolves the backend/G-code index of the physically active toolhead for per-tool wear

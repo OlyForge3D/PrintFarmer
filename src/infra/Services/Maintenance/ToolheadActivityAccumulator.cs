@@ -10,6 +10,8 @@ namespace Farm.Infrastructure.Services.Maintenance;
 /// </summary>
 public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
 {
+    private const int MaxTrackedToolIndexExclusive = 32;
+
     /// <summary>
     /// Segments longer than this are treated as a telemetry gap (the WebSocket dropped, the printer
     /// paused off-camera, etc.) and credited to no tool, so stale telemetry never fabricates wear.
@@ -46,6 +48,7 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
     {
         PrinterActivity activity = _activity.GetOrAdd(printerId, static _ => new PrinterActivity());
         long timestamp = _timeProvider.GetTimestamp();
+        int? trackedToolIndex = NormalizeToolIndex(activeToolIndex);
         lock (activity.Gate)
         {
             if (activity.LastTimestamp is long last)
@@ -64,6 +67,7 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
                 if (activity.LastPrinting
                     && activity.LastToolIndex is int tool
                     && tool >= 0
+                    && tool < MaxTrackedToolIndexExclusive
                     && elapsed > TimeSpan.Zero
                     && elapsed <= _maxSegment)
                 {
@@ -75,7 +79,7 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
             }
 
             activity.LastTimestamp = timestamp;
-            activity.LastToolIndex = activeToolIndex;
+            activity.LastToolIndex = trackedToolIndex;
             activity.LastPrinting = isPrinting;
             activity.Sequence++;
         }
@@ -92,8 +96,15 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
         lock (activity.Gate)
         {
             Dictionary<int, double> pending = [];
+            Dictionary<int, double> cumulativeSnapshot = [];
             foreach ((int toolIndex, double cumulativeSeconds) in activity.CumulativeActiveSeconds)
             {
+                if (toolIndex is < 0 or >= MaxTrackedToolIndexExclusive)
+                {
+                    continue;
+                }
+
+                cumulativeSnapshot[toolIndex] = cumulativeSeconds;
                 double acknowledged = activity.AcknowledgedActiveSeconds.TryGetValue(
                     toolIndex,
                     out double acknowledgedSeconds)
@@ -114,7 +125,7 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
                 activity.Generation,
                 activity.Sequence,
                 pending,
-                activity.CumulativeActiveSeconds,
+                cumulativeSnapshot,
                 pending.Values.Sum(),
                 windowSeconds,
                 activity.CumulativeWindowSeconds);
@@ -152,11 +163,36 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
                 activity.AcknowledgedWindowSeconds,
                 snapshot.CumulativeWindowSeconds);
             activity.AcknowledgedThroughSequence = snapshot.ThroughSequence;
+            CompactAcknowledged(activity);
         }
     }
 
     /// <inheritdoc />
     public void Reset(Guid printerId) => _activity.TryRemove(printerId, out _);
+
+    private static int? NormalizeToolIndex(int? activeToolIndex) =>
+        activeToolIndex is int toolIndex && toolIndex is >= 0 and < MaxTrackedToolIndexExclusive
+            ? toolIndex
+            : null;
+
+    private static void CompactAcknowledged(PrinterActivity activity)
+    {
+        foreach (int toolIndex in activity.AcknowledgedActiveSeconds.Keys.ToArray())
+        {
+            if (!activity.CumulativeActiveSeconds.TryGetValue(toolIndex, out double cumulativeSeconds)
+                || activity.AcknowledgedActiveSeconds[toolIndex] >= cumulativeSeconds)
+            {
+                activity.AcknowledgedActiveSeconds.Remove(toolIndex);
+                activity.CumulativeActiveSeconds.Remove(toolIndex);
+            }
+        }
+
+        if (activity.AcknowledgedWindowSeconds >= activity.CumulativeWindowSeconds)
+        {
+            activity.AcknowledgedWindowSeconds = 0;
+            activity.CumulativeWindowSeconds = 0;
+        }
+    }
 
     private sealed class PrinterActivity
     {

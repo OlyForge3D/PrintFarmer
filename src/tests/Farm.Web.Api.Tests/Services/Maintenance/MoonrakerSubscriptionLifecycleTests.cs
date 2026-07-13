@@ -21,18 +21,30 @@ public sealed class MoonrakerSubscriptionLifecycleTests
     public async Task Enumeration_PrinterDeleted_CancelsLoopAndKeepsAccumulatorCleared()
     {
         bool printerIsActive = true;
+        Guid printerId = Guid.NewGuid();
         var printer = new Printer
         {
-            Id = Guid.NewGuid(),
+            Id = printerId,
             Name = "Deleted printer",
             ServerUrl = "http://127.0.0.1",
             BackendPort = 1,
             Backend = (int)PrinterBackend.Moonraker,
-            IsEnabled = true
+            IsEnabled = true,
+            Toolheads = new List<Toolhead>
+            {
+                new Toolhead
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = printerId,
+                    Name = "T0",
+                    Index = 0,
+                    ToolheadType = ToolheadType.Physical
+                }
+            }
         };
         Mock<IPrintersRepository> printers = new();
         printers
-            .Setup(repository => repository.GetByBackendAsync(
+            .Setup(repository => repository.GetByBackendWithToolheadsAsync(
                 PrinterBackend.Moonraker,
                 It.IsAny<CancellationToken>()))
             .Returns((
@@ -104,6 +116,100 @@ public sealed class MoonrakerSubscriptionLifecycleTests
         service.TrySampleActiveToolTelemetry(printer.Id, 0, isPrinting: true)
             .Should().BeFalse();
         accumulator.PeekActiveSeconds(printer.Id).ActiveSeconds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TrySampleActiveToolTelemetry_IndexOutsidePhysicalTopology_IsRejectedAndAccumulatorStaysBounded()
+    {
+        bool printerIsActive = true;
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "Topology guarded printer",
+            ServerUrl = "http://127.0.0.1",
+            BackendPort = 1,
+            Backend = (int)PrinterBackend.Moonraker,
+            IsEnabled = true,
+            Toolheads = new List<Toolhead>
+            {
+                new Toolhead
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = printerId,
+                    Name = "T0",
+                    Index = 0,
+                    ToolheadType = ToolheadType.Physical
+                },
+                new Toolhead
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = printerId,
+                    Name = "T1",
+                    Index = 1,
+                    ToolheadType = ToolheadType.Physical
+                }
+            }
+        };
+        Mock<IPrintersRepository> printers = new();
+        printers
+            .Setup(repository => repository.GetByBackendWithToolheadsAsync(
+                PrinterBackend.Moonraker,
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                PrinterBackend _,
+                CancellationToken _) => Task.FromResult(
+                    printerIsActive ? new List<Printer> { printer } : []));
+        Mock<IUnitOfWork> unitOfWork = new();
+        unitOfWork.SetupGet(work => work.Printers).Returns(printers.Object);
+
+        var services = new ServiceCollection();
+        services.AddScoped<IUnitOfWork>(_ => unitOfWork.Object);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        var clock = new ManualTimeProvider();
+        var accumulator = new ToolheadActivityAccumulator(
+            TimeSpan.FromMinutes(1),
+            clock);
+        using var service = new MoonrakerSubscriptionService(
+            new Mock<IHubContext<PrinterHub>>().Object,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MoonrakerSubscriptionService>.Instance,
+            new Mock<IHttpClientFactory>().Object,
+            new Mock<IPrinterStatusCacheWriter>().Object,
+            activityAccumulator: accumulator);
+        service.SubscriptionLoopOverride = (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token);
+
+        await service.EnumerateAndStartSubscriptionsAsync(CancellationToken.None);
+
+        service.TrySampleActiveToolTelemetry(printer.Id, 0, isPrinting: true).Should().BeTrue();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        for (int index = 2; index < 96; index++)
+        {
+            service.TrySampleActiveToolTelemetry(printer.Id, index, isPrinting: true).Should().BeFalse();
+            clock.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        service.TrySampleActiveToolTelemetry(printer.Id, 1, isPrinting: true).Should().BeTrue();
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printer.Id);
+        snapshot.ActiveSeconds.Keys.Should().OnlyContain(index => index == 0 || index == 1);
+        snapshot.CumulativeActiveSeconds.Keys.Should().OnlyContain(index => index == 0 || index == 1);
+        snapshot.CumulativeActiveSeconds.Count.Should().BeLessThanOrEqualTo(2);
+
+        for (int cycle = 0; cycle < 3; cycle++)
+        {
+            accumulator.AckActiveSecondsThrough(accumulator.PeekActiveSeconds(printer.Id));
+            accumulator.PeekActiveSeconds(printer.Id).CumulativeActiveSeconds.Should().BeEmpty();
+            int knownIndex = cycle % 2;
+            clock.Advance(TimeSpan.FromSeconds(1));
+            service.TrySampleActiveToolTelemetry(printer.Id, knownIndex, isPrinting: true).Should().BeTrue();
+            clock.Advance(TimeSpan.FromSeconds(1));
+            service.TrySampleActiveToolTelemetry(printer.Id, knownIndex, isPrinting: true).Should().BeTrue();
+            accumulator.PeekActiveSeconds(printer.Id).CumulativeActiveSeconds.Count.Should().BeLessThanOrEqualTo(2);
+        }
+
+        printerIsActive = false;
+        await service.EnumerateAndStartSubscriptionsAsync(CancellationToken.None);
     }
 
     private sealed class ManualTimeProvider : TimeProvider

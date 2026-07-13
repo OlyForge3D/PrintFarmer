@@ -24,10 +24,10 @@
 /// </para>
 ///
 /// <para>
-/// Storage is an in-memory rolling window (see <c>ToolheadActivityAccumulator</c>). This is
-/// intentional for the first backend: a process restart drops in-flight (un-drained) attribution for
-/// the current interval, but every subsequent cycle is correct because backend print-hours are
-/// authoritative and only the intra-interval distribution is approximated.
+/// Storage is an in-memory rolling window (see <c>ToolheadActivityAccumulator</c>). The statistics
+/// sync persists the external-baseline wall-clock boundary separately, so a process restart turns
+/// the missing in-memory interval into unknown coverage instead of extrapolating the surviving
+/// suffix across the full external-hours delta.
 /// </para>
 /// </summary>
 public interface IToolheadActivityAccumulator

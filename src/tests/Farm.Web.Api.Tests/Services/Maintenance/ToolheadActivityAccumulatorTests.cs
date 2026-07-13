@@ -96,6 +96,26 @@ public class ToolheadActivityAccumulatorTests
     }
 
     [Fact]
+    public void AckActiveSecondsThrough_CurrentSnapshot_CompactsAcknowledgedBuckets()
+    {
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();
+        Guid printerId = Guid.NewGuid();
+        accumulator.Sample(printerId, activeToolIndex: 0, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        accumulator.Sample(printerId, activeToolIndex: 1, isPrinting: true);
+        clock.Advance(TimeSpan.FromSeconds(15));
+        accumulator.Sample(printerId, activeToolIndex: 1, isPrinting: true);
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        accumulator.AckActiveSecondsThrough(snapshot);
+
+        ToolheadActivitySnapshot pending = accumulator.PeekActiveSeconds(printerId);
+        pending.ActiveSeconds.Should().BeEmpty();
+        pending.CumulativeActiveSeconds.Should().BeEmpty();
+        pending.WindowSeconds.Should().Be(0);
+    }
+
+    [Fact]
     public void Sample_SegmentLongerThanCap_IsUnrecognizedButIncludedInWindow()
     {
         (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) =
@@ -127,6 +147,25 @@ public class ToolheadActivityAccumulatorTests
 
         snapshot.ActiveSeconds.Should().BeEmpty();
         snapshot.WindowSeconds.Should().BeApproximately(30, 0.0001);
+    }
+
+    [Fact]
+    public void Sample_OutOfRangeIndexes_AreTreatedAsUnknownAndDoNotCreateBuckets()
+    {
+        (ToolheadActivityAccumulator accumulator, ManualTimeProvider clock) = NewAccumulator();
+        Guid printerId = Guid.NewGuid();
+
+        for (int index = 32; index < 96; index++)
+        {
+            accumulator.Sample(printerId, activeToolIndex: index, isPrinting: true);
+            clock.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        ToolheadActivitySnapshot snapshot = accumulator.PeekActiveSeconds(printerId);
+
+        snapshot.ActiveSeconds.Should().BeEmpty();
+        snapshot.CumulativeActiveSeconds.Should().BeEmpty();
+        snapshot.WindowSeconds.Should().BeApproximately(63, 0.0001);
     }
 
     [Fact]
