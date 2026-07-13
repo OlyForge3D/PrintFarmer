@@ -286,8 +286,80 @@ public class FilamentCoverageServiceTests
     }
 
     // ------------------------------------------------------------------
-    // Unknown metadata never becomes a false runout
+    // Issue #711 round-10 Finding 2: MMU demand index space.
+    // Slicer demand keys are 0-based G-code T-indices; MMU gates are stored
+    // 1-based (physical hotend takes Index 0). Demand must route through
+    // ToolheadIndexMapper so T0->gate 1, T1->gate 2, T2->gate 3 instead of
+    // being shifted by one gate.
     // ------------------------------------------------------------------
+    [Fact]
+    public async Task MmuGates_PerExtruderDemand_RoutesToCorrectGateIndex()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0.0);
+
+        static Toolhead Gate(int index, int spoolId, string material) => new()
+        {
+            Id = Guid.NewGuid(),
+            Index = index,
+            Name = $"Gate {index}",
+            ToolheadType = ToolheadType.MmuGate,
+            CurrentSpoolId = spoolId,
+            CurrentMaterial = material,
+        };
+
+        Printer p = SeedPrinter(
+            db,
+            "mmu",
+            Gate(1, spoolId: 100, material: "PLA"),
+            Gate(2, spoolId: 200, material: "PETG"),
+            Gate(3, spoolId: 300, material: "ABS"));
+
+        // Per-extruder demand keyed by 0-based G-code tool index: T0=10g, T1=20g, T2=30g.
+        GcodeFile g = Gcode(estimatedTotalGrams: 60, perExtruder: [10, 20, 30], extruderCount: 3, printTimeMinutes: 60);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(60)));
+        _ = await db.SaveChangesAsync();
+
+        spool.Setup(s => s.GetSpoolByIdAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(100, remainingG: 500, material: "PLA"));
+        spool.Setup(s => s.GetSpoolByIdAsync(200, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(200, remainingG: 500, material: "PETG"));
+        spool.Setup(s => s.GetSpoolByIdAsync(300, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(300, remainingG: 500, material: "ABS"));
+
+        PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
+
+        cov!.Toolheads.Should().HaveCount(3, "each demand key maps onto a real gate; no phantom slots");
+
+        // T0 (G-code 0) -> gate stored at Index 1, T1 -> Index 2, T2 -> Index 3.
+        cov.Toolheads.Single(t => t.ToolheadIndex == 1).CurrentJobRequiredGrams.Should().Be(10);
+        cov.Toolheads.Single(t => t.ToolheadIndex == 2).CurrentJobRequiredGrams.Should().Be(20);
+        cov.Toolheads.Single(t => t.ToolheadIndex == 3).CurrentJobRequiredGrams.Should().Be(30);
+    }
+
+    [Fact]
+    public async Task NonMmu_PhysicalHotend_SingleToolDemand_RoutesToPhysical()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0.0);
+
+        // Non-MMU printer: physical hotend at Index 0. T0 must resolve to the physical hotend.
+        Printer p = SeedPrinter(db, "single", T(0, spoolId: 100, primary: true, material: "PLA"));
+
+        // Single-tool gcode (no per-extruder breakdown) exercises the single-tool fallback,
+        // which must attribute demand to the primary toolhead in 0-based G-code space.
+        GcodeFile g = Gcode(estimatedTotalGrams: 50, printTimeMinutes: 30);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(30)));
+        _ = await db.SaveChangesAsync();
+
+        spool.Setup(s => s.GetSpoolByIdAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(100, remainingG: 500));
+
+        PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
+
+        cov!.Toolheads.Should().HaveCount(1);
+        ToolheadCoverageDto t0 = cov.Toolheads.Single(t => t.ToolheadIndex == 0);
+        t0.CurrentJobRequiredGrams.Should().Be(50, "T0 maps to the physical hotend at Index 0");
+        t0.Status.Should().Be(FilamentCoverageStatus.Covers);
+    }
     [Fact]
     public async Task MultiTool_MissingPerExtruderMetadata_ReturnsUnknown()
     {

@@ -333,9 +333,13 @@ public class FilamentCoverageService(
                 ?? th.CurrentMaterial
                 ?? (th.IsPrimary ? printer.CurrentMaterial : null);
 
-            // Per-slot active demand.
-            bool activeHasThisSlot = activePerCopy.ContainsKey(th.Index);
-            double perCopyGrams = activeHasThisSlot ? activePerCopy[th.Index] : 0.0;
+            // Per-slot active demand. Slicer demand keys are 0-based G-code T-indices, so the
+            // stored toolhead index (1-based for MMU gates) must be translated through the mapper
+            // before matching (issue #711 round-10 Finding 2). A null G-code index is the shared
+            // physical hotend of an MMU printer and never carries filament demand of its own.
+            int? gcodeIndex = ToolheadIndexMapper.ToGcodeToolIndex(th);
+            bool activeHasThisSlot = gcodeIndex.HasValue && activePerCopy.ContainsKey(gcodeIndex.Value);
+            double perCopyGrams = activeHasThisSlot ? activePerCopy[gcodeIndex!.Value] : 0.0;
 
             double? currentJobRequired = activeHasThisSlot
                 ? perCopyGrams * activeRemainingCopies
@@ -368,12 +372,14 @@ public class FilamentCoverageService(
                 remainingGrams = Math.Max(0, remainingGrams.Value - consumedCurrentCopy);
             }
 
-            // Per-slot queued demand.
+            // Per-slot queued demand. queuedUnknownIndices is a per-toolhead taint set keyed by the
+            // stored toolhead index; queuedTouchedIndices/queuedDemand are keyed by 0-based G-code
+            // demand index, so those are matched through the mapped index (Finding 2).
             bool queuedUnknownForThisSlot = queuedUnknownIndices.Contains(th.Index);
             double? queuedRequired = queuedUnknownForThisSlot
                 ? null
-                : (queuedTouchedIndices.Contains(th.Index)
-                    ? (queuedDemand.TryGetValue(th.Index, out double q) ? q : 0.0)
+                : (gcodeIndex.HasValue && queuedTouchedIndices.Contains(gcodeIndex.Value)
+                    ? (queuedDemand.TryGetValue(gcodeIndex.Value, out double q) ? q : 0.0)
                     : 0.0);
 
             double? totalDemand = null;
@@ -389,11 +395,13 @@ public class FilamentCoverageService(
             }
 
             string? requiredActiveMaterial = currentJobRemaining is > 0
-                && activeMaterials.TryGetValue(th.Index, out string? activeMaterial)
+                && gcodeIndex.HasValue
+                && activeMaterials.TryGetValue(gcodeIndex.Value, out string? activeMaterial)
                     ? activeMaterial
                     : null;
             HashSet<string>? requiredQueuedMaterials = queuedRequired is > 0
-                && queuedMaterials.TryGetValue(th.Index, out HashSet<string>? queuedMaterialSet)
+                && gcodeIndex.HasValue
+                && queuedMaterials.TryGetValue(gcodeIndex.Value, out HashSet<string>? queuedMaterialSet)
                     ? queuedMaterialSet
                     : null;
             (bool materialCompatible, string? materialReason) = CheckMaterialCompatibility(
@@ -495,7 +503,13 @@ public class FilamentCoverageService(
             });
         }
 
-        HashSet<int> physicalIndices = toolheads.Select(t => t.Index).ToHashSet();
+        // Demand keys are 0-based G-code indices; project the physical toolheads into the same
+        // index space before deciding which demand rows have no matching slot (Finding 2).
+        HashSet<int> physicalIndices = toolheads
+            .Select(ToolheadIndexMapper.ToGcodeToolIndex)
+            .Where(index => index.HasValue)
+            .Select(index => index!.Value)
+            .ToHashSet();
         IEnumerable<int> missingRequiredIndices = activePerCopy.Keys
             .Concat(queuedDemand.Keys)
             .Where(index => !physicalIndices.Contains(index))
@@ -640,9 +654,14 @@ public class FilamentCoverageService(
             double? single = job.GcodeFile.EstimatedFilamentWeightG ?? job.EstimatedFilamentUsage;
             if (single is > 0)
             {
-                int primaryIdx = toolheads.FirstOrDefault(t => t.IsPrimary)?.Index
-                    ?? toolheads.FirstOrDefault()?.Index
-                    ?? 0;
+                // Attribute the single-extruder estimate to the primary toolhead in 0-based G-code
+                // space so it matches the per-extruder path and the slot loop's mapper-based
+                // lookups (issue #711 round-10 Finding 2).
+                Toolhead? primaryToolhead = toolheads.FirstOrDefault(t => t.IsPrimary)
+                    ?? toolheads.FirstOrDefault();
+                int primaryIdx = (primaryToolhead is not null
+                    ? ToolheadIndexMapper.ToGcodeToolIndex(primaryToolhead)
+                    : null) ?? 0;
                 demand[primaryIdx] = single.Value;
                 return (demand, true, false);
             }
