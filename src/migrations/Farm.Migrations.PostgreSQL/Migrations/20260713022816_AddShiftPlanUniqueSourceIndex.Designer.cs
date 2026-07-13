@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260713022816_AddShiftPlanUniqueSourceIndex")]
+    partial class AddShiftPlanUniqueSourceIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -851,82 +854,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrinterId", "DetectedAt");
 
                     b.ToTable("FailureDetectionIncidents");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("MaterialType")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("NameNormalized")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<Guid>("PrinterId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId");
-
-                    b.HasIndex("PrinterId", "NameNormalized")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_NameNormalized");
-
-                    b.ToTable("FilamentFallbackGroups");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("FallbackGroupId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Position")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("ToolheadId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FallbackGroupId");
-
-                    b.HasIndex("ToolheadId");
-
-                    b.HasIndex("FallbackGroupId", "Position")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_Position");
-
-                    b.HasIndex("FallbackGroupId", "ToolheadId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_ToolheadId");
-
-                    b.ToTable("FilamentFallbackGroupMembers");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentSwapOverride", b =>
@@ -2022,9 +1949,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2037,8 +1961,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
-
-                    b.HasIndex("ToolheadId");
 
                     b.HasIndex("Status", "Severity");
 
@@ -2155,12 +2077,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<double?>("ToolheadHoursAtMaintenance")
-                        .HasColumnType("double precision");
-
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("MaintenanceTaskId");
@@ -2172,8 +2088,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrinterMaintenanceScheduleId");
 
                     b.HasIndex("ResolvedAlertId");
-
-                    b.HasIndex("ToolheadId");
 
                     b.ToTable("MaintenanceLogs");
                 });
@@ -4345,9 +4259,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -4357,16 +4268,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("PrinterId");
 
-                    b.HasIndex("ToolheadId");
-
                     b.HasIndex("MaintenancePlanId", "PrinterId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_NullToolhead")
-                        .HasFilter("\"ToolheadId\" IS NULL");
-
-                    b.HasIndex("MaintenancePlanId", "PrinterId", "ToolheadId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_Toolhead");
+                        .IsUnique();
 
                     b.ToTable("PrinterMaintenanceSchedules");
                 });
@@ -4638,15 +4541,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("ExternalBaselineInitializedUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("ExternalJobsCompleted")
-                        .HasColumnType("bigint");
-
-                    b.Property<double>("ExternalPrintHours")
-                        .HasColumnType("double precision");
 
                     b.Property<DateTime>("LastSyncTime")
                         .HasColumnType("timestamp with time zone");
@@ -5108,9 +5002,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
-
-                    b.Property<double>("CumulativePrintHours")
-                        .HasColumnType("double precision");
 
                     b.Property<string>("CurrentFilamentColor")
                         .HasMaxLength(32)
@@ -5645,19 +5536,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasDatabaseName("IX_UserTasks_SourceKind_SourceId")
                         .HasFilter("\"SourceId\" IS NOT NULL AND \"Status\" IN (0, 1)");
 
-                    b.HasIndex("Status", "UpdatedAt")
-                        .HasDatabaseName("IX_UserTasks_Status_UpdatedAt");
-
                     b.HasIndex("Status", "AnchorKind", "AnchorAtUtc")
                         .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
-
-                    b.HasIndex("Status", "SourceKind", "SourceId")
-                        .HasDatabaseName("IX_UserTasks_Status_SourceKind_SourceId");
-
-                    b.HasIndex("TaskType", "EntityType", "EntityId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_UserTasks_OpenProfileImport")
-                        .HasFilter("\"TaskType\" = 1 AND \"EntityType\" = 'PrinterModel' AND \"Status\" IN (0, 1)");
 
                     b.ToTable("UserTasks");
                 });
@@ -5941,36 +5821,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Printer");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany()
-                        .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Printer");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.FilamentFallbackGroup", "FallbackGroup")
-                        .WithMany("Members")
-                        .HasForeignKey("FallbackGroupId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("FallbackGroup");
-
-                    b.Navigation("Toolhead");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
@@ -6146,18 +5996,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasForeignKey("PrinterMaintenanceScheduleId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
 
                     b.Navigation("PrinterMaintenanceSchedule");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceLog", b =>
@@ -6183,11 +6026,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasForeignKey("ResolvedAlertId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
@@ -6195,8 +6033,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("PrinterMaintenanceSchedule");
 
                     b.Navigation("ResolvedAlert");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenancePlan", b =>
@@ -6725,16 +6561,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenancePlan");
 
                     b.Navigation("Printer");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
@@ -7117,11 +6946,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldDefinition", b =>
                 {
                     b.Navigation("Values");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FolderNode", b =>

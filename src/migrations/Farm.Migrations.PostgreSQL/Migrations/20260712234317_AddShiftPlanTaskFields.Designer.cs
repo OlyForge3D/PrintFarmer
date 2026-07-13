@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260712234317_AddShiftPlanTaskFields")]
+    partial class AddShiftPlanTaskFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -243,9 +246,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
-                    b.Property<Guid?>("BinId")
-                        .HasColumnType("uuid");
-
                     b.Property<int?>("CreatedSpoolId")
                         .HasColumnType("integer");
 
@@ -264,9 +264,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.Property<Guid?>("PartInventoryId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
@@ -280,11 +277,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("Barcode");
 
-                    b.HasIndex("BinId");
-
                     b.HasIndex("Outcome");
-
-                    b.HasIndex("PartInventoryId");
 
                     b.HasIndex("Timestamp");
 
@@ -325,52 +318,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsUnique();
 
                     b.ToTable("BedTypes");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.Bin", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Location")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.HasIndex("IsActive");
-
-                    b.ToTable("Bins", t =>
-                        {
-                            t.HasCheckConstraint("CK_Bins_Code_Normalized", "\"Code\" = UPPER(\"Code\")");
-                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
@@ -851,82 +798,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrinterId", "DetectedAt");
 
                     b.ToTable("FailureDetectionIncidents");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("MaterialType")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("NameNormalized")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<Guid>("PrinterId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId");
-
-                    b.HasIndex("PrinterId", "NameNormalized")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_NameNormalized");
-
-                    b.ToTable("FilamentFallbackGroups");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("FallbackGroupId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Position")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("ToolheadId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FallbackGroupId");
-
-                    b.HasIndex("ToolheadId");
-
-                    b.HasIndex("FallbackGroupId", "Position")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_Position");
-
-                    b.HasIndex("FallbackGroupId", "ToolheadId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_ToolheadId");
-
-                    b.ToTable("FilamentFallbackGroupMembers");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentSwapOverride", b =>
@@ -2022,9 +1893,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2037,8 +1905,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
-
-                    b.HasIndex("ToolheadId");
 
                     b.HasIndex("Status", "Severity");
 
@@ -2155,12 +2021,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<double?>("ToolheadHoursAtMaintenance")
-                        .HasColumnType("double precision");
-
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("MaintenanceTaskId");
@@ -2172,8 +2032,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrinterMaintenanceScheduleId");
 
                     b.HasIndex("ResolvedAlertId");
-
-                    b.HasIndex("ToolheadId");
 
                     b.ToTable("MaintenanceLogs");
                 });
@@ -2891,270 +2749,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("ObicoServers");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartHarvestOutputSnapshot", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ActualBinCode")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<Guid>("ActualBinId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExpectedBinCode")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<Guid?>("ExpectedBinId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("JobOutputSnapshotId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Origin")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<bool>("OverrideApplied")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("OverrideReason")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<Guid>("PartInventoryAdjustmentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PartInventoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PrintJobId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Quantity")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Sequence")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Sku")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<Guid?>("SourceFileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("SourceMappingId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ActualBinId");
-
-                    b.HasIndex("ExpectedBinId");
-
-                    b.HasIndex("PartInventoryAdjustmentId")
-                        .IsUnique();
-
-                    b.HasIndex("PartInventoryId");
-
-                    b.HasIndex("SourceMappingId");
-
-                    b.HasIndex("PrintJobId", "Sequence")
-                        .IsUnique();
-
-                    b.ToTable("PartHarvestOutputSnapshots", t =>
-                        {
-                            t.HasCheckConstraint("CK_PartHarvestOutputSnapshots_ExpectedBin_Consistent", "(\"ExpectedBinId\" IS NULL AND \"ExpectedBinCode\" IS NULL) OR (\"ExpectedBinId\" IS NOT NULL AND \"ExpectedBinCode\" IS NOT NULL)");
-
-                            t.HasCheckConstraint("CK_PartHarvestOutputSnapshots_Quantity_Positive", "\"Quantity\" > 0");
-
-                            t.HasCheckConstraint("CK_PartHarvestOutputSnapshots_Sequence_NonNegative", "\"Sequence\" >= 0");
-
-                            t.HasCheckConstraint("CK_PartHarvestOutputSnapshots_Sku_Normalized", "\"Sku\" = UPPER(\"Sku\")");
-                        });
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventory", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("DefaultBinId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("ModelFileRef")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("OnHand")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ReorderPoint")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Sku")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DefaultBinId");
-
-                    b.HasIndex("IsActive");
-
-                    b.HasIndex("Sku")
-                        .IsUnique();
-
-                    b.ToTable("PartInventories", t =>
-                        {
-                            t.HasCheckConstraint("CK_PartInventories_OnHand_NonNegative", "\"OnHand\" >= 0");
-
-                            t.HasCheckConstraint("CK_PartInventories_ReorderPoint_NonNegative", "\"ReorderPoint\" >= 0");
-
-                            t.HasCheckConstraint("CK_PartInventories_Sku_Normalized", "\"Sku\" = UPPER(\"Sku\")");
-                        });
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventoryAdjustment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("BinId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Delta")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("OperationKey")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<Guid>("PartInventoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("PrintJobId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<int>("ResultingBalance")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("UserId")
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BinId");
-
-                    b.HasIndex("PartInventoryId");
-
-                    b.HasIndex("PrintJobId");
-
-                    b.HasIndex("Reason");
-
-                    b.HasIndex("PartInventoryId", "CreatedAt");
-
-                    b.HasIndex("PartInventoryId", "OperationKey")
-                        .IsUnique();
-
-                    b.ToTable("PartInventoryAdjustments", t =>
-                        {
-                            t.HasCheckConstraint("CK_PartInventoryAdjustments_Delta_NonZero", "\"Delta\" <> 0");
-
-                            t.HasCheckConstraint("CK_PartInventoryAdjustments_ResultingBalance_NonNegative", "\"ResultingBalance\" >= 0");
-                        });
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartOutputMapping", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("GcodeFileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PartInventoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("PrintProjectFileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Quantity")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GcodeFileId");
-
-                    b.HasIndex("PartInventoryId");
-
-                    b.HasIndex("PrintProjectFileId");
-
-                    b.HasIndex("GcodeFileId", "PartInventoryId")
-                        .IsUnique();
-
-                    b.HasIndex("PrintProjectFileId", "PartInventoryId")
-                        .IsUnique();
-
-                    b.ToTable("PartOutputMappings", t =>
-                        {
-                            t.HasCheckConstraint("CK_PartOutputMappings_ExactlyOneSource", "(\"GcodeFileId\" IS NULL AND \"PrintProjectFileId\" IS NOT NULL) OR (\"GcodeFileId\" IS NOT NULL AND \"PrintProjectFileId\" IS NULL)");
-
-                            t.HasCheckConstraint("CK_PartOutputMappings_Quantity_Positive", "\"Quantity\" > 0");
-                        });
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordPolicyEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -3457,20 +3051,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("HarvestOperationKey")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTime?>("HarvestedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("HarvestedByUserId")
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)");
-
-                    b.Property<Guid?>("HarvestedIntoBinId")
-                        .HasColumnType("uuid");
-
                     b.Property<bool>("IsExternalPrint")
                         .HasColumnType("boolean");
 
@@ -3573,13 +3153,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("GcodeFileId");
 
-                    b.HasIndex("HarvestOperationKey")
-                        .IsUnique();
-
-                    b.HasIndex("HarvestedAt");
-
-                    b.HasIndex("HarvestedIntoBinId");
-
                     b.HasIndex("Priority");
 
                     b.HasIndex("QueuedAt");
@@ -3597,73 +3170,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasDatabaseName("IX_PrintJobs_ExternalJobId_SourcePrinterId");
 
                     b.ToTable("PrintJobs");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJobPartOutputSnapshot", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExpectedBinCode")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<Guid?>("ExpectedBinId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PartInventoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PrintJobId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("QuantityPerPrint")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Sequence")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Sku")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<Guid>("SourceFileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("SourceKind")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<Guid>("SourceMappingId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpectedBinId");
-
-                    b.HasIndex("PartInventoryId");
-
-                    b.HasIndex("SourceMappingId");
-
-                    b.HasIndex("PrintJobId", "Sequence")
-                        .IsUnique();
-
-                    b.ToTable("PrintJobPartOutputSnapshots", t =>
-                        {
-                            t.HasCheckConstraint("CK_PrintJobPartOutputSnapshots_ExpectedBin_Consistent", "(\"ExpectedBinId\" IS NULL AND \"ExpectedBinCode\" IS NULL) OR (\"ExpectedBinId\" IS NOT NULL AND \"ExpectedBinCode\" IS NOT NULL)");
-
-                            t.HasCheckConstraint("CK_PrintJobPartOutputSnapshots_Quantity_Positive", "\"QuantityPerPrint\" > 0");
-
-                            t.HasCheckConstraint("CK_PrintJobPartOutputSnapshots_Sequence_NonNegative", "\"Sequence\" >= 0");
-
-                            t.HasCheckConstraint("CK_PrintJobPartOutputSnapshots_Sku_Normalized", "\"Sku\" = UPPER(\"Sku\")");
-                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJobStatistics", b =>
@@ -4345,9 +3851,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -4357,16 +3860,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("PrinterId");
 
-                    b.HasIndex("ToolheadId");
-
                     b.HasIndex("MaintenancePlanId", "PrinterId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_NullToolhead")
-                        .HasFilter("\"ToolheadId\" IS NULL");
-
-                    b.HasIndex("MaintenancePlanId", "PrinterId", "ToolheadId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_Toolhead");
+                        .IsUnique();
 
                     b.ToTable("PrinterMaintenanceSchedules");
                 });
@@ -4638,15 +4133,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("ExternalBaselineInitializedUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("ExternalJobsCompleted")
-                        .HasColumnType("bigint");
-
-                    b.Property<double>("ExternalPrintHours")
-                        .HasColumnType("double precision");
 
                     b.Property<DateTime>("LastSyncTime")
                         .HasColumnType("timestamp with time zone");
@@ -5108,9 +4594,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
-
-                    b.Property<double>("CumulativePrintHours")
-                        .HasColumnType("double precision");
 
                     b.Property<string>("CurrentFilamentColor")
                         .HasMaxLength(32)
@@ -5641,23 +5124,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("DismissedByUserId");
 
                     b.HasIndex("SourceKind", "SourceId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_UserTasks_SourceKind_SourceId")
-                        .HasFilter("\"SourceId\" IS NOT NULL AND \"Status\" IN (0, 1)");
-
-                    b.HasIndex("Status", "UpdatedAt")
-                        .HasDatabaseName("IX_UserTasks_Status_UpdatedAt");
+                        .HasDatabaseName("IX_UserTasks_SourceKind_SourceId");
 
                     b.HasIndex("Status", "AnchorKind", "AnchorAtUtc")
                         .HasDatabaseName("IX_UserTasks_Status_AnchorKind_AnchorAtUtc");
-
-                    b.HasIndex("Status", "SourceKind", "SourceId")
-                        .HasDatabaseName("IX_UserTasks_Status_SourceKind_SourceId");
-
-                    b.HasIndex("TaskType", "EntityType", "EntityId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_UserTasks_OpenProfileImport")
-                        .HasFilter("\"TaskType\" = 1 AND \"EntityType\" = 'PrinterModel' AND \"Status\" IN (0, 1)");
 
                     b.ToTable("UserTasks");
                 });
@@ -5941,36 +5411,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Printer");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany()
-                        .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Printer");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.FilamentFallbackGroup", "FallbackGroup")
-                        .WithMany("Members")
-                        .HasForeignKey("FallbackGroupId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("FallbackGroup");
-
-                    b.Navigation("Toolhead");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
@@ -6146,18 +5586,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasForeignKey("PrinterMaintenanceScheduleId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
 
                     b.Navigation("PrinterMaintenanceSchedule");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceLog", b =>
@@ -6183,11 +5616,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasForeignKey("ResolvedAlertId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
@@ -6195,8 +5623,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("PrinterMaintenanceSchedule");
 
                     b.Navigation("ResolvedAlert");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenancePlan", b =>
@@ -6354,108 +5780,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Manufacturer");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartHarvestOutputSnapshot", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Bin", "ActualBin")
-                        .WithMany()
-                        .HasForeignKey("ActualBinId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.Bin", "ExpectedBin")
-                        .WithMany()
-                        .HasForeignKey("ExpectedBinId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Farm.Infrastructure.Domain.PartInventoryAdjustment", "PartInventoryAdjustment")
-                        .WithMany()
-                        .HasForeignKey("PartInventoryAdjustmentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
-                        .WithMany()
-                        .HasForeignKey("PartInventoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
-                        .WithMany()
-                        .HasForeignKey("PrintJobId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ActualBin");
-
-                    b.Navigation("ExpectedBin");
-
-                    b.Navigation("PartInventory");
-
-                    b.Navigation("PartInventoryAdjustment");
-
-                    b.Navigation("PrintJob");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventory", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Bin", "DefaultBin")
-                        .WithMany()
-                        .HasForeignKey("DefaultBinId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("DefaultBin");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventoryAdjustment", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Bin", "Bin")
-                        .WithMany()
-                        .HasForeignKey("BinId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
-                        .WithMany("Adjustments")
-                        .HasForeignKey("PartInventoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
-                        .WithMany()
-                        .HasForeignKey("PrintJobId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Bin");
-
-                    b.Navigation("PartInventory");
-
-                    b.Navigation("PrintJob");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartOutputMapping", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
-                        .WithMany()
-                        .HasForeignKey("GcodeFileId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
-                        .WithMany("Mappings")
-                        .HasForeignKey("PartInventoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrintProjectFile", "PrintProjectFile")
-                        .WithMany()
-                        .HasForeignKey("PrintProjectFileId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.Navigation("GcodeFile");
-
-                    b.Navigation("PartInventory");
-
-                    b.Navigation("PrintProjectFile");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordResetToken", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
@@ -6529,40 +5853,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasForeignKey("GcodeFileId")
                         .OnDelete(DeleteBehavior.NoAction);
 
-                    b.HasOne("Farm.Infrastructure.Domain.Bin", null)
-                        .WithMany()
-                        .HasForeignKey("HarvestedIntoBinId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("AssignedPrinter");
 
                     b.Navigation("GcodeFile");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJobPartOutputSnapshot", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Bin", "ExpectedBin")
-                        .WithMany()
-                        .HasForeignKey("ExpectedBinId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
-                        .WithMany()
-                        .HasForeignKey("PartInventoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
-                        .WithMany()
-                        .HasForeignKey("PrintJobId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ExpectedBin");
-
-                    b.Navigation("PartInventory");
-
-                    b.Navigation("PrintJob");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJobStatistics", b =>
@@ -6725,16 +6018,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenancePlan");
 
                     b.Navigation("Printer");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
@@ -7119,11 +6405,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Values");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.Navigation("Members");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.FolderNode", b =>
                 {
                     b.Navigation("Files");
@@ -7191,13 +6472,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.ObicoServer", b =>
                 {
                     b.Navigation("PrinterServiceStates");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PartInventory", b =>
-                {
-                    b.Navigation("Adjustments");
-
-                    b.Navigation("Mappings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>

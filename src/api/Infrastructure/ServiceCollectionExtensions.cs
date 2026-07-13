@@ -624,6 +624,14 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
 
+        // Shift-plan compiler (issue #713): materializes attention, maintenance,
+        // and coverage signals into UserTask rows anchored to Now/At/Window/AnytimeToday.
+        // Sources are additive: register additional IShiftPlanTaskSource impls to extend coverage.
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IIdleWindowService, Farm.Infrastructure.Services.ShiftPlan.IdleWindowService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.AttentionShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.MaintenanceIdleWindowShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanCompiler, Farm.Infrastructure.Services.ShiftPlan.ShiftPlanCompiler>();
+
         // SystemLogs service
         _ = services.AddScoped<Farm.Infrastructure.Services.SystemLogs.ISystemLogService, Farm.Infrastructure.Services.SystemLogs.SystemLogService>();
 
@@ -757,6 +765,9 @@ public static class ServiceCollectionExtensions
 
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
+
+            // Shift-plan compiler (issue #713): periodic materialization of operational tasks.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.ShiftPlan.ShiftPlanCompilerHostedService>();
 
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();
