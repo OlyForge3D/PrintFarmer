@@ -14,6 +14,10 @@ public class UserTaskService(
     ILogger<UserTaskService> logger,
     ITaskBroadcaster? broadcaster = null) : IUserTaskService
 {
+    private const int MaxProfileImportWriteAttempts = 5;
+    private static readonly IReadOnlyCollection<string> ProfileImportUpdateProperties =
+        [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)];
+
     private readonly IUserTaskRepository _taskRepository = taskRepository ?? throw new ArgumentNullException(nameof(taskRepository));
     private readonly ILogger<UserTaskService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ITaskBroadcaster? _broadcaster = broadcaster;
@@ -58,120 +62,139 @@ public class UserTaskService(
     /// <inheritdoc />
     public async Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskDto dto, CancellationToken ct = default)
     {
-        // Check if a task already exists for this printer model
-        UserTask? existingTask = await _taskRepository.GetByEntityAsync(
-            UserTaskType.ProfileImport,
-            "PrinterModel",
-            dto.PrinterModelId,
-            ct);
-
-        if (existingTask != null)
+        for (int attempt = 0; attempt < MaxProfileImportWriteAttempts; attempt++)
         {
-            // Add printer to the related entities list if not already there
-            List<Guid> relatedPrinterIds = ParseRelatedEntityIds(existingTask.RelatedEntityIdsJson);
-            if (!relatedPrinterIds.Contains(dto.PrinterId))
+            UserTask? existingTask = await _taskRepository.GetByEntityAsync(
+                UserTaskType.ProfileImport,
+                "PrinterModel",
+                dto.PrinterModelId,
+                ct);
+
+            if (existingTask is null)
             {
-                relatedPrinterIds.Add(dto.PrinterId);
-                existingTask.RelatedEntityIdsJson = JsonSerializer.Serialize(relatedPrinterIds);
-
-                // Update description with new count
-                int count = relatedPrinterIds.Count;
-                existingTask.Description = $"{count} printer{(count == 1 ? string.Empty : "s")} waiting for slicer profiles";
-
-                // Fix R4-2/R5-C: the task was loaded via GetByEntityAsync (no-tracking), so a
-                // blind full-entity UpdateAsync marks EVERY column modified and would
-                // clobber a concurrent user Complete/Skip/Dismiss back to the stale
-                // Pending status (the same lost-update bug R3-5 fixed for the
-                // complete/skip/dismiss paths). Write only the columns this import path
-                // actually changes, and only if the row is still open at write time.
-                // If a concurrent terminal user action wins, create a fresh occurrence
-                // rather than appending stale printer state or broadcasting a stale DTO.
-                bool updated = await _taskRepository.TryUpdateFieldsIfOpenAsync(
-                    existingTask,
-                    [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)],
-                    ct);
-                if (!updated)
+                UserTaskDto? created = await TryInsertProfileImportTaskAsync(dto, recoverySource: null, ct);
+                if (created is not null)
                 {
-                    _logger.LogWarning(
-                        "[UserTaskService] Profile import task {TaskId} for {PrinterModelName} became terminal before append; creating a new occurrence",
-                        existingTask.Id,
-                        dto.PrinterModelName);
-
-                    UserTask recoveredTask = CreateProfileImportTask(dto);
-                    recoveredTask.SourceKind = existingTask.SourceKind;
-                    recoveredTask.SourceId = existingTask.SourceId;
-
-                    try
-                    {
-                        await _taskRepository.AddAsync(recoveredTask, ct);
-                    }
-                    catch (DbUpdateException ex) when (EfUserTaskRepository.IsUniqueConstraintViolation(ex))
-                    {
-                        // A concurrent recovery inserted the open profile-import task
-                        // first. Detach the failed insert before updating that winner.
-                        await _taskRepository.DetachTrackedAsync([recoveredTask], ct);
-                        UserTask? concurrentTask = await _taskRepository.GetByEntityAsync(
-                            UserTaskType.ProfileImport,
-                            "PrinterModel",
-                            dto.PrinterModelId,
-                            ct);
-                        if (concurrentTask is null)
-                        {
-                            throw;
-                        }
-
-                        List<Guid> concurrentRelatedPrinterIds = ParseRelatedEntityIds(concurrentTask.RelatedEntityIdsJson);
-                        if (!concurrentRelatedPrinterIds.Contains(dto.PrinterId))
-                        {
-                            concurrentRelatedPrinterIds.Add(dto.PrinterId);
-                        }
-
-                        concurrentTask.RelatedEntityIdsJson = JsonSerializer.Serialize(concurrentRelatedPrinterIds);
-                        int concurrentCount = concurrentRelatedPrinterIds.Count;
-                        concurrentTask.Description =
-                            $"{concurrentCount} printer{(concurrentCount == 1 ? string.Empty : "s")} waiting for slicer profiles";
-                        bool updatedConcurrentTask = await _taskRepository.TryUpdateFieldsIfOpenAsync(
-                            concurrentTask,
-                            [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)],
-                            ct);
-                        if (!updatedConcurrentTask)
-                        {
-                            throw;
-                        }
-
-                        UserTask persistedConcurrentTask =
-                            await _taskRepository.GetByIdAsync(concurrentTask.Id, ct) ?? concurrentTask;
-                        UserTaskDto concurrentDto = MapToDto(persistedConcurrentTask);
-                        await BroadcastTaskUpdatedAsync(concurrentDto, ct);
-                        return concurrentDto;
-                    }
-
-                    UserTaskDto recoveredDto = MapToDto(recoveredTask);
-                    await BroadcastTaskCreatedAsync(recoveredDto, ct);
-                    return recoveredDto;
+                    return created;
                 }
 
-                _logger.LogInformation("[UserTaskService] Updated profile import task for {PrinterModelName}, now {PrinterCount} printers waiting", dto.PrinterModelName, count);
-
-                UserTask persisted = await _taskRepository.GetByIdAsync(existingTask.Id, ct) ?? existingTask;
-                UserTaskDto updatedDto = MapToDto(persisted);
-                await BroadcastTaskUpdatedAsync(updatedDto, ct);
-                return updatedDto;
+                continue;
             }
 
+            UserTaskDto? updated = await TryMergeProfileImportTaskAsync(existingTask, dto, ct);
+            if (updated is not null)
+            {
+                return updated;
+            }
+
+            // The failed OCC update may have observed a terminal row or a newer open
+            // snapshot. The same insert/reconcile flow handles both cases and also
+            // covers a concurrent recovery insert.
+            UserTaskDto? recovered = await TryInsertProfileImportTaskAsync(dto, existingTask, ct);
+            if (recovered is not null)
+            {
+                return recovered;
+            }
+        }
+
+        throw new DbUpdateConcurrencyException(
+            $"Could not merge profile import task for printer model {dto.PrinterModelId} after {MaxProfileImportWriteAttempts} attempts.");
+    }
+
+    private async Task<UserTaskDto?> TryMergeProfileImportTaskAsync(
+        UserTask existingTask,
+        CreateProfileImportTaskDto dto,
+        CancellationToken ct)
+    {
+        List<Guid> relatedPrinterIds = ParseRelatedEntityIds(existingTask.RelatedEntityIdsJson);
+        if (relatedPrinterIds.Contains(dto.PrinterId))
+        {
             return MapToDto(existingTask);
         }
 
-        // Create new task
+        relatedPrinterIds.Add(dto.PrinterId);
+        existingTask.RelatedEntityIdsJson = JsonSerializer.Serialize(relatedPrinterIds);
+        int count = relatedPrinterIds.Count;
+        existingTask.Description = $"{count} printer{(count == 1 ? string.Empty : "s")} waiting for slicer profiles";
+
+        bool updated = await _taskRepository.TryUpdateFieldsIfOpenAsync(
+            existingTask,
+            ProfileImportUpdateProperties,
+            existingTask.UpdatedAt,
+            ct);
+        if (!updated)
+        {
+            return null;
+        }
+
+        _logger.LogInformation(
+            "[UserTaskService] Updated profile import task for {PrinterModelName}, now {PrinterCount} printers waiting",
+            dto.PrinterModelName,
+            count);
+
+        if (_broadcaster is null)
+        {
+            return MapToDto(existingTask);
+        }
+
+        UserTask persisted = await ReloadCommittedTaskAsync(existingTask.Id, ct);
+        UserTaskDto updatedDto = MapToDto(persisted);
+        await BroadcastTaskUpdatedAsync(updatedDto, ct);
+        return updatedDto;
+    }
+
+    private async Task<UserTaskDto?> TryInsertProfileImportTaskAsync(
+        CreateProfileImportTaskDto dto,
+        UserTask? recoverySource,
+        CancellationToken ct)
+    {
         UserTask newTask = CreateProfileImportTask(dto);
+        if (recoverySource is not null)
+        {
+            newTask.SourceKind = recoverySource.SourceKind;
+            newTask.SourceId = recoverySource.SourceId;
+        }
 
-        await _taskRepository.AddAsync(newTask, ct);
-        _logger.LogInformation("[UserTaskService] Created profile import task for {ManufacturerName} {PrinterModelName}", dto.ManufacturerName, dto.PrinterModelName);
+        try
+        {
+            await _taskRepository.AddAsync(newTask, ct);
+        }
+        catch (DbUpdateException ex) when (EfUserTaskRepository.IsUniqueConstraintViolation(ex))
+        {
+            await _taskRepository.DetachTrackedAsync([newTask], ct);
+            UserTask? concurrentTask = await _taskRepository.GetByEntityAsync(
+                UserTaskType.ProfileImport,
+                "PrinterModel",
+                dto.PrinterModelId,
+                ct);
+            if (concurrentTask is null)
+            {
+                return null;
+            }
 
-        UserTaskDto createdDto = MapToDto(newTask);
+            return await TryMergeProfileImportTaskAsync(concurrentTask, dto, ct);
+        }
+
+        _logger.LogInformation(
+            "[UserTaskService] Created profile import task for {ManufacturerName} {PrinterModelName}",
+            dto.ManufacturerName,
+            dto.PrinterModelName);
+
+        if (_broadcaster is null)
+        {
+            return MapToDto(newTask);
+        }
+
+        UserTask persisted = await ReloadCommittedTaskAsync(newTask.Id, ct);
+        UserTaskDto createdDto = MapToDto(persisted);
         await BroadcastTaskCreatedAsync(createdDto, ct);
-
         return createdDto;
+    }
+
+    private async Task<UserTask> ReloadCommittedTaskAsync(Guid taskId, CancellationToken ct)
+    {
+        UserTask? persisted = await _taskRepository.GetByIdAsync(taskId, ct);
+        return persisted ?? throw new InvalidOperationException($"Committed user task {taskId} could not be reloaded.");
     }
 
     /// <inheritdoc />

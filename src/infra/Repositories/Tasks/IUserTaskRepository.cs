@@ -121,10 +121,22 @@ public interface IUserTaskRepository
     /// <summary>
     /// Atomically updates only the named properties when the row is still open
     /// (<see cref="UserTaskStatus.Pending"/> or <see cref="UserTaskStatus.InProgress"/>).
-    /// Returns <c>false</c> without changing the row if a concurrent action already
-    /// moved it to a terminal status.
+    /// Returns <c>false</c> without changing the row if a concurrent action moved it
+    /// to a terminal status.
     /// </summary>
     Task<bool> TryUpdateFieldsIfOpenAsync(UserTask task, IReadOnlyCollection<string> propertyNames, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically updates only the named properties when the row is still open and
+    /// still has the expected <see cref="UserTask.UpdatedAt"/> timestamp. Returns
+    /// <c>false</c> without changing the row if a concurrent action changed the row
+    /// or moved it to a terminal status.
+    /// </summary>
+    Task<bool> TryUpdateFieldsIfOpenAsync(
+        UserTask task,
+        IReadOnlyCollection<string> propertyNames,
+        DateTime? expectedUpdatedAt,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Atomically completes the task with <paramref name="taskId"/> only if its

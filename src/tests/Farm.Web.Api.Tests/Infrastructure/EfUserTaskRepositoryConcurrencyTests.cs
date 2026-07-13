@@ -236,6 +236,62 @@ public class EfUserTaskRepositoryConcurrencyTests
     }
 
     /// <summary>
+    /// The profile-import read-modify-write path must reject a second detached
+    /// snapshot after the first writer advances UpdatedAt.
+    /// </summary>
+    [Fact]
+    public async Task TryUpdateFieldsIfOpenAsync_ProfileImportExpectedUpdatedAt_RejectsStaleSnapshot()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        Guid taskId = Guid.NewGuid();
+        Guid firstPrinter = Guid.NewGuid();
+        Guid secondPrinter = Guid.NewGuid();
+        Guid thirdPrinter = Guid.NewGuid();
+
+        await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
+        {
+            UserTask task = NewOpenTask(UserTaskSourceKind.Unspecified, null, UserTaskStatus.Pending, taskId);
+            task.TaskType = UserTaskType.ProfileImport;
+            task.EntityType = "PrinterModel";
+            task.EntityId = Guid.NewGuid();
+            task.RelatedEntityIdsJson = $"[\"{firstPrinter}\"]";
+            task.Description = "1 printer waiting for slicer profiles";
+            _ = seed.UserTasks.Add(task);
+            _ = await seed.SaveChangesAsync();
+        }
+
+        await using AppDbContext firstContext = TestInfrastructure.TestHelpers.CreateContext(connection);
+        await using AppDbContext secondContext = TestInfrastructure.TestHelpers.CreateContext(connection);
+        UserTask firstSnapshot = await firstContext.UserTasks.AsNoTracking().SingleAsync(t => t.Id == taskId);
+        UserTask secondSnapshot = await secondContext.UserTasks.AsNoTracking().SingleAsync(t => t.Id == taskId);
+        DateTime expectedUpdatedAt = firstSnapshot.UpdatedAt;
+
+        firstSnapshot.RelatedEntityIdsJson = $"[\"{firstPrinter}\",\"{secondPrinter}\"]";
+        firstSnapshot.Description = "2 printers waiting for slicer profiles";
+        EfUserTaskRepository firstRepository = new(firstContext);
+        bool firstUpdated = await firstRepository.TryUpdateFieldsIfOpenAsync(
+            firstSnapshot,
+            [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)],
+            expectedUpdatedAt);
+
+        secondSnapshot.RelatedEntityIdsJson = $"[\"{firstPrinter}\",\"{thirdPrinter}\"]";
+        secondSnapshot.Description = "2 printers waiting for slicer profiles";
+        EfUserTaskRepository secondRepository = new(secondContext);
+        bool staleUpdated = await secondRepository.TryUpdateFieldsIfOpenAsync(
+            secondSnapshot,
+            [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)],
+            expectedUpdatedAt);
+
+        await using AppDbContext verifyContext = TestInfrastructure.TestHelpers.CreateContext(connection);
+        UserTask finalTask = await verifyContext.UserTasks.AsNoTracking().SingleAsync(t => t.Id == taskId);
+
+        firstUpdated.Should().BeTrue();
+        staleUpdated.Should().BeFalse();
+        finalTask.RelatedEntityIdsJson.Should().Be($"[\"{firstPrinter}\",\"{secondPrinter}\"]");
+        finalTask.Description.Should().Be("2 printers waiting for slicer profiles");
+    }
+
+    /// <summary>
     /// Fix R6-2: durable bootstrap is bounded to a 30-day maximum age so a terminal
     /// row from an ancient source episode does not suppress a genuinely new occurrence.
     /// </summary>

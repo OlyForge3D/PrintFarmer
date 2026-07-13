@@ -309,9 +309,17 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
+    public Task<bool> TryUpdateFieldsIfOpenAsync(
+        UserTask task,
+        IReadOnlyCollection<string> propertyNames,
+        CancellationToken ct = default) =>
+        TryUpdateFieldsIfOpenAsync(task, propertyNames, expectedUpdatedAt: null, ct);
+
+    /// <inheritdoc />
     public async Task<bool> TryUpdateFieldsIfOpenAsync(
         UserTask task,
         IReadOnlyCollection<string> propertyNames,
+        DateTime? expectedUpdatedAt,
         CancellationToken ct = default)
     {
         HashSet<string> properties = propertyNames.ToHashSet(StringComparer.Ordinal);
@@ -319,14 +327,19 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
 
         if (properties.SetEquals([nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)]))
         {
-            int rows = await _db.UserTasks
-                .Where(t => t.Id == task.Id && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(t => t.UpdatedAt, updatedAt)
-                        .SetProperty(t => t.RelatedEntityIdsJson, task.RelatedEntityIdsJson)
-                        .SetProperty(t => t.Description, task.Description),
-                    ct);
+            IQueryable<UserTask> query = _db.UserTasks
+                .Where(t => t.Id == task.Id && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress));
+            if (expectedUpdatedAt.HasValue)
+            {
+                query = query.Where(t => t.UpdatedAt == expectedUpdatedAt.Value);
+            }
+
+            int rows = await query.ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(t => t.UpdatedAt, updatedAt)
+                    .SetProperty(t => t.RelatedEntityIdsJson, task.RelatedEntityIdsJson)
+                    .SetProperty(t => t.Description, task.Description),
+                ct);
 
             return rows > 0;
         }
