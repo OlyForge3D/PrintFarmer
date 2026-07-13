@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using Farm.Infrastructure.Normalization;
 
 namespace Farm.Infrastructure.Services.Idempotency;
 
@@ -34,6 +35,45 @@ public static class IdempotencyKeyUtilities
     /// leaves the Processing row to be reclaimed and the same header key is retried.
     /// </summary>
     public const string SynthesizedOperationKeyPrefix = "idem:";
+
+    /// <summary>
+    /// Returns whether <paramref name="operationKey"/> lies in the reserved
+    /// <see cref="SynthesizedOperationKeyPrefix"/> (<c>idem:</c>) namespace, comparing in a
+    /// <b>width-aware</b> way (issue #715, Hicks r4 blocker 2).
+    ///
+    /// <para>
+    /// A plain ordinal <c>StartsWith("idem:")</c> is byte-exact, so a fullwidth <c>ｉｄｅｍ:</c>
+    /// (U+FF49 U+FF44 U+FF45 U+FF4D — optionally with a fullwidth colon U+FF1A) slips past it, yet
+    /// SQL Server's width-insensitive collation would later treat the persisted value as equivalent
+    /// to an ASCII <c>idem:</c> key and could dedup it against a server-synthesized key. We
+    /// therefore fold the value to its Unicode NFKC form
+    /// (<see cref="Farm.Infrastructure.Normalization.UnicodeCompatibilityNormalizer"/>) before the
+    /// ordinal, case-insensitive prefix test, so every width/compatibility variant of the reserved
+    /// prefix is caught. The comparison also trims surrounding whitespace to match the service-side
+    /// normalization.
+    /// </para>
+    ///
+    /// <para>
+    /// This is a pure comparison helper — it never mutates the key. Callers that persist the key
+    /// (the service ledger) must store the client's <b>original</b> value, using this method only to
+    /// decide acceptance, so legitimate non-<c>idem:</c> clients that use accented or composed
+    /// characters keep their exact key at rest. Null/empty/whitespace is treated as not reserved so
+    /// the check composes with optional, nullable operation-key fields.
+    /// </para>
+    /// </summary>
+    /// <param name="operationKey">The client-supplied operation key to inspect. May be <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if the key begins with the reserved prefix in any width variant; otherwise <see langword="false"/>.</returns>
+    public static bool IsReservedOperationKey(string? operationKey)
+    {
+        if (string.IsNullOrWhiteSpace(operationKey))
+        {
+            return false;
+        }
+
+        return UnicodeCompatibilityNormalizer
+            .ToCompatibilityForm(operationKey.Trim())
+            .StartsWith(SynthesizedOperationKeyPrefix, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Derives a deterministic domain <c>operationKey</c> from the idempotency identity

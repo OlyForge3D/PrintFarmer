@@ -54,16 +54,19 @@ public class PartInventoryService(
 
         string trimmedSku = PartInventoryIdentity.NormalizeSku(sku);
 
-        // Reserved-namespace guard (issue #715, Hicks r3 blocker 2): the "idem:" prefix is
-        // reserved for the operationKey the idempotency filter synthesizes on the client's
-        // behalf (which arrives via command.SynthesizedOperationKey). A client must never supply
-        // an operationKey in that namespace, or a crafted value could collide with a future
-        // synthesized key and dedup a genuinely distinct mutation. Only the client-supplied
-        // channel is policed; the synthesized channel is trusted. Enforced here — not only at
-        // the API boundary — as defense-in-depth for any caller of the service.
+        // Reserved-namespace guard (issue #715, Hicks r3 blocker 2; width-hardened in r4 blocker 2):
+        // the "idem:" prefix is reserved for the operationKey the idempotency filter synthesizes on
+        // the client's behalf (which arrives via command.SynthesizedOperationKey). A client must
+        // never supply an operationKey in that namespace, or a crafted value could collide with a
+        // future synthesized key and dedup a genuinely distinct mutation. The guard folds Unicode
+        // compatibility forms (NFKC) before the prefix test, so a fullwidth ｉｄｅｍ: cannot slip past
+        // it and later match ASCII idem: under SQL Server's width-insensitive collation. Only the
+        // client-supplied channel is policed; the synthesized channel is trusted. Enforced here —
+        // not only at the API boundary — as defense-in-depth for any caller of the service. NFKC is
+        // used ONLY for this comparison: clientOperationKey keeps the client's original value so a
+        // legitimate non-idem: key with accented characters is persisted unchanged.
         string? clientOperationKey = PartInventoryIdentity.NormalizeOperationKey(command.OperationKey);
-        if (clientOperationKey is not null
-            && clientOperationKey.StartsWith(IdempotencyKeyUtilities.SynthesizedOperationKeyPrefix, StringComparison.OrdinalIgnoreCase))
+        if (IdempotencyKeyUtilities.IsReservedOperationKey(clientOperationKey))
         {
             return new AdjustResult(
                 PartInventoryOutcome.InvalidRequest,

@@ -459,6 +459,52 @@ public class IdempotencyFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task PartsAdjust_SameKey_SameBody_WidthEquivalentSku_Replays_NotReExecutes()
+    {
+        // Hicks r4 blocker 1: SQL Server's default collation on PartInventory.Sku is
+        // width-insensitive, so ASCII "ABC" and fullwidth "ＡＢＣ" (U+FF21..U+FF23) resolve to the
+        // SAME physical row at the store. If the idempotency identity keyed off the raw SKU, a
+        // same-key retry that differs only in character width would mint a DISTINCT record, skip the
+        // replay, and double-apply the stock delta against that one row. Folding the SKU through
+        // NFKC in the route key collapses the width variants onto one identity, so the fullwidth
+        // retry replays instead of re-executing — the store-side and app-side identities agree.
+        IdempotencyFilter filter = CreateFilter();
+        byte[] body = Encoding.UTF8.GetBytes("{\"delta\":1}");
+        const string key = "width-key";
+
+        int executionCount = 0;
+
+        // First request: ASCII sku "ABC" — executes the adjust and persists a Completed record.
+        ResourceExecutingContext first = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, key, body,
+            path: "/api/parts-inventory/ABC/adjust",
+            routeValues: new Dictionary<string, object?> { ["sku"] = "ABC" });
+        await RunAsync(filter, first, 200, "{\"onHand\":1}", () => executionCount++);
+        _ = first.HttpContext.Response.StatusCode.Should().Be(200);
+
+        // Second request: fullwidth sku "ＡＢＣ" (U+FF21..U+FF23), same key + body → NFKC folds it to
+        // "ABC", so the effective identity matches and the request must replay.
+        ResourceExecutingContext second = CreateContext(
+            IdempotencyRouteKeys.PartsInventoryAdjust, key, body,
+            path: "/api/parts-inventory/\uFF21\uFF22\uFF23/adjust",
+            routeValues: new Dictionary<string, object?> { ["sku"] = "\uFF21\uFF22\uFF23" });
+        await filter.OnResourceExecutionAsync(second, () =>
+        {
+            executionCount++;
+            return Task.FromResult(new ResourceExecutedContext(second, second.Filters));
+        });
+        _ = second.Result.Should().BeOfType<IdempotencyReplayResult>(
+            "a width-equivalent SKU must share the ASCII SKU's idempotency identity and replay");
+
+        _ = executionCount.Should().Be(1,
+            "only the ASCII request may run the adjust; the fullwidth variant must replay, not double-apply");
+
+        using Farm.Infrastructure.Data.AppDbContext db = new(_options);
+        _ = (await db.IdempotencyRecords.CountAsync(CancellationToken.None))
+            .Should().Be(1, "the ASCII and fullwidth SKUs must share ONE idempotency record");
+    }
+
+    [Fact]
     public async Task TaskComplete_SameKey_SameBody_DifferentGuidCasing_Replays_NotReExecutes()
     {
         // Hicks r3 blocker 1: the {id:guid} route constraint validates but does NOT canonicalize,

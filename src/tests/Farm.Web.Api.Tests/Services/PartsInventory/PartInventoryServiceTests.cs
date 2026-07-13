@@ -259,6 +259,57 @@ public class PartInventoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AdjustAsync_ClientOperationKeyWithFullwidthReservedPrefix_ReturnsInvalidRequest_AndDoesNotWrite()
+    {
+        // Hicks r4 blocker 2: the service-layer defense-in-depth guard must be width-aware. A
+        // fullwidth "ｉｄｅｍ:" (U+FF49 U+FF44 U+FF45 U+FF4D) folds to ASCII "idem:" under SQL Server's
+        // width-insensitive collation, so it must be rejected here exactly like ASCII "idem:" —
+        // otherwise it slips past the ordinal guard, is stored, and can collide with a
+        // server-synthesized key.
+        _ = await SeedSkuAsync(onHand: 4);
+        PartInventoryService sut = CreateSut();
+
+        AdjustResult result = await sut.AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(3, PartAdjustmentReason.Manual, null, null, null, "\uFF49\uFF44\uFF45\uFF4D:foo", "u1"));
+
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, result.Outcome);
+        string? message = result.Message;
+        Assert.NotNull(message);
+        Assert.Contains("idem:", message, StringComparison.OrdinalIgnoreCase);
+
+        await using var db = new AppDbContext(_options);
+        Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+        Assert.Equal(4, (await db.PartInventories.SingleAsync()).OnHand);
+    }
+
+    [Fact]
+    public async Task AdjustAsync_WidthEquivalentSku_ResolvesToSameSeededRow()
+    {
+        // Hicks r4 blocker 1 at the service layer: the domain lookup must apply the same NFKC
+        // normalization as the idempotency route key, or a fullwidth SKU would be looked up as
+        // fullwidth against SQL Server's width-insensitive collation and the double-apply path
+        // would survive at a different layer than the filter. Seed ASCII "ABC" and adjust via
+        // fullwidth "ＡＢＣ" (U+FF21..U+FF23): the shared PartInventoryIdentity.NormalizeSku fold
+        // makes both spellings resolve to the one seeded row.
+        _ = await SeedSkuAsync(sku: "ABC", onHand: 5);
+        PartInventoryService sut = CreateSut();
+
+        AdjustResult result = await sut.AdjustAsync(
+            "\uFF21\uFF22\uFF23",
+            new AdjustCommand(2, PartAdjustmentReason.Manual, null, null, null, null, "u1"));
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        Assert.Equal(7, result.NewOnHand);
+
+        await using var db = new AppDbContext(_options);
+        PartInventory part = await db.PartInventories.SingleAsync();
+        Assert.Equal("ABC", part.Sku);
+        Assert.Equal(7, part.OnHand);
+        _ = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+    }
+
+    [Fact]
     public async Task AdjustAsync_SynthesizedOperationKeyChannel_AppliesOnce_AndBacksIdempotency()
     {
         // Regression for Hudson's B2 backstop under the r3 channel-split: when the client omits

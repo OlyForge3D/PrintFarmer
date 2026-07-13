@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Idempotency;
+﻿using Farm.Infrastructure.Services.Idempotency;
 using FluentAssertions;
 using Xunit;
 
@@ -75,4 +75,26 @@ public class IdempotencyKeyUtilitiesTests
         _ = hash.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
             .Should().BeTrue("hex output must be lowercase and hex-only");
     }
+
+    [Theory]
+    [InlineData("idem:foo")]
+    [InlineData("IDEM:foo")]                            // case-insensitive
+    [InlineData("  idem:foo")]                          // trimmed before the check
+    [InlineData("\uFF49\uFF44\uFF45\uFF4D:foo")]        // fullwidth ｉｄｅｍ: (NFKC → idem:)
+    [InlineData("\uFF49\uFF44\uFF45\uFF4D\uFF1Afoo")]   // fullwidth ｉｄｅｍ： incl fullwidth colon
+    [InlineData("\uFF49dem:foo")]                       // mixed-width ｉdem:
+    public void IsReservedOperationKey_TrueForReservedNamespaceInAnyWidth(string operationKey)
+        => IdempotencyKeyUtilities.IsReservedOperationKey(operationKey).Should().BeTrue(
+            "the reserved 'idem:' namespace must be detected regardless of case, width, or whitespace");
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("myapp:idem:foo")]                      // reserved token not at the start
+    [InlineData("idempotent")]                          // shares a stem, not the prefix
+    [InlineData("caf\u00E9-op")]                        // accented client key (precomposed)
+    [InlineData("cafe\u0301-op")]                       // accented client key (decomposed)
+    public void IsReservedOperationKey_FalseForEverythingElse(string? operationKey)
+        => IdempotencyKeyUtilities.IsReservedOperationKey(operationKey).Should().BeFalse();
 }

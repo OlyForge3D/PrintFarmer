@@ -20,9 +20,14 @@ public class ReservedOperationKeyPrefixAttributeTests
     [InlineData("Idem:Foo")]              // case-insensitive
     [InlineData("IDEM:bar")]
     [InlineData("  idem:leading-space")]  // surrounding whitespace is trimmed before the check
+    // --- Hicks r4 blocker 2: width/compatibility variants must not bypass the ordinal guard ---
+    [InlineData("\uFF49\uFF44\uFF45\uFF4D:foo")]        // fullwidth ｉｄｅｍ: + ASCII colon
+    [InlineData("\uFF49\uFF44\uFF45\uFF4D\uFF1Afoo")]   // fullwidth ｉｄｅｍ： + FULLWIDTH colon (U+FF1A)
+    [InlineData("\uFF49dem:foo")]                       // mixed: fullwidth ｉ + ASCII dem:
+    [InlineData("\uFF29\uFF24\uFF25\uFF2D:bar")]        // fullwidth uppercase ＩＤＥＭ: → NFKC IDEM:
     public void IsValid_RejectsReservedPrefix(string operationKey)
         => Attribute.IsValid(operationKey).Should().BeFalse(
-            "the reserved 'idem:' prefix must be rejected regardless of case or surrounding whitespace");
+            "the reserved 'idem:' prefix must be rejected regardless of case, width, or surrounding whitespace");
 
     [Theory]
     [InlineData(null)]                    // optional field → valid
@@ -31,6 +36,11 @@ public class ReservedOperationKeyPrefixAttributeTests
     [InlineData("myapp:idem:foo")]        // reserved token not at the start → allowed
     [InlineData("idempotent")]            // shares a stem but is not the "idem:" prefix
     [InlineData("op-1234")]
+    // Accented client keys are legitimate and must pass in either Unicode composition form; NFKC is
+    // used only to catch the reserved prefix, never to reject ordinary international characters.
+    [InlineData("caf\u00E9-op")]          // precomposed é (U+00E9)
+    [InlineData("cafe\u0301-op")]         // decomposed e + combining acute (U+0301)
+    [InlineData("\uFF4Fp-1234")]          // fullwidth ｏp-1234 → NFKC op-1234, not reserved
     public void IsValid_AllowsEverythingElse(string? operationKey)
         => Attribute.IsValid(operationKey).Should().BeTrue();
 

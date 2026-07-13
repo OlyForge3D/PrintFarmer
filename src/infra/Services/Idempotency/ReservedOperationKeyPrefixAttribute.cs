@@ -36,9 +36,10 @@ public sealed class ReservedOperationKeyPrefixAttribute : ValidationAttribute
             return true;
         }
 
-        return !text.Trim().StartsWith(
-            IdempotencyKeyUtilities.SynthesizedOperationKeyPrefix,
-            StringComparison.OrdinalIgnoreCase);
+        // Delegate to the shared width-aware guard so a fullwidth ｉｄｅｍ: (or fullwidth-colon
+        // variant) is rejected just like ASCII idem: — an ordinal StartsWith alone would let those
+        // compatibility variants through (issue #715, Hicks r4 blocker 2).
+        return !IdempotencyKeyUtilities.IsReservedOperationKey(text);
     }
 
     /// <inheritdoc />
