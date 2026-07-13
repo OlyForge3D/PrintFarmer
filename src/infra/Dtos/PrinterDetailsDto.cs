@@ -41,4 +41,13 @@ public record PrinterDetailsDto(
     bool UseModelDispatchDefaults = true,
     string? BuddyCameraIp = null,
     double? NozzleDiameter = null,
-    bool? HasMmu = null);
+    bool? HasMmu = null,
+    IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto>? FallbackGroups = null,
+
+    // Whether the printer's backend + physical topology can attribute wear to individual
+    // toolheads (issue #711, F6 backend). Always emitted as a deterministic bool so #719 UI
+    // consumers can gate per-tool odometers without inferring absence. True only when the
+    // MultiSlotFallback operator feature is enabled AND the persisted Printer.SupportsPerToolAttribution
+    // domain flag is true; false in every other case (feature disabled, non-Moonraker backend,
+    // single physical toolhead, etc.).
+    bool SupportsPerToolAttribution = false);

@@ -286,8 +286,124 @@ public class FilamentCoverageServiceTests
     }
 
     // ------------------------------------------------------------------
-    // Unknown metadata never becomes a false runout
+    // Issue #711 round-10 Finding 2: MMU demand index space.
+    // Slicer demand keys are 0-based G-code T-indices; MMU gates are stored
+    // 1-based (physical hotend takes Index 0). Demand must route through
+    // ToolheadIndexMapper so T0->gate 1, T1->gate 2, T2->gate 3 instead of
+    // being shifted by one gate.
     // ------------------------------------------------------------------
+    [Fact]
+    public async Task MmuGates_PerExtruderDemand_RoutesToCorrectGateIndex()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0.0);
+
+        static Toolhead Gate(int index, int spoolId, string material) => new()
+        {
+            Id = Guid.NewGuid(),
+            Index = index,
+            Name = $"Gate {index}",
+            ToolheadType = ToolheadType.MmuGate,
+            CurrentSpoolId = spoolId,
+            CurrentMaterial = material,
+        };
+
+        Toolhead physical = T(0, spoolId: 999, primary: true, material: "STALE");
+        Printer p = SeedPrinter(
+            db,
+            "mmu",
+            physical,
+            Gate(1, spoolId: 100, material: "PLA"),
+            Gate(2, spoolId: 200, material: "PETG"),
+            Gate(3, spoolId: 300, material: "ABS"));
+
+        // Per-extruder demand keyed by 0-based G-code tool index: T0=10g, T1=20g, T2=30g.
+        GcodeFile g = Gcode(estimatedTotalGrams: 60, perExtruder: [10, 20, 30], extruderCount: 3, printTimeMinutes: 60);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(60)));
+        _ = await db.SaveChangesAsync();
+
+        spool.Setup(s => s.GetSpoolByIdAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(100, remainingG: 500, material: "PLA"));
+        spool.Setup(s => s.GetSpoolByIdAsync(200, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(200, remainingG: 500, material: "PETG"));
+        spool.Setup(s => s.GetSpoolByIdAsync(300, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(300, remainingG: 500, material: "ABS"));
+        spool.Setup(s => s.GetSpoolByIdAsync(999, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(999, remainingG: 500, material: "PLA"));
+
+        PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
+
+        cov!.Toolheads.Should().HaveCount(3, "each demand key maps onto a real gate; no phantom slots");
+        cov.Toolheads.Should().NotContain(
+            toolhead => toolhead.ToolheadId == physical.Id,
+            "the shared physical hotend is not a filament source when MMU gates exist");
+
+        // ToolheadIndex is the 0-based G-code index (issue #711, round-19 M19-2 — the DTO must
+        // emit the mapped G-code index, not the raw stored gate index): gate stored at Index 1
+        // maps to G-code T0, Index 2 -> T1, Index 3 -> T2.
+        cov.Toolheads.Single(t => t.ToolheadIndex == 0).CurrentJobRequiredGrams.Should().Be(10);
+        cov.Toolheads.Single(t => t.ToolheadIndex == 1).CurrentJobRequiredGrams.Should().Be(20);
+        cov.Toolheads.Single(t => t.ToolheadIndex == 2).CurrentJobRequiredGrams.Should().Be(30);
+    }
+
+    // Issue #711 round-19 Finding M19-2: the coverage DTO must emit the mapped 0-based G-code
+    // index, not the raw 1-based stored gate index — the doc-comment already claimed 0-based,
+    // but the wire value was the bug.
+    [Fact]
+    public async Task MmuGate_StoredIndexOne_EmitsZeroBasedGcodeToolheadIndex()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0.0);
+
+        Printer p = SeedPrinter(
+            db,
+            "single-gate-mmu",
+            T(0, spoolId: null, primary: true, material: null),
+            new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                Index = 1,
+                Name = "Gate 1",
+                ToolheadType = ToolheadType.MmuGate,
+                CurrentSpoolId = 100,
+                CurrentMaterial = "PLA",
+            });
+
+        GcodeFile g = Gcode(estimatedTotalGrams: 10, perExtruder: [10], extruderCount: 1, printTimeMinutes: 10);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(10)));
+        _ = await db.SaveChangesAsync();
+
+        spool.Setup(s => s.GetSpoolByIdAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(100, remainingG: 500, material: "PLA"));
+
+        PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
+
+        ToolheadCoverageDto gate = cov!.Toolheads.Should().ContainSingle().Which;
+        gate.ToolheadIndex.Should().Be(0, "gate stored at Index 1 must emit the mapped G-code T0, not the raw stored index 1");
+    }
+
+    [Fact]
+    public async Task NonMmu_PhysicalHotend_SingleToolDemand_RoutesToPhysical()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
+            BuildService(liveProgress: 0.0);
+
+        // Non-MMU printer: physical hotend at Index 0. T0 must resolve to the physical hotend.
+        Printer p = SeedPrinter(db, "single", T(0, spoolId: 100, primary: true, material: "PLA"));
+
+        // Single-tool gcode (no per-extruder breakdown) exercises the single-tool fallback,
+        // which must attribute demand to the primary toolhead in 0-based G-code space.
+        GcodeFile g = Gcode(estimatedTotalGrams: 50, printTimeMinutes: 30);
+        db.GcodeFiles.Add(g);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, g, TimeSpan.FromMinutes(30)));
+        _ = await db.SaveChangesAsync();
+
+        spool.Setup(s => s.GetSpoolByIdAsync(100, It.IsAny<CancellationToken>())).ReturnsAsync(Spool(100, remainingG: 500));
+
+        PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
+
+        cov!.Toolheads.Should().HaveCount(1);
+        ToolheadCoverageDto t0 = cov.Toolheads.Single(t => t.ToolheadIndex == 0);
+        t0.CurrentJobRequiredGrams.Should().Be(50, "T0 maps to the physical hotend at Index 0");
+        t0.Status.Should().Be(FilamentCoverageStatus.Covers);
+    }
     [Fact]
     public async Task MultiTool_MissingPerExtruderMetadata_ReturnsUnknown()
     {
@@ -557,6 +673,9 @@ public class FilamentCoverageServiceTests
 
         PrinterFilamentCoverageDto? cov = await svc.GetForPrinterAsync(p.Id, CancellationToken.None);
         cov!.Status.Should().Be(FilamentCoverageStatus.Runout);
+        cov.Toolheads.Single().AvailableForNewDemandGrams.Should().Be(
+            0,
+            "existing demand and the configured reserve consume all capacity for a newly dispatched job");
     }
 
     [Fact]

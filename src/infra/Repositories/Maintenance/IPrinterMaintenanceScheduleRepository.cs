@@ -30,9 +30,15 @@ public interface IPrinterMaintenanceScheduleRepository
     Task<PrinterMaintenanceSchedule?> GetByIdAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
-    /// Checks if a plan is already deployed to a printer.
+    /// Checks if a plan is already deployed to a printer (printer-wide, ignoring toolhead scope).
     /// </summary>
     Task<bool> ExistsAsync(Guid planId, Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Checks if a plan is already deployed to a printer for a specific toolhead scope.
+    /// A null <paramref name="toolheadId"/> matches the printer-wide (legacy) schedule.
+    /// </summary>
+    Task<bool> ExistsAsync(Guid planId, Guid printerId, Guid? toolheadId, CancellationToken ct = default);
 
     /// <summary>
     /// Adds a new schedule deployment.

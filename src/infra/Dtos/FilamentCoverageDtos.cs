@@ -102,7 +102,21 @@ public record ToolheadCoverageDto(
     FilamentCoverageStatus Status,
     string? StatusReason,
     DateTime? PredictedRunoutAt,
-    int? PredictedRunoutLayer);
+    int? PredictedRunoutLayer)
+{
+    /// <summary>
+    /// Stable toolhead or MMU/AMS gate identifier. Additive for clients that must distinguish
+    /// slots whose persisted indices overlap.
+    /// </summary>
+    public Guid? ToolheadId { get; init; }
+
+    /// <summary>
+    /// Grams safely available for additional, hypothetical demand after subtracting the
+    /// configured reserve and all active/assigned demand already committed to this slot.
+    /// Null means availability cannot be determined safely.
+    /// </summary>
+    public double? AvailableForNewDemandGrams { get; init; }
+}
 
 /// <summary>
 /// Coverage snapshot for one printer, summarizing every toolhead slot.

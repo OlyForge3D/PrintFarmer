@@ -681,7 +681,24 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
 
         index.IsUnique.Should().BeTrue();
         index.GetDatabaseName().Should().Be("UX_Toolheads_PrinterId_Index");
-        toolheadEntity.GetReferencingForeignKeys().Should().BeEmpty();
+
+        // Referencing FKs are allowed only for the F6 (issue #711) additions. All use Restrict
+        // to avoid SQL Server multiple-cascade-path violations. Physical toolheads have no
+        // standalone deletion path, and MMU gates are not eligible for maintenance scope.
+        HashSet<string> allowedReferencingTypes =
+        [
+            nameof(Farm.Infrastructure.Domain.FilamentFallbackGroupMember),
+            nameof(Farm.Infrastructure.Domain.MaintenanceAlert),
+            nameof(Farm.Infrastructure.Domain.MaintenanceLog),
+            nameof(Farm.Infrastructure.Domain.PrinterMaintenanceSchedule),
+        ];
+        List<Microsoft.EntityFrameworkCore.Metadata.IForeignKey> referencingForeignKeys = toolheadEntity
+            .GetReferencingForeignKeys()
+            .ToList();
+        IEnumerable<string> actualReferencingTypes = referencingForeignKeys
+            .Select(fk => fk.DeclaringEntityType.ClrType.Name);
+        actualReferencingTypes.Should().BeSubsetOf(allowedReferencingTypes);
+        referencingForeignKeys.Should().OnlyContain(fk => fk.DeleteBehavior == DeleteBehavior.Restrict);
     }
 
     [Fact]
@@ -797,6 +814,8 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         }
         finally
         {
+            SqliteConnection.ClearAllPools();
+
             if (File.Exists(databasePath))
             {
                 File.Delete(databasePath);

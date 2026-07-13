@@ -87,6 +87,7 @@ public static class FeatureServicesStartup
 
         // Maintenance Module - Repositories
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IToolheadStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfToolheadStatisticsRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceAlertRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceAlertRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceLogRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceLogRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenancePlanRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenancePlanRepository>();
@@ -97,6 +98,15 @@ public static class FeatureServicesStartup
         // Maintenance Module - Services
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceResolutionNotifier,
+            Farm.Web.Api.Services.Maintenance.MaintenanceResolutionNotifier>();
+
+        // Atomic resolve-with-log to close the resolve TOCTOU (issue #711, round-7 Finding 5).
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertResolutionService, Farm.Infrastructure.Services.Maintenance.MaintenanceAlertResolutionService>();
+
+        // Filament fallback groups (issue #711, F6)
+        services.AddScoped<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService,
+            Farm.Infrastructure.Services.Printers.FilamentFallbackGroupService>();
 
         // Persistent Idempotency-Key store and cleanup (issue #715). Store is
         // registered scoped because it uses IDbContextFactory internally and is

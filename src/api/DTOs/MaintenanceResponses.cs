@@ -92,6 +92,8 @@ public record MaintenanceComponentResponse(
 
 /// <summary>
 /// Response DTO for a maintenance plan deployed to a specific printer.
+/// ToolheadId/ToolheadName carry the optional physical toolhead scope (issue #711, F6);
+/// both are null when the schedule is printer-wide.
 /// </summary>
 public record PrinterMaintenanceScheduleResponse(
     Guid Id,
@@ -99,6 +101,8 @@ public record PrinterMaintenanceScheduleResponse(
     string PlanName,
     Guid PrinterId,
     string? PrinterName,
+    Guid? ToolheadId,
+    string? ToolheadName,
     bool IsActive,
     DateTime DeployedAt,
     string? Notes,
