@@ -79,7 +79,7 @@
     "created_at": "2026-04-01T19:00:00Z",
     "legacy_named": false,
     "status": "active",
-    "model": "gemini-3-pro-preview"
+    "model": "gpt-5.6-sol"
   },
   {
     "persistent_name": "Vasquez",
