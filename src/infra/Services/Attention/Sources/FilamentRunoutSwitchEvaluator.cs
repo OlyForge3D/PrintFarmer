@@ -18,8 +18,9 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// Severity policy realised here:
 /// <list type="bullet">
 ///   <item><b>SwitchConfirmed</b> — fresh MMU telemetry identifies a configured compatible
-///     fallback member as the active tool/gate. This is the only tier that permits an
-///     informational downgrade.</item>
+///     fallback member as the active tool/gate <i>and</i> reports a completed load (loaded
+///     filament state + settled action + matching live material). This is the only tier that
+///     permits an informational downgrade.</item>
 ///   <item><b>BackupAvailable</b> — a configured fallback member currently holds a loaded
 ///     compatible spool, but live telemetry does not (yet) prove the switch happened.</item>
 ///   <item><b>NoBackup</b> — no configured, loaded, compatible backup exists (or the warning is
@@ -34,6 +35,13 @@ public sealed class FilamentRunoutSwitchEvaluator(
     IPrinterStatusCacheReader printerStatusCache) : IFilamentRunoutSwitchEvaluator
 {
     private const string ActiveRunoutReason = "runout-during-active-job";
+
+    // Live-telemetry evidence gate (Finding H3): a switch is only "confirmed" when the MMU reports
+    // a fully-loaded filament state AND a settled (non-transitional) action. Backends use different
+    // vocab (Happy Hare / Qidibox / AFC / Snapmaker U1 via Moonraker), so accept only an explicit
+    // whitelist; unknown, transitional, or failure tokens are never treated as a completed switch.
+    private static readonly string[] LoadedFilamentStates = ["Loaded", "Ready"];
+    private static readonly string[] SettledActions = ["Idle", "Printing"];
 
     private readonly AppDbContext _dbContext =
         dbContext ?? throw new ArgumentNullException(nameof(dbContext));
@@ -109,18 +117,49 @@ public sealed class FilamentRunoutSwitchEvaluator(
             return RunoutSwitchAssessment.BackupAvailable;
         }
 
+        // A configured backup exists and MMU telemetry is live — but only downgrade to
+        // SwitchConfirmed when the unit reports a completed load. A gate that is Unloaded,
+        // mid-Loading/Unloading, Failed, or in an unknown state has NOT completed a switch.
+        if (!IsLoadedAndSettled(mmuStatus))
+        {
+            return RunoutSwitchAssessment.BackupAvailable;
+        }
+
         Dictionary<Guid, Toolhead> toolheadsById = toolheads.ToDictionary(t => t.Id);
         foreach (FilamentFallbackChainMember backup in configuredBackups)
         {
             if (toolheadsById.TryGetValue(backup.ToolheadId, out Toolhead? toolhead)
                 && IsActiveFallback(toolhead, mmuStatus)
-                && LiveMaterialMatches(toolhead, mmuStatus, warning.Material))
+                && LiveMaterialConfirms(toolhead, mmuStatus, warning.Material))
             {
                 return RunoutSwitchAssessment.SwitchConfirmed;
             }
         }
 
         return RunoutSwitchAssessment.BackupAvailable;
+    }
+
+    private static bool IsLoadedAndSettled(MmuStatusDto status)
+        => IsWhitelisted(status.FilamentState, LoadedFilamentStates)
+            && IsWhitelisted(status.Action, SettledActions);
+
+    private static bool IsWhitelisted(string? value, string[] whitelist)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        string trimmed = value.Trim();
+        foreach (string candidate in whitelist)
+        {
+            if (string.Equals(trimmed, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsActiveFallback(Toolhead toolhead, MmuStatusDto status)
@@ -136,7 +175,7 @@ public sealed class FilamentRunoutSwitchEvaluator(
             : status.ActiveTool == mappedIndex.Value || status.ActiveGate == mappedIndex.Value;
     }
 
-    private static bool LiveMaterialMatches(
+    private static bool LiveMaterialConfirms(
         Toolhead toolhead,
         MmuStatusDto status,
         string requiredMaterial)
@@ -145,7 +184,19 @@ public sealed class FilamentRunoutSwitchEvaluator(
         MmuGateDto? liveGate = mappedIndex.HasValue
             ? status.Gates.FirstOrDefault(gate => gate.Index == mappedIndex.Value)
             : null;
-        return string.IsNullOrWhiteSpace(liveGate?.Material)
-            || string.Equals(liveGate.Material, requiredMaterial, StringComparison.OrdinalIgnoreCase);
+
+        if (liveGate is null)
+        {
+            // No per-gate material channel for this toolhead. An MMU gate MUST prove a
+            // material-matched gate before a switch is confirmed (Finding H3, case e); a physical
+            // toolhead (toolchanger) has no gate array, so the active-tool + loaded/settled status
+            // already established above is the available evidence.
+            return toolhead.ToolheadType != ToolheadType.MmuGate;
+        }
+
+        // A gate exists: require present, matching material. Missing (blank) material on the active
+        // gate is treated as unproven rather than a match (Finding H3, case e).
+        return !string.IsNullOrWhiteSpace(liveGate.Material)
+            && string.Equals(liveGate.Material, requiredMaterial, StringComparison.OrdinalIgnoreCase);
     }
 }

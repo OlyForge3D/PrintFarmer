@@ -194,6 +194,107 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
         result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
     }
 
+    // Finding H3 (a): selected gate + loaded + printing + matching material → SwitchConfirmed.
+    [Fact]
+    public async Task AssessAsync_SelectedGateLoadedPrintingMaterialMatch_ReturnsSwitchConfirmed()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Loaded",
+            action: "Printing",
+            gateMaterial: "PLA");
+
+        result.Should().Be(RunoutSwitchAssessment.SwitchConfirmed);
+    }
+
+    // Finding H3 (b): selected gate reported Unloaded (switch not completed) → BackupAvailable.
+    [Fact]
+    public async Task AssessAsync_SelectedGateUnloaded_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Unloaded",
+            action: "Idle",
+            gateMaterial: "PLA");
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
+    // Finding H3 (c): selected gate mid-Loading (transitional action) → BackupAvailable.
+    [Fact]
+    public async Task AssessAsync_SelectedGateLoading_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Loaded",
+            action: "Loading",
+            gateMaterial: "PLA");
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
+    // Finding H3 (d): selected gate reported a failure/error action → BackupAvailable.
+    [Fact]
+    public async Task AssessAsync_SelectedGateFailed_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Loaded",
+            action: "Failed",
+            gateMaterial: "PLA");
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
+    // Finding H3 (e): selected gate loaded/settled but live material absent → BackupAvailable.
+    [Fact]
+    public async Task AssessAsync_SelectedGateLoadedMaterialMissing_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Loaded",
+            action: "Idle",
+            gateMaterial: "");
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
+    // Finding H3 (f): unknown/empty state is never treated as loaded (conservative) → BackupAvailable.
+    [Fact]
+    public async Task AssessAsync_SelectedGateUnknownState_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Unknown",
+            action: "",
+            gateMaterial: "PLA");
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
+    private async Task<RunoutSwitchAssessment> AssessGateAsync(
+        string? filamentState,
+        string? action,
+        string? gateMaterial)
+    {
+        (Printer p, Toolhead t0, Toolhead gate) = await SeedAsync();
+        gate.ToolheadType = ToolheadType.MmuGate;
+        gate.CurrentMaterial = "PLA";
+        gate.CurrentSpoolId = BackupSpoolId;
+        await _db.SaveChangesAsync();
+        await CreateGroupAsync(p, t0, gate);
+        SetStatus(
+            p,
+            new MmuStatusDto(
+                Enabled: true,
+                IsHomed: true,
+                ActiveTool: 0,
+                ActiveGate: 0,
+                FilamentState: filamentState,
+                Action: action,
+                NumGates: 1,
+                HasBypass: false,
+                EndlessSpool: false,
+                ClogDetection: false,
+                Gates: [new MmuGateDto(0, 1, gateMaterial, null, null, BackupSpoolId)]));
+
+        return await _evaluator.AssessAsync(RunoutWarning(p), CancellationToken.None);
+    }
+
     [Fact]
     public async Task AssessAsync_BackendWithoutMmuStatus_ReturnsBackupAvailable()
     {
