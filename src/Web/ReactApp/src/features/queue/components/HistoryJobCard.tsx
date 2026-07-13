@@ -1,6 +1,8 @@
 import { Button } from "@/common/components/ui/Button";
 import { Badge } from "@/common/components/ui/Badge";
+import { HarvestJobAction } from "@/features/harvest/components/HarvestJobAction";
 import type { HistoryJob } from "@/types/queue";
+import type { HarvestJobResponse } from "@/types/parts-inventory";
 
 function getCategoryBadgeVariant(category?: string | null): "default" | "primary" | "success" | "warning" | "error" | "info" {
   switch (category) {
@@ -24,6 +26,10 @@ interface HistoryJobCardProps {
   job: HistoryJob;
   onRerun: () => void;
   onViewDetails?: (jobId: string) => void;
+  /** Optimistic harvested-badge update from the harvest response (#722 H5). */
+  onHarvested?: (response: HarvestJobResponse) => void;
+  /** Deferred full refresh, run when the harvest dialog closes (#722 H5). */
+  onCloseAfterSuccess?: () => void;
 }
 
 /**
@@ -41,6 +47,8 @@ export default function HistoryJobCard({
   job,
   onRerun,
   onViewDetails,
+  onHarvested,
+  onCloseAfterSuccess,
 }: HistoryJobCardProps) {
   const durationMinutes = Math.round(job.durationSeconds / 60);
   const durationHours = Math.floor(durationMinutes / 60);
@@ -262,6 +270,14 @@ export default function HistoryJobCard({
 
       {/* Actions */}
       <div className="flex gap-2 pt-3 border-t border-pf-border">
+        {job.status === "completed" && (
+          <HarvestJobAction
+            job={{ id: job.id, name: job.name, harvestedAt: job.harvestedAt }}
+            variant="card"
+            onHarvested={onHarvested}
+            onCloseAfterSuccess={onCloseAfterSuccess}
+          />
+        )}
         {(job.status === "completed" || job.status === "cancelled") && (
           <Button
             onClick={onRerun}

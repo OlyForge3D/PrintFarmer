@@ -525,7 +525,10 @@ export class ApiClient {
         // Prefer a ProblemDetails-style top-level message from the body:
         // backend emits `{ message: "..." }` for some endpoints and
         // `{ detail: "..." }` for `application/problem+json`. Fall back to the
-        // axios error message only when neither exists.
+        // axios error message only when neither exists. Preserve the raw body
+        // and the axios-error flag so feature callers (e.g. partsHarvest,
+        // partsInventory) can recover canonical `code`/`mismatches`/`details`
+        // extensions instead of collapsing every failure into an opaque error.
         const bodyRecord =
           responseData && typeof responseData === 'object'
             ? (responseData as { message?: unknown; detail?: unknown })
@@ -541,9 +544,8 @@ export class ApiClient {
           message: bodyMessage ?? error.message,
           statusCode: error.response?.status || 500,
           details: detailMessage,
-          // Preserve the raw body so ProblemDetails parsers can read structured
-          // fields (code, mismatches, etc.) that flattening discards.
           data: responseData,
+          isAxiosError: axios.isAxiosError(error),
         };
         return Promise.reject(apiError);
       }

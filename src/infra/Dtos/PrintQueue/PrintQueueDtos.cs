@@ -582,6 +582,14 @@ public class QueueHistoryEntryDto
     /// Tags associated with the print job (auto-generated and manual).
     /// </summary>
     public List<TagDto> Tags { get; set; } = [];
+
+    /// <summary>
+    /// UTC timestamp when the completed print job was harvested into
+    /// printed-part stock (#722/#741). Null when the job has not been
+    /// harvested. Used by the web UI to gate the Harvest action and
+    /// show an "already harvested" indicator without a follow-up call.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
 }
 
 // ============= REQUEST DTOs (Phase 3) =============
