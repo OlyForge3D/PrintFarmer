@@ -246,6 +246,7 @@ struct MaintenanceView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("maintenance.analytics.link")
     }
 
     private var uptimeLink: some View {

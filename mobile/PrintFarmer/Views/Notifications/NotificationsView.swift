@@ -99,6 +99,7 @@ struct NotificationsView: View {
                     .onTapGesture {
                         handleTap(notification)
                     }
+                    .accessibilityIdentifier("notifications.row.\(notification.id)")
             }
         }
         .listStyle(.plain)

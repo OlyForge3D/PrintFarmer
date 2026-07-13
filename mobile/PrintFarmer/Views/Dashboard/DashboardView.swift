@@ -300,7 +300,7 @@ struct DashboardView: View {
                 }
             } else if sizeClass == .regular {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    ForEach(topPrinters) { printer in
+                    ForEach(Array(topPrinters.enumerated()), id: \.element.id) { index, printer in
                         NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
                             ActiveJobRow(
                                 printer: printer,
@@ -308,10 +308,11 @@ struct DashboardView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("dashboard.activeJob.\(index)")
                     }
                 }
             } else {
-                ForEach(topPrinters) { printer in
+                ForEach(Array(topPrinters.enumerated()), id: \.element.id) { index, printer in
                     NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
                         ActiveJobRow(
                             printer: printer,
@@ -319,6 +320,7 @@ struct DashboardView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("dashboard.activeJob.\(index)")
                 }
             }
 

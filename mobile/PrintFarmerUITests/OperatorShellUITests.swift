@@ -126,104 +126,470 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 
     // MARK: - Legacy sheet dismiss → reopen (#727)
+    //
+    // Contract these tests enforce:
+    //   1. Open a legacy fallback sheet from the Attention overflow (or
+    //      the disabled-attention fallback for Notifications).
+    //   2. Push a NESTED destination inside that sheet's NavigationStack.
+    //   3. Dismiss the sheet.
+    //   4. Reopen it. It MUST land on its documented root; the previously
+    //      pushed child MUST be absent.
+    //
+    // A test that never creates stale nested state cannot detect broken
+    // #727 wiring: removing the `.onChange { resetLegacySheet }` handlers
+    // on AttentionView would still let a root-only reopen appear correct.
+    // Every helper therefore fails loudly on missing prerequisites via
+    // XCTFail — silent `guard ... return` is banned.
 
-    /// Dismisses a sheet presented from the Attention overflow. Prefers the
-    /// swipe-to-dismiss gesture (which is reliable for sheets that use the
-    /// default detent chrome). Returns `true` on success.
-    @discardableResult
-    private func dismissAttentionSheet(navigationBarTitle: String) -> Bool {
-        let bar = app.navigationBars[navigationBarTitle]
-        guard bar.waitForExistence(timeout: 3) else { return false }
-        // Swipe down from the navigation bar to dismiss the sheet.
-        let start = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let end = start.withOffset(CGVector(dx: 0, dy: 600))
-        start.press(forDuration: 0.05, thenDragTo: end)
-        return !bar.waitForExistence(timeout: 2)
-    }
-
-    private func openOverflowItem(identifier: String, expectedTitle: String) -> Bool {
-        let overflow = app.buttons["attention.overflow"]
-        guard overflow.waitForExistence(timeout: 5) else { return false }
-        overflow.tap()
-        let item = app.buttons[identifier]
-        guard item.waitForExistence(timeout: 3) else { return false }
-        item.tap()
-        return app.navigationBars[expectedTitle].waitForExistence(timeout: 5)
-    }
-
-    /// Verifies that dismissing then reopening a legacy fallback sheet
-    /// lands the user back on that sheet's root navigation title. This is
-    /// the observable manifestation of #727's "reset owned NavigationPath
-    /// on dismissal" acceptance criterion.
-    private func assertLegacySheetReopensAtRoot(
-        overflowIdentifier: String,
+    /// Dismisses a sheet presented from the Attention overflow via a
+    /// swipe-down gesture on its navigation bar. Returns true only when
+    /// the navigation bar has disappeared afterward.
+    private func dismissAttentionSheet(
         navigationBarTitle: String,
         file: StaticString = #filePath,
         line: UInt = #line
+    ) -> Bool {
+        let bar = app.navigationBars[navigationBarTitle]
+        guard bar.waitForExistence(timeout: 3) else {
+            XCTFail("Cannot dismiss \(navigationBarTitle) sheet — its navigation bar is not on screen",
+                    file: file, line: line)
+            return false
+        }
+        let start = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: 0, dy: 700))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        // Poll for absence — the swipe animates for ~300ms.
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            if !bar.exists { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return false
+    }
+
+    private func selectAttentionSurface(
+        file: StaticString = #filePath,
+        line: UInt = #line
     ) {
-        guard app.tabBars.buttons["Attention"].waitForExistence(timeout: 5) ||
-              app.buttons["sidebar.attention"].waitForExistence(timeout: 5) else {
-            return
-        }
-        if app.tabBars.buttons["Attention"].exists {
-            app.tabBars.buttons["Attention"].tap()
-        } else {
-            app.buttons["sidebar.attention"].tap()
-        }
-
-        guard openOverflowItem(identifier: overflowIdentifier,
-                               expectedTitle: navigationBarTitle) else {
-            // The sheet may be unavailable (e.g. feature-disabled fallback
-            // path) — fall through without failing so the test remains
-            // resilient to bootstrap variance.
+        // Compact-width devices (iPhone) surface a bottom TabBar. Tap
+        // the Attention tab directly.
+        let tabAttention = app.tabBars.buttons["Attention"]
+        if tabAttention.waitForExistence(timeout: 5) {
+            tabAttention.tap()
             return
         }
 
-        // First presentation must land on the sheet's documented root.
-        XCTAssertTrue(app.navigationBars[navigationBarTitle].exists,
-                      "\(navigationBarTitle) sheet should present its root",
-                      file: file, line: line)
-
-        // Dismiss the sheet and reopen it. The reopened sheet must again
-        // land on its root — never on a nested destination that survived
-        // the previous session.
-        guard dismissAttentionSheet(navigationBarTitle: navigationBarTitle) else {
-            // If we can't reliably dismiss on this bootstrap (e.g. tests
-            // running without a system-provided swipe gesture), skip the
-            // reopen assertion rather than fail spuriously.
+        // Regular-width devices (iPad) use NavigationSplitView. The
+        // Attention destination is the default tab, so the Attention
+        // navigation bar is already on screen — no selection needed.
+        // If the sidebar happens to be collapsed, tapping the visible
+        // Attention nav bar is a no-op that still leaves us on Attention.
+        if app.navigationBars["Attention"].waitForExistence(timeout: 5) {
             return
         }
 
-        guard openOverflowItem(identifier: overflowIdentifier,
-                               expectedTitle: navigationBarTitle) else {
-            XCTFail("Reopened sheet must present again after dismissal",
+        // Last resort: try the explicit sidebar identifier. On iPad
+        // portrait the sidebar may be behind a system-provided toggle;
+        // attempt to reveal it.
+        if let toggle = firstMatchingSidebarToggle(), toggle.waitForExistence(timeout: 1) {
+            toggle.tap()
+        }
+        let sidebarAttention = app.buttons["sidebar.attention"]
+        if sidebarAttention.waitForExistence(timeout: 3) {
+            sidebarAttention.tap()
+            return
+        }
+
+        XCTFail("Attention destination is not reachable — no tab bar, no Attention nav bar, no sidebar entry",
+                file: file, line: line)
+    }
+
+    /// Returns the system-provided sidebar toggle if present. The
+    /// element is unlabeled by identifier; XCUI exposes it as a
+    /// navigation-bar button with label 'Sidebar' or 'Toggle Sidebar'.
+    private func firstMatchingSidebarToggle() -> XCUIElement? {
+        let candidates = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
+        for label in candidates {
+            let button = app.navigationBars.buttons[label]
+            if button.exists { return button }
+        }
+        return nil
+    }
+
+    /// Taps the Attention overflow menu and its named item. Fails loudly
+    /// if either control is missing or if the sheet's navigation bar
+    /// never appears — silent skipping is banned.
+    private func openAttentionOverflowSheet(
+        itemIdentifier: String,
+        expectedNavigationBarTitle: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let overflow = app.buttons["attention.overflow"]
+        guard overflow.waitForExistence(timeout: 5) else {
+            XCTFail("Attention overflow control is missing — required to open \(expectedNavigationBarTitle) sheet",
+                    file: file, line: line)
+            return
+        }
+        overflow.tap()
+
+        let item = app.buttons[itemIdentifier]
+        guard item.waitForExistence(timeout: 3) else {
+            XCTFail("Overflow item '\(itemIdentifier)' is missing — cannot present \(expectedNavigationBarTitle) sheet",
+                    file: file, line: line)
+            return
+        }
+        item.tap()
+
+        XCTAssertTrue(
+            app.navigationBars[expectedNavigationBarTitle].waitForExistence(timeout: 5),
+            "\(expectedNavigationBarTitle) sheet did not present after tapping overflow item '\(itemIdentifier)'",
+            file: file, line: line
+        )
+    }
+
+    /// Verifies the strict #727 contract: the sheet is opened, a nested
+    /// destination is pushed on its NavigationStack, the sheet is
+    /// dismissed, and on reopen the sheet must be back at its root with
+    /// the nested destination absent.
+    ///
+    /// `pushNestedDestination` must push exactly one child destination
+    /// and return `true` when the child is on screen; if it cannot make
+    /// nested state deterministically (e.g. required fixture missing),
+    /// it must call `XCTFail` itself and return `false`. Silent success
+    /// or silent skip is banned.
+    private func assertLegacySheetResetsAfterDismissal(
+        sheetLabel: String,
+        openSheet: () -> Void,
+        rootNavigationBarTitle: String,
+        pushNestedDestination: () -> Bool,
+        nestedNavigationBarTitle: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // 1. Open the sheet.
+        openSheet()
+        guard app.navigationBars[rootNavigationBarTitle].waitForExistence(timeout: 5) else {
+            XCTFail("[\(sheetLabel)] sheet failed to present its root '\(rootNavigationBarTitle)'",
                     file: file, line: line)
             return
         }
 
-        XCTAssertTrue(app.navigationBars[navigationBarTitle].exists,
-                      "Reopened \(navigationBarTitle) sheet must start at its root (#727)",
-                      file: file, line: line)
-    }
+        // 2. Push a nested destination. If the helper cannot, it must
+        // have failed already.
+        guard pushNestedDestination() else {
+            XCTFail("[\(sheetLabel)] could not push nested destination '\(nestedNavigationBarTitle)' — test cannot verify #727 without stale nested state",
+                    file: file, line: line)
+            return
+        }
+        XCTAssertTrue(
+            app.navigationBars[nestedNavigationBarTitle].waitForExistence(timeout: 5),
+            "[\(sheetLabel)] nested destination '\(nestedNavigationBarTitle)' did not appear after push",
+            file: file, line: line
+        )
 
-    func testDashboardSheetReopensAtRootAfterDismissal() {
-        assertLegacySheetReopensAtRoot(
-            overflowIdentifier: "attention.overflow.dashboard",
-            navigationBarTitle: "Dashboard"
+        // 3. Dismiss the sheet (from the nested destination).
+        guard dismissAttentionSheet(navigationBarTitle: nestedNavigationBarTitle) else {
+            XCTFail("[\(sheetLabel)] failed to dismiss sheet while '\(nestedNavigationBarTitle)' was on screen",
+                    file: file, line: line)
+            return
+        }
+
+        // 4. Reopen. The sheet MUST be back at its root, and the
+        // previously pushed nested destination MUST NOT be on screen.
+        openSheet()
+        XCTAssertTrue(
+            app.navigationBars[rootNavigationBarTitle].waitForExistence(timeout: 5),
+            "[\(sheetLabel)] reopened sheet must present its root '\(rootNavigationBarTitle)' — #727 regression: nested state survived dismissal",
+            file: file, line: line
+        )
+        XCTAssertFalse(
+            app.navigationBars[nestedNavigationBarTitle].exists,
+            "[\(sheetLabel)] nested destination '\(nestedNavigationBarTitle)' must be gone after dismissal + reopen — #727 regression",
+            file: file, line: line
         )
     }
 
-    func testMaintenanceSheetReopensAtRootAfterDismissal() {
-        assertLegacySheetReopensAtRoot(
-            overflowIdentifier: "attention.overflow.maintenance",
-            navigationBarTitle: "Maintenance"
+    // MARK: - Nested-destination push helpers
+
+    /// Swipes the Dashboard sheet horizontally until the Active-jobs page
+    /// (currentPage=1) is on screen. iPad renders the whole page linearly
+    /// so no swipe is needed and the row is already queryable after a
+    /// short scroll.
+    private func revealFirstDashboardActiveJob() -> XCUIElement {
+        let row = app.buttons["dashboard.activeJob.0"]
+        if row.waitForExistence(timeout: 3), row.isHittable { return row }
+
+        // Compact size class uses TabView paging — swipe left up to three
+        // times to reach the Active page. The row's presence check
+        // succeeds once the page is realized.
+        for _ in 0..<3 {
+            app.swipeLeft()
+            if row.waitForExistence(timeout: 2), row.isHittable {
+                return row
+            }
+        }
+        // Last resort — scroll the current page (iPad iPadContent is a
+        // ScrollView; the row may just be below the fold).
+        app.swipeUp()
+        _ = row.waitForExistence(timeout: 2)
+        return row
+    }
+
+    private func pushDashboardPrinterDetail(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        let row = revealFirstDashboardActiveJob()
+        guard row.exists else {
+            XCTFail("Dashboard active-job row is missing — required demo fixture 'dashboard.activeJob.0' is not on screen",
+                    file: file, line: line)
+            return false
+        }
+        row.tap()
+        return app.navigationBars["Printer"].waitForExistence(timeout: 5)
+    }
+
+    private func pushMaintenanceAnalytics(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        let analytics = app.buttons["maintenance.analytics.link"]
+        if !analytics.waitForExistence(timeout: 3) {
+            // Compact iPhone renders MaintenanceView pages; Alerts page
+            // (currentPage=0) already contains analyticsLink but it may
+            // sit below the fold — scroll to reveal.
+            app.swipeUp()
+        }
+        guard analytics.waitForExistence(timeout: 3) else {
+            XCTFail("Maintenance analytics link ('maintenance.analytics.link') is missing — required to push Maintenance Analytics",
+                    file: file, line: line)
+            return false
+        }
+        analytics.tap()
+        return app.navigationBars["Maintenance Analytics"].waitForExistence(timeout: 5)
+    }
+
+    private func pushSettingsManageServers(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        let manage = app.buttons["settings.manageServers"]
+        if !manage.waitForExistence(timeout: 3) {
+            app.swipeUp()
+        }
+        guard manage.waitForExistence(timeout: 3) else {
+            XCTFail("Settings 'Manage Servers' link ('settings.manageServers') is missing — required to push ServersView",
+                    file: file, line: line)
+            return false
+        }
+        manage.tap()
+        return app.navigationBars["Servers"].waitForExistence(timeout: 5)
+    }
+
+    // MARK: - Strict #727 scenarios (default authenticated bootstrap)
+
+    func testDashboardSheetResetsPushedPrinterDetailAfterDismissal() {
+        selectAttentionSurface()
+
+        assertLegacySheetResetsAfterDismissal(
+            sheetLabel: "Dashboard",
+            openSheet: {
+                self.openAttentionOverflowSheet(
+                    itemIdentifier: "attention.overflow.dashboard",
+                    expectedNavigationBarTitle: "Dashboard"
+                )
+            },
+            rootNavigationBarTitle: "Dashboard",
+            pushNestedDestination: { self.pushDashboardPrinterDetail() },
+            nestedNavigationBarTitle: "Printer"
         )
     }
 
-    func testSettingsSheetReopensAtRootAfterDismissal() {
-        assertLegacySheetReopensAtRoot(
-            overflowIdentifier: "attention.overflow.settings",
-            navigationBarTitle: "Settings"
+    func testMaintenanceSheetResetsPushedAnalyticsAfterDismissal() {
+        selectAttentionSurface()
+
+        assertLegacySheetResetsAfterDismissal(
+            sheetLabel: "Maintenance",
+            openSheet: {
+                self.openAttentionOverflowSheet(
+                    itemIdentifier: "attention.overflow.maintenance",
+                    expectedNavigationBarTitle: "Maintenance"
+                )
+            },
+            rootNavigationBarTitle: "Maintenance",
+            pushNestedDestination: { self.pushMaintenanceAnalytics() },
+            nestedNavigationBarTitle: "Maintenance Analytics"
+        )
+    }
+
+    func testSettingsSheetResetsPushedManageServersAfterDismissal() {
+        selectAttentionSurface()
+
+        assertLegacySheetResetsAfterDismissal(
+            sheetLabel: "Settings",
+            openSheet: {
+                self.openAttentionOverflowSheet(
+                    itemIdentifier: "attention.overflow.settings",
+                    expectedNavigationBarTitle: "Settings"
+                )
+            },
+            rootNavigationBarTitle: "Settings",
+            pushNestedDestination: { self.pushSettingsManageServers() },
+            nestedNavigationBarTitle: "Servers"
+        )
+    }
+}
+
+// MARK: - #727 Notifications-fallback coverage
+//
+// The legacy Notifications sheet is only reachable from
+// `AttentionView.disabledFallback`, which renders when the operator
+// feature gate resolves `attentionEnabled == false`. This subclass
+// launches with the deterministic attention-disabled bootstrap so the
+// fallback surface is guaranteed to be on screen.
+final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
+
+    override var additionalLaunchArguments: [String] {
+        // Contract with UITestBootstrap.attentionDisabledLaunchArgument.
+        // UI test targets cannot import the app target, so this literal
+        // is verified by `test_attentionDisabledLaunchArgument_matchesUITestsHarness`.
+        ["--uitesting-attention-disabled"]
+    }
+
+    // Reuse the strict helpers via file-scope private extensions would
+    // require exposing them; the fallback flow is a single scenario so
+    // it's cheapest to inline the strict contract here.
+
+    private func openFallbackNotifications(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // The disabled fallback is the AttentionView.disabledFallback
+        // surface, exposed at the Attention destination root. On iPhone
+        // this is a tab; on iPad it is the default sidebar column.
+        let tabAttention = app.tabBars.buttons["Attention"]
+        if tabAttention.waitForExistence(timeout: 5) {
+            tabAttention.tap()
+        } else if app.navigationBars["Attention"].waitForExistence(timeout: 3) {
+            // iPad regular width — Attention nav bar already visible
+            // because it is the default destination.
+        } else if app.buttons["sidebar.attention"].waitForExistence(timeout: 2) {
+            app.buttons["sidebar.attention"].tap()
+        } else {
+            XCTFail("Attention destination is not reachable under disabled-attention bootstrap",
+                    file: file, line: line)
+            return
+        }
+
+        // The fallback surface renders three buttons, all of which inherit
+        // the outer `attention.disabled.fallback` identifier (a SwiftUI
+        // a11y propagation quirk on a parent VStack). Disambiguate by
+        // label; this is the deterministic 'Notifications' entry.
+        let fallbackNotificationsButton = app.buttons
+            .matching(identifier: "attention.disabled.fallback")
+            .matching(NSPredicate(format: "label == %@", "Notifications"))
+            .firstMatch
+        if !fallbackNotificationsButton.waitForExistence(timeout: 10) {
+            let dump = app.debugDescription
+            XCTFail("Fallback Notifications button (label='Notifications', id='attention.disabled.fallback') must be on screen under --uitesting-attention-disabled. App hierarchy:\n\(dump)",
+                    file: file, line: line)
+            return
+        }
+
+        guard fallbackNotificationsButton.isHittable else {
+            XCTFail("attention.fallback.notifications is not hittable — fallback surface is present but obscured",
+                    file: file, line: line)
+            return
+        }
+        fallbackNotificationsButton.tap()
+        XCTAssertTrue(
+            app.navigationBars["Notifications"].waitForExistence(timeout: 5),
+            "Notifications fallback sheet did not present after tapping attention.fallback.notifications",
+            file: file, line: line
+        )
+    }
+
+    /// Pushes a nested `JobDetailView` from the fallback Notifications
+    /// sheet. Uses the deterministic first-notification row emitted by
+    /// `DemoNotificationService`, which carries a `jobId`.
+    private func pushFirstNotificationJobDetail(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        // Any notification whose `jobId` is non-nil pushes a jobDetail
+        // destination when tapped (see `NotificationsView.handleTap`).
+        // notif-001 is the first row in `DemoData.notifications` and its
+        // `jobId == DemoData.job1ID`.
+        let identifier = "notifications.row.notif-001"
+        let row = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        guard row.waitForExistence(timeout: 3) else {
+            XCTFail("Deterministic notification row '\(identifier)' is missing — DemoNotificationService fixture drift",
+                    file: file, line: line)
+            return false
+        }
+        row.tap()
+
+        // The push targets JobDetailView, whose navigationTitle is the
+        // job's name (falls back to 'Job' if unloaded). Either the job
+        // name or the generic 'Notifications' back button confirms a
+        // nested destination is on screen.
+        let backButton = app.navigationBars.buttons["Notifications"]
+        return backButton.waitForExistence(timeout: 5)
+    }
+
+    func testNotificationsFallbackSheetResetsPushedJobDetailAfterDismissal() {
+        // 1. Open the fallback Notifications sheet.
+        openFallbackNotifications()
+        guard app.navigationBars["Notifications"].exists else { return }
+
+        // 2. Push nested job detail.
+        guard pushFirstNotificationJobDetail() else { return }
+
+        // The pushed nested destination must be verifiable — the back
+        // button in the nav bar reads 'Notifications' (its parent).
+        let backButtonBeforeDismiss = app.navigationBars.buttons["Notifications"]
+        XCTAssertTrue(
+            backButtonBeforeDismiss.waitForExistence(timeout: 5),
+            "Nested Notifications → job detail push did not put a 'Notifications' back button on screen"
+        )
+
+        // 3. Dismiss while nested. Swipe on the top nav bar (which is
+        // the job detail bar, not 'Notifications').
+        let currentBar = app.navigationBars.element(boundBy: 0)
+        guard currentBar.waitForExistence(timeout: 3) else {
+            XCTFail("No navigation bar on screen to swipe-dismiss the nested Notifications sheet")
+            return
+        }
+        let start = currentBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: 0, dy: 700))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        // Wait for the sheet to dismiss — the fallback Notifications
+        // button (an unambiguous sentinel of the disabled-attention
+        // fallback surface) must be back on screen.
+        let fallbackNotificationsButton = app.buttons
+            .matching(identifier: "attention.disabled.fallback")
+            .matching(NSPredicate(format: "label == %@", "Notifications"))
+            .firstMatch
+        XCTAssertTrue(
+            fallbackNotificationsButton.waitForExistence(timeout: 5),
+            "Dismissing the nested Notifications fallback did not return to the disabled-attention fallback surface"
+        )
+
+        // 4. Reopen. Notifications sheet MUST land at its root; the
+        // previous 'Notifications' back button (i.e. any nested job
+        // detail) MUST be gone.
+        openFallbackNotifications()
+
+        // On reopen at the root, no back button labeled 'Notifications'
+        // exists (a root nav bar has no parent to point back to).
+        let notificationsBackAfterReopen = app.navigationBars["Notifications"]
+            .buttons["Notifications"]
+        XCTAssertFalse(
+            notificationsBackAfterReopen.exists,
+            "Reopened fallback Notifications sheet must NOT retain the pushed job-detail child — #727 regression"
         )
     }
 }
