@@ -2172,7 +2172,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
 
-                    b.HasIndex("ResolvedAlertId");
+                    b.HasIndex("ResolvedAlertId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MaintenanceLogs_ResolvedAlertId")
+                        .HasFilter("[ResolvedAlertId] IS NOT NULL");
 
                     b.HasIndex("ToolheadId");
 
@@ -4212,6 +4215,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(256)");
 
                     b.Property<bool>("SupportsAutoLeveling")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("SupportsPerToolAttribution")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("TemplateMachineProfileId")
