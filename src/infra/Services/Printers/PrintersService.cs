@@ -72,6 +72,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
 /// <param name="spoolResolver">Resolves guided spool ids from each printer's owning source</param>
 /// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
+/// <param name="activityAccumulator">Optional per-tool active-time accumulator (issue #711, round-14) consulted when wiring the per-tool attribution capability flag and reset on printer removal</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -91,7 +92,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
     IStoragePathService storagePathService,
     IFilamentCoverageSpoolResolver spoolResolver,
-    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IPrintersService
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -114,6 +116,11 @@ public class PrintersService(
     // that build PrintersService directly do not need to supply a mock.
     private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver ?? throw new ArgumentNullException(nameof(spoolResolver));
     private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+
+    // Optional (issue #711, round-14): shared in-memory per-tool activity accumulator. Nullable so
+    // unit tests that build PrintersService directly need not supply it. Used to discard a printer's
+    // accumulated telemetry when it is deleted.
+    private readonly Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -483,6 +490,10 @@ public class PrintersService(
     public async Task RemoveAsync(Printer p, CancellationToken ct)
     {
         await _unitOfWork.Printers.RemoveAsync(p, ct);
+
+        // Discard any accumulated per-tool activity so a deleted printer's buckets do not linger
+        // (issue #711, round-14). Best-effort: the accumulator is a shared in-memory singleton.
+        _activityAccumulator?.Reset(p.Id);
     }
 
     /// <summary>
@@ -1642,12 +1653,10 @@ public class PrintersService(
             MultiMaterial = modelTemplate?.MultiMaterial ?? false,
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
 
-            // TODO(#711): SupportsPerToolAttribution stays false until a backend can attribute the
-            // external print-history delta to specific toolheads over a sync interval. Outstanding
-            // per-backend work: Moonraker (derive per-tool weights from Happy Hare active-tool
-            // history in MoonrakerSubscriptionService), OctoPrint (per-tool activity from history);
-            // PrusaLink/Sdcp/FlashForge/Core/TestEmulator expose no per-tool telemetry today. Until
-            // then the statistics sync leaves per-toolhead wear unattributed (round-10 Finding 1).
+            // SupportsPerToolAttribution is derived after the toolheads are built (see
+            // DeterminePerToolAttributionSupport before AddAsync below): it is true only for a
+            // Moonraker printer with two or more physical hotends, the case where interval-aware
+            // active-tool telemetry can genuinely differentiate per-head wear (issue #711, round-14).
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
@@ -1743,6 +1752,11 @@ public class PrintersService(
                 _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", dto.LocationName, p.Name);
             }
         }
+
+        // Derive per-tool attribution capability now that the physical toolheads exist (issue #711,
+        // round-14). True only for a Moonraker printer with ≥2 physical hotends, where interval-aware
+        // active-tool telemetry can genuinely differentiate per-head wear.
+        p.SupportsPerToolAttribution = DeterminePerToolAttributionSupport(dto.Backend, p.Toolheads);
 
         await AddAsync(p, ct);
 
@@ -3598,6 +3612,32 @@ public class PrintersService(
                     gatesToRemove.Count, printer.Name, printer.Id);
             }
         }
+
+        // Re-derive per-tool attribution capability after a topology change (issue #711, round-14).
+        // Guarded so it stays a no-op — and does not mark the printer Modified — unless the physical
+        // hotend count actually flips the outcome (toggling MMU gates never changes physical count).
+        bool derivedSupport = DeterminePerToolAttributionSupport((PrinterBackend)printer.Backend, printer.Toolheads);
+        if (printer.SupportsPerToolAttribution != derivedSupport)
+        {
+            printer.SupportsPerToolAttribution = derivedSupport;
+        }
+    }
+
+    /// <summary>
+    /// Determines whether a printer can genuinely attribute per-toolhead wear from interval-aware
+    /// active-tool telemetry (issue #711, round-14). True only when the backend samples active-tool
+    /// telemetry (today only Moonraker) AND the printer has two or more physical hotends, since a
+    /// single-hotend printer — even with an MMU/AMS — has just one wear-bearing head to attribute to.
+    /// </summary>
+    internal static bool DeterminePerToolAttributionSupport(PrinterBackend backend, IEnumerable<Toolhead> toolheads)
+    {
+        if (backend != PrinterBackend.Moonraker)
+        {
+            return false;
+        }
+
+        int physicalToolheadCount = toolheads.Count(toolhead => toolhead.ToolheadType == ToolheadType.Physical);
+        return physicalToolheadCount >= 2;
     }
 
     /// <summary>
