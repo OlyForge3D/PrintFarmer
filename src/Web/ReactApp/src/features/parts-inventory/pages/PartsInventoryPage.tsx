@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Tabs, Badge } from '@/common/components/ui';
+import { Tabs, Badge, Alert } from '@/common/components/ui';
 import {
   PackageIcon,
   DatabaseIcon,
@@ -28,6 +28,7 @@ import { BinsTab } from '../components/BinsTab';
 import { MappingsTab } from '../components/MappingsTab';
 import { ReorderTab } from '../components/ReorderTab';
 import { useReorderCandidates } from '../hooks/usePartsInventory';
+import { isFeatureDisabledError } from '../utils/problemDetails';
 
 const TAB_IDS = ['skus', 'bins', 'mappings', 'reorder'] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -74,8 +75,14 @@ export function PartsInventoryPage() {
     [navigate]
   );
 
-  const { data: reorderCandidates = [] } = useReorderCandidates();
+  const { data: reorderCandidates = [], error: reorderError } = useReorderCandidates();
   const reorderCount = reorderCandidates.length;
+
+  // The parts API root paths return a `featureDisabled` 404 when an admin has
+  // switched the feature off. The reorder query hits one of those root paths on
+  // every page mount, so it surfaces the disabled state regardless of the
+  // active tab.
+  const featureDisabled = isFeatureDisabledError(reorderError);
 
   const subtitle = useMemo(
     () =>
@@ -89,7 +96,12 @@ export function PartsInventoryPage() {
       subtitle={subtitle}
       icon={PackageIcon}
     >
-      <Tabs activeTab={activeTab} onTabChange={handleTabChange} className="space-y-0">
+      {featureDisabled ? (
+        <Alert type="warning">
+          The parts inventory feature is currently disabled by an administrator
+        </Alert>
+      ) : (
+        <Tabs activeTab={activeTab} onTabChange={handleTabChange} className="space-y-0">
         <Tabs.List
           className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto"
           aria-label="Printed parts inventory sections"
@@ -141,6 +153,7 @@ export function PartsInventoryPage() {
           </Tabs.Panel>
         </Tabs.Panels>
       </Tabs>
+      )}
     </PageTemplate>
   );
 }

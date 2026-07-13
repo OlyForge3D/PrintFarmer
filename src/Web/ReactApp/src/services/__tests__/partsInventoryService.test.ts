@@ -212,26 +212,28 @@ describe('partsInventoryService', () => {
   });
 
   describe('error propagation', () => {
-    it('bubbles apiClient rejection unchanged', async () => {
-      const err = Object.assign(new Error('conflict'), {
-        response: {
-          status: 409,
-          data: {
-            type: 'about:blank',
-            title: 'Wrong bin',
-            code: 'wrongBin',
-            mismatches: [],
-          },
+    it('bubbles the post-interceptor ApiError unchanged (problem body on data)', async () => {
+      // The response interceptor emits { message, statusCode, details, data };
+      // the service must rethrow it verbatim so callers can inspect `data`.
+      const apiError = {
+        message: 'Wrong bin',
+        statusCode: 409,
+        details: undefined,
+        data: {
+          type: 'about:blank',
+          title: 'Wrong bin',
+          code: 'wrongBin',
+          mismatches: [],
         },
-      });
-      mockPost.mockRejectedValueOnce(err);
+      };
+      mockPost.mockRejectedValueOnce(apiError);
       await expect(
         partsInventoryService.adjustStock('S', {
           delta: 1,
           reason: 'harvest',
           operationKey: 'k',
         })
-      ).rejects.toBe(err);
+      ).rejects.toBe(apiError);
     });
   });
 });

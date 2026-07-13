@@ -98,17 +98,34 @@ export function getErrorStatus(error: unknown): number | null {
   return typeof status === 'number' ? status : null;
 }
 
+/**
+ * Matches the boilerplate axios throws for a non-2xx response
+ * (e.g. "Request failed with status code 409"). This string is useless to
+ * operators, so `getErrorMessage` never returns it — it prefers the
+ * caller-supplied fallback instead.
+ */
+const AXIOS_STATUS_BOILERPLATE = /^Request failed with status code \d+$/;
+
 export function getErrorMessage(error: unknown, fallback = 'Request failed'): string {
   if (!error) return fallback;
   const problem = toProblemDetails(error);
+  // 1. ProblemDetails `detail` (problem+json).
   if (problem?.detail && typeof problem.detail === 'string') {
     return problem.detail;
   }
-  if (typeof error === 'string') return error;
+  // 2. ProblemDetails top-level `message`.
+  if (typeof problem?.message === 'string' && problem.message.length > 0) {
+    return problem.message;
+  }
+  // 3. Top-level `message` on the error object — unless it is the axios
+  //    boilerplate, in which case the fallback is more useful to the operator.
+  if (typeof error === 'string') {
+    return AXIOS_STATUS_BOILERPLATE.test(error) ? fallback : error;
+  }
   if (typeof error === 'object' && error !== null) {
     const candidate = error as { message?: unknown };
     if (typeof candidate.message === 'string' && candidate.message.length > 0) {
-      return candidate.message;
+      return AXIOS_STATUS_BOILERPLATE.test(candidate.message) ? fallback : candidate.message;
     }
   }
   return fallback;

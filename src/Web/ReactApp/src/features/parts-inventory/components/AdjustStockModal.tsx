@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { Alert, Badge, Button, Input, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
@@ -13,7 +13,7 @@ import type {
   PartAdjustmentReason,
   PartInventoryDto,
 } from '@/types/partsInventory';
-import { getErrorMessage, isWrongBinError } from '../utils/problemDetails';
+import { getErrorMessage, getErrorStatus, isWrongBinError } from '../utils/problemDetails';
 
 export interface AdjustStockModalProps {
   isOpen: boolean;
@@ -23,14 +23,25 @@ export interface AdjustStockModalProps {
 }
 
 /**
+ * Generate an idempotency key, falling back to a time+random token on
+ * browsers without WebCrypto (`crypto.randomUUID`).
+ */
+function generateOperationKey(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `adjust-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
  * Adjust the on-hand quantity of a printed-part SKU through the ledger.
  *
  * The backend enforces the sign of the delta and prevents on-hand from
  * going below zero. We surface those errors as-is via toasts so operators
  * see the same reason string the ledger recorded.
  *
- * `operationKey` is generated per submission for idempotency across
- * accidental double-clicks or retries.
+ * `operationKey` is computed once per logical adjustment (per open modal and
+ * per unchanged payload) so a retry after a transient failure reuses the same
+ * key and the server dedupes it instead of applying the delta twice.
  */
 export function AdjustStockModal({ isOpen, onClose, part, bins }: AdjustStockModalProps) {
   if (!part) return null;
@@ -59,6 +70,11 @@ function AdjustStockFormBody({ part, bins, onClose }: AdjustStockFormBodyProps) 
   const [delta, setDelta] = useState('1');
   const [binCode, setBinCode] = useState(part.defaultBinCode ?? '');
   const [notes, setNotes] = useState('');
+  // Cache of the idempotency key alongside the payload signature it was minted
+  // for. Only ever read/written inside event handlers (never during render), so
+  // an identical-payload retry reuses the same key and the server dedupes it
+  // instead of applying the delta twice.
+  const opKeyRef = useRef<{ signature: string; key: string } | null>(null);
 
   const deltaNum = Number(delta);
   const isValidDelta = Number.isFinite(deltaNum) && deltaNum !== 0 && Number.isInteger(deltaNum);
@@ -75,15 +91,24 @@ function AdjustStockFormBody({ part, bins, onClose }: AdjustStockFormBodyProps) 
       toast.error('Adjustment would take on-hand below zero');
       return;
     }
-    const operationKey =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `adjust-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    // "Use default" ("") must resolve to the SKU's default bin — the backend
+    // does not substitute it, so an empty binCode records the adjustment with
+    // no bin and loses attribution.
+    const effectiveBinCode = binCode.trim() === '' ? part.defaultBinCode ?? null : binCode.trim();
+
+    // One operationKey per logical adjustment: reuse the cached key when the
+    // payload is unchanged (a retry), mint a fresh one when the payload changed.
+    const signature = `${deltaNum}|${reason}|${effectiveBinCode ?? ''}|${notes.trim()}`;
+    if (!opKeyRef.current || opKeyRef.current.signature !== signature) {
+      opKeyRef.current = { signature, key: generateOperationKey() };
+    }
+    const operationKey = opKeyRef.current.key;
 
     const request: AdjustPartInventoryRequest = {
       delta: deltaNum,
       reason,
-      binCode: binCode.trim() || null,
+      binCode: effectiveBinCode,
       notes: notes.trim() || null,
       operationKey,
     };
@@ -96,6 +121,15 @@ function AdjustStockFormBody({ part, bins, onClose }: AdjustStockFormBodyProps) 
         toast.error('Scanned bin does not match the SKU’s default bin. Register or select the correct bin.');
       } else {
         toast.error(getErrorMessage(error, 'Failed to adjust stock'));
+      }
+      // A 400/409 means the server rejected THIS payload for a validation or
+      // business-rule reason (not a transient failure), so a corrected retry is
+      // a new logical operation — drop the cached key so the next submit mints a
+      // fresh one. Transient failures (network timeouts, 5xx) keep the cached
+      // key so an identical retry dedupes server-side.
+      const status = getErrorStatus(error);
+      if (status === 400 || status === 409) {
+        opKeyRef.current = null;
       }
     }
   };
@@ -165,7 +199,9 @@ function AdjustStockFormBody({ part, bins, onClose }: AdjustStockFormBodyProps) 
             value={binCode}
             onChange={(event) => setBinCode(event.target.value)}
           >
-            <option value="">— Use default —</option>
+            <option value="">
+              {part.defaultBinCode ? '— Use default —' : '— No bin —'}
+            </option>
             {bins
               .filter((bin) => bin.isActive || bin.code === binCode)
               .map((bin) => (

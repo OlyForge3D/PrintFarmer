@@ -52,11 +52,15 @@ describe('problemDetails utils', () => {
     expect(getErrorStatus(err)).toBe(409);
   });
 
-  it('recognises wrongBin conflict from apiClient-wrapped details', () => {
+  it('recognises wrongBin conflict from apiClient-wrapped data (post-interceptor shape)', () => {
+    // The response interceptor flattens axios errors into
+    // { message, statusCode, details, data } — the raw problem body lives on
+    // `data`, while `details` stays a string for legacy callers.
     const err = {
       statusCode: 409,
       message: 'Wrong bin',
-      details: { code: 'wrongBin', mismatches: [{ partSku: 'S', scannedBinCode: 'X' }] },
+      details: undefined,
+      data: { code: 'wrongBin', mismatches: [{ partSku: 'S', scannedBinCode: 'X' }] },
     };
     expect(isWrongBinError(err)).toBe(true);
     expect(getErrorStatus(err)).toBe(409);
@@ -92,5 +96,22 @@ describe('problemDetails utils', () => {
     expect(getErrorMessage({ response: { data: { detail: 'bad delta' } } })).toBe('bad delta');
     expect(getErrorMessage({ message: 'axios err' })).toBe('axios err');
     expect(getErrorMessage(null, 'default')).toBe('default');
+  });
+
+  it('getErrorMessage reads ProblemDetails from the post-interceptor data field', () => {
+    // Real prod shape: interceptor moves the problem body to `data`.
+    expect(
+      getErrorMessage({ statusCode: 409, message: 'Request failed with status code 409', data: { detail: 'On-hand cannot go below zero' } })
+    ).toBe('On-hand cannot go below zero');
+    expect(
+      getErrorMessage({ statusCode: 409, message: 'boom', data: { message: 'Insufficient stock' } })
+    ).toBe('Insufficient stock');
+  });
+
+  it('getErrorMessage never returns the axios boilerplate; uses fallback instead', () => {
+    expect(
+      getErrorMessage({ statusCode: 409, message: 'Request failed with status code 409' }, 'Failed to adjust stock')
+    ).toBe('Failed to adjust stock');
+    expect(getErrorMessage('Request failed with status code 500', 'nope')).toBe('nope');
   });
 });
