@@ -4477,3 +4477,51 @@ The GPT code reviewer is Hicks. Update Hicks persistently from GPT-5.5/older GPT
 
 - No application code, GitHub issues, or PR #741.
 - Append-only record captured from `.squad/decisions/inbox/hicks-model-refresh.md`.
+
+---
+## Decision: Machine-Local Execution Policy — Maximum Supported Reasoning Effort & Work Continuation
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-07-13T07:49:47.542-07:00 |
+| **Requested by** | Jeff Papiez |
+| **Scope** | Machine-local directive for Jeff Papiez's current machine; tracked on this feature branch for reproducibility; other machines may override locally |
+| **Status** | In Effect |
+
+## Directive
+
+On this machine, all in-scope agents use the maximum reasoning effort supported by their selected model and do not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass.
+
+## In-Scope Agents & Reasoning Efforts
+
+Implementation agents:
+- **Lambert** (Backend Dev) — reasoning effort `max`
+- **Ripley** (Frontend Dev) — reasoning effort `max`
+- **Hudson** (iOS Developer) — reasoning effort `max`
+- **Gorman** (iOS Networking) — reasoning effort `max`
+- **Parker** (DevOps & Deployment) — reasoning effort `max`
+
+Code reviewers (pre-PR gate: Bishop + Hicks + Vasquez):
+- **Bishop** (Code Reviewer, `claude-opus-4.8`) — reasoning effort `max`
+- **Hicks** (Code Reviewer, `gpt-5.6-sol`) — reasoning effort `max`
+- **Vasquez** (Code Reviewer, `gemini-3.1-pro-preview`) — reasoning effort `high` (Gemini 3.1 Pro Preview does not support `max`)
+
+## Policy
+
+1. **No self-imposed budgets:** In-scope agents do not cap tool calls, review rounds, iterations, or wall-clock time. Each agent continues primary work until the deliverable is verified and (for reviewers) mandatory gates pass.
+2. **Unavoidable platform/provider limits apply:** This policy removes artificial agent-level budgets but cannot disable hard limits from the platform, provider rate limits, or infrastructure constraints.
+3. **Mandatory gates preserved:** Reviewers continue the pre-PR review gate (Bishop + Hicks + Vasquez consensus APPROVE) until satisfied. Implementers continue iteration until verified.
+4. **Failure handling & explicit stops:** Agents still handle failures, stop on unrecoverable errors, and report blockers clearly. This policy is about removing *arbitrary* budgets, not recklessness.
+
+## Rationale
+
+Jeff Papiez requested correctness and completeness without artificial agent budgets.
+
+## Implementation Files Updated
+
+- `.squad/config.json` — `agentReasoningEffortOverrides` expanded
+- `.squad/routing.md` — minimal clarifications for future coordinators
+- `.squad/agents/{agent}/charter.md` (Lambert, Ripley, Hudson, Gorman, Parker, Bishop, Hicks, Vasquez) — machine-local policy and reasoning effort added
+- `.squad/casting/registry.json` — reviewer model coherence alignment (Bishop, Vasquez)
+- `.squad/templates/model-selection-reference.md` — documentation of reasoning effort overrides
+- `.squad/templates/spawn-reference.md` — removal of artificial post-work budgets and documentation of continuation policy

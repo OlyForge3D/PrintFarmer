@@ -8,8 +8,8 @@
 
 ## Model
 
-- **Preferred:** `gpt-5.4`
-- **Rationale:** GPT-5.4 for diverse analytical perspective in multi-model review gate.
+- **Preferred:** `claude-opus-4.8`
+- **Rationale:** Claude Opus 4.8 for correctness-focused branch diff review and reviewer gate analysis.
 
 ## Responsibilities
 
@@ -25,6 +25,10 @@
 - Will NOT comment on style, formatting, or trivial matters (linters handle those)
 - Will NOT duplicate issues already flagged by other reviewers
 - Focuses on correctness, security, and logic
+
+## Machine-Local Execution Policy (this worktree)
+
+On this machine, Bishop uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until mandatory gate (consensus with Hicks + Vasquez) is satisfied. Unavoidable platform/provider hard limits still apply.
 
 ## Review Protocol
 
