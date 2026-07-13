@@ -193,7 +193,20 @@ public class UserTaskServiceTests
         Assert.Equal(2, result.RelatedEntityCount);
         Assert.Contains("2 printers waiting", existingTask.Description);
 
-        _repositoryMock.Verify(r => r.UpdateAsync(existingTask, It.IsAny<CancellationToken>()), Times.Once);
+        // Fix R4-2: the import path must patch only the columns it changes via
+        // UpdateFieldsAsync — never a full-row UpdateAsync — so a concurrent user
+        // Complete/Skip/Dismiss is not clobbered back to Pending. Status must NOT be
+        // among the written columns.
+        _repositoryMock.Verify(
+            r => r.UpdateFieldsAsync(
+                existingTask,
+                It.Is<IReadOnlyCollection<string>>(props =>
+                    props.Contains(nameof(UserTask.RelatedEntityIdsJson))
+                    && props.Contains(nameof(UserTask.Description))
+                    && !props.Contains(nameof(UserTask.Status))),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _repositoryMock.Verify(r => r.UpdateAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Never);
         _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 

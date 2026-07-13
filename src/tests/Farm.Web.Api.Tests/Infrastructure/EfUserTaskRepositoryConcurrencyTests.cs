@@ -146,6 +146,111 @@ public class EfUserTaskRepositoryConcurrencyTests
         open.Should().Be(1);
     }
 
+    /// <summary>
+    /// Fix R4-2: the profile-import path patches only its own columns via
+    /// UpdateFieldsAsync. A user Skip that commits after the import loaded the (detached,
+    /// no-tracking) task must NOT be clobbered back to Pending, yet the import's
+    /// RelatedEntityIdsJson/Description changes must still persist — because
+    /// UpdateFieldsAsync marks only those columns modified and never touches Status.
+    /// </summary>
+    [Fact]
+    public async Task UpdateFieldsAsync_ProfileImportRacesUserSkip_StatusSurvives_ImportedFieldsPersist()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        Guid taskId = Guid.NewGuid();
+        Guid firstPrinter = Guid.NewGuid();
+        Guid importedPrinter = Guid.NewGuid();
+
+        await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
+        {
+            UserTask task = NewOpenTask(UserTaskSourceKind.Unspecified, null, UserTaskStatus.Pending, taskId);
+            task.TaskType = UserTaskType.ProfileImport;
+            task.RelatedEntityIdsJson = $"[\"{firstPrinter}\"]";
+            task.Description = "1 printer waiting for slicer profiles";
+            _ = seed.UserTasks.Add(task);
+            _ = await seed.SaveChangesAsync();
+        }
+
+        // Import path loads the task detached (mirrors GetByEntityAsync's no-tracking read).
+        UserTask detached;
+        await using (AppDbContext readCtx = TestInfrastructure.TestHelpers.CreateContext(connection))
+        {
+            detached = await readCtx.UserTasks.AsNoTracking().SingleAsync(t => t.Id == taskId);
+        }
+
+        // Meanwhile a user skips the task in a separate context.
+        await using (AppDbContext userCtx = TestInfrastructure.TestHelpers.CreateContext(connection))
+        {
+            UserTask userTask = await userCtx.UserTasks.SingleAsync(t => t.Id == taskId);
+            userTask.Status = UserTaskStatus.Skipped;
+            userTask.UpdatedAt = DateTime.UtcNow;
+            _ = await userCtx.SaveChangesAsync();
+        }
+
+        // Import path patches only its own columns (never Status).
+        string importedJson = $"[\"{firstPrinter}\",\"{importedPrinter}\"]";
+        const string importedDescription = "2 printers waiting for slicer profiles";
+        detached.RelatedEntityIdsJson = importedJson;
+        detached.Description = importedDescription;
+
+        await using (AppDbContext importCtx = TestInfrastructure.TestHelpers.CreateContext(connection))
+        {
+            EfUserTaskRepository importRepo = new(importCtx);
+            await importRepo.UpdateFieldsAsync(
+                detached,
+                [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)]);
+        }
+
+        await using AppDbContext verifyCtx = TestInfrastructure.TestHelpers.CreateContext(connection);
+        UserTask finalTask = await verifyCtx.UserTasks.AsNoTracking().SingleAsync(t => t.Id == taskId);
+
+        finalTask.Status.Should().Be(UserTaskStatus.Skipped);          // user action wins
+        finalTask.RelatedEntityIdsJson.Should().Be(importedJson);      // import fields persisted
+        finalTask.Description.Should().Be(importedDescription);
+    }
+
+    /// <summary>
+    /// Fix R4-4: on process restart the bootstrap suppression lookback (widened from 24h
+    /// to 7d) must rediscover a still-active episode a user Skipped several days ago, so
+    /// the compiler does not resurrect a task the user dismissed 25h+ ago. A Skip 3 days
+    /// old is inside the window; one 30 days old is beyond it, proving the bound still
+    /// exists.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_Bootstrap_SuppressionLookbackIncludesSkipsWithinSevenDays()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        DateTime now = DateTime.UtcNow;
+
+        await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
+        {
+            UserTask recent = NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:recent", UserTaskStatus.Skipped);
+            recent.UpdatedAt = now.AddDays(-3);
+            UserTask old = NewOpenTask(UserTaskSourceKind.Maintenance, "maintenancealert:old", UserTaskStatus.Skipped);
+            old.UpdatedAt = now.AddDays(-30);
+            _ = seed.UserTasks.Add(recent);
+            _ = seed.UserTasks.Add(old);
+            _ = await seed.SaveChangesAsync();
+        }
+
+        await using AppDbContext ctx = TestInfrastructure.TestHelpers.CreateContext(connection);
+        EfUserTaskRepository repo = new(ctx);
+
+        // The source owns a DIFFERENT kind and produces nothing, so the compiler's
+        // end-of-pass RemoveWhere (which only drops keys for successfully-evaluated
+        // kinds) cannot discard the bootstrapped Maintenance keys under assertion.
+        ShiftPlanCompiler compiler = new(
+            new[] { new NoSpecSource([UserTaskSourceKind.FailureIncident]) },
+            repo,
+            NullLogger<ShiftPlanCompiler>.Instance);
+
+        ShiftPlanSuppressionState state = new(); // fresh: LastPassAtUtc == null → bootstrap path
+        _ = await compiler.CompileAsync(state);
+
+        state.SuppressedKeys.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:recent"));
+        state.SuppressedKeys.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:old"));
+    }
+
     private static UserTask NewOpenTask(
         UserTaskSourceKind sourceKind,
         string? sourceId,
@@ -173,5 +278,13 @@ public class EfUserTaskRepositoryConcurrencyTests
         public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = [UserTaskSourceKind.Maintenance];
         public Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<ShiftPlanTaskSpec>>([_spec]);
+    }
+
+    private sealed class NoSpecSource(IReadOnlyCollection<UserTaskSourceKind> ownedKinds) : IShiftPlanTaskSource
+    {
+        public string SourceName => "nospec";
+        public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = ownedKinds;
+        public Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ShiftPlanTaskSpec>>([]);
     }
 }

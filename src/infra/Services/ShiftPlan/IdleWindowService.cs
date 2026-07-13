@@ -61,12 +61,18 @@ public sealed class IdleWindowService : IIdleWindowService
 
     public async Task<IReadOnlyList<IdleWindow>> GetIdleWindowsAsync(TimeSpan minWindow, CancellationToken ct = default)
     {
+        IdleWindowResult result = await GetIdleWindowsWithIndeterminateAsync(minWindow, ct).ConfigureAwait(false);
+        return result.Windows;
+    }
+
+    public async Task<IdleWindowResult> GetIdleWindowsWithIndeterminateAsync(TimeSpan minWindow, CancellationToken ct = default)
+    {
         DateTime now = DateTime.UtcNow;
 
         List<Printer> printers = await _queue.GetAvailablePrintersAsync(ct);
         if (printers.Count == 0)
         {
-            return Array.Empty<IdleWindow>();
+            return new IdleWindowResult(Array.Empty<IdleWindow>(), new HashSet<Guid>());
         }
 
         // Load dispatch settings, global candidates, and per-printer dispatch states
@@ -112,6 +118,13 @@ public sealed class IdleWindowService : IIdleWindowService
 
         List<IdleWindow> results = new(printers.Count);
 
+        // Fix R4-1: printers whose dispatch eligibility could not be determined this
+        // pass (every evaluated candidate's scoring threw). They are excluded from
+        // 'results' just like before, but we now surface them so a fail-closed caller
+        // (the maintenance source) can tell an outage apart from a genuinely absent
+        // window instead of silently seeing the printer drop out of the set.
+        HashSet<Guid> indeterminate = new();
+
         foreach (Printer printer in printers)
         {
             ct.ThrowIfCancellationRequested();
@@ -155,13 +168,14 @@ public sealed class IdleWindowService : IIdleWindowService
                 _logger.LogWarning(
                     "Idle window: dispatch eligibility unknown for printer {PrinterId} ({PrinterName}) — scoring failed for every evaluated candidate; excluding from idle-window set this pass",
                     printer.Id, printer.Name);
+                _ = indeterminate.Add(printer.Id);
                 continue;
             }
 
             results.Add(new IdleWindow(printer.Id, printer.Name, windowStart, windowEnd, dispatchEligibleNow.Value));
         }
 
-        return results;
+        return new IdleWindowResult(results, indeterminate);
     }
 
     private static DateTime? ProjectNextBoundary(IEnumerable<PrintJob> assigned, DateTime now)

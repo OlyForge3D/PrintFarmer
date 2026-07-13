@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Queue;
@@ -210,6 +210,58 @@ public class IdleWindowServiceTests
         IReadOnlyList<IdleWindow> windows = await svc.GetIdleWindowsAsync(TimeSpan.Zero);
 
         Assert.Empty(windows);
+    }
+
+    /// <summary>
+    /// Fix R4-1: the same sole-candidate scorer outage that excludes the printer from
+    /// the window set must ALSO surface that printer in
+    /// <see cref="IdleWindowResult.IndeterminatePrinterIds"/>, so a fail-closed caller
+    /// (the maintenance source) can distinguish "eligibility unknown" from "no window".
+    /// </summary>
+    [Fact]
+    public async Task GetIdleWindowsWithIndeterminateAsync_ScorerThrowsForSoleCandidate_PrinterReportedIndeterminate()
+    {
+        Printer printer = BuildPrinter(autoDispatch: true);
+        PrintJob candidate = BuildJob(null, PrintJobStatus.Queued);
+
+        SetupQueueData([printer], []);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, [candidate], printerReady: true);
+
+        _scorer.Setup(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("scorer boom"));
+
+        IdleWindowService svc = BuildService();
+        IdleWindowResult result = await svc.GetIdleWindowsWithIndeterminateAsync(TimeSpan.Zero);
+
+        Assert.Empty(result.Windows);
+        Assert.Contains(PrinterId, result.IndeterminatePrinterIds);
+    }
+
+    /// <summary>
+    /// Fix R4-1: when eligibility IS conclusively determined, the indeterminate set is
+    /// empty — the fail-closed path is only for genuine scorer outages.
+    /// </summary>
+    [Fact]
+    public async Task GetIdleWindowsWithIndeterminateAsync_ConclusiveEligibility_IndeterminateSetEmpty()
+    {
+        Printer printer = BuildPrinter(autoDispatch: true);
+        PrintJob candidate = BuildJob(null, PrintJobStatus.Queued);
+
+        SetupQueueData([printer], []);
+        SetupDb(globalEnabled: true, AutoDispatchMode.Auto, [candidate], printerReady: true);
+
+        _scorer.Setup(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DispatchScore>
+            {
+                new(PrinterId, "TestPrinter", TotalScore: 80.0, new Dictionary<string, FactorScore>(),
+                    Eliminated: false, []),
+            });
+
+        IdleWindowService svc = BuildService();
+        IdleWindowResult result = await svc.GetIdleWindowsWithIndeterminateAsync(TimeSpan.Zero);
+
+        Assert.Single(result.Windows);
+        Assert.Empty(result.IndeterminatePrinterIds);
     }
 
     /// <summary>

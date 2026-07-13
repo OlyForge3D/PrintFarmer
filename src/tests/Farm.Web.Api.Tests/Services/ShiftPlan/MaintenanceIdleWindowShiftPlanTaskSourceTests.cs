@@ -74,8 +74,8 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
 
         _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert() });
-        _idleWindows.Setup(s => s.GetIdleWindowsAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<IdleWindow> { eligibleWindow });
+        _idleWindows.Setup(s => s.GetIdleWindowsWithIndeterminateAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IdleWindowResult(new List<IdleWindow> { eligibleWindow }, new HashSet<Guid>()));
 
         MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
         IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
@@ -108,8 +108,8 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
 
         _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert() });
-        _idleWindows.Setup(s => s.GetIdleWindowsAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<IdleWindow> { shortWindow });
+        _idleWindows.Setup(s => s.GetIdleWindowsWithIndeterminateAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IdleWindowResult(new List<IdleWindow> { shortWindow }, new HashSet<Guid>()));
 
         MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
         IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
@@ -141,8 +141,8 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
         const string expectedMessage = "Nozzle is clogged — replace before next print.";
         _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert(message: expectedMessage) });
-        _idleWindows.Setup(s => s.GetIdleWindowsAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<IdleWindow> { goodWindow });
+        _idleWindows.Setup(s => s.GetIdleWindowsWithIndeterminateAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IdleWindowResult(new List<IdleWindow> { goodWindow }, new HashSet<Guid>()));
 
         MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
         IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
@@ -173,6 +173,73 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
         InvalidOperationException thrown = await Assert.ThrowsAsync<InvalidOperationException>(
             () => source.ProduceAsync(CancellationToken.None));
         Assert.Same(boom, thrown);
+    }
+
+    /// <summary>
+    /// Fix R4-1 (issue #713 round 4): when dispatch eligibility is indeterminate for a
+    /// printer that has an active maintenance alert (every scorer threw, so
+    /// IdleWindowService excluded it and reported it via IndeterminatePrinterIds),
+    /// ProduceAsync must FAIL CLOSED by throwing. If it instead returned successfully
+    /// with the printer merely absent from the window set, the compiler would treat
+    /// Maintenance as a successful (spec-less) source and auto-complete the still-active
+    /// maintenance task — then recreate a duplicate once scoring recovered (flapping).
+    /// </summary>
+    [Fact]
+    public async Task ProduceAsync_AlertedPrinterIndeterminate_ThrowsToPreserveTasks()
+    {
+        SetupSettings();
+
+        _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert() });
+
+        // Scorer outage: the alerted printer is reported indeterminate (and thus absent
+        // from Windows) rather than conclusively idle/busy.
+        _idleWindows.Setup(s => s.GetIdleWindowsWithIndeterminateAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IdleWindowResult(
+                new List<IdleWindow>(),
+                new HashSet<Guid> { PrinterId }));
+
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+
+        InvalidOperationException thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => source.ProduceAsync(CancellationToken.None));
+        Assert.Contains("indeterminate", thrown.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Fix R4-1: indeterminate eligibility for an UNALERTED printer must NOT trip the
+    /// fail-closed throw — only an alerted printer's outage risks the spurious
+    /// auto-complete. The alerted printer still has a valid window, so its spec is
+    /// emitted normally.
+    /// </summary>
+    [Fact]
+    public async Task ProduceAsync_UnrelatedPrinterIndeterminate_DoesNotThrow()
+    {
+        SetupSettings(minIdleMinutes: 5, leadMinutes: 0);
+
+        Guid otherPrinterId = Guid.Parse("CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC");
+        DateTime now = DateTime.UtcNow;
+        IdleWindow goodWindow = new(
+            PrinterId,
+            "TestPrinter",
+            StartUtc: now,
+            EndUtc: now.AddHours(2),
+            IsDispatchEligibleNow: false);
+
+        _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert() });
+
+        // A different printer is indeterminate; the alerted printer has a real window.
+        _idleWindows.Setup(s => s.GetIdleWindowsWithIndeterminateAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IdleWindowResult(
+                new List<IdleWindow> { goodWindow },
+                new HashSet<Guid> { otherPrinterId }));
+
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+        IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
+
+        ShiftPlanTaskSpec spec = Assert.Single(specs);
+        Assert.Equal(UserTaskSourceKind.Maintenance, spec.SourceKind);
     }
 
     /// <summary>

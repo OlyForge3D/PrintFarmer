@@ -38,14 +38,42 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
     private static readonly SemaphoreSlim CompileGate = new(1, 1);
 
     /// <summary>
-    /// Fix F / Fix R3-6: fallback lookback used to bootstrap suppression continuity
-    /// only on the very first compile pass after process start (before any
+    /// Fix F / Fix R3-6 / Fix R4-4: fallback lookback used to bootstrap suppression
+    /// continuity only on the very first compile pass after process start (before any
     /// <see cref="ShiftPlanSuppressionState.LastPassAtUtc"/> exists). Every pass after
     /// that, suppression continuity is tracked precisely via
     /// <see cref="ShiftPlanSuppressionState"/> rather than a flat rolling window — see
     /// that type's remarks for why a fixed window over- and under-suppresses.
+    /// <para>
+    /// Fix R4-4: widened from 24h to 7d. <see cref="ShiftPlanSuppressionState"/> is
+    /// process-local, so on restart the only way to rediscover a still-active episode a
+    /// user already Skipped/Dismissed is this bootstrap query. A 24h window resurrected
+    /// any suppression older than a day (e.g. a printer skipped 25h ago that is still
+    /// alerting), spuriously recreating the task the user dismissed. 7 days is a
+    /// defensible bound: Skipped/Dismissed episodes rarely stay active longer, and it
+    /// keeps the query cheap. The residual gap (an episode continuously active for &gt;7d)
+    /// is accepted; the durable fix is option (c) — persisting suppression-episode state
+    /// to the database (a new table/column + migration) — left as a follow-up if
+    /// operators report resurrections beyond this bound.
+    /// </para>
     /// </summary>
-    private static readonly TimeSpan SuppressionBootstrapLookback = TimeSpan.FromHours(24);
+    private static readonly TimeSpan SuppressionBootstrapLookback = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// Fix R4-3: safety overlap subtracted from <c>now</c> when advancing
+    /// <see cref="ShiftPlanSuppressionState.LastPassAtUtc"/> at the end of a pass. The
+    /// next pass queries suppressed source-keys with <c>UpdatedAt &gt;= LastPassAtUtc</c>;
+    /// without an overlap a user Skip/Dismiss whose <c>UpdatedAt</c> was stamped just
+    /// before this pass's <c>now</c> but whose transaction committed just after the
+    /// suppression query ran would be missed this pass AND next pass (its
+    /// <c>UpdatedAt</c> is then below the advanced watermark), letting the compiler
+    /// recreate the task the user just dismissed. Overlapping the watermark by 15s — the
+    /// compile cadence — absorbs any commit skew up to a full cadence. Re-observed keys
+    /// are idempotently absorbed by the suppression <see cref="HashSet{T}"/>, and cleared
+    /// episodes are still dropped by the end-of-pass RemoveWhere, so the overlap only
+    /// costs a brief, self-healing debounce on flapping conditions.
+    /// </summary>
+    private static readonly TimeSpan SuppressionWatermarkOverlap = TimeSpan.FromSeconds(15);
 
     private readonly IEnumerable<IShiftPlanTaskSource> _sources;
     private readonly IUserTaskRepository _tasks;
@@ -263,7 +291,11 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         {
             _ = suppressionState.SuppressedKeys.RemoveWhere(
                 key => !specs.ContainsKey(key) && successfulKinds.Contains(key.SourceKind));
-            suppressionState.LastPassAtUtc = now;
+
+            // Fix R4-3: advance the watermark to now MINUS a safety overlap rather than
+            // exactly now, so a user Skip/Dismiss committed just after this pass's
+            // suppression query (but stamped just before now) is still caught next pass.
+            suppressionState.LastPassAtUtc = now - SuppressionWatermarkOverlap;
         }
 
         // Fix E / Fix R3-2: a concurrent tick on another instance may have inserted the

@@ -1,7 +1,10 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Tasks;
 using Farm.Infrastructure.Services.ShiftPlan;
+using Farm.Infrastructure.Services.ShiftPlan.Sources;
+using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -194,6 +197,146 @@ public class ShiftPlanCompilerTests
         Assert.Equal(0, result.AutoCompleted);
         Assert.Equal(UserTaskStatus.Pending, maintenanceTask.Status);
         Assert.Null(maintenanceTask.CompletedAt);
+    }
+
+    /// <summary>
+    /// Fix R4-1 (end-to-end): a scorer outage that makes the idle-window service report
+    /// an alerted printer as indeterminate must cause the REAL maintenance source to
+    /// fail closed (throw), so the compiler's per-source isolation preserves the open
+    /// maintenance task instead of auto-completing it. This exercises the full wiring
+    /// (indeterminate idle-window → source throw → compiler preservation), not just the
+    /// source in isolation.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_MaintenanceSourceIndeterminateEligibility_PreservesOpenMaintenanceTask()
+    {
+        Guid alertId = Guid.Parse("B1B1B1B1-B1B1-B1B1-B1B1-B1B1B1B1B1B1");
+
+        UserTask maintenanceTask = new()
+        {
+            Id = Guid.NewGuid(),
+            SourceKind = UserTaskSourceKind.Maintenance,
+            SourceId = $"maintenancealert:{alertId}",
+            Status = UserTaskStatus.Pending,
+            Title = "maintenance window",
+        };
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { maintenanceTask });
+
+        Mock<IMaintenanceAlertRepository> alerts = new();
+        alerts.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MaintenanceAlert>
+            {
+                new()
+                {
+                    Id = alertId,
+                    PrinterId = PrinterId,
+                    Title = "Check nozzle",
+                    Message = "Nozzle needs cleaning.",
+                    Severity = 2,
+                    Status = MaintenanceAlertStatus.Active,
+                },
+            });
+
+        // Scorer outage: the alerted printer is indeterminate (absent from Windows).
+        Mock<IIdleWindowService> idle = new();
+        idle.Setup(s => s.GetIdleWindowsWithIndeterminateAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IdleWindowResult(new List<IdleWindow>(), new HashSet<Guid> { PrinterId }));
+
+        Mock<ISettingsService> settings = new();
+        settings.Setup(s => s.Get<ShiftPlanSettings>()).Returns(new ShiftPlanSettings());
+
+        MaintenanceIdleWindowShiftPlanTaskSource maintenanceSource = new(
+            alerts.Object,
+            idle.Object,
+            settings.Object,
+            NullLogger<MaintenanceIdleWindowShiftPlanTaskSource>.Instance);
+
+        ShiftPlanCompiler compiler = BuildCompiler(maintenanceSource);
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(1, result.SourceFailures);
+        Assert.Equal(0, result.AutoCompleted);
+        Assert.Equal(UserTaskStatus.Pending, maintenanceTask.Status);
+        Assert.Null(maintenanceTask.CompletedAt);
+    }
+
+    /// <summary>
+    /// Fix R4-3: at the end of a pass the suppression watermark is advanced to
+    /// <c>now - SuppressionWatermarkOverlap</c> (15s), not exactly <c>now</c>, so a user
+    /// skip stamped just before this pass but committed just after its suppression query
+    /// is still inside the next pass's lookback.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_R4_3_AdvancesSuppressionWatermarkWithOverlap()
+    {
+        ShiftPlanSuppressionState state = new();
+        DateTimeOffset t0 = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        MutableClock clock = new(t0);
+
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        ShiftPlanCompiler compiler = BuildCompiler(clock, new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident]));
+
+        _ = await compiler.CompileAsync(state);
+
+        Assert.Equal(t0.UtcDateTime.AddSeconds(-15), state.LastPassAtUtc);
+    }
+
+    /// <summary>
+    /// Fix R4-3 (behavioral): a skip whose <c>UpdatedAt</c> is stamped just before a
+    /// pass's <c>now</c> but whose transaction commits just after that pass's suppression
+    /// query runs is missed by the pass that created the task. The 15s watermark overlap
+    /// ensures the NEXT pass's lookback still includes it, so the compiler does not
+    /// recreate the task the user just dismissed. Without the overlap the next pass would
+    /// query <c>[now, ...)</c> and miss the skip forever.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_R4_3_SkipCommittedAfterQuery_IsObservedNextPassViaOverlap()
+    {
+        ShiftPlanSuppressionState state = new();
+        DateTimeOffset t0 = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        DateTime skipUpdatedAt = t0.UtcDateTime.AddMilliseconds(-1);
+        MutableClock clock = new(t0);
+
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        // Pass 1's suppression query runs before the skip commits → returns nothing.
+        // Pass 2's query observes the skip iff its lookback watermark reaches back to
+        // skipUpdatedAt (t0 - 1ms). With the overlap the watermark is t0 - 15s, which
+        // does; without it the watermark would be t0, which does not.
+        int call = 0;
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns((DateTime since, CancellationToken _) =>
+            {
+                call++;
+                if (call == 1)
+                {
+                    return Task.FromResult<IReadOnlyCollection<(UserTaskSourceKind, string)>>(
+                        Array.Empty<(UserTaskSourceKind, string)>());
+                }
+
+                IReadOnlyCollection<(UserTaskSourceKind, string)> observed = since <= skipUpdatedAt
+                    ? [(UserTaskSourceKind.FailureIncident, "failure:1")]
+                    : Array.Empty<(UserTaskSourceKind, string)>();
+                return Task.FromResult(observed);
+            });
+
+        ShiftPlanCompiler compiler = BuildCompiler(clock, new StubSource("attn",
+            [UserTaskSourceKind.FailureIncident], Spec("failure:1")));
+
+        // Pass 1 at t0: skip not yet committed → task created.
+        ShiftPlanCompileResult r1 = await compiler.CompileAsync(state);
+        Assert.Equal(1, r1.Created);
+
+        // Advance one compile cadence; pass 2 must observe the now-committed skip and
+        // NOT recreate the task.
+        clock.Advance(TimeSpan.FromSeconds(15));
+        ShiftPlanCompileResult r2 = await compiler.CompileAsync(state);
+        Assert.Equal(0, r2.Created);
     }
 
     [Fact]
@@ -605,6 +748,20 @@ public class ShiftPlanCompilerTests
 
     private ShiftPlanCompiler BuildCompiler(params IShiftPlanTaskSource[] sources) =>
         new(sources, _tasks.Object, NullLogger<ShiftPlanCompiler>.Instance);
+
+    private ShiftPlanCompiler BuildCompiler(TimeProvider clock, params IShiftPlanTaskSource[] sources) =>
+        new(sources, _tasks.Object, NullLogger<ShiftPlanCompiler>.Instance, clock);
+
+    /// <summary>
+    /// A hand-advanceable <see cref="TimeProvider"/> so a test can drive the compiler's
+    /// pass clock deterministically across passes (Fix R4-3 watermark-overlap test).
+    /// </summary>
+    private sealed class MutableClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan by) => _now += by;
+    }
 
     private static ShiftPlanTaskSpec WindowSpec(DateTime windowStart, string sourceId = "maintenance:1") => new(
         TaskType: UserTaskType.MaintenanceDue,

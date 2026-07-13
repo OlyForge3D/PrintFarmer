@@ -66,11 +66,27 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
             return Array.Empty<ShiftPlanTaskSpec>();
         }
 
-        IReadOnlyList<IdleWindow> windows = await _idleWindows
-            .GetIdleWindowsAsync(minWindow, ct)
+        IdleWindowResult idleResult = await _idleWindows
+            .GetIdleWindowsWithIndeterminateAsync(minWindow, ct)
             .ConfigureAwait(false);
 
-        Dictionary<Guid, IdleWindow> byPrinter = windows.ToDictionary(w => w.PrinterId);
+        // Fix R4-1: fail closed when dispatch eligibility is indeterminate for a
+        // printer that has an active maintenance alert. A scorer outage makes
+        // IdleWindowService exclude that printer from the window set; if we returned
+        // successfully with the printer merely absent, the compiler would treat
+        // Maintenance as a successful (but now spec-less) source and auto-complete the
+        // still-active maintenance task — then recreate a duplicate once scoring
+        // recovers (task flapping, lost InProgress state). Throwing routes through the
+        // compiler's per-source isolation, which preserves existing maintenance tasks
+        // for this pass instead of sweeping them into auto-complete.
+        if (idleResult.IndeterminatePrinterIds.Count > 0
+            && active.Any(a => idleResult.IndeterminatePrinterIds.Contains(a.PrinterId)))
+        {
+            throw new InvalidOperationException(
+                "Dispatch eligibility indeterminate for maintenance-alerted printer; failing closed to preserve tasks.");
+        }
+
+        Dictionary<Guid, IdleWindow> byPrinter = idleResult.Windows.ToDictionary(w => w.PrinterId);
 
         List<ShiftPlanTaskSpec> specs = new(active.Count);
         foreach (MaintenanceAlert alert in active)
