@@ -8,6 +8,7 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private(set) var connectionState: SignalRConnectionState = .disconnected
     private var printerHandler: (@Sendable (PrinterStatusUpdate) -> Void)?
     private var jobQueueHandler: (@Sendable (JobQueueUpdate) -> Void)?
+    private var attentionHandler: (@Sendable (AttentionChangedEvent) -> Void)?
     private var simulationTask: Task<Void, Never>?
 
     func connect() async throws {
@@ -27,6 +28,10 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {
         jobQueueHandler = handler
+    }
+
+    func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {
+        attentionHandler = handler
     }
 
     // MARK: - Simulation

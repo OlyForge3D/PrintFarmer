@@ -7,6 +7,7 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     var disconnectCalled = false
     var printerUpdateHandler: (@Sendable (PrinterStatusUpdate) -> Void)?
     var jobQueueUpdateHandler: (@Sendable (JobQueueUpdate) -> Void)?
+    var attentionChangedHandler: (@Sendable (AttentionChangedEvent) -> Void)?
     var errorToThrow: Error?
 
     func connect() async throws {
@@ -26,6 +27,17 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {
         jobQueueUpdateHandler = handler
+    }
+
+    func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {
+        attentionChangedHandler = handler
+    }
+
+    /// Simulate an attention-invalidation event for testing. Callers use
+    /// this to prove that a listener receives the invalidation and triggers
+    /// its own refetch.
+    func simulateAttentionChanged(_ event: AttentionChangedEvent) {
+        attentionChangedHandler?(event)
     }
 
     /// Simulate a printer status update for testing.
