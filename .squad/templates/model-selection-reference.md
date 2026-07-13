@@ -94,8 +94,30 @@ When spawning, include the model in your acknowledgment:
 
 Include tier annotation only when the model was bumped or a specialist was chosen. Default-tier spawns just show the model name.
 
+### Per-Agent Reasoning Effort
+
+Reasoning effort is resolved independently **after** the model is selected. Check these layers in order:
+
+**Layer 0 — Agent-Specific Override (`.squad/config.json`):** On this machine, specific agents use elevated reasoning effort defined in `agentReasoningEffortOverrides.{agentName}`:
+
+- **Implementation agents** (Lambert, Ripley, Hudson, Gorman, Parker): reasoning effort `max`
+- **Code reviewers:**
+  - Bishop (`claude-opus-4.8`): reasoning effort `max`
+  - Hicks (`gpt-5.6-sol`): reasoning effort `max`
+  - Vasquez (`gemini-3.1-pro-preview`): reasoning effort `high` (Gemini 3.1 Pro Preview does not support `max`)
+
+These overrides are automatically resolved when spawning. Work continues until verified and mandatory gates pass. Unavoidable platform/provider hard limits still apply.
+
+**Layer 1 — Session Directive:** Did the user specify reasoning effort for this session? If yes, use that effort for this session.
+
+**Layer 2 — Charter Preference:** Does the agent's charter have a `## Reasoning Effort` section with a preference? If yes, use that effort.
+
+**Layer 3 — Platform Default:** If nothing matched, use the platform's default reasoning effort for the selected model.
+
+**No-artificial-budget directives:** The machine-local policy removes self-imposed time, tool-call, review-round, and iteration budgets. This does **not** disable unavoidable platform, provider, or infrastructure hard limits (rate limits, timeout limits, resource quotas, etc.).
+
 **Valid models (current platform catalog):**
 
-Premium: `claude-opus-4.6`, `claude-opus-4.6-1m` (Internal only), `claude-opus-4.5`
-Standard: `claude-sonnet-4.6`, `claude-sonnet-4.5`, `claude-sonnet-4`, `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex-max`, `gpt-5.1-codex`, `gpt-5.1`, `gemini-3-pro-preview`
+Premium: `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`, `claude-opus-4.5`
+Standard: `claude-sonnet-4.6`, `claude-sonnet-4.5`, `claude-sonnet-4`, `gpt-5.6-sol`, `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex-max`, `gpt-5.1-codex`, `gpt-5.1`, `gemini-3.1-pro-preview`, `gemini-3-pro-preview`
 Fast/Cheap: `claude-haiku-4.5`, `gpt-5.4-mini`, `gpt-5.1-codex-mini`, `gpt-5-mini`, `gpt-4.1`
