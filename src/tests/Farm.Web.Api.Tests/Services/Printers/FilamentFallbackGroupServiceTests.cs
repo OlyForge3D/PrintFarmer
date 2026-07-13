@@ -55,7 +55,11 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
             Name = $"{name}-{suffix}",
             ManufacturerId = mfg.Id,
             ModelId = model.Id,
-            ServerUrl = $"http://10.0.0.{(Math.Abs(suffix.GetHashCode(StringComparison.Ordinal)) % 240) + 2}",
+            // Deterministically unique per seed call: the 8-hex GUID suffix guarantees no collision
+            // on the unique Printers.ServerUrl index. (A prior hash-modulo scheme had only ~240
+            // buckets and could intermittently fail with "UNIQUE constraint failed: Printers.ServerUrl"
+            // when a single test seeded two printers.)
+            ServerUrl = $"http://printer-{suffix}.local",
             IsEnabled = true,
         };
         Toolhead t0 = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 0, Name = "T0", ToolheadType = ToolheadType.Physical };
