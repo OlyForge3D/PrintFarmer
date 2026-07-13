@@ -77,7 +77,7 @@ interface TaskItemProps {
   onComplete: (taskId: string) => void;
   onSkip: (taskId: string) => void;
   onDismiss: (taskId: string) => void;
-  pendingActionTaskId: string | null;
+  pendingActionTaskIds: ReadonlySet<string>;
 }
 
 function TaskItem({
@@ -86,13 +86,13 @@ function TaskItem({
   onComplete,
   onSkip,
   onDismiss,
-  pendingActionTaskId,
+  pendingActionTaskIds,
 }: TaskItemProps) {
   const details = getShiftTaskDetails(task);
   const anchorHint = formatTaskAnchorHint(task);
   const sourceLabel = describeTaskSource(task.sourceKind);
-  const isActionable = details.href !== null && !details.isUnknownKind;
-  const isRowBusy = pendingActionTaskId === task.id;
+  const isActionable = !details.isUnknownKind;
+  const isRowBusy = pendingActionTaskIds.has(task.id);
 
   const rowClasses = [
     'flex items-start gap-3 p-3 rounded-lg transition-colors group',
@@ -117,6 +117,7 @@ function TaskItem({
       aria-label={ariaLabel}
       aria-busy={isRowBusy || undefined}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (!isActionable) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -275,7 +276,11 @@ export function TasksWidget() {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>(TaskPriority.Normal);
-  const [pendingActionTaskId, setPendingActionTaskId] = useState<string | null>(null);
+  const [pendingActionTaskIds, setPendingActionTaskIds] = useState<Set<string>>(new Set());
+  const addPending = (id: string) =>
+    setPendingActionTaskIds((prev) => { const s = new Set(prev); s.add(id); return s; });
+  const removePending = (id: string) =>
+    setPendingActionTaskIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['tasks', 'shift'],
@@ -292,7 +297,7 @@ export function TasksWidget() {
       { successMessage, errorMessage }: { successMessage: string; errorMessage: string },
     ) =>
       async (...args: TArgs) => {
-        setPendingActionTaskId(args[0]);
+        addPending(args[0]);
         try {
           await fn(...args);
           toast.success(successMessage);
@@ -300,7 +305,7 @@ export function TasksWidget() {
         } catch {
           toast.error(errorMessage);
         } finally {
-          setPendingActionTaskId(null);
+          removePending(args[0]);
         }
       };
 
@@ -439,7 +444,7 @@ export function TasksWidget() {
                     onComplete={(id) => completeMutation.mutate(id)}
                     onSkip={(id) => skipMutation.mutate(id)}
                     onDismiss={(id) => dismissMutation.mutate(id)}
-                    pendingActionTaskId={pendingActionTaskId}
+                    pendingActionTaskIds={pendingActionTaskIds}
                   />
                 ))}
               </div>

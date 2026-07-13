@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
+import { toast } from 'sonner';
 import { TasksWidget } from '../components/TasksWidget';
 import {
   ShiftPlanResult,
@@ -400,5 +401,107 @@ describe('TasksWidget', () => {
     renderWidget();
     const row = await screen.findByRole('button', { name: /Runout at 1:30 — Filament coverage/ });
     expect(row).toBeInTheDocument();
+  });
+
+  it('clicking a manual (Custom) task fires a toast fallback and does not navigate', async () => {
+    const user = userEvent.setup();
+    const customTask = baseTask({
+      id: 'custom-1',
+      taskType: TaskType.Custom,
+      title: 'Fix the thing manually',
+      sourceKind: UserTaskSourceKind.Unspecified,
+    });
+    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
+      shiftPlanResult([{ anchorKind: UserTaskAnchorKind.Now, tasks: [customTask] }]),
+    );
+
+    renderWidget();
+    await waitFor(() => expect(screen.getByText('Fix the thing manually')).toBeInTheDocument());
+
+    const row = screen.getByText('Fix the thing manually').closest('[data-testid="tasks-widget-row"]')!;
+    // Custom tasks are known kinds — they must be rendered as role="button"
+    expect(row.getAttribute('role')).toBe('button');
+
+    await user.click(row);
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(vi.mocked(toast.info)).toHaveBeenCalledWith('Fix the thing manually');
+  });
+
+  it('keyboard activation on a lifecycle button fires only that mutation (not row navigation)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
+      shiftPlanResult([
+        {
+          anchorKind: UserTaskAnchorKind.Now,
+          tasks: [
+            baseTask({
+              id: 'kbd-btn',
+              title: 'Button key test',
+              taskType: TaskType.HarvestReady,
+              entityId: 'p-kbd',
+              sourceKind: UserTaskSourceKind.Harvest,
+            }),
+          ],
+        },
+      ]),
+    );
+    vi.mocked(tasksApi.completeTask).mockResolvedValue(undefined);
+
+    renderWidget();
+    await waitFor(() => expect(screen.getByText('Button key test')).toBeInTheDocument());
+
+    const row = screen.getByText('Button key test').closest('[data-testid="tasks-widget-row"]')!;
+    const completeBtn = within(row as HTMLElement).getByTestId('tasks-widget-complete');
+
+    completeBtn.focus();
+    await user.keyboard('{Enter}');
+
+    expect(tasksApi.completeTask).toHaveBeenCalledWith('kbd-btn');
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('concurrent lifecycle requests keep independent per-row busy state', async () => {
+    const user = userEvent.setup();
+
+    let resolveComplete: () => void = () => {};
+    let resolveSkip: () => void = () => {};
+    vi.mocked(tasksApi.completeTask).mockImplementation(
+      () => new Promise<void>((r) => { resolveComplete = r; }),
+    );
+    vi.mocked(tasksApi.skipTask).mockImplementation(
+      () => new Promise<void>((r) => { resolveSkip = r; }),
+    );
+
+    const task1 = baseTask({ id: 'row-1', title: 'Row one', taskType: TaskType.HarvestReady, entityId: 'p1' });
+    const task2 = baseTask({ id: 'row-2', title: 'Row two', taskType: TaskType.HarvestReady, entityId: 'p2' });
+    vi.mocked(tasksApi.getShiftPlan).mockResolvedValue(
+      shiftPlanResult([{ anchorKind: UserTaskAnchorKind.Now, tasks: [task1, task2] }]),
+    );
+
+    renderWidget();
+    await waitFor(() => expect(screen.getByText('Row one')).toBeInTheDocument());
+
+    const row1 = screen.getByText('Row one').closest('[data-testid="tasks-widget-row"]')!;
+    const row2 = screen.getByText('Row two').closest('[data-testid="tasks-widget-row"]')!;
+
+    // Fire Complete on row1 and Skip on row2 before either resolves
+    await user.click(within(row1 as HTMLElement).getByTestId('tasks-widget-complete'));
+    await user.click(within(row2 as HTMLElement).getByTestId('tasks-widget-skip'));
+
+    // Both rows should be busy simultaneously
+    await waitFor(() => {
+      expect(row1).toHaveAttribute('aria-busy', 'true');
+      expect(row2).toHaveAttribute('aria-busy', 'true');
+    });
+
+    // Resolve row1's complete — row2 must still be busy
+    resolveComplete();
+    await waitFor(() => expect(row1).not.toHaveAttribute('aria-busy'));
+    expect(row2).toHaveAttribute('aria-busy', 'true');
+
+    // Resolve row2's skip
+    resolveSkip();
+    await waitFor(() => expect(row2).not.toHaveAttribute('aria-busy'));
   });
 });
