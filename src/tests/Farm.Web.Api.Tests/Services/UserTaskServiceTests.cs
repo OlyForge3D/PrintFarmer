@@ -324,8 +324,6 @@ public class UserTaskServiceTests
             PrinterId: concurrentPrinterId);
         List<UserTask> openTasks = [];
         object sync = new();
-        int lookupCount = 0;
-        TaskCompletionSource<bool> initialLookups = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         UserTask CreateTerminalRead() => new()
         {
@@ -344,23 +342,11 @@ public class UserTaskServiceTests
             SourceId = terminalTask.SourceId,
         };
 
-        async Task<UserTask?> GetTaskForRaceAsync()
+        Task<UserTask?> GetTaskForRaceAsync()
         {
-            int lookup = Interlocked.Increment(ref lookupCount);
-            if (lookup <= 2)
-            {
-                if (lookup == 2)
-                {
-                    _ = initialLookups.TrySetResult(true);
-                }
-
-                await initialLookups.Task.ConfigureAwait(false);
-                return CreateTerminalRead();
-            }
-
             lock (sync)
             {
-                return openTasks.SingleOrDefault();
+                return Task.FromResult<UserTask?>(openTasks.Count == 0 ? CreateTerminalRead() : openTasks.SingleOrDefault());
             }
         }
 
@@ -499,7 +485,6 @@ public class UserTaskServiceTests
         Guid firstPrinterId = Guid.NewGuid();
         Guid secondPrinterId = Guid.NewGuid();
         ProfileImportRepositoryState state = new();
-        state.BlockFirstInsertReload();
         Mock<IUserTaskRepository> repository = CreateProfileImportRepository(state);
         List<UserTaskDto> createdBroadcasts = [];
         List<UserTaskDto> updatedBroadcasts = [];
@@ -516,6 +501,65 @@ public class UserTaskServiceTests
         UserTaskDto lastBroadcast = orderedBroadcasts[^1];
         Assert.Equal(2, lastBroadcast.RelatedEntityCount);
         Assert.Equal(2, JsonSerializer.Deserialize<List<Guid>>(state.GetOpenTask(printerModelId).RelatedEntityIdsJson!)!.Count);
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_ConcurrentMerges_SerializesPerTask_LastBroadcastReflectsLatestState_InverseInterleaving()
+    {
+        Guid printerModelId = Guid.NewGuid();
+        Guid firstPrinterId = Guid.NewGuid();
+        Guid secondPrinterId = Guid.NewGuid();
+        InverseInterleavingProfileImportRepositoryState state = new();
+        Mock<IUserTaskRepository> repository = CreateInverseInterleavingProfileImportRepository(state);
+        List<UserTaskDto> createdBroadcasts = [];
+        List<UserTaskDto> updatedBroadcasts = [];
+        List<UserTaskDto> orderedBroadcasts = [];
+        TaskCompletionSource<bool> firstCreatedBroadcastEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> allowFirstCreatedBroadcast = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> updatedBroadcastCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<ITaskBroadcaster> broadcaster = CreateBlockingCreatedBroadcastBroadcaster(
+            createdBroadcasts,
+            updatedBroadcasts,
+            orderedBroadcasts,
+            firstCreatedBroadcastEntered,
+            allowFirstCreatedBroadcast,
+            updatedBroadcastCompleted);
+        UserTaskService firstService = new(repository.Object, _loggerMock.Object, broadcaster.Object);
+        UserTaskService secondService = new(repository.Object, _loggerMock.Object, broadcaster.Object);
+
+        Task<UserTaskDto> firstOperation = firstService.CreateOrUpdateProfileImportTaskAsync(
+            CreateProfileImportDto(printerModelId, firstPrinterId));
+        await state.FirstAddAttempted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Task<UserTaskDto> secondOperation = secondService.CreateOrUpdateProfileImportTaskAsync(
+            CreateProfileImportDto(printerModelId, secondPrinterId));
+        bool secondAddArmedBeforeInsert = await WaitForSignalAsync(state.SecondAddAttempted, TimeSpan.FromSeconds(1));
+
+        state.AllowFirstInsert();
+        await firstCreatedBroadcastEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        state.AllowConflictingInsert();
+
+        if (secondAddArmedBeforeInsert)
+        {
+            await updatedBroadcastCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        _ = allowFirstCreatedBroadcast.TrySetResult(true);
+
+        UserTaskDto[] results = await Task.WhenAll(firstOperation, secondOperation);
+        UserTask finalTask = state.GetOpenTask(printerModelId);
+        List<Guid> relatedPrinterIds = JsonSerializer.Deserialize<List<Guid>>(finalTask.RelatedEntityIdsJson!)!;
+
+        Assert.Equal(2, results.Length);
+        Assert.All(results, result => Assert.Equal(finalTask.Id, result.Id));
+        Assert.Single(createdBroadcasts);
+        Assert.Single(updatedBroadcasts);
+        Assert.Equal(2, orderedBroadcasts.Count);
+        Assert.Equal(1, orderedBroadcasts[0].RelatedEntityCount);
+        Assert.Equal(2, orderedBroadcasts[1].RelatedEntityCount);
+        Assert.Equal(2, relatedPrinterIds.Count);
+        Assert.Contains(firstPrinterId, relatedPrinterIds);
+        Assert.Contains(secondPrinterId, relatedPrinterIds);
     }
 
     [Fact]
@@ -823,6 +867,34 @@ public class UserTaskServiceTests
         return repository;
     }
 
+    private static Mock<IUserTaskRepository> CreateInverseInterleavingProfileImportRepository(
+        InverseInterleavingProfileImportRepositoryState state)
+    {
+        Mock<IUserTaskRepository> repository = new();
+        repository.Setup(r => r.GetByEntityAsync(
+                UserTaskType.ProfileImport,
+                "PrinterModel",
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((UserTaskType _, string _, Guid entityId, CancellationToken ct) => state.GetOpenTaskAsync(entityId, ct));
+        repository.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid id, CancellationToken ct) => state.GetByIdAsync(id, ct));
+        repository.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Returns((UserTask task, CancellationToken ct) => state.AddAsync(task, ct));
+        repository.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+                It.IsAny<UserTask>(),
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((UserTask task, IReadOnlyCollection<string> _, DateTime? expectedUpdatedAt, CancellationToken ct) =>
+                state.TryUpdateFieldsIfOpenAsync(task, expectedUpdatedAt, ct));
+        repository.Setup(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repository.Setup(r => r.GetPendingCountAsync(null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        return repository;
+    }
+
     private static Mock<ITaskBroadcaster> CreateRecordingBroadcaster(
         List<UserTaskDto> createdBroadcasts,
         List<UserTaskDto> updatedBroadcasts,
@@ -868,17 +940,66 @@ public class UserTaskServiceTests
         return broadcaster;
     }
 
+    private static Mock<ITaskBroadcaster> CreateBlockingCreatedBroadcastBroadcaster(
+        List<UserTaskDto> createdBroadcasts,
+        List<UserTaskDto> updatedBroadcasts,
+        List<UserTaskDto> orderedBroadcasts,
+        TaskCompletionSource<bool> firstCreatedBroadcastEntered,
+        TaskCompletionSource<bool> allowFirstCreatedBroadcast,
+        TaskCompletionSource<bool> updatedBroadcastCompleted)
+    {
+        Mock<ITaskBroadcaster> broadcaster = new();
+        int createdBroadcastCount = 0;
+        broadcaster.Setup(b => b.BroadcastTaskCreatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()))
+            .Returns(async (UserTaskDto task, CancellationToken ct) =>
+            {
+                if (Interlocked.Increment(ref createdBroadcastCount) == 1)
+                {
+                    _ = firstCreatedBroadcastEntered.TrySetResult(true);
+                    await allowFirstCreatedBroadcast.Task.WaitAsync(ct);
+                }
+
+                lock (createdBroadcasts)
+                {
+                    createdBroadcasts.Add(task);
+                }
+
+                lock (orderedBroadcasts)
+                {
+                    orderedBroadcasts.Add(task);
+                }
+            });
+        broadcaster.Setup(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()))
+            .Returns((UserTaskDto task, CancellationToken ct) =>
+            {
+                lock (updatedBroadcasts)
+                {
+                    updatedBroadcasts.Add(task);
+                }
+
+                lock (orderedBroadcasts)
+                {
+                    orderedBroadcasts.Add(task);
+                }
+
+                _ = updatedBroadcastCompleted.TrySetResult(true);
+                return Task.CompletedTask;
+            });
+        broadcaster.Setup(b => b.BroadcastPendingTaskCountAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return broadcaster;
+    }
+
+    private static async Task<bool> WaitForSignalAsync(Task signal, TimeSpan timeout)
+    {
+        Task completedTask = await Task.WhenAny(signal, Task.Delay(timeout));
+        return completedTask == signal;
+    }
+
     private sealed class ProfileImportRepositoryState
     {
         private readonly object _sync = new();
         private readonly Dictionary<Guid, UserTask> _tasks = [];
-        private readonly TaskCompletionSource<bool> _initialReads =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource<bool> _allowFirstInsertReload =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _readCount;
-        private bool _blockFirstInsertReload;
-        private Guid? _firstInsertedTaskId;
 
         public void Seed(UserTask task)
         {
@@ -888,27 +1009,8 @@ public class UserTaskServiceTests
             }
         }
 
-        public void BlockFirstInsertReload()
+        public Task<UserTask?> GetOpenTaskAsync(Guid printerModelId, CancellationToken _)
         {
-            lock (_sync)
-            {
-                _blockFirstInsertReload = true;
-            }
-        }
-
-        public async Task<UserTask?> GetOpenTaskAsync(Guid printerModelId, CancellationToken ct)
-        {
-            int readNumber = Interlocked.Increment(ref _readCount);
-            if (readNumber <= 2)
-            {
-                if (readNumber == 2)
-                {
-                    _ = _initialReads.TrySetResult(true);
-                }
-
-                await _initialReads.Task.WaitAsync(ct);
-            }
-
             lock (_sync)
             {
                 UserTask? task = _tasks.Values.SingleOrDefault(task =>
@@ -916,26 +1018,15 @@ public class UserTaskServiceTests
                     && task.TaskType == UserTaskType.ProfileImport
                     && task.EntityType == "PrinterModel"
                     && task.Status is UserTaskStatus.Pending or UserTaskStatus.InProgress);
-                return task is null ? null : Clone(task);
+                return Task.FromResult(task is null ? null : Clone(task));
             }
         }
 
-        public async Task<UserTask?> GetByIdAsync(Guid id, CancellationToken ct)
+        public Task<UserTask?> GetByIdAsync(Guid id, CancellationToken _)
         {
-            bool shouldBlock;
             lock (_sync)
             {
-                shouldBlock = _blockFirstInsertReload && _firstInsertedTaskId == id;
-            }
-
-            if (shouldBlock)
-            {
-                await _allowFirstInsertReload.Task.WaitAsync(ct);
-            }
-
-            lock (_sync)
-            {
-                return _tasks.TryGetValue(id, out UserTask? task) ? Clone(task) : null;
+                return Task.FromResult(_tasks.TryGetValue(id, out UserTask? task) ? Clone(task) : null);
             }
         }
 
@@ -959,10 +1050,6 @@ public class UserTaskServiceTests
                 }
 
                 _tasks[task.Id] = Clone(task);
-                if (_firstInsertedTaskId is null)
-                {
-                    _firstInsertedTaskId = task.Id;
-                }
             }
 
             return Task.CompletedTask;
@@ -978,11 +1065,10 @@ public class UserTaskServiceTests
                 {
                     return Task.FromResult(false);
                 }
-
                 persisted.RelatedEntityIdsJson = task.RelatedEntityIdsJson;
                 persisted.Description = task.Description;
                 persisted.UpdatedAt = persisted.UpdatedAt.AddTicks(1);
-                _allowFirstInsertReload.TrySetResult(true);
+                persisted.UpdatedAt = persisted.UpdatedAt.AddTicks(1);
                 return Task.FromResult(true);
             }
         }
@@ -999,6 +1085,156 @@ public class UserTaskServiceTests
                 return Clone(task);
             }
         }
+
+        private static UserTask Clone(UserTask task) => new()
+        {
+            Id = task.Id,
+            TaskType = task.TaskType,
+            EntityType = task.EntityType,
+            EntityId = task.EntityId,
+            Title = task.Title,
+            Description = task.Description,
+            Status = task.Status,
+            Priority = task.Priority,
+            CreatedAt = task.CreatedAt,
+            UpdatedAt = task.UpdatedAt,
+            MetadataJson = task.MetadataJson,
+            RelatedEntityIdsJson = task.RelatedEntityIdsJson,
+            SourceKind = task.SourceKind,
+            SourceId = task.SourceId,
+        };
+    }
+
+    private sealed class InverseInterleavingProfileImportRepositoryState
+    {
+        private readonly object _sync = new();
+        private readonly Dictionary<Guid, UserTask> _tasks = [];
+        private readonly TaskCompletionSource<bool> _firstAddAttempted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _allowFirstInsert =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _firstInsertCompleted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _secondAddAttempted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _allowConflictingInsert =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _addAttemptCount;
+
+        public Task FirstAddAttempted => _firstAddAttempted.Task;
+
+        public Task SecondAddAttempted => _secondAddAttempted.Task;
+
+        public void AllowFirstInsert()
+        {
+            _ = _allowFirstInsert.TrySetResult(true);
+        }
+
+        public void AllowConflictingInsert()
+        {
+            _ = _allowConflictingInsert.TrySetResult(true);
+        }
+
+        public Task<UserTask?> GetOpenTaskAsync(Guid printerModelId, CancellationToken _)
+        {
+            lock (_sync)
+            {
+                UserTask? task = _tasks.Values.SingleOrDefault(task =>
+                    task.EntityId == printerModelId
+                    && task.TaskType == UserTaskType.ProfileImport
+                    && task.EntityType == "PrinterModel"
+                    && task.Status is UserTaskStatus.Pending or UserTaskStatus.InProgress);
+                return Task.FromResult(task is null ? null : Clone(task));
+            }
+        }
+
+        public Task<UserTask?> GetByIdAsync(Guid id, CancellationToken _)
+        {
+            lock (_sync)
+            {
+                return Task.FromResult(_tasks.TryGetValue(id, out UserTask? task) ? Clone(task) : null);
+            }
+        }
+
+        public async Task AddAsync(UserTask task, CancellationToken ct)
+        {
+            int attemptNumber = Interlocked.Increment(ref _addAttemptCount);
+            if (attemptNumber == 1)
+            {
+                _ = _firstAddAttempted.TrySetResult(true);
+                await _allowFirstInsert.Task.WaitAsync(ct);
+
+                lock (_sync)
+                {
+                    _tasks[task.Id] = Clone(task);
+                }
+
+                _ = _firstInsertCompleted.TrySetResult(true);
+                return;
+            }
+
+            if (attemptNumber == 2)
+            {
+                _ = _secondAddAttempted.TrySetResult(true);
+                await _firstInsertCompleted.Task.WaitAsync(ct);
+                await _allowConflictingInsert.Task.WaitAsync(ct);
+                throw CreateUniqueConstraintException();
+            }
+
+            lock (_sync)
+            {
+                bool hasOpenTask = _tasks.Values.Any(existing =>
+                    existing.EntityId == task.EntityId
+                    && existing.TaskType == UserTaskType.ProfileImport
+                    && existing.EntityType == "PrinterModel"
+                    && existing.Status is UserTaskStatus.Pending or UserTaskStatus.InProgress);
+                if (hasOpenTask)
+                {
+                    throw CreateUniqueConstraintException();
+                }
+
+                _tasks[task.Id] = Clone(task);
+            }
+        }
+
+        public Task<bool> TryUpdateFieldsIfOpenAsync(UserTask task, DateTime? expectedUpdatedAt, CancellationToken _)
+        {
+            lock (_sync)
+            {
+                if (!_tasks.TryGetValue(task.Id, out UserTask? persisted)
+                    || persisted.Status is not (UserTaskStatus.Pending or UserTaskStatus.InProgress)
+                    || (expectedUpdatedAt.HasValue && persisted.UpdatedAt != expectedUpdatedAt.Value))
+                {
+                    return Task.FromResult(false);
+                }
+
+                persisted.RelatedEntityIdsJson = task.RelatedEntityIdsJson;
+                persisted.Description = task.Description;
+                persisted.UpdatedAt = persisted.UpdatedAt.AddTicks(1);
+                return Task.FromResult(true);
+            }
+        }
+
+        public UserTask GetOpenTask(Guid printerModelId)
+        {
+            lock (_sync)
+            {
+                UserTask task = _tasks.Values.Single(task =>
+                    task.EntityId == printerModelId
+                    && task.TaskType == UserTaskType.ProfileImport
+                    && task.EntityType == "PrinterModel"
+                    && task.Status is UserTaskStatus.Pending or UserTaskStatus.InProgress);
+                return Clone(task);
+            }
+        }
+
+        private static DbUpdateException CreateUniqueConstraintException() =>
+            new(
+                "insert failed",
+                new SqliteException(
+                    "UNIQUE constraint failed: UserTasks.TaskType, UserTasks.EntityType, UserTasks.EntityId",
+                    19,
+                    2067));
 
         private static UserTask Clone(UserTask task) => new()
         {

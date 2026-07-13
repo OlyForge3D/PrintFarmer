@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Collections.Concurrent;
+using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -15,8 +16,15 @@ public class UserTaskService(
     ITaskBroadcaster? broadcaster = null) : IUserTaskService
 {
     private const int MaxProfileImportWriteAttempts = 5;
+    private const string ProfileImportEntityType = "PrinterModel";
     private static readonly IReadOnlyCollection<string> ProfileImportUpdateProperties =
         [nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)];
+
+    private static readonly object ProfileImportTaskGateSync = new();
+
+    // This only serializes profile-import writers inside the current process.
+    // Cross-node broadcast ordering still requires external coordination.
+    private static readonly ConcurrentDictionary<ProfileImportTaskLockKey, ProfileImportTaskGateEntry> ProfileImportTaskGates = new();
 
     private readonly IUserTaskRepository _taskRepository = taskRepository ?? throw new ArgumentNullException(nameof(taskRepository));
     private readonly ILogger<UserTaskService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -62,11 +70,13 @@ public class UserTaskService(
     /// <inheritdoc />
     public async Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskDto dto, CancellationToken ct = default)
     {
+        using ProfileImportTaskGateLease gateLease = await AcquireProfileImportTaskGateAsync(ProfileImportEntityType, dto.PrinterModelId, ct);
+
         for (int attempt = 0; attempt < MaxProfileImportWriteAttempts; attempt++)
         {
             UserTask? existingTask = await _taskRepository.GetByEntityAsync(
                 UserTaskType.ProfileImport,
-                "PrinterModel",
+                ProfileImportEntityType,
                 dto.PrinterModelId,
                 ct);
 
@@ -164,7 +174,7 @@ public class UserTaskService(
             await _taskRepository.DetachTrackedAsync([newTask], ct);
             UserTask? concurrentTask = await _taskRepository.GetByEntityAsync(
                 UserTaskType.ProfileImport,
-                "PrinterModel",
+                ProfileImportEntityType,
                 dto.PrinterModelId,
                 ct);
             if (concurrentTask is null)
@@ -189,6 +199,64 @@ public class UserTaskService(
         UserTaskDto createdDto = MapToDto(persisted);
         await BroadcastTaskCreatedAsync(createdDto, ct);
         return createdDto;
+    }
+
+    private static async Task<ProfileImportTaskGateLease> AcquireProfileImportTaskGateAsync(
+        string entityType,
+        Guid entityId,
+        CancellationToken ct)
+    {
+        ProfileImportTaskLockKey key = new(entityType, entityId);
+        ProfileImportTaskGateEntry entry;
+        lock (ProfileImportTaskGateSync)
+        {
+            if (!ProfileImportTaskGates.TryGetValue(key, out ProfileImportTaskGateEntry? existingEntry))
+            {
+                existingEntry = new ProfileImportTaskGateEntry();
+                ProfileImportTaskGates[key] = existingEntry;
+            }
+
+            existingEntry.ReferenceCount++;
+            entry = existingEntry;
+        }
+
+        try
+        {
+            await entry.Semaphore.WaitAsync(ct);
+            return new ProfileImportTaskGateLease(key, entry);
+        }
+        catch
+        {
+            ReleaseProfileImportTaskGate(key, entry, releaseSemaphore: false);
+            throw;
+        }
+    }
+
+    private static void ReleaseProfileImportTaskGate(
+        ProfileImportTaskLockKey key,
+        ProfileImportTaskGateEntry entry,
+        bool releaseSemaphore)
+    {
+        if (releaseSemaphore)
+        {
+            entry.Semaphore.Release();
+        }
+
+        bool disposeSemaphore = false;
+        lock (ProfileImportTaskGateSync)
+        {
+            entry.ReferenceCount--;
+            if (entry.ReferenceCount == 0)
+            {
+                _ = ProfileImportTaskGates.TryRemove(key, out _);
+                disposeSemaphore = true;
+            }
+        }
+
+        if (disposeSemaphore)
+        {
+            entry.Semaphore.Dispose();
+        }
     }
 
     private async Task<UserTask> ReloadCommittedTaskAsync(Guid taskId, CancellationToken ct)
@@ -386,7 +454,7 @@ public class UserTaskService(
         {
             Id = Guid.NewGuid(),
             TaskType = UserTaskType.ProfileImport,
-            EntityType = "PrinterModel",
+            EntityType = ProfileImportEntityType,
             EntityId = dto.PrinterModelId,
             Title = $"Import slicer profiles for {dto.ManufacturerName} {dto.PrinterModelName}",
             Description = "1 printer waiting for slicer profiles",
@@ -489,6 +557,32 @@ public class UserTaskService(
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[UserTaskService] Failed to broadcast task updated event");
+        }
+    }
+
+    private readonly record struct ProfileImportTaskLockKey(string EntityType, Guid EntityId);
+
+    private sealed class ProfileImportTaskGateEntry
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+        public int ReferenceCount { get; set; }
+    }
+
+    private sealed class ProfileImportTaskGateLease(
+        ProfileImportTaskLockKey key,
+        ProfileImportTaskGateEntry entry) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            ReleaseProfileImportTaskGate(key, entry, releaseSemaphore: true);
         }
     }
 }
