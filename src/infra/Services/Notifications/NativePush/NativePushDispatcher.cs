@@ -432,7 +432,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
             await PersistOutcomeInFreshScopeAsync(
-                (tokens, ct) => tokens.RecordSuccessAsync(deviceToken.Id, nowUtc, ct),
+                (tokens, ct) => tokens.RecordSuccessAsync(
+                    deviceToken.Id,
+                    deviceToken.RegistrationVersion,
+                    nowUtc,
+                    ct),
                 cancellationToken);
             return;
         }
@@ -443,7 +447,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             await PersistOutcomeInFreshScopeAsync(
                 async (tokens, ct) =>
                 {
-                    _ = await tokens.InvalidateAsync(deviceToken.Id, ct);
+                    _ = await tokens.InvalidateAsync(
+                        deviceToken.Id,
+                        deviceToken.RegistrationVersion,
+                        ct);
                 },
                 cancellationToken);
             return;
@@ -490,6 +497,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         await PersistOutcomeInFreshScopeAsync(
             (tokens, ct) => tokens.RecordFailureAsync(
                 deviceToken.Id,
+                deviceToken.RegistrationVersion,
                 nowUtc,
                 settings.FailureDeactivationThreshold,
                 ct),

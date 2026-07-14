@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Data.Common;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Dtos.Attention;
@@ -295,6 +296,7 @@ public sealed class NativePushDispatcherTests
             .ReturnsAsync([tokenB]);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<long>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -346,6 +348,7 @@ public sealed class NativePushDispatcherTests
             .ReturnsAsync([unauthorizedToken]);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<long>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -415,7 +418,7 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ConcurrentDeletePersistenceFailure_UsesFreshContextsAndContinuesFanOut()
+    public async Task DispatchAsync_ConcurrentDeleteMakesStaleOutcomeNoOpAndContinuesWithFreshContexts()
     {
         Guid ownerA = Guid.Parse("00000000-0000-0000-0000-000000000001");
         Guid ownerB = Guid.Parse("00000000-0000-0000-0000-000000000002");
@@ -509,12 +512,8 @@ public sealed class NativePushDispatcherTests
             interceptor.PersistenceContextIds.Should().HaveCount(3);
             interceptor.PersistenceContextIds.Should().OnlyHaveUniqueItems(
                 "every token outcome must use an independent scoped AppDbContext");
-            DbUpdateConcurrencyException original = logger.Exceptions
-                .Should().ContainSingle()
-                .Subject.Should().BeOfType<DbUpdateConcurrencyException>().Subject;
-            original.Entries.Should().ContainSingle();
-            original.Entries.Single().Entity.Should().BeOfType<DeviceToken>()
-                .Which.Id.Should().Be(tokenA.Id);
+            logger.Exceptions.Should().BeEmpty(
+                "a conditionally stale outcome is an expected zero-row no-op, not a persistence failure");
 
             await using AppDbContext verify = new(plainOptions);
             DeviceToken[] remaining = await verify.DeviceTokens.AsNoTracking().ToArrayAsync();
@@ -575,7 +574,7 @@ public sealed class NativePushDispatcherTests
             .Setup(r => r.GetActiveByUserAsync(ownerB, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<DeviceToken> { ownerBToken });
         tokens
-            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
@@ -639,9 +638,10 @@ public sealed class NativePushDispatcherTests
         var persistedSuccesses = new ConcurrentBag<Guid>();
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<long>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<Guid, DateTime, CancellationToken>((id, _, _) => persistedSuccesses.Add(id))
+            .Callback<Guid, long, DateTime, CancellationToken>((id, _, _, _) => persistedSuccesses.Add(id))
             .Returns(Task.CompletedTask);
 
         var attention = new Mock<IAttentionService>();
@@ -717,6 +717,7 @@ public sealed class NativePushDispatcherTests
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<long>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -759,6 +760,7 @@ public sealed class NativePushDispatcherTests
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<long>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -782,6 +784,26 @@ public sealed class NativePushDispatcherTests
         await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: userId);
 
         captured!.ExpiresAtUtc.Should().Be(deadline);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_RegistrationRefreshDuringSuccessfulSend_StaleSuccessDoesNotMutateReplacement()
+    {
+        await AssertRegistrationRefreshRejectsStaleOutcomeAsync(NativePushDispatchResult.Delivered());
+    }
+
+    [Fact]
+    public async Task DispatchAsync_RegistrationRefreshDuringTokenFailure_StaleFailureDoesNotMutateReplacement()
+    {
+        await AssertRegistrationRefreshRejectsStaleOutcomeAsync(
+            NativePushDispatchResult.TokenFailure("device-token-failure"));
+    }
+
+    [Fact]
+    public async Task DispatchAsync_RegistrationRefreshDuringInvalidation_StaleInvalidationDoesNotDeleteReplacement()
+    {
+        await AssertRegistrationRefreshRejectsStaleOutcomeAsync(
+            NativePushDispatchResult.Invalidated("BadDeviceToken"));
     }
 
     [Fact]
@@ -889,7 +911,7 @@ public sealed class NativePushDispatcherTests
         Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens
-            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
@@ -944,8 +966,8 @@ public sealed class NativePushDispatcherTests
         using var innerCts = new CancellationTokenSource();
         innerCts.Cancel();
         tokens
-            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Returns<Guid, DateTime, CancellationToken>((_, _, _) => Task.FromException(new OperationCanceledException(innerCts.Token)));
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, long, DateTime, CancellationToken>((_, _, _, _) => Task.FromException(new OperationCanceledException(innerCts.Token)));
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
         var sender = new Mock<INativePushSender>();
@@ -987,7 +1009,7 @@ public sealed class NativePushDispatcherTests
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         int recordFailureCount = 0;
         tokens
-            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Callback(() => System.Threading.Interlocked.Increment(ref recordFailureCount))
             .Returns(Task.CompletedTask);
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
@@ -1031,7 +1053,7 @@ public sealed class NativePushDispatcherTests
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         int recordFailureCount = 0;
         tokens
-            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Callback(() => System.Threading.Interlocked.Increment(ref recordFailureCount))
             .Returns(Task.CompletedTask);
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
@@ -1076,7 +1098,7 @@ public sealed class NativePushDispatcherTests
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         int recordFailureCount = 0;
         tokens
-            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Callback(() => System.Threading.Interlocked.Increment(ref recordFailureCount))
             .Returns(Task.CompletedTask);
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
@@ -1131,7 +1153,7 @@ public sealed class NativePushDispatcherTests
             .Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<DeviceToken> { t1, t2, t3 });
         tokens
-            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var attention = new Mock<IAttentionService>();
@@ -1207,7 +1229,7 @@ public sealed class NativePushDispatcherTests
         Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens
-            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var attention = new Mock<IAttentionService>();
@@ -1281,6 +1303,7 @@ public sealed class NativePushDispatcherTests
         tokens
             .Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<long>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -1338,6 +1361,144 @@ public sealed class NativePushDispatcherTests
         sendCount.Should().Be(
             2,
             "the duplicate must be discarded before rate capacity is consumed, leaving room for the distinct third event");
+    }
+
+    private static async Task AssertRegistrationRefreshRejectsStaleOutcomeAsync(
+        NativePushDispatchResult staleOutcome)
+    {
+        Guid userId = Guid.NewGuid();
+        const string installationId = "refreshing-installation";
+        string tokenA = new('a', 64);
+        string tokenB = new('b', 64);
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"native-push-registration-refresh-{Guid.NewGuid():N}.db");
+        string connectionString =
+            $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        try
+        {
+            DeviceToken registrationA;
+            await using (AppDbContext seed = new(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.Add(BuildUser(userId, "refresh-owner"));
+                seed.NotificationPreferences.Add(BuildPushPreferences(userId));
+                await seed.SaveChangesAsync();
+                registrationA = await new EfDeviceTokenRepository(seed).UpsertAsync(
+                    userId,
+                    installationId,
+                    tokenA,
+                    "ios",
+                    "production",
+                    "com.example.topic-a");
+            }
+
+            var services = new ServiceCollection();
+            services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(connectionString));
+            services.AddScoped<IDeviceTokenRepository, EfDeviceTokenRepository>();
+            services.AddSingleton<IOperatorFeatureGate>(BuildGate(enabled: true).Object);
+            var attention = new Mock<IAttentionService>();
+            attention.Setup(service => service.FindItemAsync(
+                    userId,
+                    item.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(item);
+            services.AddSingleton<IAttentionService>(attention.Object);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            var sendStarted = new TaskCompletionSource<NativePushEnvelope>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseSend = new TaskCompletionSource<NativePushDispatchResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var sender = new Mock<INativePushSender>();
+            sender.SetupGet(value => value.ModeName).Returns("direct");
+            sender.Setup(value => value.SendAsync(
+                    It.IsAny<NativePushEnvelope>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<NativePushEnvelope, CancellationToken>(async (envelope, cancellationToken) =>
+                {
+                    sendStarted.TrySetResult(envelope);
+                    return await releaseSend.Task.WaitAsync(cancellationToken);
+                });
+            using var sut = new NativePushDispatcher(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                sender.Object,
+                new StaticOptionsMonitor(new NativePushSettings
+                {
+                    Mode = NativePushMode.Direct,
+                    MaxAttempts = 1,
+                    FailureDeactivationThreshold = 1,
+                }),
+                new NativePushMetrics(),
+                NullLogger<NativePushDispatcher>.Instance);
+
+            Task dispatch = sut.DispatchAsync(
+                item.Id,
+                AttentionChangeKind.Created,
+                targetUserId: userId);
+            try
+            {
+                NativePushEnvelope dispatched = await sendStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                dispatched.Token.Should().Be(tokenA);
+                dispatched.Environment.Should().Be("production");
+                dispatched.AppBundleId.Should().Be("com.example.topic-a");
+
+                DeviceToken replacement;
+                await using (AppDbContext refresh = new(options))
+                {
+                    replacement = await new EfDeviceTokenRepository(refresh).UpsertAsync(
+                        userId,
+                        installationId,
+                        tokenB,
+                        "ios",
+                        "development",
+                        "com.example.topic-b");
+                }
+
+                replacement.Id.Should().Be(registrationA.Id);
+                replacement.RegistrationVersion.Should().Be(registrationA.RegistrationVersion + 1);
+
+                DeviceToken replacementBaseline;
+                await using (AppDbContext baseline = new(options))
+                {
+                    replacementBaseline = await baseline.DeviceTokens.AsNoTracking().SingleAsync();
+                }
+
+                releaseSend.TrySetResult(staleOutcome);
+                await dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+
+                await using AppDbContext verify = new(options);
+                DeviceToken persisted = await verify.DeviceTokens.AsNoTracking().SingleAsync();
+                persisted.Id.Should().Be(replacementBaseline.Id);
+                persisted.UserId.Should().Be(replacementBaseline.UserId);
+                persisted.InstallationId.Should().Be(replacementBaseline.InstallationId);
+                persisted.RegistrationVersion.Should().Be(replacementBaseline.RegistrationVersion);
+                persisted.Token.Should().Be(tokenB);
+                persisted.Platform.Should().Be(replacementBaseline.Platform);
+                persisted.Environment.Should().Be("development");
+                persisted.AppBundleId.Should().Be("com.example.topic-b");
+                persisted.IsActive.Should().BeTrue();
+                persisted.ConsecutiveFailureCount.Should().Be(0);
+                persisted.LastFailureAt.Should().BeNull();
+                persisted.LastUsedAt.Should().Be(replacementBaseline.LastUsedAt);
+            }
+            finally
+            {
+                releaseSend.TrySetResult(NativePushDispatchResult.Transient("test-cleanup"));
+                await dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
     }
 
     private static Farm.Infrastructure.Domain.User BuildUser(Guid userId, string name)
@@ -1477,10 +1638,10 @@ public sealed class NativePushDispatcherTests
             Actions: Array.Empty<AttentionActionDto>());
     }
 
-    private sealed class TokenOutcomeDeleteRaceInterceptor(Guid doomedTokenId) : SaveChangesInterceptor
+    private sealed class TokenOutcomeDeleteRaceInterceptor(Guid doomedTokenId) : DbCommandInterceptor
     {
         private readonly ConcurrentQueue<DbContextId> _persistenceContextIds = new();
-        private int _doomedSaveObserved;
+        private int _doomedUpdateObserved;
 
         public TaskCompletionSource TokenAUpdateReady { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1491,25 +1652,22 @@ public sealed class NativePushDispatcherTests
         public IReadOnlyCollection<DbContextId> PersistenceContextIds =>
             _persistenceContextIds.ToArray();
 
-        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData,
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
             InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
         {
-            AppDbContext context = (AppDbContext)eventData.Context!;
-            DeviceToken[] modifiedTokens = context.ChangeTracker.Entries<DeviceToken>()
-                .Where(entry => entry.State == EntityState.Modified)
-                .Select(entry => entry.Entity)
-                .ToArray();
-            if (modifiedTokens.Length == 0)
+            if (!command.CommandText.Contains("UPDATE \"DeviceTokens\"", StringComparison.Ordinal))
             {
                 return result;
             }
 
-            _persistenceContextIds.Enqueue(context.ContextId);
-            if (modifiedTokens.Any(token => token.Id == doomedTokenId)
-                && Interlocked.CompareExchange(ref _doomedSaveObserved, 1, 0) == 0)
+            _persistenceContextIds.Enqueue(eventData.Context!.ContextId);
+            if (Interlocked.CompareExchange(ref _doomedUpdateObserved, 1, 0) == 0)
             {
+                command.Parameters.Cast<DbParameter>()
+                    .Should().Contain(parameter => Equals(parameter.Value, doomedTokenId));
                 TokenAUpdateReady.TrySetResult();
                 await DeleteCommitted.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
             }

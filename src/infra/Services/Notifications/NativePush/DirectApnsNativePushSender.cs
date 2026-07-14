@@ -91,6 +91,12 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
     /// </summary>
     internal Func<CancellationToken, Task>? OnBeforeInvalidateWaitAsyncForTests { get; set; }
 
+    /// <summary>
+    /// Test-only factory used to prove that a replacement key is disposed when PEM import
+    /// fails. Production always uses <see cref="ECDsa.Create()"/>.
+    /// </summary>
+    internal Func<ECDsa> SigningKeyFactoryForTests { get; set; } = static () => ECDsa.Create();
+
     /// <inheritdoc />
     public string ModeName => "direct";
 
@@ -363,11 +369,20 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             ? apns.P8KeyPem!
             : File.ReadAllText(apns.P8KeyPath!);
 
-        ECDsa ecdsa = ECDsa.Create();
-        ecdsa.ImportFromPem(pem);
+        ECDsa? replacement = SigningKeyFactoryForTests();
+        try
+        {
+            replacement.ImportFromPem(pem);
 
-        _cachedSigningKey?.Dispose();
-        _cachedSigningKey = ecdsa;
+            ECDsa? previous = _cachedSigningKey;
+            _cachedSigningKey = replacement;
+            replacement = null;
+            previous?.Dispose();
+        }
+        finally
+        {
+            replacement?.Dispose();
+        }
     }
 
     private async Task InvalidateJwtCacheAsync(string failedJwt, CancellationToken cancellationToken)

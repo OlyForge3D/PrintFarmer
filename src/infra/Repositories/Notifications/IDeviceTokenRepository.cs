@@ -13,7 +13,8 @@ public interface IDeviceTokenRepository
     /// <c>(userId, installationId)</c>. Any existing row for the same installation is
     /// updated in-place (token, platform, environment, bundle id, activation) so re-launch
     /// or provider-refreshed tokens do not leave orphan rows. On any successful upsert the
-    /// row is re-activated and its consecutive-failure counter is reset.
+    /// registration version is rotated atomically, the row is re-activated, and its
+    /// consecutive-failure counter is reset.
     /// </summary>
     Task<DeviceToken> UpsertAsync(
         Guid userId,
@@ -43,24 +44,40 @@ public interface IDeviceTokenRepository
 
     /// <summary>
     /// Records a successful send: bumps <c>LastUsedAt</c> and resets the consecutive-failure
-    /// counter. Never re-activates a manually deactivated row here; that only happens on
-    /// upsert.
+    /// counter. The write is applied only when <paramref name="registrationVersion"/> is
+    /// still current; stale provider outcomes are no-ops. Never re-activates a manually
+    /// deactivated row here; that only happens on upsert.
     /// </summary>
-    Task RecordSuccessAsync(Guid deviceTokenId, DateTime nowUtc, CancellationToken cancellationToken = default);
+    Task RecordSuccessAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        DateTime nowUtc,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records an explicitly device-token-attributed terminal failure: bumps
     /// <c>LastFailureAt</c> and the consecutive-failure counter, and soft-deactivates the row
     /// when the counter reaches <paramref name="failureThreshold"/>. Provider-wide transient
-    /// failures never call this method.
+    /// failures never call this method. The write is applied only when
+    /// <paramref name="registrationVersion"/> is still current; stale provider outcomes are
+    /// no-ops.
     /// </summary>
-    Task RecordFailureAsync(Guid deviceTokenId, DateTime nowUtc, int failureThreshold, CancellationToken cancellationToken = default);
+    Task RecordFailureAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        DateTime nowUtc,
+        int failureThreshold,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Hard-deletes the exact registration identified by <paramref name="deviceTokenId"/>
     /// after APNs reports <c>410 Gone</c>, <c>BadDeviceToken</c>, or <c>Unregistered</c>.
     /// Provider token text is not an identity: the same value can legitimately exist in
-    /// another APNs environment, topic, installation, or user registration.
+    /// another APNs environment, topic, installation, or user registration. The delete is
+    /// applied only when <paramref name="registrationVersion"/> is still current.
     /// </summary>
-    Task<bool> InvalidateAsync(Guid deviceTokenId, CancellationToken cancellationToken = default);
+    Task<bool> InvalidateAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        CancellationToken cancellationToken = default);
 }

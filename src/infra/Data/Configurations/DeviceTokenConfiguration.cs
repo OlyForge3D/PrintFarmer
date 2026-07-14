@@ -18,6 +18,11 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
 
         _ = builder.Property(t => t.UserId).IsRequired();
 
+        _ = builder.Property(t => t.RegistrationVersion)
+            .IsRequired()
+            .HasDefaultValue(0L)
+            .IsConcurrencyToken();
+
         _ = builder.Property(t => t.InstallationId)
             .HasMaxLength(NativePushRegistrationContract.InstallationIdMaxLength)
             .IsRequired();

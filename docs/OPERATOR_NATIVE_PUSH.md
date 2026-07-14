@@ -74,9 +74,12 @@ time (chosen by `Mode`); the disabled sender is a no-op that returns
 - Response classification:
   - `200 OK` → success.
   - `410 Gone` OR APNs body reason `BadDeviceToken` / `Unregistered` → the
-    exact attempted registration (`DeviceToken.Id`) is hard-deleted and the
-    fleet-side counter is not touched. Rows that merely share provider-token
-    text in another environment/topic/installation/user are preserved.
+    exact attempted registration incarnation (`DeviceToken.Id` plus
+    `RegistrationVersion`) is hard-deleted and the fleet-side counter is not
+    touched. A concurrent registration refresh rotates the version, making every
+    stale success, failure, or invalidation outcome a no-op. Rows that merely
+    share provider-token text in another environment/topic/installation/user are
+    preserved.
   - `408 Request Timeout`, `429 Too Many Requests`, `5xx`, socket errors,
     or internal `HttpClient.Timeout` → **transient**. Caller/shutdown token
     cancellation propagates immediately and is never converted to a retry.
@@ -217,7 +220,7 @@ Disabling the flag never mutates `DeviceTokens`. Rows are only removed when:
 
 Consecutive-failure soft-deactivation (`IsActive=false`) triggers after 5
 consecutive provider-attributed token failures; relay, configuration, JWT, topic,
-payload, and unknown failures do not affect token health. the row is retained for
+payload, and unknown failures do not affect token health. The row is retained for
 diagnostics and can be reactivated on next successful registration upsert.
 
 ## 5. Persistence
@@ -227,6 +230,7 @@ New entity `DeviceToken` (main app, `AppDbContext`):
 | Column                     | Type            | Notes                                                     |
 |----------------------------|------------------|-----------------------------------------------------------|
 | `Id`                       | `uuid`           | PK.                                                       |
+| `RegistrationVersion`      | `bigint`         | Rotated on each upsert; guards all provider outcomes.     |
 | `UserId`                   | `uuid`           | FK → `Users(Id)`, cascade delete.                         |
 | `InstallationId`           | `varchar(128)`   | Canonical ASCII installation id (1–128 characters).       |
 | `Token`                    | `varchar(256)`   | Canonical lowercase APNs hex token (64–256 characters).   |
@@ -242,8 +246,9 @@ New entity `DeviceToken` (main app, `AppDbContext`):
 Indexes:
 
 - Unique `(UserId, InstallationId)` — one token per installation per user; upsert.
-- Non-unique `(Token)` for provider-token diagnostics. Invalidation never
-  uses this index as identity; it deletes by `DeviceToken.Id`.
+- Non-unique `(Token)` for provider-token diagnostics. Provider outcomes never
+  use token text as identity; every mutation is conditional on the dispatched
+  `(DeviceToken.Id, RegistrationVersion)` incarnation.
 
 Extension to `NotificationPreferences` (same entity, one new column):
 

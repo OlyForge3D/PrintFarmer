@@ -19,6 +19,13 @@ public sealed class DeviceToken
     /// <summary>Primary key.</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    /// <summary>
+    /// Monotonic incarnation of this registration. Every successful upsert rotates the
+    /// value so a provider outcome for an older routing snapshot cannot mutate the current
+    /// token, environment, bundle/topic, installation, or owner registration.
+    /// </summary>
+    public long RegistrationVersion { get; set; }
+
     /// <summary>Owning user (cascade delete).</summary>
     public Guid UserId { get; set; }
 

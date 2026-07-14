@@ -222,8 +222,23 @@ public class AutoDispatchConcurrencyTests : IDisposable
         Guid printer2Id = SeedPrinter("Printer-2", 11);
         Guid jobId = SeedQueuedJob("contested-job");
 
+        foreach (Guid printerId in new[] { printer1Id, printer2Id })
+        {
+            Printer printer = _db.Printers.Single(value => value.Id == printerId);
+            printer.AutoDispatchEnabled = true;
+            printer.DispatchState = new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                AutoDispatchState = AutoDispatchState.Ready,
+            };
+        }
+
+        _db.SaveChanges();
+
         var scorerMock = new Mock<IDispatchScorer>();
         var dispatchMock = new Mock<IJobDispatchService>();
+        var dispatchObserved = new TaskCompletionSource<(Guid JobId, Guid PrinterId)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Both printers score well for the job
         scorerMock
@@ -253,34 +268,49 @@ public class AutoDispatchConcurrencyTests : IDisposable
                     _db.SaveChanges();
                 }
 
+                dispatchObserved.TrySetResult((jId, pId));
                 return Task.FromResult(new QueuedPrintJobDto());
             });
 
         IServiceScopeFactory scopeFactory = BuildScopeFactory(scorerMock, dispatchMock);
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
-        AutoDispatchBackgroundService svc = new(
+        using CancellationTokenSource shutdown = new();
+        using AutoDispatchBackgroundService svc = new(
             _trigger, scopeFactory, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        Task serviceTask = svc.StartAsync(cts.Token);
+        async Task ProcessAfterStartGateAsync(Guid printerId)
+        {
+            await startGate.Task.WaitAsync(shutdown.Token);
+            await svc.ProcessPrinterIdleAsync(
+                printerId,
+                skipIdleThreshold: false,
+                shutdown.Token);
+        }
 
-        // Fire both idle events as close together as possible
-        _trigger.NotifyPrinterIdle(printer1Id);
-        _trigger.NotifyPrinterIdle(printer2Id);
+        Task printer1Cycle = ProcessAfterStartGateAsync(printer1Id);
+        Task printer2Cycle = ProcessAfterStartGateAsync(printer2Id);
+        Task allCycles = Task.WhenAll(printer1Cycle, printer2Cycle);
 
-        await Task.Delay(1500, cts.Token);
-        await cts.CancelAsync();
+        startGate.TrySetResult();
 
         try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        {
+            (Guid observedJobId, _) = await dispatchObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            observedJobId.Should().Be(jobId, "the test must observe the contested job reaching real dispatch");
+            await allCycles.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            await shutdown.CancelAsync();
+            await allCycles.WaitAsync(TimeSpan.FromSeconds(10));
+        }
 
-        // Assert: the SemaphoreSlim + DB update should prevent double-dispatch
         lock (_dispatchLock)
         {
             int timesJobDispatched = _dispatchedPairs.Count(p => p.jobId == jobId);
-            timesJobDispatched.Should().BeInRange(0, 1,
+            timesJobDispatched.Should().Be(1,
                 "the dispatch lock should prevent two printers from grabbing the same job");
         }
     }

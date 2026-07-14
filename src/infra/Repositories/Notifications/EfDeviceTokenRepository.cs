@@ -13,6 +13,9 @@ namespace Farm.Infrastructure.Repositories.Notifications;
 /// </summary>
 public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTokenRepository
 {
+    private const int UpsertMaxAttempts = 3;
+    private const long InitialRegistrationVersion = 1;
+
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
     /// <inheritdoc />
@@ -35,7 +38,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         // Retry loop for concurrent-registration TOCTOU: a race between two
         // (userId, installationId) upserts can produce two "existing is null"
         // observations, and the second SaveChangesAsync trips the unique index.
-        for (int attempt = 0; attempt < 3; attempt++)
+        for (int attempt = 0; attempt < UpsertMaxAttempts; attempt++)
         {
             DeviceToken? existing = await _dbContext.DeviceTokens
                 .FirstOrDefaultAsync(t => t.UserId == userId && t.InstallationId == installationId, cancellationToken);
@@ -45,6 +48,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                 var created = new DeviceToken
                 {
                     UserId = userId,
+                    RegistrationVersion = InitialRegistrationVersion,
                     InstallationId = installationId,
                     Token = token,
                     Platform = platform,
@@ -61,7 +65,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                     await _dbContext.SaveChangesAsync(cancellationToken);
                     return created;
                 }
-                catch (DbUpdateException ex) when (attempt < 2 && IsUniqueDeviceTokenConflict(ex))
+                catch (DbUpdateException ex) when (attempt < UpsertMaxAttempts - 1 && IsUniqueDeviceTokenConflict(ex))
                 {
                     // Concurrent registration won the race — detach the tracked
                     // ghost entity and retry as an update.
@@ -74,6 +78,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
             existing.Platform = platform;
             existing.Environment = environment;
             existing.AppBundleId = appBundleId;
+            existing.RegistrationVersion = checked(existing.RegistrationVersion + 1);
             existing.IsActive = true;
             existing.ConsecutiveFailureCount = 0;
             existing.LastUsedAt = nowUtc;
@@ -83,7 +88,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 return existing;
             }
-            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            catch (DbUpdateConcurrencyException) when (attempt < UpsertMaxAttempts - 1)
             {
                 _dbContext.Entry(existing).State = EntityState.Detached;
             }
@@ -184,51 +189,56 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
     }
 
     /// <inheritdoc />
-    public async Task RecordSuccessAsync(Guid deviceTokenId, DateTime nowUtc, CancellationToken cancellationToken = default)
+    public async Task RecordSuccessAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        DateTime nowUtc,
+        CancellationToken cancellationToken = default)
     {
-        DeviceToken? row = await _dbContext.DeviceTokens.FirstOrDefaultAsync(t => t.Id == deviceTokenId, cancellationToken);
-        if (row is null)
-        {
-            return;
-        }
-
-        row.LastUsedAt = nowUtc;
-        row.ConsecutiveFailureCount = 0;
-        row.LastFailureAt = null;
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        _ = await _dbContext.DeviceTokens
+            .Where(token => token.Id == deviceTokenId && token.RegistrationVersion == registrationVersion)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(token => token.LastUsedAt, nowUtc)
+                    .SetProperty(token => token.ConsecutiveFailureCount, 0)
+                    .SetProperty(token => token.LastFailureAt, (DateTime?)null),
+                cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task RecordFailureAsync(Guid deviceTokenId, DateTime nowUtc, int failureThreshold, CancellationToken cancellationToken = default)
+    public async Task RecordFailureAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        DateTime nowUtc,
+        int failureThreshold,
+        CancellationToken cancellationToken = default)
     {
-        DeviceToken? row = await _dbContext.DeviceTokens.FirstOrDefaultAsync(t => t.Id == deviceTokenId, cancellationToken);
-        if (row is null)
-        {
-            return;
-        }
-
-        row.LastFailureAt = nowUtc;
-        row.ConsecutiveFailureCount = checked(row.ConsecutiveFailureCount + 1);
-        if (failureThreshold > 0 && row.ConsecutiveFailureCount >= failureThreshold)
-        {
-            row.IsActive = false;
-        }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        _ = await _dbContext.DeviceTokens
+            .Where(token => token.Id == deviceTokenId && token.RegistrationVersion == registrationVersion)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(token => token.LastFailureAt, nowUtc)
+                    .SetProperty(
+                        token => token.IsActive,
+                        token => failureThreshold > 0
+                            && token.ConsecutiveFailureCount >= failureThreshold - 1
+                                ? false
+                                : token.IsActive)
+                    .SetProperty(
+                        token => token.ConsecutiveFailureCount,
+                        token => token.ConsecutiveFailureCount + 1),
+                cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<bool> InvalidateAsync(Guid deviceTokenId, CancellationToken cancellationToken = default)
+    public async Task<bool> InvalidateAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        CancellationToken cancellationToken = default)
     {
-        DeviceToken? registration = await _dbContext.DeviceTokens
-            .FirstOrDefaultAsync(token => token.Id == deviceTokenId, cancellationToken);
-        if (registration is null)
-        {
-            return false;
-        }
-
-        _dbContext.DeviceTokens.Remove(registration);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        int deleted = await _dbContext.DeviceTokens
+            .Where(token => token.Id == deviceTokenId && token.RegistrationVersion == registrationVersion)
+            .ExecuteDeleteAsync(cancellationToken);
+        return deleted == 1;
     }
 }

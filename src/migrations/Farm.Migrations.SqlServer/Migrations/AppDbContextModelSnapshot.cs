@@ -2698,6 +2698,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
 
+                    b.Property<long>("RegistrationVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.Property<string>("Token")
                         .IsRequired()
                         .HasMaxLength(256)

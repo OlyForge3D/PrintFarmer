@@ -467,6 +467,49 @@ public sealed class DirectApnsNativePushSenderTests
         }
     }
 
+    [Fact]
+    public async Task SendAsync_CorruptedOnDiskPem_DisposesReplacementKeyWhenImportThrows()
+    {
+        string keyPath = Path.Combine(
+            Path.GetTempPath(),
+            $"native-push-corrupt-key-{Guid.NewGuid():N}.p8");
+        await File.WriteAllTextAsync(
+            keyPath,
+            "-----BEGIN PRIVATE KEY-----\ncorrupted-after-startup\n-----END PRIVATE KEY-----");
+        var settings = new NativePushSettings
+        {
+            Mode = NativePushMode.Direct,
+            Apns = new NativePushApnsSettings
+            {
+                TeamId = "TEAM123ABC",
+                KeyId = "KEY123ABCD",
+                BundleId = "com.example.app",
+                P8KeyPath = keyPath,
+                Environment = "production",
+            },
+        };
+        var replacementKey = new ImportThrowingEcdsa();
+
+        try
+        {
+            using DirectApnsNativePushSender sut = CreateSender(
+                settings,
+                _ => throw new InvalidOperationException("HTTP must not run when key import fails."));
+            sut.SigningKeyFactoryForTests = () => replacementKey;
+
+            NativePushDispatchResult result = await sut.SendAsync(Sample);
+
+            result.Reason.Should().Be("jwt_sign_failed");
+            replacementKey.ImportAttempted.Should().BeTrue();
+            replacementKey.IsDisposed.Should().BeTrue(
+                "ownership must be released immediately when on-disk PEM import fails");
+        }
+        finally
+        {
+            File.Delete(keyPath);
+        }
+    }
+
     private static (NativePushSettings settings, ECDsa key) MakeDirectSettings()
     {
         ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -513,6 +556,29 @@ public sealed class DirectApnsNativePushSenderTests
         string padded = value.Replace('-', '+').Replace('_', '/');
         padded = padded.PadRight(padded.Length + ((4 - (padded.Length % 4)) % 4), '=');
         return Convert.FromBase64String(padded);
+    }
+
+    private sealed class ImportThrowingEcdsa : ECDsa
+    {
+        public bool ImportAttempted { get; private set; }
+
+        public bool IsDisposed { get; private set; }
+
+        public override void ImportFromPem(ReadOnlySpan<char> input)
+        {
+            ImportAttempted = true;
+            throw new CryptographicException("Simulated corrupted PEM.");
+        }
+
+        public override byte[] SignHash(byte[] hash) => throw new NotSupportedException();
+
+        public override bool VerifyHash(byte[] hash, byte[] signature) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed |= disposing;
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class StaticOptionsMonitor(NativePushSettings value) : IOptionsMonitor<NativePushSettings>

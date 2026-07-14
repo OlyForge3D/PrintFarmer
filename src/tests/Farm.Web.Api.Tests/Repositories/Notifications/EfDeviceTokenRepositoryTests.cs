@@ -12,27 +12,32 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Repositories.Notifications;
 
 /// <summary>
-/// Behavioral coverage for <see cref="EfDeviceTokenRepository"/> using EF Core's InMemory
-/// provider. Provider-parity checks (unique index behaviour under PG/SQL Server) are covered
-/// by the relational migrations pipeline and gated by the CI has-pending-model-changes check.
+/// Relational SQLite behavioral coverage for <see cref="EfDeviceTokenRepository"/>.
+/// Provider-parity checks for PostgreSQL and SQL Server are covered by the migrations pipeline
+/// and gated by the CI has-pending-model-changes checks.
 /// </summary>
 public sealed class EfDeviceTokenRepositoryTests : IDisposable
 {
+    private readonly SqliteConnection _connection;
     private readonly AppDbContext _db;
     private readonly EfDeviceTokenRepository _repo;
 
     public EfDeviceTokenRepositoryTests()
     {
+        _connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=False");
+        _connection.Open();
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseSqlite(_connection)
             .Options;
         _db = new AppDbContext(options);
+        _db.Database.EnsureCreated();
         _repo = new EfDeviceTokenRepository(_db);
     }
 
     public void Dispose()
     {
         _db.Dispose();
+        _connection.Dispose();
     }
 
     [Fact]
@@ -47,6 +52,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         row.Token.Should().Be("token-1");
         row.IsActive.Should().BeTrue();
         row.ConsecutiveFailureCount.Should().Be(0);
+        row.RegistrationVersion.Should().Be(1);
 
         (await _db.DeviceTokens.CountAsync()).Should().Be(1);
     }
@@ -55,10 +61,26 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     public async Task Upsert_ReplacesRow_WhenInstallationExists()
     {
         Guid userId = Guid.NewGuid();
-        await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", "com.example.app");
+        DeviceToken original = await _repo.UpsertAsync(
+            userId,
+            "install-a",
+            "token-1",
+            "ios",
+            "production",
+            "com.example.app");
+        Guid originalId = original.Id;
+        long originalVersion = original.RegistrationVersion;
 
-        DeviceToken updated = await _repo.UpsertAsync(userId, "install-a", "token-2", "ios", "development", "com.example.app");
+        DeviceToken updated = await _repo.UpsertAsync(
+            userId,
+            "install-a",
+            "token-2",
+            "ios",
+            "development",
+            "com.example.app");
 
+        updated.Id.Should().Be(originalId);
+        updated.RegistrationVersion.Should().Be(originalVersion + 1);
         updated.Token.Should().Be("token-2");
         updated.Environment.Should().Be("development");
         (await _db.DeviceTokens.CountAsync()).Should().Be(1);
@@ -69,10 +91,12 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     {
         Guid userId = Guid.NewGuid();
         DeviceToken row = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
-        await _repo.RecordFailureAsync(row.Id, DateTime.UtcNow, failureThreshold: 1);
+        long failedVersion = row.RegistrationVersion;
+        await _repo.RecordFailureAsync(row.Id, failedVersion, DateTime.UtcNow, failureThreshold: 1);
 
         DeviceToken reactivated = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
 
+        reactivated.RegistrationVersion.Should().Be(failedVersion + 1);
         reactivated.IsActive.Should().BeTrue();
         reactivated.ConsecutiveFailureCount.Should().Be(0);
         reactivated.LastFailureAt.Should().BeNull();
@@ -114,7 +138,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
 
         for (int i = 0; i < 5; i++)
         {
-            await _repo.RecordFailureAsync(row.Id, DateTime.UtcNow, failureThreshold: 5);
+            await _repo.RecordFailureAsync(row.Id, row.RegistrationVersion, DateTime.UtcNow, failureThreshold: 5);
         }
 
         DeviceToken? refreshed = await _db.DeviceTokens.AsNoTracking().FirstAsync(t => t.Id == row.Id);
@@ -127,10 +151,10 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     {
         Guid userId = Guid.NewGuid();
         DeviceToken row = await _repo.UpsertAsync(userId, "install-a", "token-a", "ios", "production", null);
-        await _repo.RecordFailureAsync(row.Id, DateTime.UtcNow, failureThreshold: 10);
-        await _repo.RecordFailureAsync(row.Id, DateTime.UtcNow, failureThreshold: 10);
+        await _repo.RecordFailureAsync(row.Id, row.RegistrationVersion, DateTime.UtcNow, failureThreshold: 10);
+        await _repo.RecordFailureAsync(row.Id, row.RegistrationVersion, DateTime.UtcNow, failureThreshold: 10);
 
-        await _repo.RecordSuccessAsync(row.Id, DateTime.UtcNow);
+        await _repo.RecordSuccessAsync(row.Id, row.RegistrationVersion, DateTime.UtcNow);
 
         DeviceToken? refreshed = await _db.DeviceTokens.AsNoTracking().FirstAsync(t => t.Id == row.Id);
         refreshed.ConsecutiveFailureCount.Should().Be(0);
@@ -145,6 +169,13 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         DeviceToken sandbox = await _repo.UpsertAsync(
             userA,
             "install-sandbox",
+            "shared-token",
+            "ios",
+            "development",
+            "com.example.sandbox");
+        DeviceToken sameUserSameProviderScope = await _repo.UpsertAsync(
+            userA,
+            "install-sandbox-2",
             "shared-token",
             "ios",
             "development",
@@ -171,13 +202,18 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
             "production",
             "com.example.production");
 
-        bool removed = await _repo.InvalidateAsync(sandbox.Id);
+        bool removed = await _repo.InvalidateAsync(sandbox.Id, sandbox.RegistrationVersion);
 
         removed.Should().BeTrue();
         DeviceToken[] remaining = await _db.DeviceTokens.AsNoTracking().ToArrayAsync();
         remaining.Select(token => token.Id).Should().BeEquivalentTo(
-            new[] { production.Id, otherUser.Id, otherToken.Id });
-        remaining.Count(token => token.Token == "shared-token").Should().Be(2);
+            new[] { sameUserSameProviderScope.Id, production.Id, otherUser.Id, otherToken.Id });
+        remaining.Count(token => token.Token == "shared-token").Should().Be(3);
+        remaining.Should().ContainSingle(token =>
+            token.Id == sameUserSameProviderScope.Id
+            && token.UserId == sandbox.UserId
+            && token.Environment == sandbox.Environment
+            && token.AppBundleId == sandbox.AppBundleId);
     }
 
     [Fact]
@@ -268,6 +304,105 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         }
         finally
         {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
+    }
+
+    [Fact]
+    public async Task Upsert_ConcurrentRefresh_RetriesAndRotatesVersionForEachSuccessfulRegistration()
+    {
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"device-token-refresh-race-{Guid.NewGuid():N}.db");
+        string connectionString = $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> plainOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var interceptor = new PauseFirstDeviceTokenUpdateInterceptor();
+        DbContextOptions<AppDbContext> pausedOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .AddInterceptors(interceptor)
+            .Options;
+        Guid userId = Guid.NewGuid();
+
+        try
+        {
+            DeviceToken original;
+            await using (AppDbContext seed = new(plainOptions))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.Add(new Farm.Infrastructure.Domain.User
+                {
+                    Id = userId,
+                    Username = $"device-token-refresh-{userId:N}",
+                    Email = $"device-token-refresh-{userId:N}@example.com",
+                    PasswordHash = "x",
+                });
+                await seed.SaveChangesAsync();
+                original = await new EfDeviceTokenRepository(seed).UpsertAsync(
+                    userId,
+                    "installation-refresh-race",
+                    new string('0', 64),
+                    "ios",
+                    "production",
+                    "com.example.original");
+            }
+
+            await using AppDbContext contextA = new(pausedOptions);
+            await using AppDbContext contextB = new(plainOptions);
+            var repositoryA = new EfDeviceTokenRepository(contextA);
+            var repositoryB = new EfDeviceTokenRepository(contextB);
+
+            Task<DeviceToken> writeA = repositoryA.UpsertAsync(
+                userId,
+                "installation-refresh-race",
+                new string('a', 64),
+                "ios",
+                "development",
+                "com.example.a");
+            await interceptor.FirstUpdateReady.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            DeviceToken writeB;
+            try
+            {
+                writeB = await repositoryB.UpsertAsync(
+                    userId,
+                    "installation-refresh-race",
+                    new string('b', 64),
+                    "ios",
+                    "production",
+                    "com.example.b");
+                interceptor.ReleaseFirstUpdate.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                interceptor.ReleaseFirstUpdate.TrySetException(exception);
+                throw;
+            }
+
+            DeviceToken writeAResult = await writeA.WaitAsync(TimeSpan.FromSeconds(10));
+
+            writeB.RegistrationVersion.Should().Be(original.RegistrationVersion + 1);
+            writeAResult.RegistrationVersion.Should().Be(original.RegistrationVersion + 2);
+            interceptor.SaveAttempts.Should().Be(2);
+            interceptor.Failures.Should().ContainSingle()
+                .Which.Should().BeOfType<DbUpdateConcurrencyException>();
+
+            await using AppDbContext verify = new(plainOptions);
+            DeviceToken persisted = await verify.DeviceTokens.AsNoTracking().SingleAsync();
+            persisted.Id.Should().Be(original.Id);
+            persisted.RegistrationVersion.Should().Be(original.RegistrationVersion + 2);
+            persisted.Token.Should().Be(new string('a', 64));
+            persisted.Environment.Should().Be("development");
+            persisted.AppBundleId.Should().Be("com.example.a");
+            persisted.IsActive.Should().BeTrue();
+            persisted.ConsecutiveFailureCount.Should().Be(0);
+        }
+        finally
+        {
+            interceptor.ReleaseFirstUpdate.TrySetCanceled();
             File.Delete(databasePath);
             File.Delete(databasePath + "-shm");
             File.Delete(databasePath + "-wal");
@@ -410,6 +545,52 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         {
             Failures.Enqueue(eventData.Exception);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class PauseFirstDeviceTokenUpdateInterceptor : SaveChangesInterceptor
+    {
+        private int _firstUpdateObserved;
+
+        public TaskCompletionSource FirstUpdateReady { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseFirstUpdate { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ConcurrentQueue<Exception> Failures { get; } = new();
+
+        public int SaveAttempts { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            bool updatesRegistration = eventData.Context!.ChangeTracker.Entries<DeviceToken>()
+                .Any(entry => entry.State == EntityState.Modified);
+            if (!updatesRegistration)
+            {
+                return result;
+            }
+
+            SaveAttempts++;
+            if (Interlocked.CompareExchange(ref _firstUpdateObserved, 1, 0) == 0)
+            {
+                FirstUpdateReady.TrySetResult();
+                await ReleaseFirstUpdate.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult> ThrowingConcurrencyExceptionAsync(
+            ConcurrencyExceptionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            Failures.Enqueue(eventData.Exception);
+            return ValueTask.FromResult(result);
         }
     }
 
