@@ -758,89 +758,103 @@ public class NotificationService(
             // invariant: a stale legacy PUT never clobbers a concurrent modern
             // attention update.
             //
-            // Hicks #5: every scalar is a nullable "patch". When the caller
-            // omitted it (`null`) we resolve against the persisted value on
-            // `tracked` — preserving pre-fix defaults for a bare `{}` PUT
-            // instead of the previous behaviour that silently bound
-            // `EnableEmailNotifications=true` and enabled email rows nobody
-            // requested. We resolve every scalar ONCE up front so the derived
-            // rows below use a consistent snapshot.
-            bool enableInApp = patch.EnableInAppNotifications ?? tracked.EnableInAppNotifications;
-            bool enableEmail = patch.EnableEmailNotifications ?? tracked.EnableEmailNotifications;
-            bool enablePush = patch.EnablePushNotifications ?? tracked.EnablePushNotifications;
-            bool enableTelegram = patch.EnableTelegramNotifications ?? tracked.EnableTelegramNotifications;
+            // An omitted channel master means that channel is outside the
+            // patch. Do not derive any of its job or attention rows from
+            // persisted master/scalar values: doing so turns a retention-only
+            // request into a channel preference write. When a master is
+            // explicitly present, legacy derivation uses the final per-event
+            // scalar values exactly as before.
             bool notifyStart = patch.NotifyOnStart ?? tracked.NotifyOnStart;
             bool notifyComplete = patch.NotifyOnCompletion ?? tracked.NotifyOnCompletion;
             bool notifyFail = patch.NotifyOnFailure ?? tracked.NotifyOnFailure;
             bool notifyPause = patch.NotifyOnPause ?? tracked.NotifyOnPause;
 
-            tracked.NotifyOnStart = notifyStart;
-            tracked.NotifyOnCompletion = notifyComplete;
-            tracked.NotifyOnFailure = notifyFail;
-            tracked.NotifyOnPause = notifyPause;
-
-            tracked.InAppOnJobStarted = enableInApp && notifyStart;
-            tracked.InAppOnJobCompleted = enableInApp && notifyComplete;
-
-            // Legacy contract: job-failed always stays in-app so a user can
-            // never accidentally silence critical failure surfaces.
-            tracked.InAppOnJobFailed = true;
-            tracked.InAppOnJobPaused = enableInApp && notifyPause;
-
-            tracked.EmailOnJobStarted = enableEmail && notifyStart;
-            tracked.EmailOnJobCompleted = enableEmail && notifyComplete;
-            tracked.EmailOnJobFailed = enableEmail && notifyFail;
-            tracked.EmailOnJobPaused = enableEmail && notifyPause;
-
-            tracked.PushOnJobStarted = enablePush && notifyStart;
-            tracked.PushOnJobCompleted = enablePush && notifyComplete;
-            tracked.PushOnJobFailed = enablePush && notifyFail;
-            tracked.PushOnJobPaused = enablePush && notifyPause;
-
-            tracked.TelegramOnJobStarted = enableTelegram && notifyStart;
-            tracked.TelegramOnJobCompleted = enableTelegram && notifyComplete;
-            tracked.TelegramOnJobFailed = enableTelegram && notifyFail;
-            tracked.TelegramOnJobPaused = enableTelegram && notifyPause;
-
-            // Hicks H1-v5-final + Hicks #5: a legacy PUT that EXPLICITLY flips
-            // a global channel OFF must also drop that channel's attention
-            // rows. When the caller did NOT send a channel scalar (null), we
-            // preserve everything — including the attention rows. Only an
-            // explicit `false` from the caller triggers the zeroing.
-            if (patch.EnableInAppNotifications == false)
+            if (patch.NotifyOnStart.HasValue)
             {
-                tracked.InAppOnPrinterFailure = false;
-                tracked.InAppOnFilamentRunout = false;
-                tracked.InAppOnHarvestReady = false;
-                tracked.InAppOnMaintenanceDue = false;
-                tracked.InAppOnPrinterOffline = false;
+                tracked.NotifyOnStart = notifyStart;
             }
 
-            if (patch.EnableEmailNotifications == false)
+            if (patch.NotifyOnCompletion.HasValue)
             {
-                tracked.EmailOnPrinterFailure = false;
-                tracked.EmailOnFilamentRunout = false;
-                tracked.EmailOnHarvestReady = false;
-                tracked.EmailOnMaintenanceDue = false;
-                tracked.EmailOnPrinterOffline = false;
+                tracked.NotifyOnCompletion = notifyComplete;
             }
 
-            if (patch.EnablePushNotifications == false)
+            if (patch.NotifyOnFailure.HasValue)
             {
-                tracked.PushOnPrinterFailure = false;
-                tracked.PushOnFilamentRunout = false;
-                tracked.PushOnHarvestReady = false;
-                tracked.PushOnMaintenanceDue = false;
-                tracked.PushOnPrinterOffline = false;
+                tracked.NotifyOnFailure = notifyFail;
             }
 
-            if (patch.EnableTelegramNotifications == false)
+            if (patch.NotifyOnPause.HasValue)
             {
-                tracked.TelegramOnPrinterFailure = false;
-                tracked.TelegramOnFilamentRunout = false;
-                tracked.TelegramOnHarvestReady = false;
-                tracked.TelegramOnMaintenanceDue = false;
-                tracked.TelegramOnPrinterOffline = false;
+                tracked.NotifyOnPause = notifyPause;
+            }
+
+            if (patch.EnableInAppNotifications is bool enableInApp)
+            {
+                tracked.InAppOnJobStarted = enableInApp && notifyStart;
+                tracked.InAppOnJobCompleted = enableInApp && notifyComplete;
+                tracked.InAppOnJobFailed = true;
+                tracked.InAppOnJobPaused = enableInApp && notifyPause;
+
+                if (!enableInApp)
+                {
+                    tracked.InAppOnPrinterFailure = false;
+                    tracked.InAppOnFilamentRunout = false;
+                    tracked.InAppOnHarvestReady = false;
+                    tracked.InAppOnMaintenanceDue = false;
+                    tracked.InAppOnPrinterOffline = false;
+                }
+            }
+
+            if (patch.EnableEmailNotifications is bool enableEmail)
+            {
+                tracked.EmailOnJobStarted = enableEmail && notifyStart;
+                tracked.EmailOnJobCompleted = enableEmail && notifyComplete;
+                tracked.EmailOnJobFailed = enableEmail && notifyFail;
+                tracked.EmailOnJobPaused = enableEmail && notifyPause;
+
+                if (!enableEmail)
+                {
+                    tracked.EmailOnPrinterFailure = false;
+                    tracked.EmailOnFilamentRunout = false;
+                    tracked.EmailOnHarvestReady = false;
+                    tracked.EmailOnMaintenanceDue = false;
+                    tracked.EmailOnPrinterOffline = false;
+                }
+            }
+
+            if (patch.EnablePushNotifications is bool enablePush)
+            {
+                tracked.PushOnJobStarted = enablePush && notifyStart;
+                tracked.PushOnJobCompleted = enablePush && notifyComplete;
+                tracked.PushOnJobFailed = enablePush && notifyFail;
+                tracked.PushOnJobPaused = enablePush && notifyPause;
+
+                if (!enablePush)
+                {
+                    tracked.PushOnPrinterFailure = false;
+                    tracked.PushOnFilamentRunout = false;
+                    tracked.PushOnHarvestReady = false;
+                    tracked.PushOnMaintenanceDue = false;
+                    tracked.PushOnPrinterOffline = false;
+                }
+            }
+
+            if (patch.EnableTelegramNotifications is bool enableTelegram)
+            {
+                tracked.TelegramOnJobStarted = enableTelegram && notifyStart;
+                tracked.TelegramOnJobCompleted = enableTelegram && notifyComplete;
+                tracked.TelegramOnJobFailed = enableTelegram && notifyFail;
+                tracked.TelegramOnJobPaused = enableTelegram && notifyPause;
+
+                if (!enableTelegram)
+                {
+                    tracked.TelegramOnPrinterFailure = false;
+                    tracked.TelegramOnFilamentRunout = false;
+                    tracked.TelegramOnHarvestReady = false;
+                    tracked.TelegramOnMaintenanceDue = false;
+                    tracked.TelegramOnPrinterOffline = false;
+                }
             }
         }
         else
