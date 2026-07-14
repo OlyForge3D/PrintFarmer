@@ -283,6 +283,54 @@ public class PartInventoryServiceTests : IDisposable
         Assert.Equal(4, (await db.PartInventories.SingleAsync()).OnHand);
     }
 
+    [Theory]
+    [InlineData("harvest:foo")]                                              // ASCII
+    [InlineData("Harvest:FOO")]                                              // case-insensitive
+    [InlineData("\uFF48\uFF41\uFF52\uFF56\uFF45\uFF53\uFF54\uFF1A\uFF46\uFF4F\uFF4F")] // fullwidth ｈａｒｖｅｓｔ：ｆｏｏ → NFKC harvest:foo
+    public async Task AdjustAsync_ClientOperationKeyWithHarvestPrefix_ReturnsInvalidRequest_AndDoesNotWrite(string operationKey)
+    {
+        // Hicks r7 blocker H2: the server generates "harvest:<id>" operation keys directly on the
+        // ledger (PartHarvestService) for permanent, beyond-retention uniqueness. A client must never
+        // be able to pre-occupy that namespace: a forged "harvest:" adjust command that later
+        // collides with a genuine server harvest key would make that harvest fail permanently. The
+        // service-layer guard rejects it (width-aware, like the idem: guard) before any mutation.
+        _ = await SeedSkuAsync(onHand: 4);
+        PartInventoryService sut = CreateSut();
+
+        AdjustResult result = await sut.AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(3, PartAdjustmentReason.Manual, null, null, null, operationKey, "u1"));
+
+        Assert.Equal(PartInventoryOutcome.InvalidRequest, result.Outcome);
+        string? message = result.Message;
+        Assert.NotNull(message);
+        Assert.Contains("harvest:", message, StringComparison.OrdinalIgnoreCase);
+
+        await using var db = new AppDbContext(_options);
+        Assert.Empty(await db.PartInventoryAdjustments.ToListAsync());
+        Assert.Equal(4, (await db.PartInventories.SingleAsync()).OnHand);
+    }
+
+    [Fact]
+    public async Task AdjustAsync_ClientOperationKeySharingHarvestStem_IsAllowed()
+    {
+        // Only the exact reserved prefix "harvest:" is rejected. "harvestable-tote" merely shares a
+        // stem and is a legitimate client key that must be honored and persisted unchanged.
+        _ = await SeedSkuAsync(onHand: 4);
+        PartInventoryService sut = CreateSut();
+
+        AdjustResult result = await sut.AdjustAsync(
+            "PF-TEST-01",
+            new AdjustCommand(3, PartAdjustmentReason.Manual, null, null, null, "harvestable-tote", "u1"));
+
+        Assert.Equal(PartInventoryOutcome.Ok, result.Outcome);
+        Assert.Equal(7, result.NewOnHand);
+
+        await using var db = new AppDbContext(_options);
+        PartInventoryAdjustment ledger = Assert.Single(await db.PartInventoryAdjustments.ToListAsync());
+        Assert.Equal("harvestable-tote", ledger.OperationKey);
+    }
+
     [Fact]
     public async Task AdjustAsync_WidthEquivalentSku_ResolvesToSameSeededRow()
     {

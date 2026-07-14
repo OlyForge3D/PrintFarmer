@@ -37,32 +37,57 @@ public static class IdempotencyKeyUtilities
     public const string SynthesizedOperationKeyPrefix = "idem:";
 
     /// <summary>
-    /// Returns whether <paramref name="operationKey"/> lies in the reserved
-    /// <see cref="SynthesizedOperationKeyPrefix"/> (<c>idem:</c>) namespace, comparing in a
-    /// <b>width-aware</b> way (issue #715, Hicks r4 blocker 2).
+    /// Prefix marking an <c>operationKey</c> that the <b>server</b> generates for a harvested
+    /// printed part (see <c>PartHarvestService</c>). Harvest keys must stay unique for the life of
+    /// the ledger — well beyond idempotency-record retention — so a client must never be able to
+    /// pre-occupy one: a forged <c>harvest:</c> adjust command that later collides with a genuine
+    /// server harvest key would make that harvest fail permanently (issue #715, Hicks r7 blocker H2).
+    /// The server writes these keys straight to the ledger and never routes them through
+    /// <see cref="IsReservedOperationKey"/>, so reserving the prefix blocks client submissions
+    /// without affecting server-side generation.
+    /// </summary>
+    public const string HarvestOperationKeyPrefix = "harvest:";
+
+    /// <summary>
+    /// The complete set of <c>operationKey</c> prefixes reserved for server/framework use and
+    /// therefore forbidden on client-supplied operation keys (issue #715, Hicks r7 blocker H2).
+    /// <see cref="IsReservedOperationKey"/> tests membership width- and case-insensitively.
+    /// <b>Any future server-generated operation-key namespace MUST be added here</b> so the DTO
+    /// validation attribute and the service-layer guard both automatically reject client attempts to
+    /// occupy it.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ReservedOperationKeyPrefixes =
+        new[] { SynthesizedOperationKeyPrefix, HarvestOperationKeyPrefix };
+
+    /// <summary>
+    /// Returns whether <paramref name="operationKey"/> lies in ANY reserved operation-key namespace
+    /// (<see cref="ReservedOperationKeyPrefixes"/> — currently <c>idem:</c> and <c>harvest:</c>),
+    /// comparing in a <b>width-aware</b> way (issue #715, Hicks r4 blocker 2 and r7 blocker H2).
     ///
     /// <para>
-    /// A plain ordinal <c>StartsWith("idem:")</c> is byte-exact, so a fullwidth <c>ｉｄｅｍ:</c>
-    /// (U+FF49 U+FF44 U+FF45 U+FF4D — optionally with a fullwidth colon U+FF1A) slips past it, yet
+    /// A plain ordinal <c>StartsWith</c> is byte-exact, so a fullwidth variant such as <c>ｉｄｅｍ:</c>
+    /// or <c>ｈａｒｖｅｓｔ：</c> (fullwidth letters, optionally a fullwidth colon U+FF1A) slips past it, yet
     /// SQL Server's width-insensitive collation would later treat the persisted value as equivalent
-    /// to an ASCII <c>idem:</c> key and could dedup it against a server-synthesized key. We
-    /// therefore fold the value to its Unicode NFKC form
-    /// (<see cref="Farm.Infrastructure.Normalization.UnicodeCompatibilityNormalizer"/>) before the
-    /// ordinal, case-insensitive prefix test, so every width/compatibility variant of the reserved
-    /// prefix is caught. The comparison also trims surrounding whitespace to match the service-side
-    /// normalization.
+    /// to the ASCII reserved key and could dedup it against a server key. We therefore fold the value
+    /// to its Unicode NFKC form
+    /// (<see cref="Farm.Infrastructure.Normalization.UnicodeCompatibilityNormalizer"/>) once, then
+    /// test each reserved prefix with an ordinal, case-insensitive comparison, so every
+    /// width/compatibility variant of every reserved prefix is caught. The comparison also trims
+    /// surrounding whitespace to match the service-side normalization.
     /// </para>
     ///
     /// <para>
     /// This is a pure comparison helper — it never mutates the key. Callers that persist the key
     /// (the service ledger) must store the client's <b>original</b> value, using this method only to
-    /// decide acceptance, so legitimate non-<c>idem:</c> clients that use accented or composed
-    /// characters keep their exact key at rest. Null/empty/whitespace is treated as not reserved so
-    /// the check composes with optional, nullable operation-key fields.
+    /// decide acceptance, so legitimate clients that use accented or composed characters keep their
+    /// exact key at rest. Null/empty/whitespace is treated as not reserved so the check composes with
+    /// optional, nullable operation-key fields. A partial-prefix match (for example
+    /// <c>harvestable-tote</c>) is NOT reserved — only values that actually begin with a full
+    /// reserved prefix are rejected.
     /// </para>
     /// </summary>
     /// <param name="operationKey">The client-supplied operation key to inspect. May be <see langword="null"/>.</param>
-    /// <returns><see langword="true"/> if the key begins with the reserved prefix in any width variant; otherwise <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/> if the key begins with a reserved prefix in any width variant; otherwise <see langword="false"/>.</returns>
     public static bool IsReservedOperationKey(string? operationKey)
     {
         if (string.IsNullOrWhiteSpace(operationKey))
@@ -70,9 +95,17 @@ public static class IdempotencyKeyUtilities
             return false;
         }
 
-        return UnicodeCompatibilityNormalizer
-            .ToCompatibilityForm(operationKey.Trim())
-            .StartsWith(SynthesizedOperationKeyPrefix, StringComparison.OrdinalIgnoreCase);
+        string normalized = UnicodeCompatibilityNormalizer.ToCompatibilityForm(operationKey.Trim());
+
+        foreach (string prefix in ReservedOperationKeyPrefixes)
+        {
+            if (normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

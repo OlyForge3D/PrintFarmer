@@ -63,6 +63,13 @@ public partial class AddIdempotencyKeyCaseSensitiveCollation : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        // Restore the original default catalog collation EXPLICITLY on every reverted column
+        // (issue #715, Hicks r7 blocker H1). EF's oldCollation: parameter is metadata-only and emits
+        // no COLLATE clause, so without naming SQL_Latin1_General_CP1_CI_AS here the columns would
+        // stay on Latin1_General_100_BIN2 and Down() would be a silent no-op for collation. WARNING:
+        // this rollback can legitimately fail if the BIN2 columns admitted rows that the
+        // case/width-insensitive CI_AS unique index would treat as duplicates — an inherent risk of
+        // widening a collation under a UNIQUE index, surfaced as an error rather than hidden.
         migrationBuilder.DropIndex(
             name: "IX_IdempotencyRecords_User_Route_Key",
             table: "IdempotencyRecords");
@@ -73,6 +80,7 @@ public partial class AddIdempotencyKeyCaseSensitiveCollation : Migration
             type: "nvarchar(450)",
             maxLength: 450,
             nullable: false,
+            collation: "SQL_Latin1_General_CP1_CI_AS",
             oldClrType: typeof(string),
             oldType: "nvarchar(256)",
             oldMaxLength: 256,
@@ -84,6 +92,7 @@ public partial class AddIdempotencyKeyCaseSensitiveCollation : Migration
             type: "nvarchar(200)",
             maxLength: 200,
             nullable: false,
+            collation: "SQL_Latin1_General_CP1_CI_AS",
             oldClrType: typeof(string),
             oldType: "nvarchar(200)",
             oldMaxLength: 200,
@@ -95,6 +104,7 @@ public partial class AddIdempotencyKeyCaseSensitiveCollation : Migration
             type: "nvarchar(200)",
             maxLength: 200,
             nullable: false,
+            collation: "SQL_Latin1_General_CP1_CI_AS",
             oldClrType: typeof(string),
             oldType: "nvarchar(200)",
             oldMaxLength: 200,

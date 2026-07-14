@@ -83,9 +83,14 @@ public class IdempotencyKeyUtilitiesTests
     [InlineData("\uFF49\uFF44\uFF45\uFF4D:foo")]        // fullwidth ｉｄｅｍ: (NFKC → idem:)
     [InlineData("\uFF49\uFF44\uFF45\uFF4D\uFF1Afoo")]   // fullwidth ｉｄｅｍ： incl fullwidth colon
     [InlineData("\uFF49dem:foo")]                       // mixed-width ｉdem:
+    // --- Hicks r7 blocker H2: the server-generated harvest: namespace is reserved too ---
+    [InlineData("harvest:foo")]
+    [InlineData("Harvest:FOO")]                         // case-insensitive
+    [InlineData("  harvest:foo")]                       // trimmed before the check
+    [InlineData("\uFF48\uFF41\uFF52\uFF56\uFF45\uFF53\uFF54\uFF1A\uFF46\uFF4F\uFF4F")] // fullwidth ｈａｒｖｅｓｔ：ｆｏｏ (NFKC → harvest:foo)
     public void IsReservedOperationKey_TrueForReservedNamespaceInAnyWidth(string operationKey)
         => IdempotencyKeyUtilities.IsReservedOperationKey(operationKey).Should().BeTrue(
-            "the reserved 'idem:' namespace must be detected regardless of case, width, or whitespace");
+            "the reserved 'idem:' and 'harvest:' namespaces must be detected regardless of case, width, or whitespace");
 
     [Theory]
     [InlineData(null)]
@@ -93,6 +98,8 @@ public class IdempotencyKeyUtilitiesTests
     [InlineData("   ")]
     [InlineData("myapp:idem:foo")]                      // reserved token not at the start
     [InlineData("idempotent")]                          // shares a stem, not the prefix
+    [InlineData("harvestable-tote")]                    // shares a stem, not the 'harvest:' prefix
+    [InlineData("myapp:harvest:foo")]                   // reserved token not at the start
     [InlineData("caf\u00E9-op")]                        // accented client key (precomposed)
     [InlineData("cafe\u0301-op")]                       // accented client key (decomposed)
     public void IsReservedOperationKey_FalseForEverythingElse(string? operationKey)
