@@ -105,7 +105,12 @@ public sealed class AttentionBroadcaster(
                         return;
                     }
 
-                    await dispatcher.DispatchAsync(payload.ItemId, payload.ChangeKind, targetUserId, shutdownToken);
+                    await dispatcher.DispatchAsync(
+                        payload.ItemId,
+                        payload.ChangeKind,
+                        targetUserId,
+                        payload.OccurredAt,
+                        shutdownToken);
                 }
                 catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
                 {

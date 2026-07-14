@@ -34,6 +34,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // Resolved atomically consumes the entry before any send-side checks, making
     // replay safe even when a later opt-in changes.
     private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionSnapshot> _snapshots = new();
+
+    // One versioned lane per item and delivery audience serializes an active lifecycle
+    // transition, coalesces queued transitions to the newest authoritative timestamp,
+    // and retains a tombstone so delayed Created work cannot follow Resolved.
+    private readonly ConcurrentDictionary<AttentionDispatchKey, AttentionDispatchLane> _attentionDispatchLanes = new();
     private static readonly TimeSpan AttentionSnapshotTtl = TimeSpan.FromDays(7);
     private static readonly TimeSpan InformationalAlertTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ActionableAlertTtl = TimeSpan.FromMinutes(30);
@@ -71,7 +76,51 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         string attentionItemId,
         AttentionChangeKind changeKind,
         Guid? targetUserId,
+        DateTime? occurredAtUtc = null,
         CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(attentionItemId))
+        {
+            return;
+        }
+
+        var dispatchKey = new AttentionDispatchKey(attentionItemId, targetUserId);
+        var version = new AttentionDispatchVersion(
+            NormalizeOccurredAt(occurredAtUtc ?? UtcNow),
+            LifecycleOrder(changeKind));
+        if (!TryObserveDispatch(dispatchKey, version, out AttentionDispatchLane lane))
+        {
+            return;
+        }
+
+        bool entered = false;
+        try
+        {
+            await lane.Gate.WaitAsync(cancellationToken);
+            entered = true;
+            if (!lane.IsLatest(version))
+            {
+                return;
+            }
+
+            await DispatchCoreAsync(attentionItemId, changeKind, targetUserId, cancellationToken);
+        }
+        finally
+        {
+            if (entered)
+            {
+                lane.Gate.Release();
+            }
+
+            lane.Complete();
+        }
+    }
+
+    private async Task DispatchCoreAsync(
+        string attentionItemId,
+        AttentionChangeKind changeKind,
+        Guid? targetUserId,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(attentionItemId))
         {
@@ -304,6 +353,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     resolvedSnapshot,
                     deviceToken,
                     settings,
+                    gate,
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -333,6 +383,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionSnapshot? resolvedSnapshot,
         DeviceToken deviceToken,
         NativePushSettings settings,
+        IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
     {
         // Rate limit consumption has moved to DispatchForOwnerAsync so it
@@ -341,12 +392,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         NativePushEnvelope envelope = item is not null
             ? BuildEnvelope(item, changeKind, deviceToken)
             : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken);
-        _metrics.Attempted.Add(1);
-
-        NativePushDispatchResult result;
+        NativePushDispatchResult? result;
         try
         {
-            result = await SendWithRetriesAsync(envelope, settings, cancellationToken);
+            result = await SendWithRetriesAsync(envelope, settings, gate, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -359,6 +408,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             _logger.LogWarning(ex, "[NativePush] Sender threw for deviceTokenId={DeviceTokenId}.", deviceToken.Id);
             result = NativePushDispatchResult.Transient("sender_exception");
+        }
+
+        if (result is null)
+        {
+            return;
         }
 
         // Every mutating outcome opens its own DI scope/AppDbContext. A failed
@@ -387,22 +441,89 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
+    private bool TryObserveDispatch(
+        AttentionDispatchKey key,
+        AttentionDispatchVersion version,
+        out AttentionDispatchLane lane)
+    {
+        while (true)
+        {
+            lane = _attentionDispatchLanes.GetOrAdd(key, static _ => new AttentionDispatchLane());
+            AttentionDispatchObserveResult result = lane.TryObserve(version, UtcNow);
+            if (result == AttentionDispatchObserveResult.Accepted)
+            {
+                return true;
+            }
+
+            if (result == AttentionDispatchObserveResult.Stale)
+            {
+                return false;
+            }
+
+            // A pruner retired this lane after GetOrAdd returned it. Retry against
+            // the replacement lane instead of executing against an orphaned tombstone.
+        }
+    }
+
+    private static DateTime NormalizeOccurredAt(DateTime occurredAt)
+    {
+        return occurredAt.Kind switch
+        {
+            DateTimeKind.Utc => occurredAt,
+            DateTimeKind.Local => occurredAt.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(occurredAt, DateTimeKind.Utc),
+        };
+    }
+
+    private static int LifecycleOrder(AttentionChangeKind changeKind)
+    {
+        return changeKind switch
+        {
+            AttentionChangeKind.Created => 0,
+            AttentionChangeKind.Updated => 1,
+            AttentionChangeKind.Resolved => 2,
+            _ => int.MinValue,
+        };
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
         // No unmanaged resources; kept for future rate-limit timer.
     }
 
-    private async Task<NativePushDispatchResult> SendWithRetriesAsync(
+    private async Task<NativePushDispatchResult?> SendWithRetriesAsync(
         NativePushEnvelope envelope,
         NativePushSettings settings,
+        IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
     {
         int attempts = Math.Max(1, settings.MaxAttempts);
         NativePushDispatchResult last = NativePushDispatchResult.Transient("no_attempt");
+        bool attempted = false;
         for (int i = 0; i < attempts; i++)
         {
-            last = await _sender.SendAsync(envelope, cancellationToken);
+            // This persisted gate read is intentionally adjacent to the transport call.
+            // A retry must never inherit the enabled decision made by an earlier attempt.
+            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            {
+                _metrics.SkippedFeatureDisabled.Add(1);
+                return null;
+            }
+
+            try
+            {
+                last = await _sender.SendAsync(envelope, cancellationToken);
+            }
+            finally
+            {
+                if (!attempted)
+                {
+                    _metrics.Attempted.Add(1);
+                    attempted = true;
+                }
+            }
+
             if (last.Success || last.TokenInvalidated || !last.IsTransient)
             {
                 return last;
@@ -617,6 +738,91 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ActionIds: Array.Empty<string>());
     }
 
+    private readonly record struct AttentionDispatchKey(string AttentionItemId, Guid? TargetUserId);
+
+    private readonly record struct AttentionDispatchVersion(DateTime OccurredAtUtc, int ChangeOrder)
+        : IComparable<AttentionDispatchVersion>
+    {
+        public int CompareTo(AttentionDispatchVersion other)
+        {
+            int timestampOrder = OccurredAtUtc.CompareTo(other.OccurredAtUtc);
+            return timestampOrder != 0 ? timestampOrder : ChangeOrder.CompareTo(other.ChangeOrder);
+        }
+    }
+
+    private enum AttentionDispatchObserveResult
+    {
+        Accepted,
+        Stale,
+        Retired,
+    }
+
+    private sealed class AttentionDispatchLane
+    {
+        private readonly object _sync = new();
+        private AttentionDispatchVersion _latest;
+        private DateTime _lastObservedAtUtc;
+        private int _participants;
+        private bool _hasVersion;
+        private bool _retired;
+
+        public SemaphoreSlim Gate { get; } = new(1, 1);
+
+        public AttentionDispatchObserveResult TryObserve(
+            AttentionDispatchVersion version,
+            DateTime observedAtUtc)
+        {
+            lock (_sync)
+            {
+                if (_retired)
+                {
+                    return AttentionDispatchObserveResult.Retired;
+                }
+
+                if (_hasVersion && version.CompareTo(_latest) <= 0)
+                {
+                    return AttentionDispatchObserveResult.Stale;
+                }
+
+                _latest = version;
+                _lastObservedAtUtc = observedAtUtc;
+                _hasVersion = true;
+                _participants++;
+                return AttentionDispatchObserveResult.Accepted;
+            }
+        }
+
+        public bool IsLatest(AttentionDispatchVersion version)
+        {
+            lock (_sync)
+            {
+                return version == _latest;
+            }
+        }
+
+        public void Complete()
+        {
+            lock (_sync)
+            {
+                _participants--;
+            }
+        }
+
+        public bool TryRetire(DateTime cutoffUtc)
+        {
+            lock (_sync)
+            {
+                if (_retired || _participants != 0 || _lastObservedAtUtc >= cutoffUtc)
+                {
+                    return false;
+                }
+
+                _retired = true;
+                return true;
+            }
+        }
+    }
+
     private readonly record struct AttentionSnapshotKey(Guid UserId, string AttentionItemId);
 
     private sealed record AttentionSnapshot(
@@ -767,6 +973,18 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             if (kv.Value.CapturedAtUtc < snapshotCutoff)
             {
                 _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots).Remove(kv);
+            }
+        }
+
+        // Lifecycle tombstones reject delayed work for the same seven-day window as
+        // delivery snapshots. Retirement and dictionary removal are coordinated so
+        // a racing observer retries against a live replacement lane.
+        foreach (KeyValuePair<AttentionDispatchKey, AttentionDispatchLane> kv in _attentionDispatchLanes)
+        {
+            if (kv.Value.TryRetire(snapshotCutoff))
+            {
+                _ = ((ICollection<KeyValuePair<AttentionDispatchKey, AttentionDispatchLane>>)_attentionDispatchLanes)
+                    .Remove(kv);
             }
         }
     }
