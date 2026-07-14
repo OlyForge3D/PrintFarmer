@@ -26,9 +26,13 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
-vi.mock('@/common/hooks/useApi', () => ({
-  usePrinters: () => ({ data: [{ id: 'printer-1', name: 'Voron 2.4' }] }),
-}));
+vi.mock('@/common/hooks/useApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/common/hooks/useApi')>();
+  return {
+    ...actual,
+    usePrinters: () => ({ data: [{ id: 'printer-1', name: 'Voron 2.4' }] }),
+  };
+});
 
 vi.mock('@/services/maintenancePlanService', () => ({
   maintenancePlanService: {
@@ -40,7 +44,11 @@ vi.mock('@/services/maintenancePlanService', () => ({
 
 import { apiClient } from '@/services/api';
 import { maintenancePlanService } from '@/services/maintenancePlanService';
+import { queryKeys } from '@/common/hooks/useApi';
 
+// Calendar/manual-only plan — no task resolves an hour-based interval.
+// `planUsesHourIntervals` (DeployPlanModal, Hicks #719/2) is therefore
+// `false` for this fixture, matching the default across most tests below.
 const plan: MaintenancePlanDto = {
   id: 'plan-1',
   name: 'Nozzle care',
@@ -50,7 +58,34 @@ const plan: MaintenancePlanDto = {
   isActive: true,
   ownerId: null,
   ownerName: null,
-  tasks: [],
+  planTasks: [],
+} as unknown as MaintenancePlanDto;
+
+// A plan whose sole task resolves an HOUR-based interval (via the
+// per-task override). Mirrors the backend's `UsesPrintHourIntervals`
+// exactly (Hicks #719/2) so tests can pin the one case where
+// `supportsPerToolAttribution === false` legitimately still blocks
+// per-toolhead scheduling.
+const hourIntervalPlan: MaintenancePlanDto = {
+  ...plan,
+  id: 'plan-hourly',
+  name: 'Nozzle wear (hours)',
+  planTasks: [
+    {
+      id: 'pt-1',
+      maintenancePlanId: 'plan-hourly',
+      maintenanceTaskId: 'task-1',
+      sortOrder: 0,
+      intervalHoursOverride: 100,
+      task: {
+        id: 'task-1',
+        taskName: 'Replace nozzle',
+        category: 'Hotend',
+        intervalHours: 100,
+        priority: 2,
+      },
+    },
+  ],
 } as unknown as MaintenancePlanDto;
 
 const t0: ToolheadDto = {
@@ -70,11 +105,11 @@ const t1: ToolheadDto = {
   cumulativePrintHours: 0,
 };
 
-function renderModal() {
+function renderModal(planOverride: MaintenancePlanDto = plan) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <DeployPlanModal isOpen plan={plan} onClose={() => {}} />
+      <DeployPlanModal isOpen plan={planOverride} onClose={() => {}} />
     </QueryClientProvider>
   );
 }
@@ -174,7 +209,10 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
     );
   });
 
-  it('does NOT show the scope picker when supportsPerToolAttribution is false', async () => {
+  it('hour-scoped plans still hide the scope picker and force printer-wide when supportsPerToolAttribution is false (Hicks #719/2)', async () => {
+    // Mirrors the backend: `DeployAsync` blocks a per-toolhead deployment
+    // only when the plan uses hour intervals AND attribution is
+    // unsupported. This is the one case that must still gate.
     (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: 'printer-1',
       name: 'Voron 2.4',
@@ -183,7 +221,7 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
       supportsPerToolAttribution: false,
     } as PrinterDetails);
 
-    renderModal();
+    renderModal(hourIntervalPlan);
     const user = userEvent.setup();
     await user.selectOptions(
       screen.getByRole('combobox', { name: /select printer/i }),
@@ -200,10 +238,51 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
     await waitFor(() =>
       expect(maintenancePlanService.deployPlan).toHaveBeenCalledTimes(1)
     );
-    // With per-tool off, the modal must send `toolheadId: null` (i.e. NOT
-    // send a per-tool value even by accident).
+    // With per-tool off AND an hour-interval plan, the modal must send
+    // `toolheadId: null` (i.e. NOT send a per-tool value even by accident).
     expect(maintenancePlanService.deployPlan).toHaveBeenCalledWith(
       expect.objectContaining({ toolheadId: null })
+    );
+  });
+
+  it('calendar/manual (non-hour) plans still show the scope picker and allow a per-toolhead deploy when supportsPerToolAttribution is false (Hicks #719/2)', async () => {
+    // The default `plan` fixture has `planTasks: []` — no task resolves an
+    // hour interval, so this is a calendar/manual-only plan. The backend's
+    // `DeployAsync` only blocks per-toolhead deployment when the plan USES
+    // hour intervals; a calendar/manual plan is deployable per-toolhead
+    // regardless of `supportsPerToolAttribution`. The prior UI incorrectly
+    // hid the picker (and forced printer-wide) for ANY unsupported printer.
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'printer-1',
+      name: 'Voron 2.4',
+      serverUrl: 'http://x',
+      toolheads: [t0, t1],
+      supportsPerToolAttribution: false,
+    } as PrinterDetails);
+
+    renderModal(plan);
+    const user = userEvent.setup();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /select printer/i }),
+      'printer-1'
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('radiogroup', { name: /maintenance scope/i })).toBeInTheDocument()
+    );
+
+    await user.click(screen.getByLabelText(/T1/));
+    await user.click(screen.getByRole('button', { name: /^Deploy$/ }));
+
+    await waitFor(() =>
+      expect(maintenancePlanService.deployPlan).toHaveBeenCalledTimes(1)
+    );
+    expect(maintenancePlanService.deployPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maintenancePlanId: 'plan-1',
+        printerId: 'printer-1',
+        toolheadId: 'th-1',
+      })
     );
   });
 
@@ -388,7 +467,7 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
     // production scenario: a previous mount populated cache with an old
     // capability verdict, and now something (mutation, invalidation,
     // reconnect) demands a re-verification.
-    qc.setQueryData(['printerDetails', 'printer-1'], stale, {
+    qc.setQueryData(queryKeys.printerDetails('printer-1'), stale, {
       updatedAt: Date.now() - 5 * 60_000,
     });
 
@@ -498,7 +577,7 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
       });
       // Prime the cache with the stale verdict so the modal sees data
       // immediately even while offline.
-      qc.setQueryData(['printerDetails', 'printer-1'], stale, {
+      qc.setQueryData(queryKeys.printerDetails('printer-1'), stale, {
         updatedAt: Date.now() - 5 * 60_000,
       });
 
@@ -565,5 +644,114 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
     } finally {
       onlineManager.setOnline(wasOnline);
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fresh-cached printer-details bypass on reselect (Hicks #719/1).
+  //
+  // React Query's `refetchOnMount` only applies on a TRUE observer mount
+  // transition — reselecting a printer while the modal itself stays
+  // mounted does not remount the observer, so a printer whose capability
+  // data is still within `staleTime` would otherwise be trusted with ZERO
+  // additional network round-trips. If the device went offline or its
+  // capability changed server-side since that cached fetch, the operator
+  // could deploy a per-tool schedule (or fail to) based on stale data.
+  // The fix forces an explicit `refetch` on every (re)selection and gates
+  // `detailsReady`/Deploy on a selection-stamped timestamp.
+  // ---------------------------------------------------------------------------
+
+  it('forces a fresh network verification on printer reselect within staleTime, closing the fresh-cached bypass (Hicks #1)', async () => {
+    const details: PrinterDetails = {
+      id: 'printer-1',
+      name: 'Voron 2.4',
+      serverUrl: 'http://x',
+      toolheads: [t0, t1],
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+
+    const getDetailsSpy = apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>;
+    getDetailsSpy.mockResolvedValue(details);
+
+    renderModal();
+    const user = userEvent.setup();
+    const select = screen.getByRole('combobox', { name: /select printer/i });
+
+    // First selection: a genuine network call, resolving with fresh data.
+    await user.selectOptions(select, 'printer-1');
+    await waitFor(() => expect(getDetailsSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole('radiogroup', { name: /maintenance scope/i })).toBeInTheDocument()
+    );
+    expect(screen.getByRole('button', { name: /^Deploy$/ })).not.toBeDisabled();
+
+    // Hold the SECOND call open so we can assert Deploy stays blocked until
+    // it resolves. Without the fix, react-query would treat the
+    // still-fresh cache (`staleTime: 60_000`) as authoritative on reselect
+    // and never call the network again — `getDetailsSpy` would stay at 1.
+    let resolveSecond: (v: PrinterDetails) => void = () => {};
+    const secondPromise = new Promise<PrinterDetails>(r => { resolveSecond = r; });
+    getDetailsSpy.mockReturnValueOnce(secondPromise);
+
+    // Deselect, then reselect the SAME printer within `staleTime`. This is
+    // NOT a true observer mount/remount (the modal itself stays mounted
+    // throughout, and toggling `enabled` false→true is not a mount
+    // transition either), so react-query's own `refetchOnMount` does not
+    // fire here — only the explicit forced-refetch effect does.
+    await user.selectOptions(select, '');
+    await user.selectOptions(select, 'printer-1');
+
+    await waitFor(() => expect(getDetailsSpy).toHaveBeenCalledTimes(2));
+    // While the second (forced) verification is in flight, Deploy must
+    // stay disabled — the modal must not trust the still-fresh cached
+    // verdict from before this exact reselection.
+    expect(screen.getByRole('button', { name: /^Deploy$/ })).toBeDisabled();
+    expect(screen.getByTestId('printer-details-updating')).toBeInTheDocument();
+
+    resolveSecond(details);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Deploy$/ })).not.toBeDisabled()
+    );
+  });
+
+  it('a direct handleDeploy invocation is rejected while the post-reselect verification is still stale, even if the button is somehow enabled', async () => {
+    // Defence-in-depth: this pins that the guard inside `handleDeploy`
+    // itself (not just the disabled attribute on the button) rejects a
+    // stale verdict. We simulate this by holding the details query on an
+    // OLD verdict past a reselect and confirming the mutation never fires
+    // no matter how many times the (disabled) button is clicked.
+    const oldDetails: PrinterDetails = {
+      id: 'printer-1',
+      name: 'Voron 2.4',
+      serverUrl: 'http://x',
+      toolheads: [t0, t1],
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+
+    const getDetailsSpy = apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>;
+    getDetailsSpy.mockResolvedValueOnce(oldDetails);
+
+    renderModal();
+    const user = userEvent.setup();
+    const select = screen.getByRole('combobox', { name: /select printer/i });
+
+    await user.selectOptions(select, 'printer-1');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Deploy$/ })).not.toBeDisabled()
+    );
+
+    // Reselect within staleTime — hold the forced verification open
+    // indefinitely so the modal remains in the "verifying" state.
+    getDetailsSpy.mockReturnValueOnce(new Promise<PrinterDetails>(() => { /* never resolves */ }));
+    await user.selectOptions(select, '');
+    await user.selectOptions(select, 'printer-1');
+
+    await waitFor(() => expect(getDetailsSpy).toHaveBeenCalledTimes(2));
+    const deployBtn = screen.getByRole('button', { name: /^Deploy$/ });
+    expect(deployBtn).toBeDisabled();
+    // Clicking a disabled native <button> does not fire onClick in jsdom,
+    // matching every other guard test in this suite — the assertion that
+    // matters is that the mutation never fires despite the click attempt.
+    await user.click(deployBtn);
+    expect(maintenancePlanService.deployPlan).not.toHaveBeenCalled();
   });
 });

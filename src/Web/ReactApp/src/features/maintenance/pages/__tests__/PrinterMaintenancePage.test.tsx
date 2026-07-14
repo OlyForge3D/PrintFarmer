@@ -325,10 +325,34 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
 
     // Legacy printer-wide alert is still shown regardless of gate.
     await waitFor(() => expect(screen.getByText('Legacy alert (printer-wide)')).toBeInTheDocument());
-    // Per-tool surface must be hidden because the printer projection says
-    // the backend cannot attribute usage to specific toolheads.
+    // The HOUR-attributed odometer/scope-filter surface must stay hidden —
+    // this printer cannot attribute new usage to specific toolheads.
     expect(screen.queryByRole('region', { name: /per-toolhead odometers/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('printer-maintenance-scope')).not.toBeInTheDocument();
+  });
+
+  it('preserves an existing deployment\'s non-null toolheadId when opening Log Maintenance, even when attribution is unsupported (Hicks #719/2)', async () => {
+    // Hicks #719/2: `supportsPerToolAttribution` gates HOUR-attributed
+    // scheduling only. A calendar/manual-scoped deployment that already
+    // targets a specific physical toolhead remains valid regardless of
+    // this flag — the page must not coerce its `toolheadId` to `null`
+    // (printer-wide) when the operator opens "Log Maintenance" for it.
+    seedDefaults({ details: printerDetailsMultiUnattributed });
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByText('Deployment for T1')).toBeInTheDocument());
+
+    const deploymentRow = screen.getByText('Deployment for T1').closest('div.p-4') as HTMLElement;
+    expect(deploymentRow).not.toBeNull();
+    await user.click(within(deploymentRow).getByRole('button', { name: 'Log' }));
+
+    const scopePicker = await screen.findByTestId('log-maintenance-scope');
+    const t1Radio = within(scopePicker).getByLabelText(/T1 · T1/i) as HTMLInputElement;
+    // The deployment's `toolheadId: 'th-1'` must still be the pre-selected
+    // scope — NOT collapsed to "Printer-wide" — confirming the coercion
+    // bug is fixed.
+    expect(t1Radio.checked).toBe(true);
   });
 
   it('trusts the server-composed supportsPerToolAttribution bool: shows UI when true even if client capabilities cache says otherwise', async () => {
@@ -620,6 +644,29 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     const summary = screen.getByTestId('toolhead-due-state-summary');
     expect(summary).toHaveTextContent(/unavailable/i);
     expect(summary).not.toHaveTextContent(/all toolheads ok/i);
+  });
+
+  it('mounts the aggregate status region empty from the very first render, before any data has loaded (Hicks #719/3)', async () => {
+    // `printerDetails` never resolves during the assertion window, so the
+    // page stays in its `isLoading` (spinner) branch the whole time. Before
+    // this fix, the `role="status"` region lived INSIDE the loaded-content
+    // branch and therefore did not exist yet here — a screen reader
+    // subscribing during this exact window would silently miss the live
+    // region altogether, since mounting a *new* live region is not
+    // announced, only content changes on an already-mounted one are.
+    seedDefaults();
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise(() => { /* never resolves */ })
+    );
+    const { container } = renderPage();
+
+    // The spinner is showing (still loading)...
+    expect(container.querySelector('.animate-spin')).toBeInTheDocument();
+
+    // ...yet the aggregate live region is ALREADY present, mounted empty.
+    const summary = screen.getByTestId('toolhead-due-state-summary');
+    expect(summary).toHaveAttribute('role', 'status');
+    expect(summary.textContent).toBe('');
   });
 
   // ---------------------------------------------------------------------------

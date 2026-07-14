@@ -33,6 +33,7 @@ import {
 } from '../components/toolheadScope';
 import { selectMaintenanceEligibleToolheads } from '@/features/printers/utils/isEligibleMaintenanceToolhead';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
+import { queryKeys } from '@/common/hooks/useApi';
 
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
@@ -118,7 +119,7 @@ export function PrinterMaintenancePage() {
     isLoading: printerDetailsLoading,
     error: printerDetailsError,
   } = useQuery<PrinterDetails>({
-    queryKey: ['printerDetails', printerId],
+    queryKey: queryKeys.printerDetails(printerId ?? ''),
     queryFn: () => apiClient.getPrinterDetails(printerId!),
     enabled: !!printerId,
     staleTime: 60_000,
@@ -129,20 +130,38 @@ export function PrinterMaintenancePage() {
     [printerDetails?.toolheads]
   );
 
-  // Per-tool UI is gated on the **server-composed** flag alone.
-  // #711 stable contract at 0428c66a63511b840034d66fcf7526e4c9b95634:
-  // `PrinterDetailsDto.supportsPerToolAttribution` is always serialized
-  // as a bool; it is true only when the global operator flag
-  // `multiSlotFallbackEnabled` AND the persisted per-printer capability
-  // are both true; otherwise false. Server does the composition, so we
-  // trust its output and do NOT client-side double-gate — that would
-  // race a stale capabilities cache and could hide UI the server just
-  // enabled. Optional (`?`) on the type is deliberate old-server
-  // tolerance; strict `=== true` collapses undefined/false to the
-  // printer-wide surface.
+  // `supportsPerToolAttribution` gates HOUR-attributed per-tool
+  // scheduling/odometer tracking (Hicks #719/2 — see
+  // `MaintenanceScheduleDeploymentController.UsesPrintHourIntervals` +
+  // `DeployAsync`, which blocks a per-tool deploy solely when the plan
+  // uses hour intervals AND attribution is unsupported). Calendar/manual
+  // per-tool scopes remain valid regardless of this flag, and simple
+  // maintenance LOG scope (`MaintenanceController.
+  // CreateMaintenanceLogAsync`) never checks it at all — only the
+  // printer-agnostic physical-toolhead-existence check. #711 stable
+  // contract at 0428c66a63511b840034d66fcf7526e4c9b95634:
+  // `PrinterDetailsDto.supportsPerToolAttribution` is composed
+  // server-side from the global `multiSlotFallbackEnabled` flag AND the
+  // persisted per-printer capability; we trust that composition and do
+  // NOT re-derive it. Optional (`?`) on the type is deliberate old-server
+  // tolerance; strict `=== true` collapses undefined/false.
   const printerSupportsPerTool = printerDetails?.supportsPerToolAttribution === true;
   const perToolAllowed = printerSupportsPerTool;
+  // Odometer cards and the scope-filter picker surface HOUR-attributed
+  // due-state data, so they stay collapsed to `[]` when attribution is
+  // unsupported — unchanged from #711.
   const eligibleToolheads = perToolAllowed ? eligibleToolheadsRaw : [];
+  // Physical toolhead existence — used to validate/preserve the scope of
+  // an existing LOG or DEPLOYMENT (`handleLogMaintenance` below, and the
+  // `toolheads` prop passed to `LogMaintenanceModal`). This must NOT be
+  // collapsed by `supportsPerToolAttribution`: the prior version reused
+  // the attribution-gated `eligibleToolheads` for this purpose, which
+  // caused `handleLogMaintenance`'s validation to silently coerce an
+  // existing, backend-valid deployment's non-null `toolheadId` to `null`
+  // whenever attribution happened to be unsupported — even for
+  // calendar/manual scopes (or plain logs) the backend still considers
+  // fully valid regardless of attribution support.
+  const logEligibleToolheads = eligibleToolheadsRaw;
 
   // Fetch printer statistics
   const { data: statistics, isLoading: statsLoading } = useQuery({
@@ -341,7 +360,7 @@ export function PrinterMaintenancePage() {
     // id that no longer maps to a physical, maintenance-eligible tool on
     // this printer. `null` (printer-wide) is always valid.
     const validated =
-      raw == null || eligibleToolheads.some(t => t.id === raw) ? raw : null;
+      raw == null || logEligibleToolheads.some(t => t.id === raw) ? raw : null;
     setModalInitialToolheadId(validated);
     setShowLogModal(true);
   };
@@ -359,7 +378,7 @@ export function PrinterMaintenancePage() {
     queryClient.invalidateQueries({ queryKey: ['printerMaintenanceLogs', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerStatistics', printerId] });
     queryClient.invalidateQueries({ queryKey: ['printerAlerts', printerId] });
-    queryClient.invalidateQueries({ queryKey: ['printerDetails', printerId] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId!) });
     queryClient.invalidateQueries({ queryKey: ['scheduleDeployments', printerId] });
     queryClient.invalidateQueries({ queryKey: ['upcoming-maintenance'] });
     setShowLogModal(false);
@@ -428,35 +447,43 @@ export function PrinterMaintenancePage() {
         </div>
       }
     >
+      {/*
+        Persistent live region for the aggregate per-toolhead due-state
+        summary (Hicks #719/3). This node is mounted unconditionally —
+        OUTSIDE the `isLoading` loading/content branch below, as well as
+        every inner conditional (no dependency on `eligibleToolheads.
+        length`, on `odometers.length`, on `upcomingError`) — so screen
+        readers subscribe to it once at page-mount (including the very
+        first, still-loading render) and observe every subsequent text
+        change. The previous version mounted this element only inside the
+        loaded-content branch, so a screen reader that started observing
+        during the initial spinner would never see the region come into
+        existence — the mount itself is silent to assistive tech, only
+        content *changes* on an already-mounted live region announce.
+        Placing it inside the `eligibleToolheads.length > 0 && odometers.
+        length > 0 && ...` branch would additionally unmount it in the
+        initial-load and single-toolhead cases and silently miss the
+        arrive-of-data announcement. The text itself is empty while
+        `isLoading` is true (nothing to summarise yet) and otherwise may
+        still be an empty string — `dueStateSummary` short-circuits to ''
+        when the feed errors (avoiding a duplicate announcement with the
+        `role="alert"` banner below) and before there is anything to
+        summarise. `sr-only` keeps it invisible while remaining reachable
+        to assistive tech.
+      */}
+      <p
+        role="status"
+        className="sr-only"
+        data-testid="toolhead-due-state-summary"
+      >
+        {isLoading ? '' : dueStateSummary}
+      </p>
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-primary" />
         </div>
       ) : (
         <div className="space-y-6">
-          {/*
-            Persistent live region for the aggregate per-toolhead due-state
-            summary. This node is mounted outside every conditional
-            branch (no dependency on `eligibleToolheads.length`, on
-            `odometers.length`, on `upcomingError`) so screen readers
-            subscribe to it once at page-mount and observe every text
-            change. Placing this inside the `eligibleToolheads.length > 0
-            && odometers.length > 0 && ...` branch would unmount it in the
-            initial-load and single-toolhead cases and silently miss the
-            arrive-of-data announcement. The text itself may be an empty
-            string — `dueStateSummary` short-circuits to '' when the
-            feed errors (avoiding a duplicate announcement with the
-            `role="alert"` banner below) and before there is anything to
-            summarise. `sr-only` keeps it invisible while remaining
-            reachable to assistive tech.
-          */}
-          <p
-            role="status"
-            className="sr-only"
-            data-testid="toolhead-due-state-summary"
-          >
-            {dueStateSummary}
-          </p>
           {/*
             Surface printer-details failures explicitly instead of silently
             collapsing per-tool UI. The per-tool surface is naturally gated
@@ -732,7 +759,7 @@ export function PrinterMaintenancePage() {
           printerId={printerId}
           printerName={printer?.name || 'Unknown Printer'}
           deployments={deployments}
-          toolheads={perToolAllowed ? printerDetails?.toolheads ?? [] : []}
+          toolheads={printerDetails?.toolheads ?? []}
           initialToolheadId={modalInitialToolheadId}
           onSubmit={handleLogSubmit}
           onClose={() => setShowLogModal(false)}
