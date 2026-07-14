@@ -117,7 +117,15 @@ public record HarvestJobRequest(
     string? BinCode = null,
     int? QuantityOverride = null,
     IReadOnlyList<HarvestOutputRequestItem>? Outputs = null,
-    string? OperationKey = null,
+
+    // The harvest endpoint writes this client-supplied key verbatim to PrintJob.HarvestOperationKey —
+    // the SAME unique filtered index the server's own "harvest:<jobId>" keys occupy — so it must
+    // reject the reserved idem:/harvest: namespaces exactly like AdjustPartInventoryRequest, or a
+    // client could pre-occupy another job's future server key and permanently break its harvest
+    // (issue #715, Hicks r8 blocker B1/H3). ASP.NET Core validates record constructor-parameter
+    // DataAnnotations (6.0+), so this rejects at the model-binding boundary with a 400; the
+    // PartHarvestService guard enforces the same rule as defense-in-depth.
+    [ReservedOperationKeyPrefix] string? OperationKey = null,
     IReadOnlyList<HarvestOutputBinRequest>? OutputBins = null,
     bool AllowWrongBin = false,
     string? OverrideReason = null);

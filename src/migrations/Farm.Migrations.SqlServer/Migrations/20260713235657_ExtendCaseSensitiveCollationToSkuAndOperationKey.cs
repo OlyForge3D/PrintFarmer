@@ -12,14 +12,6 @@ public partial class ExtendCaseSensitiveCollationToSkuAndOperationKey : Migratio
     // NFKC folding (issue #715, Frost r6).
     private const string BinaryCaseSensitiveCollation = "Latin1_General_100_BIN2";
 
-    // The collation these columns carried before the BIN2 rewrite. They inherited the database
-    // default, which on a typical deployment is SQL Server's default catalog collation
-    // SQL_Latin1_General_CP1_CI_AS (confirmed by AppDbContext / CaseSensitiveCollationModelTests).
-    // Down() must name it EXPLICITLY: EF's oldCollation: parameter is metadata-only and emits no
-    // COLLATE clause, so relying on it would leave the columns on BIN2 and make the rollback a
-    // silent no-op (issue #715, Hicks r7 blocker H1).
-    private const string DefaultCatalogCollation = "SQL_Latin1_General_CP1_CI_AS";
-
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
@@ -110,16 +102,22 @@ public partial class ExtendCaseSensitiveCollationToSkuAndOperationKey : Migratio
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        // Restore the original SQL_Latin1_General_CP1_CI_AS collation EXPLICITLY on every column
-        // (issue #715, Hicks r7 blocker H1); EF's oldCollation: metadata alone emits no COLLATE and
-        // would leave the columns on BIN2. WARNING: rollback can legitimately fail if BIN2 admitted
-        // rows that CI_AS treats as duplicates under the unique index (values differing only by
+        // Restore each column to the database's CURRENT catalog collation, read at rollback time via
+        // DATABASEPROPERTYEX(DB_NAME(),'Collation') (see RevertCollationToCatalogDefault), instead of
+        // the r7 hardcoded SQL_Latin1_General_CP1_CI_AS. A deployment on a different catalog collation
+        // (e.g. Latin1_General_CI_AS or a non-Latin locale) would otherwise be re-collated to the
+        // WRONG collation, silently corrupting rollback (issue #715, Hicks r8 blocker H1b). EF's
+        // oldCollation: metadata alone emits no COLLATE and would leave the columns on BIN2, so the
+        // revert must be explicit. WARNING: rollback can legitimately fail if BIN2 admitted rows the
+        // target collation treats as duplicates under the unique index (values differing only by
         // case/width) — an inherent risk of widening a collation, surfaced as an error rather than
         // hidden. The ledger index rebuilds stay online-aware (see OnlineAwareCreateUniqueIndex).
         migrationBuilder.Sql("DROP INDEX [IX_PrintJobs_HarvestOperationKey] ON [PrintJobs];");
-        migrationBuilder.Sql(
-            "ALTER TABLE [PrintJobs] ALTER COLUMN [HarvestOperationKey] nvarchar(128) "
-            + "COLLATE " + DefaultCatalogCollation + " NULL;");
+        migrationBuilder.Sql(RevertCollationToCatalogDefault(
+            table: "PrintJobs",
+            column: "HarvestOperationKey",
+            columnType: "nvarchar(128)",
+            nullability: "NULL"));
         migrationBuilder.Sql(OnlineAwareCreateUniqueIndex(
             indexName: "IX_PrintJobs_HarvestOperationKey",
             table: "PrintJobs",
@@ -129,9 +127,11 @@ public partial class ExtendCaseSensitiveCollationToSkuAndOperationKey : Migratio
         migrationBuilder.Sql(
             "DROP INDEX [IX_PartInventoryAdjustments_PartInventoryId_OperationKey] "
             + "ON [PartInventoryAdjustments];");
-        migrationBuilder.Sql(
-            "ALTER TABLE [PartInventoryAdjustments] ALTER COLUMN [OperationKey] nvarchar(128) "
-            + "COLLATE " + DefaultCatalogCollation + " NULL;");
+        migrationBuilder.Sql(RevertCollationToCatalogDefault(
+            table: "PartInventoryAdjustments",
+            column: "OperationKey",
+            columnType: "nvarchar(128)",
+            nullability: "NULL"));
         migrationBuilder.Sql(OnlineAwareCreateUniqueIndex(
             indexName: "IX_PartInventoryAdjustments_PartInventoryId_OperationKey",
             table: "PartInventoryAdjustments",
@@ -139,21 +139,23 @@ public partial class ExtendCaseSensitiveCollationToSkuAndOperationKey : Migratio
             filterPredicate: "[OperationKey] IS NOT NULL"));
 
         // Mirror the CHECK-constraint drop/recreate around the collation revert for Sku/Code, again
-        // recreating WITH NOCHECK so the reverted (now CI_AS) constraint never validation-scans.
+        // recreating WITH NOCHECK so the reverted (now catalog-default) constraint never
+        // validation-scans. Unlike the ledger columns above, these identity columns' unique indexes
+        // were previously rebuilt implicitly by migrationBuilder.AlterColumn; because the revert now
+        // uses raw dynamic SQL to pick up the runtime collation, the dependent UNIQUE index is
+        // dropped and recreated explicitly here (offline, non-filtered — byte-for-byte what EF
+        // emitted before, acceptable for these small identity tables per Vasquez V2 scope). EF's
+        // defensive default-constraint probe is intentionally omitted: Sku/Code carry no DEFAULTs.
         migrationBuilder.Sql(
             "ALTER TABLE [PartInventories] DROP CONSTRAINT IF EXISTS [CK_PartInventories_Sku_Normalized];");
 
-        migrationBuilder.AlterColumn<string>(
-            name: "Sku",
+        migrationBuilder.Sql("DROP INDEX [IX_PartInventories_Sku] ON [PartInventories];");
+        migrationBuilder.Sql(RevertCollationToCatalogDefault(
             table: "PartInventories",
-            type: "nvarchar(64)",
-            maxLength: 64,
-            nullable: false,
-            collation: DefaultCatalogCollation,
-            oldClrType: typeof(string),
-            oldType: "nvarchar(64)",
-            oldMaxLength: 64,
-            oldCollation: BinaryCaseSensitiveCollation);
+            column: "Sku",
+            columnType: "nvarchar(64)",
+            nullability: "NOT NULL"));
+        migrationBuilder.Sql("CREATE UNIQUE INDEX [IX_PartInventories_Sku] ON [PartInventories] ([Sku]);");
 
         migrationBuilder.Sql(
             "ALTER TABLE [PartInventories] WITH NOCHECK ADD CONSTRAINT [CK_PartInventories_Sku_Normalized] "
@@ -162,17 +164,13 @@ public partial class ExtendCaseSensitiveCollationToSkuAndOperationKey : Migratio
         migrationBuilder.Sql(
             "ALTER TABLE [Bins] DROP CONSTRAINT IF EXISTS [CK_Bins_Code_Normalized];");
 
-        migrationBuilder.AlterColumn<string>(
-            name: "Code",
+        migrationBuilder.Sql("DROP INDEX [IX_Bins_Code] ON [Bins];");
+        migrationBuilder.Sql(RevertCollationToCatalogDefault(
             table: "Bins",
-            type: "nvarchar(128)",
-            maxLength: 128,
-            nullable: false,
-            collation: DefaultCatalogCollation,
-            oldClrType: typeof(string),
-            oldType: "nvarchar(128)",
-            oldMaxLength: 128,
-            oldCollation: BinaryCaseSensitiveCollation);
+            column: "Code",
+            columnType: "nvarchar(128)",
+            nullability: "NOT NULL"));
+        migrationBuilder.Sql("CREATE UNIQUE INDEX [IX_Bins_Code] ON [Bins] ([Code]);");
 
         migrationBuilder.Sql(
             "ALTER TABLE [Bins] WITH NOCHECK ADD CONSTRAINT [CK_Bins_Code_Normalized] "
@@ -194,10 +192,52 @@ public partial class ExtendCaseSensitiveCollationToSkuAndOperationKey : Migratio
         string table,
         string columnList,
         string filterPredicate)
-        => "DECLARE @online nvarchar(3) = CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) "
+    {
+        // Suffix the locals with the (identifier-safe) index name so repeated calls in the SAME GO
+        // batch never redeclare @online/@sql. `dotnet ef migrations script` concatenates every Sql()
+        // call into ONE batch with no GO between them, so plain @online/@sql would raise Msg 134
+        // ("The variable name '@online' has already been declared") under script-based deployment
+        // (SQLCMD/sqlpackage) even though `dotnet ef database update` — which runs each Sql() as a
+        // separate command — tolerates it. T-SQL variables are batch-scoped, not block-scoped, so
+        // BEGIN/END cannot isolate them; unique names are the reliable fix (issue #715, Hicks r8
+        // blocker H1a). Index names are compile-time constants from this migration ([A-Za-z0-9_]
+        // only), so they are valid identifier suffixes and carry no injection surface.
+        string online = "@online_" + indexName;
+        string sql = "@sql_" + indexName;
+        return "DECLARE " + online + " nvarchar(3) = CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) "
             + "IN (3, 5, 8) THEN N'ON' ELSE N'OFF' END;\n"
-            + "DECLARE @sql nvarchar(max) = N'CREATE UNIQUE NONCLUSTERED INDEX [" + indexName + "] "
+            + "DECLARE " + sql + " nvarchar(max) = N'CREATE UNIQUE NONCLUSTERED INDEX [" + indexName + "] "
             + "ON [" + table + "] (" + columnList + ") WHERE " + filterPredicate + " "
-            + "WITH (ONLINE = ' + @online + N', MAXDOP = 0);';\n"
-            + "EXEC sys.sp_executesql @sql;";
+            + "WITH (ONLINE = ' + " + online + " + N', MAXDOP = 0);';\n"
+            + "EXEC sys.sp_executesql " + sql + ";";
+    }
+
+    // Reverts a column to the database's CURRENT catalog collation, captured AT ROLLBACK TIME via
+    // DATABASEPROPERTYEX(DB_NAME(), 'Collation') — NOT a collation hardcoded when this migration was
+    // authored. A deployment whose catalog collation differs from SQL Server's usual
+    // SQL_Latin1_General_CP1_CI_AS default (e.g. Latin1_General_CI_AS, or a European/Asian locale)
+    // would otherwise have Down() re-collate these columns to the WRONG collation, silently
+    // corrupting rollback semantics (issue #715, Hicks r8 blocker H1b). The collation is read into a
+    // local and the ALTER is issued via sp_executesql because a COLLATE clause requires a literal
+    // collation identifier and cannot take a function call inline. DATABASEPROPERTYEX returns a
+    // system collation name constrained to [A-Za-z0-9_] (no injection surface); it is a BARE
+    // identifier in COLLATE, so it must NOT be wrapped in QUOTENAME (COLLATE rejects a bracketed
+    // name). The @coll/@sql locals are suffixed with table+column so repeated calls in one GO batch
+    // never redeclare them (Msg 134); T-SQL variables are batch-scoped, not block-scoped. The suffix
+    // (a table_column pair) is always distinct from OnlineAwareCreateUniqueIndex's index-name suffix,
+    // so the two helpers never collide within a shared batch.
+    private static string RevertCollationToCatalogDefault(
+        string table,
+        string column,
+        string columnType,
+        string nullability)
+    {
+        string suffix = table + "_" + column;
+        string coll = "@coll_" + suffix;
+        string sql = "@sql_" + suffix;
+        return "DECLARE " + coll + " sysname = CAST(DATABASEPROPERTYEX(DB_NAME(), N'Collation') AS sysname);\n"
+            + "DECLARE " + sql + " nvarchar(max) = N'ALTER TABLE [" + table + "] ALTER COLUMN [" + column + "] "
+            + columnType + " COLLATE ' + " + coll + " + N' " + nullability + ";';\n"
+            + "EXEC sys.sp_executesql " + sql + ";";
+    }
 }
