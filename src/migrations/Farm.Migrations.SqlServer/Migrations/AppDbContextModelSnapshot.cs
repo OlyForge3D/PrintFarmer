@@ -2737,17 +2737,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("EmailOnJobCompleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobFailed")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobPaused")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobStarted")
                         .ValueGeneratedOnAdd()
