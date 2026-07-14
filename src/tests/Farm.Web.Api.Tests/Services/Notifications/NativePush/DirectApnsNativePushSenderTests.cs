@@ -194,6 +194,45 @@ public sealed class DirectApnsNativePushSenderTests
         }
     }
 
+    /// <summary>
+    /// Hicks #1 regression: an internally-generated <see cref="TaskCanceledException"/>
+    /// (which <see cref="HttpClient"/> raises when its own timeout timer fires, distinct
+    /// from a caller-token cancellation) MUST propagate as an
+    /// <see cref="OperationCanceledException"/>. The previous implementation filtered
+    /// on <c>cancellationToken.IsCancellationRequested</c> and, when the caller passed
+    /// <see cref="CancellationToken.None"/>, the filter was ALWAYS false and the OCE
+    /// fell through into a generic catch that mapped it to
+    /// <see cref="NativePushDispatchResult.Transient(string)"/>("timeout"). This
+    /// silently converted a real send failure into a spurious transient retry.
+    ///
+    /// The fix removed the OCE catch — OCE propagates naturally past the remaining
+    /// <see cref="HttpRequestException"/> catch.
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_InternalTaskCanceledException_PropagatesAsOperationCanceled()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        try
+        {
+            DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+            {
+                // TaskCanceledException is a subclass of OperationCanceledException;
+                // raised without a triggered token, it models HttpClient's internal
+                // timeout-timer cancellation.
+                throw new TaskCanceledException("internal HttpClient timeout");
+            });
+
+            Func<Task> act = () => sut.SendAsync(Sample, CancellationToken.None);
+
+            await act.Should().ThrowAsync<OperationCanceledException>(
+                "internal-timeout OCE MUST propagate; it must NOT be turned into a Transient result");
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
     [Fact]
     public async Task SendAsync_InvalidProviderToken_InvalidatesJwtCacheAndRetries()
     {

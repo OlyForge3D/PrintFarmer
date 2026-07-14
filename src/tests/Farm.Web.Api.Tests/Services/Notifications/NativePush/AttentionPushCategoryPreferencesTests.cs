@@ -100,25 +100,47 @@ public sealed class AttentionPushCategoryPreferencesTests
         prefs.IsEnabled(AttentionKind.Runout).Should().BeTrue();
     }
 
+    /// <summary>
+    /// Hicks #10: duplicate case-variant keys MUST resolve last-write-wins
+    /// against the case-insensitive dictionary. The persisted-JSON order
+    /// determines the winning value. Both input orders MUST produce the
+    /// respective distinct final state — this MUST NOT be a tautology.
+    /// </summary>
     [Fact]
-    public void FromJson_DuplicateCaseVariantKeys_CollapsesLastWriteWins()
+    public void FromJson_DuplicateCaseVariantKeys_LastWriteWins_UpperThenLower()
     {
-        // Case-insensitive rebuild MUST NOT throw when the persisted JSON
-        // carries both "Failure" and "failure" — the rebuild uses indexer
-        // semantics so the second occurrence overwrites the first. This
-        // matters because System.Text.Json will happily deserialize both
-        // keys into a case-sensitive dictionary; converting to case-
-        // insensitive with Dictionary(comparer, source) would throw
-        // ArgumentException on the duplicate.
-        const string json = "{\"categories\":{\"Failure\":false,\"failure\":true}}";
+        // Input order: "Failure":false comes FIRST, "failure":true comes SECOND.
+        // System.Text.Json populates the case-SENSITIVE intermediate dict in
+        // JSON property order; the rebuild-to-case-insensitive step then
+        // iterates in that order and uses indexer semantics so the SECOND
+        // occurrence overwrites the first.
+        //   Final stored value for Failure = true (enabled).
+        //   IsEnabled(Failure) MUST return true.
+        const string upperThenLower = "{\"categories\":{\"Failure\":false,\"failure\":true}}";
 
-        AttentionPushCategoryPreferences prefs = AttentionPushCategoryPreferences.FromJson(json);
+        AttentionPushCategoryPreferences prefs = AttentionPushCategoryPreferences.FromJson(upperThenLower);
 
-        // Whichever value the deserializer surfaces LAST wins after rebuild.
-        // The point of the test is that we did not throw and lookup still
-        // works — the exact final boolean is a secondary property.
-        bool enabled = prefs.IsEnabled(AttentionKind.Failure);
-        (enabled == true || enabled == false).Should().BeTrue();
+        prefs.IsEnabled(AttentionKind.Failure).Should().BeTrue(
+            "with input order Failure:false then failure:true the second occurrence wins and delivery is enabled");
+    }
+
+    /// <summary>
+    /// Hicks #10 complement: reverse the input order and the winning value
+    /// flips. This proves the resolution is NOT a tautology and that input
+    /// order actually determines the outcome.
+    /// </summary>
+    [Fact]
+    public void FromJson_DuplicateCaseVariantKeys_LastWriteWins_LowerThenUpper()
+    {
+        // Input order: "failure":true comes FIRST, "Failure":false comes SECOND.
+        //   Final stored value for Failure = false (opt-out).
+        //   IsEnabled(Failure) MUST return false.
+        const string lowerThenUpper = "{\"categories\":{\"failure\":true,\"Failure\":false}}";
+
+        AttentionPushCategoryPreferences prefs = AttentionPushCategoryPreferences.FromJson(lowerThenUpper);
+
+        prefs.IsEnabled(AttentionKind.Failure).Should().BeFalse(
+            "with input order failure:true then Failure:false the second occurrence wins and delivery is disabled");
     }
 
     [Fact]

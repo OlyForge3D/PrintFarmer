@@ -133,8 +133,8 @@ public sealed class NotificationPreferencesContractTests
             Telegram = false,
         };
 
-        // Match production: CamelCase property naming + bare enum converter
-        // (PascalCase enum tokens). See ControllerStartup.
+        // Match production: camelCase JSON PROPERTY names + bare enum
+        // converter for PascalCase enum VALUE tokens. See ControllerStartup.
         var apiOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -166,6 +166,121 @@ public sealed class NotificationPreferencesContractTests
             bogus,
             ProdEnumOptions);
         act.Should().Throw<JsonException>();
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        GetPreferencesEndpoint_FreshUser_ReturnsCompleteNineRowWireSnapshotWithExactShape()
+    {
+        // Hicks #9: the HTTP contract for GET /api/notifications/preferences
+        // MUST publish the complete nine-row wire snapshot with exact:
+        //   * top-level camelCase JSON property names
+        //   * PascalCase enum VALUE tokens on eventType
+        //   * canonical defaults (matches NotificationPreferencesDefaults.Apply)
+        //   * exactly nine rows, one per NotificationPreferenceEventType value,
+        //     in the documented order (JobStarted, JobCompleted, JobFailed,
+        //     JobPaused, PrinterFailure, FilamentRunout, HarvestReady,
+        //     MaintenanceDue, PrinterOffline).
+        //
+        // We drive the REAL controller endpoint on a user with no persisted
+        // row so the response reflects the CreateDefaultPreferences shape,
+        // then serialise the returned DTO under the production
+        // camelCase-property + PascalCase-enum settings and inspect the
+        // wire JSON directly.
+        var (dbContext, userId) = await BuildInMemoryDbWithUserAsync();
+        await using Farm.Infrastructure.Data.AppDbContext _dbCtx = dbContext;
+
+        NotificationsController controller = BuildController(dbContext, userId);
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.GetPreferencesAsync(System.Threading.CancellationToken.None);
+
+        var okResult = result.Result as Microsoft.AspNetCore.Mvc.OkObjectResult;
+        okResult.Should().NotBeNull();
+        okResult!.StatusCode.Should().Be(200);
+        var dto = okResult.Value as NotificationPreferencesDto;
+        dto.Should().NotBeNull();
+
+        // Serialise under production JSON settings — camelCase properties +
+        // JsonStringEnumConverter with NO naming policy (PascalCase enum
+        // value tokens).
+        var apiOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new JsonStringEnumConverter() },
+        };
+        string json = JsonSerializer.Serialize(dto!, apiOptions);
+        JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+
+        // Top-level property names (camelCase).
+        var propNames = root.EnumerateObject().Select(p => p.Name).ToArray();
+        propNames.Should().Contain(new[]
+        {
+            "userId",
+            "enableEmailNotifications",
+            "enablePushNotifications",
+            "enableInAppNotifications",
+            "enableTelegramNotifications",
+            "notifyOnCompletion",
+            "notifyOnFailure",
+            "notifyOnStart",
+            "notifyOnPause",
+            "eventChannelPreferences",
+            "frequency",
+            "retentionDays",
+        });
+
+        // Top-level default values match NotificationPreferencesDefaults.Apply.
+        root.GetProperty("enableEmailNotifications").GetBoolean().Should().BeFalse();
+        root.GetProperty("enablePushNotifications").GetBoolean().Should().BeTrue();
+        root.GetProperty("enableInAppNotifications").GetBoolean().Should().BeTrue();
+        root.GetProperty("enableTelegramNotifications").GetBoolean().Should().BeFalse();
+        root.GetProperty("notifyOnStart").GetBoolean().Should().BeFalse();
+        root.GetProperty("notifyOnCompletion").GetBoolean().Should().BeTrue();
+        root.GetProperty("notifyOnFailure").GetBoolean().Should().BeTrue();
+        root.GetProperty("notifyOnPause").GetBoolean().Should().BeTrue();
+        root.GetProperty("frequency").GetString().Should().Be("RealTime");
+        root.GetProperty("retentionDays").GetInt32().Should().Be(30);
+
+        // Exactly nine rows.
+        JsonElement rows = root.GetProperty("eventChannelPreferences");
+        rows.GetArrayLength().Should().Be(9, "the wire matrix MUST expose exactly nine rows — one per NotificationPreferenceEventType");
+
+        // Expected ordered wire snapshot: (eventType PascalCase, inApp, email, push, telegram).
+        // Values match NotificationPreferencesDefaults.Apply and BuildEventChannelPreferences.
+        (string EventType, bool InApp, bool Email, bool Push, bool Telegram)[] expected =
+        {
+            ("JobStarted",     false, false, false, false),
+            ("JobCompleted",   true,  false, true,  false),
+            ("JobFailed",      true,  false, true,  false),
+            ("JobPaused",      true,  false, true,  false),
+            ("PrinterFailure", true,  false, true,  false),
+            ("FilamentRunout", true,  false, true,  false),
+            ("HarvestReady",   true,  false, true,  false),
+            ("MaintenanceDue", true,  false, true,  false),
+            ("PrinterOffline", true,  false, true,  false),
+        };
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            JsonElement row = rows[i];
+
+            // Per-row property names — camelCase.
+            var rowProps = row.EnumerateObject().Select(p => p.Name).ToArray();
+            rowProps.Should().BeEquivalentTo(new[] { "eventType", "inApp", "email", "push", "telegram" },
+                $"row #{i} MUST have exactly camelCase properties {{eventType, inApp, email, push, telegram}}");
+
+            row.GetProperty("eventType").GetString().Should().Be(expected[i].EventType,
+                $"row #{i} eventType MUST be the PascalCase token '{expected[i].EventType}'");
+            row.GetProperty("inApp").GetBoolean().Should().Be(expected[i].InApp,
+                $"row #{i} ({expected[i].EventType}) inApp default MUST match the canonical matrix");
+            row.GetProperty("email").GetBoolean().Should().Be(expected[i].Email,
+                $"row #{i} ({expected[i].EventType}) email default MUST be false");
+            row.GetProperty("push").GetBoolean().Should().Be(expected[i].Push,
+                $"row #{i} ({expected[i].EventType}) push default MUST match the canonical matrix");
+            row.GetProperty("telegram").GetBoolean().Should().Be(expected[i].Telegram,
+                $"row #{i} ({expected[i].EventType}) telegram default MUST be false");
+        }
     }
 
     [Fact]
@@ -748,13 +863,21 @@ public sealed class NotificationPreferencesContractTests
     [Fact]
     public async System.Threading.Tasks.Task UnknownEnumTokenOnPut_Returns400ProblemDetails()
     {
-        // The unknown-enum → 400 contract must survive the patch refactor.
-        // JsonStringEnumConverter (no naming policy) rejects unknown tokens at
-        // model binding, before the controller action runs. We simulate that
-        // by handing the controller a request assembled with an out-of-range
-        // enum, which the service maps back to a 400 via ArgumentException →
-        // BadRequest fallback in the catch block. (The end-to-end 400 comes
-        // from the ApiController model-binding path in production.)
+        // Hicks #9: the unknown-enum → 400 contract must survive the patch
+        // refactor. JsonStringEnumConverter (no naming policy) rejects
+        // unknown PascalCase enum VALUE tokens at model binding, before the
+        // controller action runs. We simulate that behaviour here by handing
+        // the controller a request assembled with an out-of-range enum. The
+        // service now uses typed validation and the invalid enum surfaces
+        // as an ArgumentException, which the controller maps to a 400
+        // ProblemDetails via the shared typed-validation branch. Raw
+        // provider / unexpected exceptions no longer fall through this path
+        // — Hicks #4 hardened the broad-catch surface.
+        //
+        // Hicks #9 additionally requires: after the 400, RAW STORAGE MUST
+        // be byte-for-byte unchanged. We seed a distinctive row, drive the
+        // failing PUT, and assert the persisted row is identical to the
+        // pre-attempt snapshot.
         var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
                 Farm.Infrastructure.Data.AppDbContext>()
             .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
@@ -762,6 +885,50 @@ public sealed class NotificationPreferencesContractTests
         await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
 
         System.Guid userId = System.Guid.NewGuid();
+        dbContext.Users.Add(new Farm.Infrastructure.Domain.User
+        {
+            Id = userId,
+            Username = "unknown-enum-user",
+            Email = "unknown@example.com",
+            PasswordHash = "x",
+        });
+
+        // Seed a distinctive persisted state that would be visibly altered
+        // by any successful write.
+        var seed = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            EnableInAppNotifications = true,
+            EnableEmailNotifications = false,
+            EnablePushNotifications = true,
+            EnableTelegramNotifications = false,
+            NotifyOnStart = true,
+            NotifyOnCompletion = false,
+            NotifyOnFailure = true,
+            NotifyOnPause = false,
+            Frequency = Farm.Infrastructure.Domain.Notifications.NotificationFrequency.Daily,
+            RetentionDays = 42,
+            AttentionPushCategoryPreferencesJson = "{\"categories\":{\"failure\":false}}",
+        };
+        dbContext.NotificationPreferences.Add(seed);
+        await dbContext.SaveChangesAsync();
+
+        // Snapshot every column we care about via a fresh no-tracking read.
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? preAttempt =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        preAttempt.Should().NotBeNull();
+        string preAttemptAttentionJson = preAttempt!.AttentionPushCategoryPreferencesJson!;
+        bool preEnableInApp = preAttempt.EnableInAppNotifications;
+        bool preEnableEmail = preAttempt.EnableEmailNotifications;
+        bool preEnablePush = preAttempt.EnablePushNotifications;
+        bool preEnableTelegram = preAttempt.EnableTelegramNotifications;
+        bool preNotifyOnStart = preAttempt.NotifyOnStart;
+        bool preNotifyOnCompletion = preAttempt.NotifyOnCompletion;
+        bool preNotifyOnFailure = preAttempt.NotifyOnFailure;
+        bool preNotifyOnPause = preAttempt.NotifyOnPause;
+        Farm.Infrastructure.Domain.Notifications.NotificationFrequency preFrequency = preAttempt.Frequency;
+        int preRetentionDays = preAttempt.RetentionDays;
+
         NotificationsController controller = BuildController(dbContext, userId);
 
         var request = new UpdateNotificationPreferencesRequest
@@ -783,6 +950,23 @@ public sealed class NotificationPreferencesContractTests
             await controller.UpdatePreferencesAsync(request, dbContext);
 
         result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>();
+
+        // Hicks #9: raw storage MUST be byte-for-byte unchanged.
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? postAttempt =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        postAttempt.Should().NotBeNull();
+        postAttempt!.EnableInAppNotifications.Should().Be(preEnableInApp);
+        postAttempt.EnableEmailNotifications.Should().Be(preEnableEmail);
+        postAttempt.EnablePushNotifications.Should().Be(preEnablePush);
+        postAttempt.EnableTelegramNotifications.Should().Be(preEnableTelegram);
+        postAttempt.NotifyOnStart.Should().Be(preNotifyOnStart);
+        postAttempt.NotifyOnCompletion.Should().Be(preNotifyOnCompletion);
+        postAttempt.NotifyOnFailure.Should().Be(preNotifyOnFailure);
+        postAttempt.NotifyOnPause.Should().Be(preNotifyOnPause);
+        postAttempt.Frequency.Should().Be(preFrequency);
+        postAttempt.RetentionDays.Should().Be(preRetentionDays);
+        postAttempt.AttentionPushCategoryPreferencesJson.Should().Be(preAttemptAttentionJson,
+            "raw persisted attention JSON MUST be byte-for-byte unchanged after an unknown-enum 400");
     }
 
     private static NotificationsController BuildController(
@@ -1357,117 +1541,155 @@ public sealed class NotificationPreferencesContractTests
     public async System.Threading.Tasks.Task
         UpdateAttentionPushPreferences_CumulativeCardinalityExceededAcrossRepeatedRequests_Returns400AndPersistsByteForByteUnchanged()
     {
-        // Hicks #4: the per-request bound (32 keys) alone cannot stop an
-        // attacker from persisting an unbounded map via repeated 1-key
-        // requests. We seed the row with 128 persisted keys (the cumulative
-        // cap), then submit ONE additional key. The PROSPECTIVE merged map
-        // would carry 129 keys and must be rejected with 400 — AND the
-        // persisted JSON must remain byte-for-byte identical to the seed.
+        // Hicks #8: DO NOT seed the persisted state directly. Drive
+        // REPEATED single-key HTTP PUTs until the cumulative cardinality
+        // bound (128 unique keys) rejects. Prove that:
+        //   * every accepted request adds exactly one key
+        //   * the 129th request returns 400 without mutating storage
+        //   * persisted JSON is byte-for-byte identical to the pre-attempt state
+        //
+        // The per-request bound is 32 keys; the cumulative bound is 128.
+        // A repeated one-key attack cannot reach 128 without going through
+        // the real service path each time — this test drives that end-to-end.
         (Farm.Web.Api.Controllers.NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          System.Guid userId) = await BuildAttentionEndpointFixture();
         await using AppDbContextGuard guard = new(dbContext);
 
-        var seededCategories = new System.Collections.Generic.Dictionary<string, bool>(System.StringComparer.OrdinalIgnoreCase);
+        // Drive N=128 one-key requests. Each PUT adds exactly ONE unique
+        // key so the persisted map grows monotonically from 0 → 128.
         for (int i = 0; i < 128; i++)
         {
-            seededCategories[$"seedkey-{i:D3}"] = i % 3 == 0;
+            var addOne = new AttentionPushPreferencesDto();
+            addOne.Categories[$"cumkey-{i:D3}"] = true;
+
+            Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> okResult =
+                await controller.UpdateAttentionPushPreferencesAsync(addOne, gate.Object, System.Threading.CancellationToken.None);
+
+            (okResult.Result as Microsoft.AspNetCore.Mvc.OkObjectResult)
+                .Should().NotBeNull($"one-key PUT #{i} must be accepted up to the cumulative bound");
         }
 
-        var seeded = new Farm.Infrastructure.Services.Notifications.NativePush.AttentionPushCategoryPreferences { Categories = seededCategories };
-        string seededJson = seeded.ToJson();
+        // Capture the exact persisted JSON at N=128 keys. Any further update
+        // that touches storage would change this byte string.
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? atCap =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        atCap.Should().NotBeNull();
+        string preAttemptJson = atCap!.AttentionPushCategoryPreferencesJson!;
+        preAttemptJson.Should().NotBeNullOrEmpty();
 
-        dbContext.NotificationPreferences.Add(new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
-        {
-            UserId = userId,
-            AttentionPushCategoryPreferencesJson = seededJson,
-        });
-        _ = await dbContext.SaveChangesAsync();
-
-        var payload = new AttentionPushPreferencesDto();
-        payload.Categories["one-more-key"] = true;
+        // The 129th request pushes past the cumulative bound → 400 and
+        // persisted JSON MUST NOT change.
+        var overflow = new AttentionPushPreferencesDto();
+        overflow.Categories["cumkey-129-overflow"] = true;
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(overflow, gate.Object, System.Threading.CancellationToken.None);
 
         var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
         objectResult.Should().NotBeNull();
         objectResult!.StatusCode.Should().Be(400, "the prospective merged map exceeds the cumulative cardinality bound");
 
-        // Bishop minor + Hicks #4: prove the persisted JSON is byte-for-byte
-        // unchanged. AsNoTracking pulls straight from the store rather than
-        // any change-tracker snapshot, so a stray SaveChangesAsync would
-        // show up here.
-        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? afterOverflow =
             await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
-        persisted.Should().NotBeNull();
-        persisted!.AttentionPushCategoryPreferencesJson.Should()
-            .Be(seededJson, "persisted attention JSON MUST be byte-for-byte unchanged when the cumulative bound rejects the update");
+        afterOverflow.Should().NotBeNull();
+        afterOverflow!.AttentionPushCategoryPreferencesJson.Should()
+            .Be(preAttemptJson, "persisted attention JSON MUST be byte-for-byte unchanged when the cumulative bound rejects the update");
     }
 
     [Fact]
     public async System.Threading.Tasks.Task
         UpdateAttentionPushPreferences_CumulativeJsonBytesExceeded_Returns400AndPersistsByteForByteUnchanged()
     {
-        // Hicks #4 sibling: a payload of long-valued keys can also blow past
-        // the UTF-8 byte bound before hitting the cardinality bound. Seed a
-        // row whose current JSON is comfortably under 8KB but where one more
-        // long key would push it over. Reject 400 and prove byte-for-byte
-        // unchanged persistence.
+        // Hicks #8: build persisted state JUST under the UTF-8 byte limit,
+        // then cross it with a MULTIBYTE input (Unicode characters that
+        // consume 2-3 bytes each). Assert 400 and raw JSON byte-identical.
+        // No early-return / no-assertion path — the arithmetic is calibrated
+        // to land under the limit deterministically.
+        //
+        // Constants:
+        //   * AttentionCategoryCumulativeJsonBytes = 8 * 1024 = 8192 bytes
+        //   * We seed at ~7800 bytes (comfortably under) then submit a
+        //     multibyte key whose UTF-8 encoding pushes total past 8192.
         (Farm.Web.Api.Controllers.NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          System.Guid userId) = await BuildAttentionEndpointFixture();
         await using AppDbContextGuard guard = new(dbContext);
 
-        var seededCategories = new System.Collections.Generic.Dictionary<string, bool>(System.StringComparer.OrdinalIgnoreCase);
-        // Seed with just under the byte bound. Each key is 60 chars +
-        // "":true", so 128 rows -> ~9.5KB — over budget on load. To bracket
-        // the byte bound specifically we use 120 rows of 60 chars.
-        for (int i = 0; i < 120; i++)
+        // Build the persisted state through the service so it goes through
+        // the normal size-tracking path — not a direct DB seed. Each key is
+        // 62 ASCII chars ("kb-XXX-" + 55 'x') so a JSON entry
+        // ("KEY":false,) is 71 bytes; N entries yield 71*N+1 bytes on the
+        // wire (envelope + N entries minus trailing comma). 114 entries
+        // ≈ 8095 bytes, just under the 8192 UTF-8 ceiling. Batch into 32-key
+        // PUTs (the per-request bound) so we don't trip that limit while
+        // building.
+        const int totalUnderBudget = 114;
+        int keysAdded = 0;
+        while (keysAdded < totalUnderBudget)
         {
-            string k = $"kb-{i:D3}-" + new string('x', 60);
-            seededCategories[k] = false;
+            int batchCount = System.Math.Min(32, totalUnderBudget - keysAdded);
+            var batch = new AttentionPushPreferencesDto();
+            for (int i = 0; i < batchCount; i++)
+            {
+                string k = $"kb-{keysAdded + i:D3}-" + new string('x', 55);
+                batch.Categories[k] = false;
+            }
+
+            Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> okResult =
+                await controller.UpdateAttentionPushPreferencesAsync(batch, gate.Object, System.Threading.CancellationToken.None);
+
+            (okResult.Result as Microsoft.AspNetCore.Mvc.OkObjectResult)
+                .Should().NotBeNull("batches within the byte / cardinality caps must be accepted");
+
+            keysAdded += batchCount;
         }
 
-        var seeded = new Farm.Infrastructure.Services.Notifications.NativePush.AttentionPushCategoryPreferences { Categories = seededCategories };
-        string seededJson = seeded.ToJson();
+        // Capture the persisted JSON just below the limit.
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? justUnder =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        justUnder.Should().NotBeNull();
+        string preAttemptJson = justUnder!.AttentionPushCategoryPreferencesJson!;
+        int preAttemptBytes = System.Text.Encoding.UTF8.GetByteCount(preAttemptJson);
+        preAttemptBytes.Should().BeLessThan(
+            8 * 1024,
+            $"seeded state must be under the 8KB limit; got {preAttemptBytes} bytes");
 
-        // If the seed is already over budget the test degenerates. Skip if so.
-        if (System.Text.Encoding.UTF8.GetByteCount(seededJson) >= 8 * 1024)
-        {
-            return;
-        }
+        // Now submit a MULTIBYTE key whose UTF-8 encoding is guaranteed to
+        // push the merged JSON past the 8KB bound. Use a 64-char key of a
+        // 3-byte-per-char Unicode glyph → 192 bytes for the key + JSON
+        // envelope (,"KEY":true = +7 ASCII) = 199 bytes added on the wire.
+        // (U+FFFD REPLACEMENT CHARACTER encodes to EF BF BD in UTF-8 = 3 bytes;
+        //  it survives JSON round-trip without escaping.)
+        var overflow = new AttentionPushPreferencesDto();
+        string multibyteKey = new('\uFFFD', 64);
+        overflow.Categories[multibyteKey] = true;
 
-        dbContext.NotificationPreferences.Add(new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
-        {
-            UserId = userId,
-            AttentionPushCategoryPreferencesJson = seededJson,
-        });
-        _ = await dbContext.SaveChangesAsync();
-
-        // Prospective incoming keys of the same 60-char shape push the
-        // merged payload past 8KB.
-        var payload = new AttentionPushPreferencesDto();
-        for (int i = 120; i < 128; i++)
-        {
-            string k = $"kb-{i:D3}-" + new string('x', 60);
-            payload.Categories[k] = false;
-        }
+        // Sanity: prove the incoming key IS actually multibyte and would
+        // push the total past 8KB (envelope +7 ASCII plus 192-byte key).
+        int addedKeyBytes = System.Text.Encoding.UTF8.GetByteCount(multibyteKey);
+        addedKeyBytes.Should().BeGreaterThan(64, "the crossing input MUST be multibyte to cover the UTF-8 code path");
+        (preAttemptBytes + addedKeyBytes + 7).Should().BeGreaterThan(
+            8 * 1024,
+            "the multibyte input must be sized to cross the 8KB budget on top of the seeded state");
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(overflow, gate.Object, System.Threading.CancellationToken.None);
 
         var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
         objectResult.Should().NotBeNull();
-        objectResult!.StatusCode.Should().Be(400);
+        objectResult!.StatusCode.Should().Be(400, "the prospective merged JSON exceeds the UTF-8 byte bound");
 
+        // Bishop minor + Hicks #8: prove the persisted JSON is byte-for-byte
+        // unchanged. AsNoTracking pulls straight from the store rather than
+        // any change-tracker snapshot.
         Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
             await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
         persisted.Should().NotBeNull();
         persisted!.AttentionPushCategoryPreferencesJson.Should()
-            .Be(seededJson, "byte-bound rejection MUST leave persisted JSON byte-for-byte unchanged");
+            .Be(preAttemptJson, "byte-bound rejection MUST leave persisted JSON byte-for-byte unchanged");
     }
 
     [Fact]

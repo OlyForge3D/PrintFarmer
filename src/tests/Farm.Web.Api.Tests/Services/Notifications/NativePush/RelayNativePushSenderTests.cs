@@ -166,6 +166,37 @@ public sealed class RelayNativePushSenderTests
         result.Reason.Should().Be("network");
     }
 
+    /// <summary>
+    /// Hicks #1 regression: an internally-generated <see cref="TaskCanceledException"/>
+    /// (raised by <see cref="HttpClient"/> when its own timeout timer fires, NOT by
+    /// the caller's token) MUST propagate as an <see cref="OperationCanceledException"/>.
+    /// The previous implementation filtered on <c>cancellationToken.IsCancellationRequested</c>
+    /// which was ALWAYS false when the caller passed <see cref="CancellationToken.None"/>,
+    /// so the internal-timeout OCE fell through to a generic catch that mapped it to
+    /// <see cref="NativePushDispatchResult.Transient(string)"/>("timeout"). This
+    /// silently converted a real send failure into a retry candidate that produced
+    /// no real error signal upstream.
+    ///
+    /// The fix removed the OCE catch entirely — OCE propagates naturally past the
+    /// remaining <see cref="HttpRequestException"/> catch.
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_InternalTaskCanceledException_PropagatesAsOperationCanceled()
+    {
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
+        {
+            // TaskCanceledException is a subclass of OperationCanceledException;
+            // when raised WITHOUT a triggered cancellation token it models the
+            // HttpClient internal-timeout-timer case.
+            throw new TaskCanceledException("internal HttpClient timeout");
+        });
+
+        Func<Task> act = () => sut.SendAsync(Sample, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "internal-timeout OCE MUST propagate; it must NOT be turned into a Transient result");
+    }
+
     private static NativePushSettings MakeRelaySettings() => new()
     {
         Mode = NativePushMode.Relay,
