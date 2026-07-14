@@ -441,4 +441,129 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
     expect(screen.getByRole('button', { name: /^Deploy$/ })).not.toBeDisabled();
     expect(screen.queryByTestId('printer-details-updating')).not.toBeInTheDocument();
   });
+
+  // ---------------------------------------------------------------------------
+  // Paused-fetch race (Hicks #1 rejection at 844162933).
+  //
+  // React Query pauses fetches when the network is offline
+  // (`onlineManager.setOnline(false)`). In that state `isFetching` reads
+  // FALSE (the fetch is not actively in flight; it is *paused*) while
+  // `fetchStatus === 'paused'`. If the Deploy-enable gate looks only at
+  // `!isFetching`, the modal will treat a paused stale-cache render as
+  // "authoritative details ready" and let Deploy queue a null scope
+  // against a printer whose capability has never been verified after
+  // selection. The fix requires `fetchStatus === 'idle'` AND
+  // `isFetchedAfterMount === true` before Deploy is enabled.
+  // ---------------------------------------------------------------------------
+
+  it('blocks Deploy while the printer-details fetch is paused (offline), even when stale cache says per-tool is off; unpauses on reconnect and requires the fresh verdict (Hicks #1 paused)', async () => {
+    // Late-imported so we can toggle before mount without affecting other
+    // tests. `onlineManager` is a module-level singleton; we restore its
+    // state in `finally` so subsequent tests see it online.
+    const { onlineManager } = await import('@tanstack/react-query');
+
+    const stale: PrinterDetails = {
+      id: 'printer-1',
+      name: 'Voron 2.4',
+      serverUrl: 'http://x',
+      toolheads: [t0, t1],
+      // Stale cached verdict — the pre-fix gate would treat this as
+      // authoritative because `isFetching` reads false while the fetch
+      // is *paused* by onlineManager.
+      supportsPerToolAttribution: false,
+    } as PrinterDetails;
+    const fresh: PrinterDetails = {
+      id: 'printer-1',
+      name: 'Voron 2.4',
+      serverUrl: 'http://x',
+      toolheads: [t0, t1],
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+
+    let resolveFresh: (v: PrinterDetails) => void = () => {};
+    const freshPromise = new Promise<PrinterDetails>(r => {
+      resolveFresh = r;
+    });
+    const getDetailsSpy = apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>;
+    getDetailsSpy.mockReturnValue(freshPromise);
+
+    const wasOnline = onlineManager.isOnline();
+    try {
+      onlineManager.setOnline(false);
+
+      const qc = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, networkMode: 'online' },
+        },
+      });
+      // Prime the cache with the stale verdict so the modal sees data
+      // immediately even while offline.
+      qc.setQueryData(['printerDetails', 'printer-1'], stale, {
+        updatedAt: Date.now() - 5 * 60_000,
+      });
+
+      render(
+        <QueryClientProvider client={qc}>
+          <DeployPlanModal isOpen plan={plan} onClose={() => {}} />
+        </QueryClientProvider>
+      );
+
+      const user = userEvent.setup();
+      await user.selectOptions(
+        screen.getByRole('combobox', { name: /select printer/i }),
+        'printer-1'
+      );
+
+      // The fetch is paused (offline) — the surface must expose the
+      // paused status via role="status" so screen readers can observe
+      // it. The paused indicator's data-testid is distinct from the
+      // loading/updating ones because it is a distinct axis of
+      // "authoritative verdict unavailable" that the operator can act
+      // on differently (wait for the network vs. wait for backend).
+      const pausedIndicator = await screen.findByTestId('printer-details-paused');
+      expect(pausedIndicator).toHaveAttribute('role', 'status');
+      expect(pausedIndicator.textContent).toMatch(/offline/i);
+
+      // No network call has fired — the fetch is paused, so react-query
+      // does not invoke the queryFn until we come back online.
+      expect(getDetailsSpy).not.toHaveBeenCalled();
+
+      // The stale picker verdict must NOT be trusted: `showScopePicker`
+      // remains hidden even though the cached value has two toolheads,
+      // because `perToolAllowed` is gated on `detailsReady` which
+      // requires `fetchStatus === 'idle'`.
+      expect(
+        screen.queryByRole('radiogroup', { name: /maintenance scope/i })
+      ).not.toBeInTheDocument();
+
+      // Deploy MUST be disabled AND a programmatic click on the
+      // (disabled) button must NOT fire the mutation.
+      const deployBtn = screen.getByRole('button', { name: /^Deploy$/ });
+      expect(deployBtn).toBeDisabled();
+      await user.click(deployBtn);
+      expect(maintenancePlanService.deployPlan).not.toHaveBeenCalled();
+
+      // Reconnect. The paused fetch unpauses and calls queryFn.
+      onlineManager.setOnline(true);
+      await waitFor(() => expect(getDetailsSpy).toHaveBeenCalledTimes(1));
+
+      // Now the modal should indicate the refetch is in flight; the
+      // Deploy button must still be disabled.
+      expect(screen.getByRole('button', { name: /^Deploy$/ })).toBeDisabled();
+
+      // Authoritative response arrives; the scope picker appears and
+      // Deploy re-enables.
+      resolveFresh(fresh);
+      await waitFor(() =>
+        expect(
+          screen.getByRole('radiogroup', { name: /maintenance scope/i })
+        ).toBeInTheDocument()
+      );
+      expect(screen.getByRole('button', { name: /^Deploy$/ })).not.toBeDisabled();
+      // The paused indicator is gone once the fetch resolves.
+      expect(screen.queryByTestId('printer-details-paused')).not.toBeInTheDocument();
+    } finally {
+      onlineManager.setOnline(wasOnline);
+    }
+  });
 });

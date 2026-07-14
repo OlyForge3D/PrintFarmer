@@ -43,7 +43,18 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
 }));
 
 vi.mock('@/common/components/PageTemplate', () => ({
-  PageTemplate: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PageTemplate: ({
+    children,
+    actions,
+  }: {
+    children: React.ReactNode;
+    actions?: React.ReactNode;
+  }) => (
+    <div>
+      {actions ? <div data-testid="page-template-actions">{actions}</div> : null}
+      {children}
+    </div>
+  ),
 }));
 
 import { apiClient } from '@/services/api';
@@ -721,5 +732,301 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     // false positive from P2's own T1-P2 radio.
     expect(screen.getByLabelText('Printer-wide')).toBeChecked();
     expect(screen.queryByLabelText(/^T1 · T1$/)).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Hicks #2: route change with a Log Maintenance modal open.
+  //
+  // The prior fix reset scope on printerId change but LEFT the log
+  // modal open with the previous printer's initial toolhead
+  // preselected. If the operator navigated to a different printer
+  // (e.g. via the notifications tray) while the modal was open, they
+  // could submit a maintenance log against P2 with a P1 toolhead id
+  // pre-filled in the internal state (the modal owns its own scope
+  // state after mount). The fix synchronously closes the modal AND
+  // remounts LogMaintenanceModal via `key={printerId}` so its
+  // internal state is fully reset.
+  // ---------------------------------------------------------------------------
+
+  it('closes any open Log Maintenance modal and remounts it when the :printerId route-param changes, so a P1 toolhead cannot submit for P2 (Hicks #2)', async () => {
+    // Two printers with disjoint toolhead sets.
+    const p1Details = {
+      id: 'printer-1',
+      name: 'Printer One',
+      serverUrl: 'http://p1',
+      toolheads: [physicalT0, physicalT1],
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+    const p2Details = {
+      id: 'printer-2',
+      name: 'Printer Two',
+      serverUrl: 'http://p2',
+      toolheads: [
+        { id: 'th-2a', index: 0, name: 'T0-P2', isPrimary: true, toolheadType: ToolheadType.Physical, cumulativePrintHours: 5 } as ToolheadDto,
+        { id: 'th-2b', index: 1, name: 'T1-P2', isPrimary: false, toolheadType: ToolheadType.Physical, cumulativePrintHours: 6 } as ToolheadDto,
+      ],
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+
+    (apiClient.getPrinters as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'printer-1', name: 'Printer One' },
+      { id: 'printer-2', name: 'Printer Two' },
+    ]);
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: string) => (id === 'printer-1' ? p1Details : p2Details)
+    );
+    (maintenanceService.getPrinterStatistics as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      printerId: 'x',
+      totalMaintenanceCount: 0,
+      totalMaintenanceCost: 0,
+      averageMaintenanceHours: 0,
+    });
+    (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenanceService.createMaintenanceLog as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'log-created' });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const { MemoryRouter, Routes, Route, useNavigate } = await import('react-router');
+
+    function Harness() {
+      const nav = useNavigate();
+      return (
+        <>
+          <button data-testid="go-p2" onClick={() => nav('/printers/printer-2/maintenance')}>
+            go P2
+          </button>
+          <Routes>
+            <Route
+              path="/printers/:printerId/maintenance"
+              element={<PrinterMaintenancePage />}
+            />
+          </Routes>
+        </>
+      );
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/printers/printer-1/maintenance']}>
+          <Harness />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const user = userEvent.setup();
+
+    // Wait for the P1 page to be ready, then pick T1 scope and open
+    // the Log Maintenance modal — the picker inside the modal will
+    // reflect the passed `initialToolheadId` and remount when the
+    // key changes.
+    await waitFor(() =>
+      expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument()
+    );
+    await user.click(screen.getByLabelText(/T1 · T1/));
+
+    // The top-level "Log Maintenance" button on the page (not the
+    // submit button in the modal, which reads "Log Maintenance" too;
+    // we anchor by role and name and pick the ONE that opens the
+    // dialog).
+    await user.click(screen.getAllByRole('button', { name: /^Log Maintenance$/i })[0]);
+    // Modal is open — its heading reads "Log Maintenance" (Modal
+    // sets the accessible name via the `title` prop).
+    expect(await screen.findByRole('heading', { name: /log maintenance/i })).toBeInTheDocument();
+
+    // Now navigate to P2 while the modal is still visible.
+    await user.click(screen.getByTestId('go-p2'));
+
+    // The modal MUST NOT remain visible against a foreign printer.
+    // Wait for the P2 body to render, then confirm the modal heading
+    // is gone. If the fix regresses (modal stays open with P1's
+    // toolhead pre-selected), the heading remains and this fails.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/T0-P2/)).toBeInTheDocument()
+    );
+    expect(screen.queryByRole('heading', { name: /log maintenance/i })).not.toBeInTheDocument();
+
+    // Reopen the modal on P2 — the scope picker inside must expose
+    // ONLY P2 toolheads. A leaked "T1 · T1" would be a P1 selection.
+    await user.click(screen.getAllByRole('button', { name: /^Log Maintenance$/i })[0]);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /log maintenance/i })).toBeInTheDocument()
+    );
+    // Modal-internal scope picker shows P2 toolheads, not P1's.
+    // Because the picker also carries "Printer-wide", we scope by
+    // the modal's own test id.
+    const modalScope = screen.getByTestId('log-maintenance-scope');
+    expect(within(modalScope).queryByLabelText(/^T1 · T1$/)).not.toBeInTheDocument();
+    expect(within(modalScope).getByLabelText(/T0-P2/)).toBeInTheDocument();
+    expect(within(modalScope).getByLabelText(/T1-P2/)).toBeInTheDocument();
+    // And Printer-wide is checked (fresh mount default), NOT the
+    // leaked P1 T1.
+    expect(within(modalScope).getByLabelText('Printer-wide')).toBeChecked();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Hicks #6: due-state announcement stability.
+  //
+  // Two properties matter for correct assistive-tech behaviour:
+  //   (a) The live region node must be MOUNTED persistently — outside
+  //       every conditional branch — so screen readers subscribe to
+  //       it once and observe every text change. A live region that
+  //       toggles between mounted and unmounted misses announcements.
+  //   (b) When the upcoming-maintenance banner is visible with
+  //       `role="alert"`, the sibling `role="status"` text must be
+  //       empty so the same failure is not announced twice.
+  //   (c) An "all OK" state must be reachable (not just the "N OK
+  //       cheek-by-jowl with N unknown" mixed summary).
+  // ---------------------------------------------------------------------------
+
+  it('mounts the aggregate live region persistently, even when the printer has no eligible toolheads (Hicks #6)', async () => {
+    // Single-toolhead printer with per-tool disabled → no odometer
+    // grid renders, but the live region must still exist so a
+    // future arrival of data (e.g. after a refetch) is announced.
+    seedDefaults({ details: printerDetailsMultiUnattributed });
+    renderPage();
+
+    // Wait until the page has finished loading its main data.
+    await waitFor(() =>
+      expect(screen.getByTestId('toolhead-due-state-summary')).toBeInTheDocument()
+    );
+
+    // Region is mounted; text may be empty (nothing to summarise
+    // yet). The critical property is that the node is IN the DOM.
+    const summary = screen.getByTestId('toolhead-due-state-summary');
+    expect(summary).toHaveAttribute('role', 'status');
+    // Text is either empty (initial) or a valid summary — but the
+    // node itself is present.
+    expect(summary).toBeInTheDocument();
+
+    // No odometer region — that branch is genuinely hidden.
+    expect(
+      screen.queryByRole('region', { name: /per-toolhead odometers/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('empties the live-region text when the upcoming-maintenance banner is visible, so screen readers do not announce the same failure twice (Hicks #6 no double-announce)', async () => {
+    seedDefaults();
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('feed broken')
+    );
+    renderPage();
+
+    // The upcoming banner is what carries `role="alert"` and reads
+    // out the failure — assertively, so screen readers hear it.
+    const alert = await screen.findByTestId('upcoming-maintenance-error');
+    expect(alert).toHaveAttribute('role', 'alert');
+
+    // The sibling `role="status"` region must be empty text so the
+    // polite announcement does not double up on the assertive one.
+    const summary = screen.getByTestId('toolhead-due-state-summary');
+    expect(summary).toHaveAttribute('role', 'status');
+    expect(summary.textContent).toBe('');
+  });
+
+  it('announces "All toolheads OK." when every toolhead resolves clear (Hicks #6 all-OK reachable)', async () => {
+    // Feed succeeds with an empty task list — every toolhead
+    // resolves to `dueState: 'ok'`. The summary must short-circuit
+    // to "All toolheads OK." rather than "Maintenance status: N OK."
+    // to give an unambiguous all-clear announcement.
+    seedDefaults({ upcoming: [] });
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+
+    const summary = screen.getByTestId('toolhead-due-state-summary');
+    await waitFor(() => {
+      expect(summary.textContent).toBe('All toolheads OK.');
+    });
+    // Sanity: not the mixed-state phrasing.
+    expect(summary).not.toHaveTextContent(/maintenance status/i);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Hicks #3: explicit-null preservation on handleLogMaintenance.
+  //
+  // The prior fallback used `??`, which coerces both `undefined` AND
+  // an explicit `null` into the current page scope. That converts a
+  // deliberate "log this printer-wide" request from a caller into a
+  // scoped log against the currently viewed toolhead — silently
+  // misattributing the record. The fix falls back ONLY on `undefined`.
+  //
+  // The `undefined` path (top action button) is exercised here; the
+  // `null` path is defence-in-depth for callers that pass an explicit
+  // printer-wide id (e.g. a future per-tool card whose owner is null,
+  // or an alert/deployment "Log" button crossing scope) — those
+  // callers are filtered by `scopeMatches` in the current UI, so the
+  // observable delta between `??` and `=== undefined ?` is latent
+  // today. We keep the stricter check to prevent a silent-misattribution
+  // regression the moment a new caller is introduced that does NOT
+  // pass through the same scope filter.
+  // ---------------------------------------------------------------------------
+
+  it('forwards the current scope as initialToolheadId when Log Maintenance is invoked without an argument (undefined → fallback) (Hicks #3 undefined path)', async () => {
+    seedDefaults();
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument()
+    );
+
+    const user = userEvent.setup();
+    // Scope := T1
+    await user.click(screen.getByLabelText(/T1 · T1/));
+
+    // Open the log modal via the top action button (undefined arg).
+    // The mocked PageTemplate surfaces the actions block so the top
+    // "Log Maintenance" button is queryable in the render tree.
+    await user.click(screen.getAllByRole('button', { name: /^Log Maintenance$/i })[0]);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /log maintenance/i })).toBeInTheDocument()
+    );
+
+    // The modal's own scope picker must reflect the T1 fallback.
+    // Anchored to the modal by its data-testid so we do not read the
+    // page-level scope picker.
+    const modalScope = screen.getByTestId('log-maintenance-scope');
+    // The T1 radio inside the modal must be selected.
+    expect(within(modalScope).getByLabelText(/T1 · T1/)).toBeChecked();
+    expect(within(modalScope).getByLabelText('Printer-wide')).not.toBeChecked();
+  });
+
+  it('opens the log modal with Printer-wide preselected when clicking the "Log" action on a printer-wide deployment (Hicks #3 explicit-null path stays printer-wide)', async () => {
+    // The Deployed Plans "Log" button passes `deployment.toolheadId ?? null`.
+    // For a printer-wide deployment that is an explicit `null`. Even
+    // when the caller is filtered by `scopeMatches` at T1 today, the
+    // baseline printer-wide-scope flow must open the modal with
+    // Printer-wide selected — this guards the observable half of the
+    // fix (undefined-null semantic distinction) and locks in the
+    // trivial-but-critical baseline that a printer-wide "Log" click
+    // does not silently promote to a toolhead scope.
+    seedDefaults();
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText('Deployment (printer-wide)')).toBeInTheDocument()
+    );
+
+    const user = userEvent.setup();
+    const printerWideRow = screen.getByText('Deployment (printer-wide)').closest('div.p-4');
+    expect(printerWideRow).not.toBeNull();
+    const logBtn = within(printerWideRow as HTMLElement).getByRole('button', { name: /^Log$/ });
+    await user.click(logBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /log maintenance/i })).toBeInTheDocument()
+    );
+
+    // Modal's internal scope must be Printer-wide (not silently
+    // promoted to a toolhead scope by the fallback).
+    const modalScope = screen.getByTestId('log-maintenance-scope');
+    expect(within(modalScope).getByLabelText('Printer-wide')).toBeChecked();
+    // T1 radio is present in the picker but not selected.
+    expect(within(modalScope).getByLabelText(/T1 · T1/)).not.toBeChecked();
   });
 });

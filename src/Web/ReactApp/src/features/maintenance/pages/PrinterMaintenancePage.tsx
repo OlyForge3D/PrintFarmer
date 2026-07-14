@@ -62,22 +62,30 @@ export function PrinterMaintenancePage() {
   const [modalInitialToolheadId, setModalInitialToolheadId] = useState<string | null>(null);
   const [scope, setScope] = useState<ToolheadScopeValue>(PRINTER_WIDE_SCOPE);
 
-  // Reset scope whenever the route param changes. React Router keeps this
-  // component mounted when navigating between `/printers/:id/maintenance`
-  // paths (the element type is stable across route matches), so the
-  // `scope` state would otherwise leak from the previous printer into the
-  // new one. A stale `toolheadId` from the previous printer's tool set
-  // would then either filter the new printer's records incorrectly (if
-  // the id happened to collide) or, more subtly, preseed the log-
-  // maintenance modal with a foreign `toolheadId` value that does not
-  // exist on the current printer.
+  // Reset scope AND close any open printer-owned modal state whenever the
+  // route param changes. React Router keeps this component mounted when
+  // navigating between `/printers/:id/maintenance` paths (the element type
+  // is stable across route matches), so `scope`, `showLogModal`, and
+  // `modalInitialToolheadId` would otherwise leak from the previous
+  // printer into the new one. A stale `toolheadId` from the previous
+  // printer's tool set would either filter the new printer's records
+  // incorrectly (if the id happened to collide) or, more subtly, preseed
+  // the log-maintenance modal with a foreign `toolheadId` value that does
+  // not exist on the current printer — worse, a modal left open while the
+  // route changes would remain visible with the previous printer's
+  // toolhead pre-selected and could submit a log for a toolhead that does
+  // not belong to the currently displayed printer.
   //
   // We use the React-endorsed "adjust state during rendering" pattern
   // (see https://react.dev/reference/react/useState#storing-information-from-previous-renders)
   // rather than `useEffect`: a `setState` during render triggers a
   // synchronous re-render before commit, avoiding the cascading-render
   // penalty of an effect-based reset and eliminating a visible frame
-  // where a foreign scope could leak into any child render.
+  // where a foreign scope, foreign toolhead id, or foreign modal state
+  // could leak into any child render. Combined with `key={printerId}` on
+  // `<LogMaintenanceModal>` below, this guarantees the modal's own
+  // internal state (form fields, scope selection, isSubmitting) is fully
+  // reset because React unmounts and remounts the subtree.
   //
   // We deliberately do NOT reset on `printerDetails` changes — the scope
   // is a user-facing filter and should only clear when the underlying
@@ -86,6 +94,8 @@ export function PrinterMaintenancePage() {
   if (scopeResetOwner !== printerId) {
     setScopeResetOwner(printerId);
     setScope(PRINTER_WIDE_SCOPE);
+    setShowLogModal(false);
+    setModalInitialToolheadId(null);
   }
 
   // Fetch printer details
@@ -227,19 +237,42 @@ export function PrinterMaintenancePage() {
   }, [perToolAllowed, eligibleToolheadsRaw, upcomingTasks, dueStateResolved]);
 
   // Single aggregate live-region summary of per-toolhead due state
-  // (Hicks #4 + Bishop non-blocking). N cards × N `role="status"` nodes
-  // would fire N simultaneous announcements every time the schedule feed
-  // refreshes; also, when each card renders as an interactive <button>
-  // any nested live region is flattened into the button's accessible name
-  // and is effectively silent to assistive tech.
+  // (Hicks #6). N cards × N `role="status"` nodes would fire N
+  // simultaneous announcements every time the schedule feed refreshes;
+  // also, when each card renders as an interactive <button> any nested
+  // live region is flattened into the button's accessible name and is
+  // effectively silent to assistive tech.
   //
-  // The one live region below sits as a sibling to the odometer grid
-  // (never inside a button) and is `role="status"` (implicit
-  // `aria-live="polite"`, `aria-atomic="true"`). Its plain-text child
-  // updates only when the *aggregate* verdict changes, so a screen
-  // reader announces a meaningful summary — e.g. "2 toolheads overdue,
-  // 1 due today" — instead of the same string per card.
+  // The one live region below sits as a sibling to (never inside) the
+  // odometer grid or any button, and is `role="status"` (implicit
+  // `aria-live="polite"`, `aria-atomic="true"`). Crucially, the
+  // status *element itself* is mounted persistently — outside every
+  // conditional branch (the "no eligible toolheads yet" and "feed
+  // errored" branches) — so screen readers subscribe to it once and
+  // observe every text change. Mount/unmount of a live-region node is
+  // the classic silent-announcement bug we must avoid.
+  //
+  // We deliberately keep the *text* empty in two situations to avoid a
+  // duplicate announcement with a co-visible `role="alert"` banner:
+  //   1. When the schedule feed has errored — the upcoming-maintenance
+  //      alert banner above already reads out the failure, and every
+  //      card has `dueState: 'unknown'`. Announcing "N with unknown
+  //      state" alongside the assertive alert would double-speak the
+  //      same event.
+  //   2. Before the odometer grid has any content (initial load with
+  //      zero eligible toolheads / zero odometers) — there is nothing
+  //      to summarise yet.
+  //
+  // Otherwise we emit a complete verdict for every state:
+  //   - all-unknown (feed loading, no error) → "loading" message
+  //   - all-OK (every toolhead resolved and clear) → "All toolheads
+  //     OK." (short-circuit so the announcement is a strong signal,
+  //     not "Maintenance status: N OK.")
+  //   - mixed → count each non-zero category and join.
   const dueStateSummary = useMemo(() => {
+    if (upcomingError != null) {
+      return '';
+    }
     if (odometers.length === 0) {
       return '';
     }
@@ -252,6 +285,10 @@ export function PrinterMaintenancePage() {
       return 'Maintenance due state unavailable — schedule feed is loading or unreachable.';
     }
 
+    if (ok === odometers.length) {
+      return 'All toolheads OK.';
+    }
+
     const parts: string[] = [];
     const toolheadWord = (n: number) => (n === 1 ? 'toolhead' : 'toolheads');
     if (overdue > 0) parts.push(`${overdue} ${toolheadWord(overdue)} overdue`);
@@ -262,7 +299,7 @@ export function PrinterMaintenancePage() {
       return 'All toolheads OK.';
     }
     return `Maintenance status: ${parts.join(', ')}.`;
-  }, [odometers]);
+  }, [odometers, upcomingError]);
 
   const toolheadLabel = (toolheadId: string | null | undefined): string => {
     if (!toolheadId) return 'Printer-wide';
@@ -289,7 +326,23 @@ export function PrinterMaintenancePage() {
   const scopedLogs = logs.filter(l => scopeMatches(l.toolheadId));
 
   const handleLogMaintenance = (toolheadId?: string | null) => {
-    setModalInitialToolheadId(toolheadId ?? toolheadIdFromScope(scope));
+    // Nullish coalescing (`??`) would convert an EXPLICIT `null` — the
+    // caller's request for a printer-wide log — into whatever scope the
+    // page picker is on, silently attributing a printer-wide deployment
+    // to a specific toolhead. We must distinguish "caller did not pass a
+    // value" (undefined → fall back to page scope) from "caller passed
+    // null" (explicit printer-wide → preserve). Only `undefined` triggers
+    // the fallback.
+    const raw =
+      toolheadId === undefined ? toolheadIdFromScope(scope) : toolheadId;
+    // Validate the resolved id against the CURRENT printer's eligible
+    // toolheads. `raw` may be a stale id if a previous mount cached it
+    // from another printer, or the fallback chain might have produced an
+    // id that no longer maps to a physical, maintenance-eligible tool on
+    // this printer. `null` (printer-wide) is always valid.
+    const validated =
+      raw == null || eligibleToolheads.some(t => t.id === raw) ? raw : null;
+    setModalInitialToolheadId(validated);
     setShowLogModal(true);
   };
 
@@ -382,6 +435,29 @@ export function PrinterMaintenancePage() {
       ) : (
         <div className="space-y-6">
           {/*
+            Persistent live region for the aggregate per-toolhead due-state
+            summary. This node is mounted outside every conditional
+            branch (no dependency on `eligibleToolheads.length`, on
+            `odometers.length`, on `upcomingError`) so screen readers
+            subscribe to it once at page-mount and observe every text
+            change. Placing this inside the `eligibleToolheads.length > 0
+            && odometers.length > 0 && ...` branch would unmount it in the
+            initial-load and single-toolhead cases and silently miss the
+            arrive-of-data announcement. The text itself may be an empty
+            string — `dueStateSummary` short-circuits to '' when the
+            feed errors (avoiding a duplicate announcement with the
+            `role="alert"` banner below) and before there is anything to
+            summarise. `sr-only` keeps it invisible while remaining
+            reachable to assistive tech.
+          */}
+          <p
+            role="status"
+            className="sr-only"
+            data-testid="toolhead-due-state-summary"
+          >
+            {dueStateSummary}
+          </p>
+          {/*
             Surface printer-details failures explicitly instead of silently
             collapsing per-tool UI. The per-tool surface is naturally gated
             by `supportsPerToolAttribution === true`, but the operator needs
@@ -403,7 +479,9 @@ export function PrinterMaintenancePage() {
             the feed is loading or errored, but that alone is ambiguous —
             "No data" could just mean "brand-new printer". This banner
             distinguishes "the schedule feed is broken; check back" from
-            "everything is genuinely quiet".
+            "everything is genuinely quiet". The persistent live region
+            above short-circuits to empty text when this banner is visible
+            so screen readers do not announce the same failure twice.
           */}
           {upcomingError && (
             <div
@@ -418,35 +496,19 @@ export function PrinterMaintenancePage() {
           {/* Per-toolhead odometer row (#711/#719). Hidden entirely when the
               printer has no eligible physical toolheads or no odometer data. */}
           {eligibleToolheads.length > 0 && odometers.length > 0 && (
-            <>
-              {/* Aggregate live-region summary of per-toolhead due state.
-                  Sibling to the interactive card grid, never inside any
-                  <button>, so screen readers observe the announcement and
-                  the "N simultaneous announcements" problem cannot occur.
-                  A single stable node with `role="status"` (implicit
-                  `aria-live="polite"`, `aria-atomic="true"`) whose text
-                  changes only when the aggregate verdict changes. */}
-              <p
-                role="status"
-                className="sr-only"
-                data-testid="toolhead-due-state-summary"
-              >
-                {dueStateSummary}
-              </p>
-              <section
-                aria-label="Per-toolhead odometers"
-                className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"
-              >
-                {odometers.map(o => (
-                  <ToolheadOdometerCard
-                    key={o.toolheadId}
-                    odometer={o}
-                    isActive={scope === o.toolheadId}
-                    onActivate={id => setScope(id)}
-                  />
-                ))}
-              </section>
-            </>
+            <section
+              aria-label="Per-toolhead odometers"
+              className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"
+            >
+              {odometers.map(o => (
+                <ToolheadOdometerCard
+                  key={o.toolheadId}
+                  odometer={o}
+                  isActive={scope === o.toolheadId}
+                  onActivate={id => setScope(id)}
+                />
+              ))}
+            </section>
           )}
 
           {/* Scope filter — only for multi-toolhead printers. */}
@@ -654,9 +716,18 @@ export function PrinterMaintenancePage() {
         </div>
       )}
 
-      {/* Log Maintenance Modal */}
+      {/* Log Maintenance Modal.
+          Keyed by `printerId` so React unmounts and remounts the modal
+          subtree the instant the route changes to a different printer.
+          The synchronous render-phase reset above already closes and
+          clears the modal's *owned* state on this page, but
+          `LogMaintenanceModal` also owns internal state (form fields,
+          scope selection, isSubmitting) that we cannot reset from
+          outside via props — remounting is the only guarantee. This is
+          the second half of Hicks #2 (route change with open modal). */}
       {printerId && (
         <LogMaintenanceModal
+          key={printerId}
           isOpen={showLogModal}
           printerId={printerId}
           printerName={printer?.name || 'Unknown Printer'}

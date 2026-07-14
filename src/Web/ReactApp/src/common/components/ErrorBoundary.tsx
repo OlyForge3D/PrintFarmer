@@ -90,8 +90,20 @@ export class ErrorBoundary extends Component<Props, State> {
  *                     "Loading chunk NN failed"
  *  - Vite (fetch):    `TypeError: Failed to fetch dynamically imported
  *                     module: <url>`
- *  - Safari/Firefox:  "Importing a module script failed"
- *  - CSS chunk load:  "Loading CSS chunk NN failed"
+ *  - Vite (CSS):      "Unable to preload CSS for <url>" — thrown from
+ *                     Vite's importAnalysisBuild plugin when a lazy
+ *                     route's stylesheet 404s (typically a stale
+ *                     `assets/<hash>.css` that has been rebuilt server-
+ *                     side). React re-raises this as a render-time
+ *                     exception because it happens inside the lazy
+ *                     wrapper's suspense boundary, and it must be
+ *                     classified as chunk-load or the operator sees
+ *                     "Try Again" (which will re-crash) instead of
+ *                     "Reload page" (which recovers).
+ *  - Safari/Firefox:  "Importing a module script failed" or
+ *                     "Failed to load module script"
+ *  - CSS chunk load:  "Loading CSS chunk NN failed" (webpack) or
+ *                     "error loading CSS chunk" (Vite alt phrasing)
  */
 function isChunkLoadError(err: Error | null | undefined): boolean {
   if (!err) return false;
@@ -101,9 +113,12 @@ function isChunkLoadError(err: Error | null | undefined): boolean {
     name === 'ChunkLoadError' ||
     /Loading chunk \d+ failed/i.test(msg) ||
     /Loading CSS chunk \d+ failed/i.test(msg) ||
+    /error loading CSS chunk/i.test(msg) ||
     /Failed to fetch dynamically imported module/i.test(msg) ||
     /Importing a module script failed/i.test(msg) ||
-    /error loading dynamically imported module/i.test(msg)
+    /Failed to load module script/i.test(msg) ||
+    /error loading dynamically imported module/i.test(msg) ||
+    /Unable to preload CSS/i.test(msg)
   );
 }
 

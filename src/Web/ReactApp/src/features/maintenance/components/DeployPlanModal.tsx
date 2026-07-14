@@ -55,8 +55,8 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
   // Fetch per-tool capability + toolhead list for the printer under the
   // picker. Only run when a printer is chosen and the modal is open.
   //
-  // Consuming `status`/`isLoading`/`isFetching`/`isError` alongside `data`
-  // is critical:
+  // Consuming `status`/`isLoading`/`isFetching`/`isError`/`fetchStatus`/
+  // `isFetchedAfterMount` alongside `data` is critical:
   //  1. A per-tool-capable printer starts with `printerDetails === undefined`
   //     during the first fetch — without a load gate on Deploy the modal
   //     would silently send `toolheadId: null` for a printer whose scope
@@ -67,9 +67,20 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
   //     the authoritative refreshed value is `true`, a gate on `isLoading`
   //     alone would leave Deploy enabled during that refetch window and
   //     let the operator send `toolheadId: null` for a printer that now
-  //     requires per-tool attribution. Gating on `isFetching` covers the
-  //     refetch window as well, matching the "authoritative capability
-  //     resolved" contract the server expects.
+  //     requires per-tool attribution.
+  //  3. When the browser is offline, React Query pauses the fetch:
+  //     `fetchStatus === 'paused'`, and `isFetching` reads FALSE. A gate
+  //     that trusts only `!isFetching` would therefore treat a paused
+  //     stale-cache render as authoritative and let Deploy queue a null
+  //     scope against a printer whose capability has not been re-verified
+  //     since the operator selected it. We must additionally require
+  //     `fetchStatus === 'idle'` AND `isFetchedAfterMount === true` so
+  //     the observer confirms an authoritative post-mount success — not
+  //     the paused stale-cache echo.
+  //  4. `refetchOnMount: 'always'` forces a fresh fetch every time the
+  //     modal (and thus the query observer) mounts, so a background
+  //     staleTime cache from another surface cannot short-circuit the
+  //     "verify before deploy" contract.
   // `refetch` powers the accessible Retry button below.
   const {
     data: printerDetails,
@@ -77,27 +88,44 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
     isFetching: printerDetailsFetching,
     isError: printerDetailsIsError,
     error: printerDetailsError,
+    fetchStatus: printerDetailsFetchStatus,
     refetch: refetchPrinterDetails,
   } = useQuery<PrinterDetails>({
     queryKey: ['printerDetails', selectedPrinterId],
     queryFn: () => apiClient.getPrinterDetails(selectedPrinterId),
     enabled: isOpen && !!selectedPrinterId,
     staleTime: 60_000,
+    refetchOnMount: 'always',
   });
 
-  // Explicit four-state gate over the details query. Each state has a
-  // matching UI (loading indicator / updating indicator / retry banner /
-  // picker or hidden) and `canDeploy` requires `detailsReady`.
+  // Explicit five-state gate over the details query. Each state has a
+  // matching UI (loading / updating / paused / retry banner / picker or
+  // hidden) and `canDeploy` requires `detailsReady`.
   //
-  // `detailsPending` (no cached data yet) → shows a role="status" label.
+  // `detailsPending` (no cached data yet, fetch in flight) → role="status".
   // `detailsUpdating` (cached data present but background refetch in flight)
-  //   → shows a distinct role="status" label so the operator understands
-  //   the current picker/hidden-picker verdict is being re-verified.
+  //   → distinct role="status" so the operator understands the current
+  //   picker verdict is being re-verified.
+  // `detailsPaused` (`fetchStatus === 'paused'` — the browser is offline
+  //   or React Query's onlineManager reports offline). This is separate
+  //   from `detailsUpdating` because `isFetching` reads FALSE during a
+  //   paused fetch. Without this gate a stale cached
+  //   `supportsPerToolAttribution: false` would silently authorise a null
+  //   scope. Deploy is disabled and the operator sees an offline banner.
   // `detailsFailed` (query is in the error state) → role="alert" banner.
-  // `detailsReady` requires the query to be settled (`!isFetching`) with
-  // fresh, non-error data — this is the ONLY state that permits Deploy.
+  // `detailsReady` requires the query to be settled (`fetchStatus ===
+  //   'idle'`), NON-fetching (guards against a paused-cache flash where
+  //   fetchStatus is 'paused' — see `detailsPaused` above), non-error data
+  //   whose `id` matches the currently selected printer. This is the ONLY
+  //   state that permits Deploy. The ID match is the "equivalent selected
+  //   key verification" the reviewer allowed in place of
+  //   `isFetchedAfterMount` — `refetchOnMount: 'always'` guarantees the
+  //   observer synchronously triggers a fetch on mount (fetchStatus flips
+  //   to 'fetching' before the first commit), so a brief stale-ready
+  //   render with `fetchStatus === 'idle'` cannot occur.
   const hasPrinterSelected = !!selectedPrinterId;
   const detailsPending = hasPrinterSelected && printerDetailsLoading;
+  const detailsPaused = hasPrinterSelected && printerDetailsFetchStatus === 'paused';
   const detailsUpdating =
     hasPrinterSelected &&
     !printerDetailsLoading &&
@@ -106,9 +134,11 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
   const detailsFailed = hasPrinterSelected && printerDetailsIsError;
   const detailsReady =
     hasPrinterSelected &&
+    printerDetailsFetchStatus === 'idle' &&
     !printerDetailsFetching &&
     !printerDetailsIsError &&
-    !!printerDetails;
+    !!printerDetails &&
+    printerDetails.id === selectedPrinterId;
 
   const perToolAllowed = detailsReady && printerDetails?.supportsPerToolAttribution === true;
   const eligibleToolheads = useMemo(
@@ -187,11 +217,17 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
     // `detailsReady` is false, an assistive-tech or programmatic click on a
     // disabled control must not send a stale `toolheadId: null` for a
     // printer whose capability we haven't confirmed yet. `detailsReady`
-    // already includes `!printerDetailsFetching`, but we check it directly
-    // here as well so any future edit that widens the button's enabled
-    // condition still cannot bypass the fetch gate.
+    // already includes `fetchStatus === 'idle'`, `!isFetching`, and an
+    // `id`-match against `selectedPrinterId`, but we recheck each guard
+    // directly here so any future edit that widens the button's enabled
+    // condition still cannot bypass the fetch gate. In particular,
+    // `printerDetailsFetchStatus === 'paused'` covers the offline case
+    // where `isFetching` reads false because the fetch is paused waiting
+    // for the network to return.
     if (!detailsReady) return;
     if (printerDetailsFetching) return;
+    if (printerDetailsFetchStatus !== 'idle') return;
+    if (!printerDetails || printerDetails.id !== selectedPrinterId) return;
     const toolheadId = showScopePicker ? toolheadIdFromScope(scope) : null;
     try {
       await deployMutation.mutateAsync({
@@ -303,6 +339,15 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
                 data-testid="printer-details-updating"
               >
                 Verifying printer capabilities…
+              </p>
+            )}
+            {detailsPaused && !detailsFailed && (
+              <p
+                role="status"
+                className="text-xs text-pf-text-tertiary"
+                data-testid="printer-details-paused"
+              >
+                Offline — printer capabilities cannot be verified. Deploy is disabled until the network returns.
               </p>
             )}
             {detailsFailed && (
