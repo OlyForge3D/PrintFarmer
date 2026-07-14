@@ -593,16 +593,20 @@ public class NotificationsController(INotificationService notificationService) :
             return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
         }
 
-        // Bishop v6 hardening: attention category keys are attacker-controlled
-        // free-form strings persisted verbatim into a JSON column. Without a
-        // bound the payload can grow unbounded (per-request and per-user over
-        // time) and can push the persisted column past reasonable row size.
-        // Both limits are deliberately generous — the finalized #708 category
-        // universe currently has fewer than 20 kinds, and any real
-        // AttentionKind key is well under 64 characters — so no real client is
-        // rejected. Forward compatibility with as-yet-unadded categories is
-        // preserved because we only bound cardinality/length of the incoming
-        // patch; existing persisted keys are read back unchanged.
+        // Hicks #4 / Bishop v6 hardening: attention category keys are
+        // attacker-controlled free-form strings persisted verbatim into a
+        // JSON column. Without a bound the payload can grow unbounded — both
+        // per-request AND cumulatively across repeated one-key requests.
+        // The per-request bounds catch the first exploit vector; the merged
+        // bound (below, after the persisted map is loaded) catches the
+        // repeated-one-key attack a per-request check alone misses.
+        //
+        // Any real AttentionKind key is well under 64 characters and the
+        // finalized #708 category universe has fewer than 20 kinds, so
+        // legitimate clients are never rejected. Forward compatibility with
+        // as-yet-unadded categories is preserved because we only bound
+        // cardinality/length; existing persisted keys are read back
+        // unchanged.
         if (request?.Categories is { Count: > 0 } incoming)
         {
             if (incoming.Count > MaxAttentionCategoryKeysPerRequest)
@@ -638,13 +642,25 @@ public class NotificationsController(INotificationService notificationService) :
             Guid userId = GetUserIdFromClaims();
             NotificationPreferences? prefs = await dbContext.NotificationPreferences
                 .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+
+            // Snapshot the persisted JSON BEFORE any mutation so we can
+            // faithfully return the row byte-for-byte unchanged if a
+            // cumulative-bound rejection fires below. Bishop minor + Hicks #4:
+            // the reject path must prove persistence is not written.
+            string? preExistingJson = prefs?.AttentionPushCategoryPreferencesJson;
+
             if (prefs is null)
             {
                 prefs = new NotificationPreferences { UserId = userId };
                 dbContext.NotificationPreferences.Add(prefs);
             }
 
-            AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(prefs.AttentionPushCategoryPreferencesJson);
+            AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(preExistingJson);
+
+            // Assemble the PROSPECTIVE merged map before touching the entity
+            // so we can validate cumulative cardinality and serialized byte
+            // size. Hicks #4: repeated one-key requests must not be able to
+            // grow the persisted JSON past the cumulative bound.
             if (request?.Categories is not null)
             {
                 foreach (KeyValuePair<string, bool> kv in request.Categories)
@@ -653,7 +669,38 @@ public class NotificationsController(INotificationService notificationService) :
                 }
             }
 
-            prefs.AttentionPushCategoryPreferencesJson = catPrefs.ToJson();
+            if (catPrefs.Categories.Count > MaxAttentionCategoryKeysPersisted)
+            {
+                // Detach the just-added new-user entity so a rejection does
+                // not accidentally persist an empty row. When we loaded an
+                // existing entity we never mutated it, so nothing to detach.
+                if (preExistingJson is null && dbContext.Entry(prefs).State == EntityState.Added)
+                {
+                    dbContext.Entry(prefs).State = EntityState.Detached;
+                }
+
+                return Problem(
+                    detail: $"At most {MaxAttentionCategoryKeysPersisted} attention category keys may be persisted per user.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category storage full");
+            }
+
+            string prospectiveJson = catPrefs.ToJson();
+            int prospectiveBytes = System.Text.Encoding.UTF8.GetByteCount(prospectiveJson);
+            if (prospectiveBytes > MaxAttentionCategoryJsonBytes)
+            {
+                if (preExistingJson is null && dbContext.Entry(prefs).State == EntityState.Added)
+                {
+                    dbContext.Entry(prefs).State = EntityState.Detached;
+                }
+
+                return Problem(
+                    detail: $"Persisted attention category JSON would exceed {MaxAttentionCategoryJsonBytes} bytes.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category storage full");
+            }
+
+            prefs.AttentionPushCategoryPreferencesJson = prospectiveJson;
             prefs.UpdatedAt = DateTime.UtcNow;
             _ = await dbContext.SaveChangesAsync(cancellationToken);
             return Ok(new AttentionPushPreferencesDto { Categories = catPrefs.Categories });
@@ -679,6 +726,24 @@ public class NotificationsController(INotificationService notificationService) :
     /// </summary>
     private const int MaxAttentionCategoryKeyLength = 64;
 
+    /// <summary>
+    /// Cumulative bound (Hicks #4): the maximum number of category keys that
+    /// may be persisted for a single user across the entire lifetime of that
+    /// user's preferences row. Enforced against the PROSPECTIVE merged map
+    /// so repeated single-key requests cannot slip past the per-request
+    /// bound. Exceeding the bound returns 400 and leaves persisted JSON
+    /// byte-for-byte unchanged.
+    /// </summary>
+    private const int MaxAttentionCategoryKeysPersisted = 128;
+
+    /// <summary>
+    /// Cumulative bound (Hicks #4): the maximum UTF-8 encoded byte size of
+    /// the merged category JSON payload persisted to the row. Enforced
+    /// against the PROSPECTIVE merged map so a burst of long-valued keys
+    /// cannot silently blow past reasonable row storage.
+    /// </summary>
+    private const int MaxAttentionCategoryJsonBytes = 8 * 1024;
+
     private static NotificationPreferencesDto ToDto(NotificationPreferences preferences)
     {
         return new NotificationPreferencesDto
@@ -700,63 +765,12 @@ public class NotificationsController(INotificationService notificationService) :
 
     private static NotificationPreferences CreateDefaultPreferences(Guid userId)
     {
-        // Materialize the same nine-row shape a first-visit GET would return
-        // if the user actually had a persisted row. Job rows follow the
-        // legacy default (start off, others on for in-app + push; email + telegram
-        // conservative), and attention rows follow the #708 finalized defaults
-        // (InApp/Push=true, Email/Telegram=false). Kept in-controller because
-        // it is purely a response-shaping concern for the no-row-yet case; no
-        // persistence occurs on this path.
-        return new NotificationPreferences
-        {
-            UserId = userId,
-            EnableEmailNotifications = false,
-            EnablePushNotifications = true,
-            EnableInAppNotifications = true,
-            EnableTelegramNotifications = false,
-            NotifyOnStart = false,
-            NotifyOnCompletion = true,
-            NotifyOnFailure = true,
-            NotifyOnPause = true,
-            InAppOnJobStarted = false,
-            InAppOnJobCompleted = true,
-            InAppOnJobFailed = true,
-            InAppOnJobPaused = true,
-            EmailOnJobStarted = false,
-            EmailOnJobCompleted = false,
-            EmailOnJobFailed = false,
-            EmailOnJobPaused = false,
-            PushOnJobStarted = false,
-            PushOnJobCompleted = true,
-            PushOnJobFailed = true,
-            PushOnJobPaused = true,
-            TelegramOnJobStarted = false,
-            TelegramOnJobCompleted = false,
-            TelegramOnJobFailed = false,
-            TelegramOnJobPaused = false,
-            InAppOnPrinterFailure = true,
-            EmailOnPrinterFailure = false,
-            PushOnPrinterFailure = true,
-            TelegramOnPrinterFailure = false,
-            InAppOnFilamentRunout = true,
-            EmailOnFilamentRunout = false,
-            PushOnFilamentRunout = true,
-            TelegramOnFilamentRunout = false,
-            InAppOnHarvestReady = true,
-            EmailOnHarvestReady = false,
-            PushOnHarvestReady = true,
-            TelegramOnHarvestReady = false,
-            InAppOnMaintenanceDue = true,
-            EmailOnMaintenanceDue = false,
-            PushOnMaintenanceDue = true,
-            TelegramOnMaintenanceDue = false,
-            InAppOnPrinterOffline = true,
-            EmailOnPrinterOffline = false,
-            PushOnPrinterOffline = true,
-            TelegramOnPrinterOffline = false,
-            Frequency = NotificationFrequency.RealTime,
-            RetentionDays = 30,
-        };
+        // Hicks #3 canonical defaults: the fresh-GET response and the
+        // service's new-user persistence MUST produce the same nine-row
+        // shape so a first partial modern PUT preserves omitted rows exactly
+        // as the client just observed them on GET. Delegates to the shared
+        // helper so any future default change lands in one place.
+        return Farm.Infrastructure.Services.Notifications.NotificationPreferencesDefaults.Create(userId);
     }
 
     private static List<NotificationEventChannelPreferenceDto> BuildEventChannelPreferences(NotificationPreferences preferences)
@@ -843,7 +857,14 @@ public class NotificationsController(INotificationService notificationService) :
         List<NotificationEventChannelPreferenceDto>? matrix = request.EventChannelPreferences;
         IReadOnlyList<NotificationPreferencesRowPatch>? rows = null;
 
-        if (matrix is not null && matrix.Count > 0)
+        // Hicks #3: preserve a non-null but empty modern matrix as an empty
+        // modern patch (rows = []) so the service takes the modern branch and
+        // treats every row as "omitted" — omitted rows are preserved. Prior
+        // behaviour collapsed an empty matrix to null which forced the legacy
+        // branch, deriving job rows from top-level scalars and silently
+        // reshaping any modern client that submitted an empty matrix to
+        // re-affirm "no per-event opinion".
+        if (matrix is not null)
         {
             // Vasquez v6 B3: translate the wire matrix rows into service-layer
             // patch rows without ever synthesizing rows for events the caller
@@ -1062,8 +1083,10 @@ public enum NotificationPreferenceEventType
 
     // Issue #708 shared preference contract — attention-row events extend the
     // existing four job events without changing the DTO shape or JSON casing.
-    // Tokens serialize (via JsonStringEnumConverter) as: "printerFailure",
-    // "filamentRunout", "harvestReady", "maintenanceDue", "printerOffline".
+    // The DTO uses PascalCase JSON casing for enum tokens (the JsonStringEnumConverter
+    // in production has no naming policy override), so tokens serialize as:
+    // "PrinterFailure", "FilamentRunout", "HarvestReady", "MaintenanceDue",
+    // "PrinterOffline". A separate contract test locks the exact tokens.
     PrinterFailure,
     FilamentRunout,
     HarvestReady,

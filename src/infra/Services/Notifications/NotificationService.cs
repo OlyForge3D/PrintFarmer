@@ -187,8 +187,16 @@ public class NotificationService(
     IEmailService? emailService = null,
     IWebPushNotificationSender? webPushNotificationSender = null,
     Func<string, CancellationToken, Task<bool>>? pushEndpointValidatorOverride = null,
-    IEnumerable<INotificationChannel>? notificationChannels = null) : INotificationService
+    IEnumerable<INotificationChannel>? notificationChannels = null,
+    IDbContextFactory<AppDbContext>? preferencesContextFactory = null) : INotificationService
 {
+    // Hicks #2: retries use a FRESH DbContext per attempt via the factory so
+    // stale change-tracker snapshots from a losing serializable transaction
+    // never leak into the retried attempt. When absent (tests wire a bespoke
+    // in-memory context directly), the retry helper falls back to a single
+    // attempt on the injected context. Production wiring always supplies the
+    // factory via DI.
+    private readonly IDbContextFactory<AppDbContext>? _preferencesContextFactory = preferencesContextFactory;
     private static readonly string[] KnownPushServiceHosts =
     {
         "fcm.googleapis.com",
@@ -478,13 +486,36 @@ public class NotificationService(
 
     public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default)
     {
-        // Bishop v6 master-flag stale-order race: same rationale as the
-        // patch overload — a legacy PUT that lands between a concurrent
-        // modern read and save can leave the master flags describing the
-        // pre-modern-save state. Wrapping under Serializable makes the
-        // read/mutate/save atomic on relational providers; InMemory
-        // fall-through remains safe for unit tests where no cross-context
-        // race exists.
+        // Hicks #2 hardening: the entire read/mutate/derive/save unit runs under a
+        // serializable transaction on relational providers so a concurrent legacy
+        // PUT cannot land between this request's read and save. Provider
+        // serialization / deadlock / unique-index conflicts are shed via a
+        // bounded whole-operation retry over a FRESH DbContext per attempt so
+        // the change-tracker never carries losing-attempt snapshots forward.
+        // Non-relational providers (InMemory used only in unit tests) fall
+        // through without a transaction and without retry — no cross-context
+        // race can arise there.
+        //
+        // Explicitly NOT retried: any exception thrown by
+        // <see cref="UpdatePreferencesCoreAsync"/> that isn't a recognised
+        // transient. A malformed patch surfaces on the first attempt.
+        if (dbContext.Database.IsRelational() && _preferencesContextFactory is not null)
+        {
+            await PreferenceConcurrencyRetry.ExecuteAsync<int>(
+                _preferencesContextFactory,
+                dbContext,
+                async (freshContext, ct) =>
+                {
+                    await using var transaction = await freshContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+                    await UpdatePreferencesCoreOnContextAsync(freshContext, userId, preferences, preserveAttentionFields, ct);
+                    await transaction.CommitAsync(ct);
+                    return 0;
+                },
+                logger,
+                cancellationToken);
+            return;
+        }
+
         if (dbContext.Database.IsRelational())
         {
             await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
@@ -498,7 +529,12 @@ public class NotificationService(
 
     private async Task UpdatePreferencesCoreAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields, CancellationToken cancellationToken)
     {
-        var existing = await dbContext.NotificationPreferences
+        await UpdatePreferencesCoreOnContextAsync(dbContext, userId, preferences, preserveAttentionFields, cancellationToken);
+    }
+
+    private async Task UpdatePreferencesCoreOnContextAsync(AppDbContext ctx, Guid userId, NotificationPreferences preferences, bool preserveAttentionFields, CancellationToken cancellationToken)
+    {
+        var existing = await ctx.NotificationPreferences
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
 
         if (existing is null)
@@ -513,7 +549,7 @@ public class NotificationService(
             // row the caller-supplied `preferences` IS the final state, so we
             // derive directly onto it.
             ApplyMasterFlagsFromMatrix(preferences);
-            dbContext.NotificationPreferences.Add(preferences);
+            ctx.NotificationPreferences.Add(preferences);
         }
         else
         {
@@ -587,7 +623,7 @@ public class NotificationService(
             MirrorAttentionAndMasterFlags(existing, preferences);
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await ctx.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Updated notification preferences for user {UserId}", userId);
     }
 
@@ -595,16 +631,35 @@ public class NotificationService(
     {
         ArgumentNullException.ThrowIfNull(patch);
 
-        // Vasquez v6 B3 + Bishop v6 master-flag stale-order race: the entire
-        // read/mutate/derive-master-flags/save sequence must be a single
-        // atomic step so a concurrent legacy PUT cannot land BETWEEN this
-        // request's read and save, leaving derived master flags stale. On
-        // relational providers we wrap under Serializable which forces
-        // conflict detection at commit; a losing writer retries above this
-        // layer (through the controller's normal error path). Non-relational
-        // providers (InMemory used only in unit tests) fall through without
-        // a transaction — the mutation is still single-context and no cross-
-        // context race is possible there.
+        // Vasquez v6 B3 + Bishop v6 master-flag stale-order race + Hicks #2:
+        // the entire read/mutate/derive-master-flags/save sequence is one
+        // atomic step. Under a serializable transaction plus a bounded
+        // whole-operation retry over a fresh DbContext, a concurrent legacy
+        // PUT that loses the serialization contest is retried until it
+        // observes the winner's state (or the retry budget is exhausted, at
+        // which point the transient surfaces to the caller). Only recognised
+        // transient signals trigger retry; validation errors and cancellation
+        // propagate immediately.
+        //
+        // Non-relational providers (InMemory in unit tests) fall through
+        // without transaction and without retry — mutation is single-context
+        // and no cross-context race exists.
+        if (dbContext.Database.IsRelational() && _preferencesContextFactory is not null)
+        {
+            return await PreferenceConcurrencyRetry.ExecuteAsync(
+                _preferencesContextFactory,
+                dbContext,
+                async (freshContext, ct) =>
+                {
+                    await using var transaction = await freshContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+                    NotificationPreferences persistedInner = await ApplyPatchOnContextAsync(freshContext, userId, patch, ct);
+                    await transaction.CommitAsync(ct);
+                    return persistedInner;
+                },
+                logger,
+                cancellationToken);
+        }
+
         if (dbContext.Database.IsRelational())
         {
             await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
@@ -618,21 +673,25 @@ public class NotificationService(
 
     private async Task<NotificationPreferences> ApplyPatchAsync(Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken)
     {
-        var tracked = await dbContext.NotificationPreferences
+        return await ApplyPatchOnContextAsync(dbContext, userId, patch, cancellationToken);
+    }
+
+    private async Task<NotificationPreferences> ApplyPatchOnContextAsync(AppDbContext ctx, Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken)
+    {
+        var tracked = await ctx.NotificationPreferences
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
 
         bool isNew = tracked is null;
         if (tracked is null)
         {
-            // For a brand-new user the tracked entity carries the finalized
-            // #708 defaults (attention InApp/Push=true; Email/Telegram=false;
-            // one representative default for each job row) so that any row
-            // omitted from a patch preserves a sensible starting value rather
-            // than reverting to "everything off".
-            tracked = BuildDefaultPreferences(userId);
+            // Hicks #3: new-user persistence MUST use the same canonical
+            // defaults the GET returns for a user with no persisted row, so a
+            // first partial modern PUT never mutates omitted rows. Delegating
+            // to the shared helper keeps both paths in sync.
+            tracked = NotificationPreferencesDefaults.Create(userId);
             tracked.Id = Guid.NewGuid().ToString();
             tracked.CreatedAt = DateTime.UtcNow;
-            dbContext.NotificationPreferences.Add(tracked);
+            ctx.NotificationPreferences.Add(tracked);
         }
 
         // Scalars always apply.
@@ -682,6 +741,11 @@ public class NotificationService(
             // are simply not visited, so their persisted value is preserved.
             // Duplicate rows for the same event are last-write-wins within
             // this request (mirrors previous controller behavior).
+            //
+            // Hicks #3: an empty modern matrix (list with zero rows) reaches
+            // this branch too so every row is treated as "omitted" and the
+            // caller's request cannot silently reshape rows via the legacy
+            // scalar derivation.
             foreach (var row in patch.MatrixRows)
             {
                 ApplyRow(tracked, row);
@@ -707,7 +771,7 @@ public class NotificationService(
         ApplyMasterFlagsFromMatrix(tracked);
         tracked.UpdatedAt = DateTime.UtcNow;
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await ctx.SaveChangesAsync(cancellationToken);
         logger.LogInformation(
             "Updated notification preferences for user {UserId} (matrix rows: {RowCount}, new row: {IsNew})",
             userId,
@@ -878,36 +942,12 @@ public class NotificationService(
 
     private static NotificationPreferences BuildDefaultPreferences(Guid userId)
     {
-        return new NotificationPreferences
-        {
-            UserId = userId,
-            EnableEmailNotifications = true,
-            EnablePushNotifications = true,
-            EnableInAppNotifications = true,
-            EnableTelegramNotifications = false,
-            NotifyOnCompletion = true,
-            NotifyOnFailure = true,
-            NotifyOnStart = false,
-            NotifyOnPause = true,
-            InAppOnJobStarted = false,
-            InAppOnJobCompleted = true,
-            InAppOnJobFailed = true,
-            InAppOnJobPaused = true,
-            EmailOnJobStarted = false,
-            EmailOnJobCompleted = true,
-            EmailOnJobFailed = true,
-            EmailOnJobPaused = true,
-            PushOnJobStarted = false,
-            PushOnJobCompleted = true,
-            PushOnJobFailed = true,
-            PushOnJobPaused = true,
-            TelegramOnJobStarted = false,
-            TelegramOnJobCompleted = false,
-            TelegramOnJobFailed = false,
-            TelegramOnJobPaused = false,
-            Frequency = NotificationFrequency.RealTime,
-            RetentionDays = 30
-        };
+        // Hicks #3: this legacy helper now delegates to the canonical shared
+        // defaults so any future default-shape change lands in exactly one
+        // place. Kept for backward compatibility with callers outside this
+        // file; new code should call NotificationPreferencesDefaults.Create
+        // directly.
+        return NotificationPreferencesDefaults.Create(userId);
     }
 
     private static bool ShouldDeliverToChannel(NotificationPreferences preferences, NotificationType type, NotificationDeliveryChannel channel)

@@ -1219,6 +1219,178 @@ public sealed class NotificationPreferencesContractTests
         ok!.StatusCode.Should().Be(200);
     }
 
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdateAttentionPushPreferences_CumulativeCardinalityExceededAcrossRepeatedRequests_Returns400AndPersistsByteForByteUnchanged()
+    {
+        // Hicks #4: the per-request bound (32 keys) alone cannot stop an
+        // attacker from persisting an unbounded map via repeated 1-key
+        // requests. We seed the row with 128 persisted keys (the cumulative
+        // cap), then submit ONE additional key. The PROSPECTIVE merged map
+        // would carry 129 keys and must be rejected with 400 — AND the
+        // persisted JSON must remain byte-for-byte identical to the seed.
+        (Farm.Web.Api.Controllers.NotificationsController controller,
+         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
+         Farm.Infrastructure.Data.AppDbContext dbContext,
+         System.Guid userId) = await BuildAttentionEndpointFixture();
+        await using AppDbContextGuard guard = new(dbContext);
+
+        var seededCategories = new System.Collections.Generic.Dictionary<string, bool>(System.StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < 128; i++)
+        {
+            seededCategories[$"seedkey-{i:D3}"] = i % 3 == 0;
+        }
+
+        var seeded = new Farm.Infrastructure.Services.Notifications.NativePush.AttentionPushCategoryPreferences { Categories = seededCategories };
+        string seededJson = seeded.ToJson();
+
+        dbContext.NotificationPreferences.Add(new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            AttentionPushCategoryPreferencesJson = seededJson,
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        var payload = new AttentionPushPreferencesDto();
+        payload.Categories["one-more-key"] = true;
+
+        Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+
+        var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
+        objectResult.Should().NotBeNull();
+        objectResult!.StatusCode.Should().Be(400, "the prospective merged map exceeds the cumulative cardinality bound");
+
+        // Bishop minor + Hicks #4: prove the persisted JSON is byte-for-byte
+        // unchanged. AsNoTracking pulls straight from the store rather than
+        // any change-tracker snapshot, so a stray SaveChangesAsync would
+        // show up here.
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.AttentionPushCategoryPreferencesJson.Should()
+            .Be(seededJson, "persisted attention JSON MUST be byte-for-byte unchanged when the cumulative bound rejects the update");
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdateAttentionPushPreferences_CumulativeJsonBytesExceeded_Returns400AndPersistsByteForByteUnchanged()
+    {
+        // Hicks #4 sibling: a payload of long-valued keys can also blow past
+        // the UTF-8 byte bound before hitting the cardinality bound. Seed a
+        // row whose current JSON is comfortably under 8KB but where one more
+        // long key would push it over. Reject 400 and prove byte-for-byte
+        // unchanged persistence.
+        (Farm.Web.Api.Controllers.NotificationsController controller,
+         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
+         Farm.Infrastructure.Data.AppDbContext dbContext,
+         System.Guid userId) = await BuildAttentionEndpointFixture();
+        await using AppDbContextGuard guard = new(dbContext);
+
+        var seededCategories = new System.Collections.Generic.Dictionary<string, bool>(System.StringComparer.OrdinalIgnoreCase);
+        // Seed with just under the byte bound. Each key is 60 chars +
+        // "":true", so 128 rows -> ~9.5KB — over budget on load. To bracket
+        // the byte bound specifically we use 120 rows of 60 chars.
+        for (int i = 0; i < 120; i++)
+        {
+            string k = $"kb-{i:D3}-" + new string('x', 60);
+            seededCategories[k] = false;
+        }
+
+        var seeded = new Farm.Infrastructure.Services.Notifications.NativePush.AttentionPushCategoryPreferences { Categories = seededCategories };
+        string seededJson = seeded.ToJson();
+
+        // If the seed is already over budget the test degenerates. Skip if so.
+        if (System.Text.Encoding.UTF8.GetByteCount(seededJson) >= 8 * 1024)
+        {
+            return;
+        }
+
+        dbContext.NotificationPreferences.Add(new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            AttentionPushCategoryPreferencesJson = seededJson,
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        // Prospective incoming keys of the same 60-char shape push the
+        // merged payload past 8KB.
+        var payload = new AttentionPushPreferencesDto();
+        for (int i = 120; i < 128; i++)
+        {
+            string k = $"kb-{i:D3}-" + new string('x', 60);
+            payload.Categories[k] = false;
+        }
+
+        Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+
+        var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
+        objectResult.Should().NotBeNull();
+        objectResult!.StatusCode.Should().Be(400);
+
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.AttentionPushCategoryPreferencesJson.Should()
+            .Be(seededJson, "byte-bound rejection MUST leave persisted JSON byte-for-byte unchanged");
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdatePreferences_EmptyModernMatrix_PreservesAllNineRowsAsNoRowPatch()
+    {
+        // Hicks #3: a non-null explicit empty modern matrix must be treated
+        // as a no-row modern patch — every existing row is preserved as-is
+        // (fresh-defaults for a first-time user, existing persisted values
+        // otherwise). It MUST NOT collapse to legacy derivation from the
+        // top-level scalars, which would silently rewrite Job* rows.
+        var (dbContext, userId) = await BuildInMemoryDbWithUserAsync();
+        await using Farm.Infrastructure.Data.AppDbContext _ = dbContext;
+
+        // Seed a row with a distinctive non-default value — attention Push
+        // for MaintenanceDue = false. If empty-matrix collapses to legacy
+        // derivation, this attention row would still be preserved (legacy
+        // path leaves attention rows alone) but Job* rows would be rewritten
+        // from the NotifyOn scalars. We assert BOTH categories.
+        dbContext.NotificationPreferences.Add(new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            EnablePushNotifications = true,
+            NotifyOnCompletion = true,
+            NotifyOnFailure = true,
+            NotifyOnPause = true,
+            NotifyOnStart = false,
+            PushOnJobCompleted = false,   // distinctive: a legacy re-derive would flip this to true
+            PushOnMaintenanceDue = false, // distinctive attention row
+        });
+        await dbContext.SaveChangesAsync();
+
+        NotificationsController controller = BuildController(dbContext, userId);
+
+        var request = new UpdateNotificationPreferencesRequest
+        {
+            EnablePushNotifications = true,
+            NotifyOnCompletion = true,
+            NotifyOnFailure = true,
+            NotifyOnPause = true,
+            NotifyOnStart = false,
+            EventChannelPreferences = new System.Collections.Generic.List<NotificationEventChannelPreferenceDto>(), // EMPTY, non-null
+        };
+
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+
+        result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.OkObjectResult>();
+
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.PushOnJobCompleted.Should()
+            .BeFalse("empty modern matrix is a no-row patch and MUST NOT trigger legacy derivation of Job rows");
+        persisted.PushOnMaintenanceDue.Should().BeFalse("attention row must remain untouched by empty modern matrix");
+    }
+
     /// <summary>
     /// Small holder ensuring the shared DbContext is disposed at the end of each
     /// bounded-JSON test. Existing tests in this file rely on garbage collection

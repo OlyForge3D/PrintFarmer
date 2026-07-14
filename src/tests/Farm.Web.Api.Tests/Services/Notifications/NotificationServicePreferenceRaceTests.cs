@@ -298,19 +298,25 @@ public sealed class NotificationServicePreferenceRaceTests
         persisted.InAppOnMaintenanceDue.Should().BeFalse();
         persisted.PushOnMaintenanceDue.Should().BeFalse();
 
-        // Master flags derived from the final merged nine-row row. Because
-        // BuildDefaultPreferences seeds the four job rows with In-App/Email/Push
-        // enabled (JobCompleted, JobFailed, JobPaused) and the four non-modified
-        // attention rows with In-App/Push enabled by spec default, the derived
-        // master flags reflect that merged state — not the scalar hints on the
-        // incoming patch.
+        // Master flags derived from the final merged nine-row row. Under the
+        // Hicks #3 canonical defaults (see NotificationPreferencesDefaults):
+        //   * InApp defaults are ON for Completed/Failed/Paused + all five
+        //     attention rows → master EnableInApp=true.
+        //   * Push defaults mirror InApp → master EnablePush=true.
+        //   * Email defaults to OFF across every row (opt-in) so master
+        //     EnableEmail=false even though the incoming patch scalar hint
+        //     asks for true — master flags are DERIVED from row state, not
+        //     copied from the request. This closes Hicks #3: the fresh GET
+        //     defaults and the persisted-after-first-partial-PUT state agree
+        //     for every row the patch omits.
+        //   * Telegram defaults to OFF everywhere → master EnableTelegram=false.
         persisted.EnableInAppNotifications.Should().BeTrue(
             "at least one row on the merged nine-row state has InApp=true");
         persisted.EnablePushNotifications.Should().BeTrue(
             "at least one row on the merged nine-row state has Push=true");
-        persisted.EnableEmailNotifications.Should().BeTrue(
-            "BuildDefaultPreferences seeds JobCompleted/Failed/Paused with Email=true, " +
-            "and the incoming patch preserves omitted job rows");
+        persisted.EnableEmailNotifications.Should().BeFalse(
+            "Hicks #3: canonical defaults set every Email* row to false; " +
+            "master EnableEmail derives from row state, not the scalar hint");
         persisted.EnableTelegramNotifications.Should().BeFalse(
             "no seeded default row has Telegram=true and the patch did not enable it");
         persisted.RetentionDays.Should().Be(45);

@@ -346,6 +346,105 @@ public sealed class NativePushDispatcherTests
         ownerBSendAttempts.Should().BeGreaterThanOrEqualTo(1, "owner A's failure must not abort owner B");
     }
 
+    [Fact]
+    public async Task DispatchAsync_SenderThrowsOceWithInternalToken_PropagatesWhenCallerTokenIsNone()
+    {
+        // Hicks #1 regression: an OperationCanceledException raised from an
+        // INTERNAL or linked token (a timeout inside the sender, an inner
+        // linked cts, etc.) must propagate out of DispatchAsync even when
+        // the caller passed CancellationToken.None. The prior code guarded
+        // every isolation catch on `cancellationToken.IsCancellationRequested`
+        // which was false when only the internal token tripped — so the OCE
+        // fell through into the generic Exception catch and was swallowed,
+        // masking cancellation as a delivery blip.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        // Sender throws OCE with an internal token that has ALREADY been
+        // cancelled — mimicking a per-attempt timeout inside the sender.
+        using var innerCts = new CancellationTokenSource();
+        innerCts.Cancel();
+
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
+                Task.FromException<NativePushDispatchResult>(new OperationCanceledException(innerCts.Token)));
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        // Caller cancellation token is None — the whole point of Hicks #1 is
+        // that this MUST still propagate the inner OCE out of DispatchAsync.
+        Func<Task> act = () => sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, cancellationToken: CancellationToken.None);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_PersistenceThrowsOceWithInternalToken_PropagatesWhenCallerTokenIsNone()
+    {
+        // Hicks #1 regression companion: the same rule for the persistence
+        // catch. A cancellation raised inside RecordSuccessAsync — for
+        // example when the ambient DbContext link chain trips a linked
+        // token — must not be swallowed by the per-device Exception
+        // isolator. Sender path completes normally with Delivered; only the
+        // persistence step throws OCE with an internal token, and caller
+        // passes CancellationToken.None.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        using var innerCts = new CancellationTokenSource();
+        innerCts.Cancel();
+        tokens
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, DateTime, CancellationToken>((_, _, _) => Task.FromException(new OperationCanceledException(innerCts.Token)));
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        Func<Task> act = () => sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, cancellationToken: CancellationToken.None);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     private static DeviceToken MakeToken(Guid userId, string installationId)
     {
         return new DeviceToken

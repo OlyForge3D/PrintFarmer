@@ -147,8 +147,20 @@ public static class FeatureServicesStartup
         // Native push (issue #708) — device-token registration, per-user category
         // preferences, and the dispatcher hooked from AttentionBroadcaster after the
         // SignalR broadcast. See docs/OPERATOR_NATIVE_PUSH.md.
-        services.Configure<Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings>(
-            configuration.GetSection(Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings.SectionName));
+        //
+        // Hicks #6: fail-fast startup validation for credentials. The
+        // validator enforces mode-specific requirements (Relay: absolute
+        // HTTPS endpoint + api key; Direct: TeamId/KeyId/BundleId + a
+        // readable .p8 file OR inline PEM). Disabled mode requires nothing.
+        // Diagnostics NEVER echo the secret path, api key, PEM contents, or
+        // full URI — only high-level shape errors surface so ops logs stay
+        // safe.
+        services.AddOptions<Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings>,
+            Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettingsValidator>();
+
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.IDeviceTokenRepository,
             Farm.Infrastructure.Repositories.Notifications.EfDeviceTokenRepository>();
         services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics>();

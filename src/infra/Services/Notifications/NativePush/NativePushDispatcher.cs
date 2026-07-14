@@ -123,6 +123,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 // this a transient DB read failure for one owner (attention
                 // lookup, preferences read, token list) would abort every
                 // remaining owner in the current dispatch.
+                //
+                // Hicks #1: rethrow ANY OperationCanceledException — not just
+                // ones whose Token matches the caller's — because an inner
+                // linked/timeout cancellation still means "stop this
+                // pipeline". A guarded catch (when caller.IsCancellationRequested)
+                // would let a linked-CTS OCE fall through into the generic
+                // Exception isolator below, which would swallow it and keep
+                // dispatching. Unconditional rethrow closes that gap.
                 try
                 {
                     await DispatchForOwnerAsync(
@@ -136,7 +144,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         db,
                         cancellationToken);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException)
                 {
                     throw;
                 }
@@ -151,8 +159,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 }
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            // Hicks #1: unconditional rethrow. A cancellation surfaced from
+            // any inner token — caller, linked, or per-attempt timeout — must
+            // propagate out of DispatchAsync so the caller (broadcaster)
+            // observes it and can shut down cleanly. Guarding on the caller
+            // token alone would swallow legitimate internal cancellations.
             throw;
         }
         catch (Exception ex)
@@ -260,8 +273,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
             // Vasquez v6 B1: isolate the entire per-device send + persist
             // step so a downstream persistence throw for one token cannot
-            // cost the remaining tokens their delivery attempt. Cancellation
-            // still propagates.
+            // cost the remaining tokens their delivery attempt.
+            //
+            // Hicks #1: rethrow ANY OperationCanceledException so an internal
+            // linked/timeout cancellation still bubbles out and stops the
+            // dispatch — the caller-token guard swallowed those and let the
+            // generic Exception isolator continue.
             try
             {
                 await SendAndApplyForDeviceAsync(
@@ -274,7 +291,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     tokens,
                     cancellationToken);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -326,8 +343,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             result = await SendWithRetriesAsync(envelope, settings, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            // Hicks #1: any OCE — caller, linked, or internal timeout —
+            // stops the pipeline. Never re-shape cancellation into a
+            // "sender_exception" transient result.
             throw;
         }
         catch (Exception ex)
@@ -339,13 +359,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // Vasquez v6 B1: persistence of the send outcome must not be able to
         // abort the outer fan-out. A transient DB error while recording
         // success/failure for one token is a per-token concern, not a
-        // pipeline-wide one, so we scope it here with a targeted
-        // cancellation-preserving catch. Cancellation still propagates.
+        // pipeline-wide one, so we scope it here with a cancellation-
+        // preserving catch. Hicks #1: any OCE propagates unconditionally.
         try
         {
             await ApplyResultAsync(tokens, deviceToken, result, settings, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             throw;
         }
