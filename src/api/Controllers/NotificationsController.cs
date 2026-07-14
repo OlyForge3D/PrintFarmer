@@ -217,7 +217,7 @@ public class NotificationsController(INotificationService notificationService) :
     [AllowAnonymous]
     public ActionResult<NotificationPreferencesCapabilitiesDto> GetPreferencesCapabilities()
     {
-        // Enum members are converted to the same camelCase wire tokens the
+        // Enum members are converted to the same PascalCase value tokens the
         // JsonStringEnumConverter emits everywhere else in the DTO, via the
         // pre-built CapabilitiesJsonOptions singleton, so the two paths stay
         // in lock-step even if the naming policy ever changes.
@@ -565,6 +565,15 @@ public class NotificationsController(INotificationService notificationService) :
                     title: "Attention category batch too large");
             }
 
+            int requestBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request).Length;
+            if (requestBytes > MaxAttentionCategoryJsonBytes)
+            {
+                return Problem(
+                    detail: $"Serialized attention category request must not exceed {MaxAttentionCategoryJsonBytes} UTF-8 bytes.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category batch too large");
+            }
+
             foreach (string key in incoming.Keys)
             {
                 if (string.IsNullOrEmpty(key))
@@ -590,9 +599,18 @@ public class NotificationsController(INotificationService notificationService) :
             return Unauthorized(new { error = "User ID not found in claims" });
         }
 
-        IReadOnlyDictionary<string, bool> updates = request?.Categories is null
-            ? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, bool>(request.Categories, StringComparer.OrdinalIgnoreCase);
+        var updates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        if (request?.Categories is not null)
+        {
+            // System.Text.Json preserves object-property order in Dictionary.
+            // Assign through the indexer so raw case variants collapse
+            // deterministically with ordered last-write-wins rather than the
+            // comparer-changing Dictionary constructor throwing a 500.
+            foreach (KeyValuePair<string, bool> update in request.Categories)
+            {
+                updates[update.Key] = update.Value;
+            }
+        }
 
         // Hicks #6: the merge/read/save is service-owned so a serializable
         // transaction + retry can guarantee concurrent first-creates converge
@@ -635,13 +653,13 @@ public class NotificationsController(INotificationService notificationService) :
     /// persisted JSON column while comfortably exceeding the count of real
     /// AttentionKind categories in the finalized #708 contract (Bishop v6).
     /// </summary>
-    private const int MaxAttentionCategoryKeysPerRequest = 32;
+    private const int MaxAttentionCategoryKeysPerRequest = AttentionPushCategoryPreferences.MaxKeysPerRequest;
 
     /// <summary>
     /// Maximum length in characters of each attention-category key in a single
     /// update request. Real AttentionKind enum names are well under this bound.
     /// </summary>
-    private const int MaxAttentionCategoryKeyLength = 64;
+    private const int MaxAttentionCategoryKeyLength = AttentionPushCategoryPreferences.MaxKeyLength;
 
     /// <summary>
     /// Cumulative bound (Hicks #4): the maximum number of category keys that
@@ -651,7 +669,7 @@ public class NotificationsController(INotificationService notificationService) :
     /// bound. Exceeding the bound returns 400 and leaves persisted JSON
     /// byte-for-byte unchanged.
     /// </summary>
-    private const int MaxAttentionCategoryKeysPersisted = 128;
+    private const int MaxAttentionCategoryKeysPersisted = AttentionPushCategoryPreferences.MaxPersistedKeys;
 
     /// <summary>
     /// Cumulative bound (Hicks #4): the maximum UTF-8 encoded byte size of
@@ -659,7 +677,7 @@ public class NotificationsController(INotificationService notificationService) :
     /// against the PROSPECTIVE merged map so a burst of long-valued keys
     /// cannot silently blow past reasonable row storage.
     /// </summary>
-    private const int MaxAttentionCategoryJsonBytes = 8 * 1024;
+    private const int MaxAttentionCategoryJsonBytes = AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes;
 
     private static NotificationPreferencesDto ToDto(NotificationPreferences preferences)
     {
@@ -1048,8 +1066,8 @@ public class NotificationPreferencesCapabilitiesDto
 {
     /// <summary>
     /// Ordered set of <see cref="NotificationPreferenceEventType"/> tokens the
-    /// server accepts, using the same camelCase JSON tokens the update
-    /// endpoint accepts (e.g. <c>"jobStarted"</c>, <c>"printerFailure"</c>).
+    /// server accepts, using the same PascalCase enum-value tokens the update
+    /// endpoint accepts (e.g. <c>"JobStarted"</c>, <c>"PrinterFailure"</c>).
     /// </summary>
     public List<string> SupportedEventTypes { get; set; } = new();
 }

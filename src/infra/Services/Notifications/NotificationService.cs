@@ -580,14 +580,17 @@ public class NotificationService(
             preferences.CreatedAt = DateTime.UtcNow;
             preferences.UpdatedAt = DateTime.UtcNow;
 
-            // Derive master flags from the final nine-row state. For a new
-            // row the caller-supplied `preferences` IS the final state, so we
-            // derive directly onto it.
-            ApplyMasterFlagsFromMatrix(preferences);
+            // Global channel controls are independent kill switches. The caller's
+            // complete entity already carries their authoritative values; matrix
+            // rows must never synthesize an opt-in.
             ctx.NotificationPreferences.Add(preferences);
         }
         else
         {
+            existing.EnableInAppNotifications = preferences.EnableInAppNotifications;
+            existing.EnableEmailNotifications = preferences.EnableEmailNotifications;
+            existing.EnablePushNotifications = preferences.EnablePushNotifications;
+            existing.EnableTelegramNotifications = preferences.EnableTelegramNotifications;
             existing.NotifyOnCompletion = preferences.NotifyOnCompletion;
             existing.NotifyOnFailure = preferences.NotifyOnFailure;
             existing.NotifyOnStart = preferences.NotifyOnStart;
@@ -642,13 +645,9 @@ public class NotificationService(
                 existing.TelegramOnPrinterOffline = preferences.TelegramOnPrinterOffline;
             }
 
-            // Issue #708 H1-v5: master flags are derived data — the OR of the
-            // final nine event×channel rows on the tracked entity, computed
-            // AFTER attention-row preservation. Deriving here (rather than in
-            // the controller) is the single source of truth so a legacy PUT
-            // whose caller doesn't know the persisted attention state still
-            // ends up with an accurate master flag.
-            ApplyMasterFlagsFromMatrix(existing);
+            // The four global controls are independent kill switches copied above.
+            // Never derive them from row values: doing so can silently reopen a
+            // channel that an operator explicitly disabled.
             existing.UpdatedAt = DateTime.UtcNow;
 
             // Mirror the final persisted state back onto the caller's DTO so
@@ -753,6 +752,29 @@ public class NotificationService(
             tracked.RetentionDays = patch.RetentionDays.Value;
         }
 
+        // Global channel controls are independent user kill switches. A supplied
+        // value is persisted verbatim; an omitted value is a strict no-op. They
+        // are intentionally not derived from matrix rows below.
+        if (patch.EnableInAppNotifications is bool enableInAppGlobal)
+        {
+            tracked.EnableInAppNotifications = enableInAppGlobal;
+        }
+
+        if (patch.EnableEmailNotifications is bool enableEmailGlobal)
+        {
+            tracked.EnableEmailNotifications = enableEmailGlobal;
+        }
+
+        if (patch.EnablePushNotifications is bool enablePushGlobal)
+        {
+            tracked.EnablePushNotifications = enablePushGlobal;
+        }
+
+        if (patch.EnableTelegramNotifications is bool enableTelegramGlobal)
+        {
+            tracked.EnableTelegramNotifications = enableTelegramGlobal;
+        }
+
         if (patch.MatrixRows is null)
         {
             // Legacy branch. Only the four job rows are addressed, derived
@@ -793,73 +815,66 @@ public class NotificationService(
                 tracked.NotifyOnPause = notifyPause;
             }
 
-            if (patch.EnableInAppNotifications is bool enableInApp)
-            {
-                tracked.InAppOnJobStarted = enableInApp && notifyStart;
-                tracked.InAppOnJobCompleted = enableInApp && notifyComplete;
-                tracked.InAppOnJobFailed = true;
-                tracked.InAppOnJobPaused = enableInApp && notifyPause;
+            // A legacy job cell changes only when at least one of its two input
+            // axes was explicitly supplied: the event toggle or the channel
+            // control. The other axis comes from the tracked row. This preserves
+            // legacy cross-product semantics without turning `{}`, retention-only,
+            // or unrelated partial requests into synthetic writes. Attention rows
+            // are never rewritten by legacy fields; the independent global control
+            // suppresses the whole channel without destroying per-kind choices.
+            bool startChanged = patch.NotifyOnStart.HasValue;
+            bool completionChanged = patch.NotifyOnCompletion.HasValue;
+            bool failureChanged = patch.NotifyOnFailure.HasValue;
+            bool pauseChanged = patch.NotifyOnPause.HasValue;
 
-                if (!enableInApp)
-                {
-                    tracked.InAppOnPrinterFailure = false;
-                    tracked.InAppOnFilamentRunout = false;
-                    tracked.InAppOnHarvestReady = false;
-                    tracked.InAppOnMaintenanceDue = false;
-                    tracked.InAppOnPrinterOffline = false;
-                }
-            }
-
-            if (patch.EnableEmailNotifications is bool enableEmail)
-            {
-                tracked.EmailOnJobStarted = enableEmail && notifyStart;
-                tracked.EmailOnJobCompleted = enableEmail && notifyComplete;
-                tracked.EmailOnJobFailed = enableEmail && notifyFail;
-                tracked.EmailOnJobPaused = enableEmail && notifyPause;
-
-                if (!enableEmail)
-                {
-                    tracked.EmailOnPrinterFailure = false;
-                    tracked.EmailOnFilamentRunout = false;
-                    tracked.EmailOnHarvestReady = false;
-                    tracked.EmailOnMaintenanceDue = false;
-                    tracked.EmailOnPrinterOffline = false;
-                }
-            }
-
-            if (patch.EnablePushNotifications is bool enablePush)
-            {
-                tracked.PushOnJobStarted = enablePush && notifyStart;
-                tracked.PushOnJobCompleted = enablePush && notifyComplete;
-                tracked.PushOnJobFailed = enablePush && notifyFail;
-                tracked.PushOnJobPaused = enablePush && notifyPause;
-
-                if (!enablePush)
-                {
-                    tracked.PushOnPrinterFailure = false;
-                    tracked.PushOnFilamentRunout = false;
-                    tracked.PushOnHarvestReady = false;
-                    tracked.PushOnMaintenanceDue = false;
-                    tracked.PushOnPrinterOffline = false;
-                }
-            }
-
-            if (patch.EnableTelegramNotifications is bool enableTelegram)
-            {
-                tracked.TelegramOnJobStarted = enableTelegram && notifyStart;
-                tracked.TelegramOnJobCompleted = enableTelegram && notifyComplete;
-                tracked.TelegramOnJobFailed = enableTelegram && notifyFail;
-                tracked.TelegramOnJobPaused = enableTelegram && notifyPause;
-
-                if (!enableTelegram)
-                {
-                    tracked.TelegramOnPrinterFailure = false;
-                    tracked.TelegramOnFilamentRunout = false;
-                    tracked.TelegramOnHarvestReady = false;
-                    tracked.TelegramOnMaintenanceDue = false;
-                    tracked.TelegramOnPrinterOffline = false;
-                }
-            }
+            ApplyLegacyJobCells(
+                tracked,
+                NotificationDeliveryChannel.InApp,
+                patch.EnableInAppNotifications.HasValue,
+                startChanged,
+                completionChanged,
+                failureChanged,
+                pauseChanged,
+                notifyStart,
+                notifyComplete,
+                notifyFail,
+                notifyPause);
+            ApplyLegacyJobCells(
+                tracked,
+                NotificationDeliveryChannel.Email,
+                patch.EnableEmailNotifications.HasValue,
+                startChanged,
+                completionChanged,
+                failureChanged,
+                pauseChanged,
+                notifyStart,
+                notifyComplete,
+                notifyFail,
+                notifyPause);
+            ApplyLegacyJobCells(
+                tracked,
+                NotificationDeliveryChannel.Push,
+                patch.EnablePushNotifications.HasValue,
+                startChanged,
+                completionChanged,
+                failureChanged,
+                pauseChanged,
+                notifyStart,
+                notifyComplete,
+                notifyFail,
+                notifyPause);
+            ApplyLegacyJobCells(
+                tracked,
+                NotificationDeliveryChannel.Telegram,
+                patch.EnableTelegramNotifications.HasValue,
+                startChanged,
+                completionChanged,
+                failureChanged,
+                pauseChanged,
+                notifyStart,
+                notifyComplete,
+                notifyFail,
+                notifyPause);
         }
         else
         {
@@ -894,11 +909,9 @@ public class NotificationService(
             tracked.InAppOnJobFailed = true;
         }
 
-        // Master flags are always derived from the final nine-row tracked
-        // state — the ONLY authoritative source. Whether this call came from
-        // a legacy PUT or a modern matrix PUT, the flags describe what's
-        // actually persisted, not what the caller asked for.
-        ApplyMasterFlagsFromMatrix(tracked);
+        // Global channel controls remain whatever the user explicitly selected
+        // (or the prior/default value when omitted). Matrix rows cannot reopen a
+        // disabled channel.
         tracked.UpdatedAt = DateTime.UtcNow;
 
         await ctx.SaveChangesAsync(cancellationToken);
@@ -1109,56 +1122,83 @@ public class NotificationService(
     /// authoritative one under concurrent load because it observes the merged
     /// prospective map inside the transaction.
     /// </summary>
-    internal const int AttentionCategoryCumulativeKeyLimit = 128;
+    internal const int AttentionCategoryCumulativeKeyLimit = AttentionPushCategoryPreferences.MaxPersistedKeys;
 
     /// <summary>
     /// Cumulative UTF-8 byte cap (Hicks #4 / #6). Matches
     /// <c>MaxAttentionCategoryJsonBytes</c> in the controller.
     /// </summary>
-    internal const int AttentionCategoryCumulativeJsonBytes = 8 * 1024;
+    internal const int AttentionCategoryCumulativeJsonBytes = AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes;
 
-    private static void ApplyMasterFlagsFromMatrix(NotificationPreferences prefs)
+    private static void ApplyLegacyJobCells(
+        NotificationPreferences preferences,
+        NotificationDeliveryChannel channel,
+        bool channelChanged,
+        bool startChanged,
+        bool completionChanged,
+        bool failureChanged,
+        bool pauseChanged,
+        bool notifyStart,
+        bool notifyCompletion,
+        bool notifyFailure,
+        bool notifyPause)
     {
-        prefs.EnableInAppNotifications =
-            prefs.InAppOnJobStarted
-            || prefs.InAppOnJobCompleted
-            || prefs.InAppOnJobFailed
-            || prefs.InAppOnJobPaused
-            || prefs.InAppOnPrinterFailure
-            || prefs.InAppOnFilamentRunout
-            || prefs.InAppOnHarvestReady
-            || prefs.InAppOnMaintenanceDue
-            || prefs.InAppOnPrinterOffline;
-        prefs.EnableEmailNotifications =
-            prefs.EmailOnJobStarted
-            || prefs.EmailOnJobCompleted
-            || prefs.EmailOnJobFailed
-            || prefs.EmailOnJobPaused
-            || prefs.EmailOnPrinterFailure
-            || prefs.EmailOnFilamentRunout
-            || prefs.EmailOnHarvestReady
-            || prefs.EmailOnMaintenanceDue
-            || prefs.EmailOnPrinterOffline;
-        prefs.EnablePushNotifications =
-            prefs.PushOnJobStarted
-            || prefs.PushOnJobCompleted
-            || prefs.PushOnJobFailed
-            || prefs.PushOnJobPaused
-            || prefs.PushOnPrinterFailure
-            || prefs.PushOnFilamentRunout
-            || prefs.PushOnHarvestReady
-            || prefs.PushOnMaintenanceDue
-            || prefs.PushOnPrinterOffline;
-        prefs.EnableTelegramNotifications =
-            prefs.TelegramOnJobStarted
-            || prefs.TelegramOnJobCompleted
-            || prefs.TelegramOnJobFailed
-            || prefs.TelegramOnJobPaused
-            || prefs.TelegramOnPrinterFailure
-            || prefs.TelegramOnFilamentRunout
-            || prefs.TelegramOnHarvestReady
-            || prefs.TelegramOnMaintenanceDue
-            || prefs.TelegramOnPrinterOffline;
+        bool enabled = channel switch
+        {
+            NotificationDeliveryChannel.InApp => preferences.EnableInAppNotifications,
+            NotificationDeliveryChannel.Email => preferences.EnableEmailNotifications,
+            NotificationDeliveryChannel.Push => preferences.EnablePushNotifications,
+            NotificationDeliveryChannel.Telegram => preferences.EnableTelegramNotifications,
+            _ => false,
+        };
+
+        if (channelChanged || startChanged)
+        {
+            SetJobCell(preferences, NotificationPreferenceEvent.JobStarted, channel, enabled && notifyStart);
+        }
+
+        if (channelChanged || completionChanged)
+        {
+            SetJobCell(preferences, NotificationPreferenceEvent.JobCompleted, channel, enabled && notifyCompletion);
+        }
+
+        if (channelChanged || failureChanged)
+        {
+            bool value = channel == NotificationDeliveryChannel.InApp || (enabled && notifyFailure);
+            SetJobCell(preferences, NotificationPreferenceEvent.JobFailed, channel, value);
+        }
+
+        if (channelChanged || pauseChanged)
+        {
+            SetJobCell(preferences, NotificationPreferenceEvent.JobPaused, channel, enabled && notifyPause);
+        }
+    }
+
+    private static void SetJobCell(
+        NotificationPreferences preferences,
+        NotificationPreferenceEvent eventType,
+        NotificationDeliveryChannel channel,
+        bool value)
+    {
+        switch (eventType, channel)
+        {
+            case (NotificationPreferenceEvent.JobStarted, NotificationDeliveryChannel.InApp): preferences.InAppOnJobStarted = value; break;
+            case (NotificationPreferenceEvent.JobStarted, NotificationDeliveryChannel.Email): preferences.EmailOnJobStarted = value; break;
+            case (NotificationPreferenceEvent.JobStarted, NotificationDeliveryChannel.Push): preferences.PushOnJobStarted = value; break;
+            case (NotificationPreferenceEvent.JobStarted, NotificationDeliveryChannel.Telegram): preferences.TelegramOnJobStarted = value; break;
+            case (NotificationPreferenceEvent.JobCompleted, NotificationDeliveryChannel.InApp): preferences.InAppOnJobCompleted = value; break;
+            case (NotificationPreferenceEvent.JobCompleted, NotificationDeliveryChannel.Email): preferences.EmailOnJobCompleted = value; break;
+            case (NotificationPreferenceEvent.JobCompleted, NotificationDeliveryChannel.Push): preferences.PushOnJobCompleted = value; break;
+            case (NotificationPreferenceEvent.JobCompleted, NotificationDeliveryChannel.Telegram): preferences.TelegramOnJobCompleted = value; break;
+            case (NotificationPreferenceEvent.JobFailed, NotificationDeliveryChannel.InApp): preferences.InAppOnJobFailed = true; break;
+            case (NotificationPreferenceEvent.JobFailed, NotificationDeliveryChannel.Email): preferences.EmailOnJobFailed = value; break;
+            case (NotificationPreferenceEvent.JobFailed, NotificationDeliveryChannel.Push): preferences.PushOnJobFailed = value; break;
+            case (NotificationPreferenceEvent.JobFailed, NotificationDeliveryChannel.Telegram): preferences.TelegramOnJobFailed = value; break;
+            case (NotificationPreferenceEvent.JobPaused, NotificationDeliveryChannel.InApp): preferences.InAppOnJobPaused = value; break;
+            case (NotificationPreferenceEvent.JobPaused, NotificationDeliveryChannel.Email): preferences.EmailOnJobPaused = value; break;
+            case (NotificationPreferenceEvent.JobPaused, NotificationDeliveryChannel.Push): preferences.PushOnJobPaused = value; break;
+            case (NotificationPreferenceEvent.JobPaused, NotificationDeliveryChannel.Telegram): preferences.TelegramOnJobPaused = value; break;
+        }
     }
 
     private static void MirrorAttentionAndMasterFlags(NotificationPreferences source, NotificationPreferences target)
