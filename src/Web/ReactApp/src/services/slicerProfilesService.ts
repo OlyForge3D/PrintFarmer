@@ -385,8 +385,9 @@ export const slicerProfilesService = {
    * @param modelId - The printer model GUID from the catalog
    * @returns Machine profiles for the specified model
    */
-  async getMachineProfilesForModel(modelId: string): Promise<OrcaMachineProfile[]> {
-    const res = await apiClient.get<OrcaMachineProfile[]>(`/slicer/profiles/machine/for-model/${modelId}`);
+  async getMachineProfilesForModel(modelId: string, engineVersion?: string): Promise<OrcaMachineProfile[]> {
+    const qs = engineVersion ? `?slicerEngineVersion=${encodeURIComponent(engineVersion)}` : '';
+    const res = await apiClient.get<OrcaMachineProfile[]>(`/slicer/profiles/machine/for-model/${modelId}${qs}`);
     return res.data;
   },
 
@@ -395,11 +396,13 @@ export const slicerProfilesService = {
    * Direct query when you know the exact manufacturer/model strings.
    * @param manufacturer - Manufacturer name (e.g., "Prusa", "Elegoo")
    * @param model - Model name (e.g., "CORE One", "Neptune 4")
+   * @param engineVersion - Optional OrcaSlicer engine version to route to.
    * @returns Machine profiles matching the manufacturer/model
    */
-  async getMachineProfilesByName(manufacturer: string, model: string): Promise<OrcaMachineProfile[]> {
+  async getMachineProfilesByName(manufacturer: string, model: string, engineVersion?: string): Promise<OrcaMachineProfile[]> {
+    const qs = engineVersion ? `?slicerEngineVersion=${encodeURIComponent(engineVersion)}` : '';
     const res = await apiClient.get<OrcaMachineProfile[]>(
-      `/slicer/profiles/machine/${encodeURIComponent(manufacturer)}/${encodeURIComponent(model)}`
+      `/slicer/profiles/machine/${encodeURIComponent(manufacturer)}/${encodeURIComponent(model)}${qs}`
     );
     return res.data;
   },
@@ -408,11 +411,13 @@ export const slicerProfilesService = {
    * Get filament profiles compatible with specific machine profiles.
    * Uses OrcaSlicer's compatible_printers matching.
    * @param machineNames - Array of machine profile names (e.g., ["Prusa CORE One 0.4 nozzle"])
+   * @param engineVersion - Optional OrcaSlicer engine version to route to.
    * @returns Filament profiles compatible with the specified machines
    */
-  async getFilamentProfilesForMachines(machineNames: string[]): Promise<OrcaFilamentProfile[]> {
+  async getFilamentProfilesForMachines(machineNames: string[], engineVersion?: string): Promise<OrcaFilamentProfile[]> {
+    const qs = engineVersion ? `?slicerEngineVersion=${encodeURIComponent(engineVersion)}` : '';
     const res = await apiClient.post<OrcaFilamentProfile[]>(
-      '/slicer/profiles/filament/for-machines',
+      `/slicer/profiles/filament/for-machines${qs}`,
       { machineNames } as ForMachinesRequest
     );
     return res.data;
@@ -422,11 +427,13 @@ export const slicerProfilesService = {
    * Get process profiles compatible with specific machine profiles.
    * Uses OrcaSlicer's compatible_printers matching.
    * @param machineNames - Array of machine profile names (e.g., ["Prusa CORE One 0.4 nozzle"])
+   * @param engineVersion - Optional OrcaSlicer engine version to route to.
    * @returns Process profiles compatible with the specified machines
    */
-  async getProcessProfilesForMachines(machineNames: string[]): Promise<OrcaProcessProfile[]> {
+  async getProcessProfilesForMachines(machineNames: string[], engineVersion?: string): Promise<OrcaProcessProfile[]> {
+    const qs = engineVersion ? `?slicerEngineVersion=${encodeURIComponent(engineVersion)}` : '';
     const res = await apiClient.post<OrcaProcessProfile[]>(
-      '/slicer/profiles/process/for-machines',
+      `/slicer/profiles/process/for-machines${qs}`,
       { machineNames } as ForMachinesRequest
     );
     return res.data;

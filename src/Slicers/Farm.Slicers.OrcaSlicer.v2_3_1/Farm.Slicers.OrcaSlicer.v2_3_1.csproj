@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <WarningsNotAsErrors>nullable</WarningsNotAsErrors>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <Title>Farm.Slicers.OrcaSlicer.v2_3_1</Title>
+    <Description>OrcaSlicer v2.3.1 slicer library for PrintFarmer. Ships alongside v2_4_0 for dual-engine support (issue #578).</Description>
+    <Version>2.3.1</Version>
+    <Authors>PrintFarmer</Authors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../slicer/Farm.Slicer.Plugin.Core/Farm.Slicer.Plugin.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+    <EmbeddedResource Include="lib/Assets/**/*" Exclude="lib/Assets/**/*.cs">
+      <LogicalName>$([System.String]::Copy('OrcaSlicer_v2_3_1_Assets_%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '.').Replace('/', '.').ToLowerInvariant())</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

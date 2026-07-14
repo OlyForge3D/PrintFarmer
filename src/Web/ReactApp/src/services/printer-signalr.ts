@@ -20,6 +20,10 @@ import {
   decodeFilamentCoverageChangedEvent,
   type FilamentCoverageChangedEvent,
 } from "@/features/filament-coverage/types";
+import {
+  decodeFallbackGroupsUpdatedEvent,
+  type FallbackGroupsUpdatedEvent,
+} from "@/features/fallback-groups/types";
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
@@ -32,6 +36,7 @@ type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => v
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
 type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
 type FilamentCoverageChangedCallback = (event: FilamentCoverageChangedEvent) => void;
+type FallbackGroupsUpdatedCallback = (event: FallbackGroupsUpdatedEvent) => void;
 
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
@@ -287,6 +292,21 @@ export class PrinterSignalRService {
       });
     });
 
+    // Fallback-group invalidation cue (issue #718 / #711). Payload is only a
+    // hint — subscribers refetch the canonical fallback-groups queries.
+    // Only the lowercase event name is registered; do NOT add a PascalCase
+    // alias.
+    this.connection.on("fallbackgroupsupdated", (raw: unknown) => {
+      const event = decodeFallbackGroupsUpdatedEvent(raw);
+      this.fallbackGroupsUpdatedCallbacks.forEach((cb) => {
+        try {
+          cb(event);
+        } catch (e) {
+          console.error("Fallback groups callback error:", e);
+        }
+      });
+    });
+
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -330,6 +350,7 @@ export class PrinterSignalRService {
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
   private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
   private filamentCoverageChangedCallbacks: FilamentCoverageChangedCallback[] = [];
+  private fallbackGroupsUpdatedCallbacks: FallbackGroupsUpdatedCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -642,6 +663,20 @@ export class PrinterSignalRService {
     };
   }
 
+  /**
+   * Subscribe to the lowercase `fallbackgroupsupdated` invalidation cue from
+   * the printer hub. Payload carries the affected `printerId` (or `null` for
+   * a fleet-wide invalidation). Subscribers must refetch canonical queries
+   * and treat the payload as opaque; do NOT infer group content from it.
+   */
+  onFallbackGroupsUpdated(callback: FallbackGroupsUpdatedCallback): () => void {
+    this.fallbackGroupsUpdatedCallbacks.push(callback);
+    return () => {
+      const idx = this.fallbackGroupsUpdatedCallbacks.indexOf(callback);
+      if (idx > -1) this.fallbackGroupsUpdatedCallbacks.splice(idx, 1);
+    };
+  }
+
   get connectionState(): HubConnectionState {
     return this.connection?.state ?? HubConnectionState.Disconnected;
   }
@@ -663,6 +698,7 @@ export class PrinterSignalRService {
     this.failureDetectionCallbacks = [];
     this.autoDispatchStatusCallbacks = [];
     this.filamentCoverageChangedCallbacks = [];
+    this.fallbackGroupsUpdatedCallbacks = [];
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

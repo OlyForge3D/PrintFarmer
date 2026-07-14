@@ -28,6 +28,35 @@ public sealed class ProfileFieldMetadata
     public List<EnumOptionDto>? Options { get; init; }
 
     public bool IsAdvanced { get; init; }
+
+    /// <summary>
+    /// Optional lower bound on OrcaSlicer engine version at which this field becomes available.
+    /// Null = no lower bound. Example: "2.4.0" means the field only appears when the caller
+    /// requests schema for engineVersion &gt;= 2.4.0 (or requests without engineVersion filter).
+    /// Applied by <see cref="Services.ProfileSchemaProvider"/> via <see cref="System.Version"/> comparison.
+    /// </summary>
+    public string? MinEngineVersion { get; init; }
+
+    /// <summary>
+    /// Optional upper bound on OrcaSlicer engine version at which this field is still available.
+    /// Null = no upper bound. Example: "2.3.99" means the field is retired for engineVersion &gt;= 2.4.0.
+    /// </summary>
+    public string? MaxEngineVersion { get; init; }
+
+    /// <summary>
+    /// If set, this field was renamed in a specific engine version. When the caller requests
+    /// schema for an engine version older than <see cref="RenamedInVersion"/>, the field is
+    /// emitted with <see cref="RenamedFromKey"/> as its <see cref="Key"/> instead. This lets
+    /// the frontend render the correct key for a pinned engine version without leaking the
+    /// post-rename key into older-engine payloads.
+    /// </summary>
+    public string? RenamedFromKey { get; init; }
+
+    /// <summary>
+    /// The engine version in which this field's key changed from <see cref="RenamedFromKey"/>
+    /// to <see cref="Key"/>. Ignored when <see cref="RenamedFromKey"/> is null.
+    /// </summary>
+    public string? RenamedInVersion { get; init; }
 }
 
 /// <summary>
