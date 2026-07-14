@@ -4,6 +4,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
@@ -11,6 +12,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Farm.Web.Api.Infrastructure.PartsInventory;
 using Microsoft.AspNetCore.Authorization;
@@ -329,6 +331,7 @@ public class JobQueueController(
     /// <param name="request">Optional bin code, quantity override, or manual SKU mapping fallback.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id:guid}/harvest")]
+    [Idempotent(IdempotencyRouteKeys.JobQueueHarvest)]
     [ProducesResponseType(typeof(HarvestJobResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]

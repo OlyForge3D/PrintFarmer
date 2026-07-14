@@ -3065,6 +3065,27 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
+        // H-3: natural idempotency backstop. Re-binding the SAME spool to the SAME
+        // (printer, toolhead) slot is a no-op, so short-circuit BEFORE any spool
+        // re-resolution, UpdatedAt churn, override-audit staging, SaveChanges, or
+        // coverage broadcast. This gives spool-bind the same durable natural-idempotency
+        // backstop that adjust (OperationKey) and harvest (HarvestedAt + snapshot) already
+        // own, so a re-delivered bind — an Idempotency-Key retry while the replay flag is
+        // off or transitioning, or a staleness-reclaimed retry — cannot produce a duplicate
+        // FilamentSwapOverride audit row or a spurious state change. Returns 200
+        // (CommandResult success) with the existing binding unchanged.
+        bool alreadyBoundToRequestedSpool = toolhead is null && toolheadIndex == 0
+            ? p.CurrentSpoolId == spoolId
+            : toolhead is not null && toolhead.CurrentSpoolId == spoolId;
+
+        if (alreadyBoundToRequestedSpool)
+        {
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: spool {SpoolId} already bound to toolhead T{Index} on printer {PName} ({Id}); returning existing binding unchanged (idempotent no-op re-bind)",
+                spoolId, toolheadIndex, p.Name, id);
+            return new CommandResult(true, $"Spool {spoolId} already assigned to toolhead T{toolheadIndex}");
+        }
+
         // B3: legacy single-tool T0 with no materialized Toolhead row → bind via the Printer
         // scalar (Printer.CurrentSpoolId). Never fabricate a fake MMU gate at index 0.
         if (toolhead is null && toolheadIndex == 0)

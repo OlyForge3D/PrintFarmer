@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -52,7 +53,35 @@ public class PartInventoryService(
         }
 
         string trimmedSku = PartInventoryIdentity.NormalizeSku(sku);
-        string? operationKey = PartInventoryIdentity.NormalizeOperationKey(command.OperationKey);
+
+        // Reserved-namespace guard (issue #715, Hicks r3 blocker 2; width-hardened in r4 blocker 2;
+        // extended to harvest: in r7 blocker H2): the "idem:" prefix is reserved for the operationKey
+        // the idempotency filter synthesizes on the client's behalf (which arrives via
+        // command.SynthesizedOperationKey), and the "harvest:" prefix is reserved for keys the server
+        // generates when harvesting printed parts. A client must never supply an operationKey in
+        // either namespace, or a crafted value could collide with a future server-generated key and
+        // either dedup a genuinely distinct mutation or permanently break a later harvest. The guard
+        // folds Unicode compatibility forms (NFKC) before the prefix test, so a fullwidth ｉｄｅｍ: /
+        // ｈａｒｖｅｓｔ: cannot slip past it and later match the ASCII reserved key under SQL Server's
+        // width-insensitive collation. Only the client-supplied channel is policed; the synthesized
+        // and server-harvest channels are trusted (the harvest writer bypasses this service). Enforced
+        // here — not only at the API boundary — as defense-in-depth for any caller of the service.
+        // NFKC is used ONLY for this comparison: clientOperationKey keeps the client's original value
+        // so a legitimate non-reserved key with accented characters is persisted unchanged.
+        string? clientOperationKey = PartInventoryIdentity.NormalizeOperationKey(command.OperationKey);
+        if (IdempotencyKeyUtilities.IsReservedOperationKey(clientOperationKey))
+        {
+            return new AdjustResult(
+                PartInventoryOutcome.InvalidRequest,
+                null,
+                0,
+                $"Operation key must not begin with a reserved prefix ('{IdempotencyKeyUtilities.SynthesizedOperationKeyPrefix}' or '{IdempotencyKeyUtilities.HarvestOperationKeyPrefix}'), which are reserved for server-side idempotency backstopping and harvest bookkeeping.");
+        }
+
+        // Prefer the client's key; fall back to the trusted synthesized backstop only when the
+        // client omitted its own. The synthesized key is exempt from the reserved-prefix guard.
+        string? operationKey = clientOperationKey
+            ?? PartInventoryIdentity.NormalizeOperationKey(command.SynthesizedOperationKey);
         if (operationKey?.Length > 128)
         {
             return new AdjustResult(PartInventoryOutcome.InvalidRequest, null, 0, "Operation key must be 128 characters or fewer.");

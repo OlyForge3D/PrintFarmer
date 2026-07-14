@@ -248,6 +248,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Durable audit of guided filament-swap material-mismatch overrides (issue #710).
     public DbSet<FilamentSwapOverride> FilamentSwapOverrides => Set<FilamentSwapOverride>();
 
+    // Persistent Idempotency-Key records for offline write-replay (issue #715).
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+
     // Ordered same-material fallback chains over existing Toolheads (issue #711, F6).
     public DbSet<FilamentFallbackGroup> FilamentFallbackGroups => Set<FilamentFallbackGroup>();
 
@@ -352,6 +355,64 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v.UtcDateTime,
                     v => new DateTimeOffset(v, TimeSpan.Zero));
+        }
+
+        // Fix (#715): SQL Server's default catalog collation
+        // (SQL_Latin1_General_CP1_CI_AS) is a LINGUISTIC collation whose equivalence
+        // classes diverge from BOTH ordinal .NET comparison AND Unicode NFKC folding.
+        // It is case-INSENSITIVE ("ABC" == "abc"), width-INSENSITIVE (fullwidth ＡＢＣ ==
+        // ABC), Kana-type-INSENSITIVE (Hiragana か U+304B == Katakana カ U+30AB), and
+        // folds assorted Latin phonetic letters onto their ASCII base (small-capital I
+        // U+026A == "i"; dotless ı U+0131 == "i"). PostgreSQL and SQLite compare these
+        // columns byte-exact (deterministic collation), so on SQL Server ALONE a value
+        // whose identity is DISTINCT to the application (ordinal, post-NFKC) can collapse
+        // onto the SAME physical row — double-applying a stock delta, or false-deduping a
+        // genuinely distinct operation, under a single Idempotency-Key.
+        //
+        // NFKC (Apone r5) plus the ordinal reserved-prefix guard align the app with SOME
+        // of those classes, but not all: NFKC does not fold Kana か/カ (Hicks r5 blocker 1)
+        // nor small-capital I U+026A (Hicks r5 blocker 2). Chasing each linguistic
+        // equivalence in application code is a losing game. Instead we converge at the
+        // storage layer: every client-controlled identity/idempotency column that backs a
+        // unique index is forced to a binary, culture-invariant, case-sensitive collation.
+        // Byte-exact SQL comparison then matches the app's ordinal comparison exactly,
+        // closing ALL SQL-vs-app mismatch classes at once. Kane r1 established this for
+        // IdempotencyRecords; r6 extends it to the printed-part identity columns. NFKC is
+        // retained as advisory defense-in-depth for any non-DB code path.
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer")
+        {
+            const string caseSensitiveCollation = "Latin1_General_100_BIN2";
+            _ = modelBuilder.Entity<IdempotencyRecord>(entity =>
+            {
+                _ = entity.Property(r => r.UserId).UseCollation(caseSensitiveCollation);
+                _ = entity.Property(r => r.RouteKey).UseCollation(caseSensitiveCollation);
+                _ = entity.Property(r => r.IdempotencyKey).UseCollation(caseSensitiveCollation);
+            });
+
+            // Printed-part SKU catalog: Sku is the client-owned identity behind the unique
+            // index IX_PartInventories_Sku (Hicks r5 blocker 1 — Hiragana vs Katakana SKUs
+            // resolving to one physical row under Kana-insensitive collation).
+            _ = modelBuilder.Entity<PartInventory>(entity =>
+                entity.Property(p => p.Sku).UseCollation(caseSensitiveCollation));
+
+            // Bin barcodes share the SKU normalization pathway (PartInventoryIdentity
+            // .NormalizeBinCode) and back the unique index IX_Bins_Code; identical class.
+            _ = modelBuilder.Entity<Bin>(entity =>
+                entity.Property(b => b.Code).UseCollation(caseSensitiveCollation));
+
+            // Natural idempotency backstop: (PartInventoryId, OperationKey) unique index.
+            // OperationKey is persisted client-verbatim (trimmed only — never NFKC-folded),
+            // so the store MUST compare it byte-exact (Hicks r5 blocker 2 — small-capital I
+            // U+026A false-deduping against a server-synthesized "idem:" key).
+            _ = modelBuilder.Entity<PartInventoryAdjustment>(entity =>
+                entity.Property(a => a.OperationKey).UseCollation(caseSensitiveCollation));
+
+            // Harvest idempotency key: the client-verbatim (trimmed) value behind the
+            // unique index IX_PrintJobs_HarvestOperationKey. This is the harvest-path twin
+            // of PartInventoryAdjustment.OperationKey and is exposed to the identical
+            // collation-mismatch class, so it converges to BIN2 alongside it.
+            _ = modelBuilder.Entity<PrintJob>(entity =>
+                entity.Property(pj => pj.HarvestOperationKey).UseCollation(caseSensitiveCollation));
         }
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)

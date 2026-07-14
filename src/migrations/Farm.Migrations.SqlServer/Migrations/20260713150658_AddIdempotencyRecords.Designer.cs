@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260713150658_AddIdempotencyRecords")]
+    partial class AddIdempotencyRecords
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -336,8 +339,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -852,82 +854,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterId", "DetectedAt");
 
                     b.ToTable("FailureDetectionIncidents");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("int");
-
-                    b.Property<string>("MaterialType")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("NameNormalized")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<Guid>("PrinterId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrinterId");
-
-                    b.HasIndex("PrinterId", "NameNormalized")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroups_PrinterId_NameNormalized");
-
-                    b.ToTable("FilamentFallbackGroups");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("FallbackGroupId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Position")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("ToolheadId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FallbackGroupId");
-
-                    b.HasIndex("ToolheadId");
-
-                    b.HasIndex("FallbackGroupId", "Position")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_Position");
-
-                    b.HasIndex("FallbackGroupId", "ToolheadId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_FilamentFallbackGroupMembers_GroupId_ToolheadId");
-
-                    b.ToTable("FilamentFallbackGroupMembers");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentSwapOverride", b =>
@@ -1649,8 +1575,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("RequestHash")
                         .IsRequired()
@@ -1670,8 +1595,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("RouteKey")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1683,9 +1607,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("UserId")
                         .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -2086,9 +2009,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -2101,8 +2021,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
-
-                    b.HasIndex("ToolheadId");
 
                     b.HasIndex("Status", "Severity");
 
@@ -2219,12 +2137,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<double?>("ToolheadHoursAtMaintenance")
-                        .HasColumnType("float");
-
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.HasKey("Id");
 
                     b.HasIndex("MaintenanceTaskId");
@@ -2235,12 +2147,7 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
 
-                    b.HasIndex("ResolvedAlertId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_MaintenanceLogs_ResolvedAlertId")
-                        .HasFilter("[ResolvedAlertId] IS NOT NULL");
-
-                    b.HasIndex("ToolheadId");
+                    b.HasIndex("ResolvedAlertId");
 
                     b.ToTable("MaintenanceLogs");
                 });
@@ -2654,70 +2561,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("NfcTagBindings");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.DeviceToken", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AppBundleId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<int>("ConsecutiveFailureCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Environment")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("nvarchar(16)");
-
-                    b.Property<string>("InstallationId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<DateTime?>("LastFailureAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LastUsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Platform")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("nvarchar(16)");
-
-                    b.Property<string>("Token")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Token")
-                        .HasDatabaseName("IX_DeviceTokens_Token");
-
-                    b.HasIndex("UserId", "InstallationId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_DeviceTokens_UserId_InstallationId");
-
-                    b.ToTable("DeviceTokens");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.Property<string>("Id")
@@ -2781,53 +2624,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<string>("AttentionPushCategoryPreferencesJson")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<bool>("EmailOnFilamentRunout")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("EmailOnHarvestReady")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobCompleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
-                        .HasDefaultValue(false);
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("EmailOnJobFailed")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
-                        .HasDefaultValue(false);
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("EmailOnJobPaused")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
-                        .HasDefaultValue(false);
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("EmailOnJobStarted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("EmailOnMaintenanceDue")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("EmailOnPrinterFailure")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("EmailOnPrinterOffline")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
@@ -2849,16 +2664,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
-                    b.Property<bool>("InAppOnFilamentRunout")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<bool>("InAppOnHarvestReady")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<bool>("InAppOnJobCompleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -2879,21 +2684,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
-                    b.Property<bool>("InAppOnMaintenanceDue")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<bool>("InAppOnPrinterFailure")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<bool>("InAppOnPrinterOffline")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<bool>("NotifyOnCompletion")
                         .HasColumnType("bit");
 
@@ -2905,16 +2695,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<bool>("NotifyOnStart")
                         .HasColumnType("bit");
-
-                    b.Property<bool>("PushOnFilamentRunout")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<bool>("PushOnHarvestReady")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
 
                     b.Property<bool>("PushOnJobCompleted")
                         .ValueGeneratedOnAdd()
@@ -2936,35 +2716,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
-                    b.Property<bool>("PushOnMaintenanceDue")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<bool>("PushOnPrinterFailure")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<bool>("PushOnPrinterOffline")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<int>("RetentionDays")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(30);
-
-                    b.Property<bool>("TelegramOnFilamentRunout")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("TelegramOnHarvestReady")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
 
                     b.Property<bool>("TelegramOnJobCompleted")
                         .HasColumnType("bit");
@@ -2977,21 +2732,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<bool>("TelegramOnJobStarted")
                         .HasColumnType("bit");
-
-                    b.Property<bool>("TelegramOnMaintenanceDue")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("TelegramOnPrinterFailure")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("TelegramOnPrinterOffline")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -3255,8 +2995,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Sku")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -3301,8 +3040,7 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("OperationKey")
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<Guid>("PartInventoryId")
                         .HasColumnType("uniqueidentifier");
@@ -3698,8 +3436,7 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("HarvestOperationKey")
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<DateTime?>("HarvestedAt")
                         .HasColumnType("datetime2");
@@ -4450,9 +4187,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("SupportsAutoLeveling")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("SupportsPerToolAttribution")
-                        .HasColumnType("bit");
-
                     b.Property<Guid?>("TemplateMachineProfileId")
                         .HasColumnType("uniqueidentifier");
 
@@ -4591,9 +4325,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("ToolheadId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -4603,17 +4334,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("PrinterId");
 
-                    b.HasIndex("ToolheadId");
-
                     b.HasIndex("MaintenancePlanId", "PrinterId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_NullToolhead")
-                        .HasFilter("\"ToolheadId\" IS NULL");
-
-                    b.HasIndex("MaintenancePlanId", "PrinterId", "ToolheadId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_PrinterMaintenanceSchedules_Plan_Printer_Toolhead")
-                        .HasFilter("[ToolheadId] IS NOT NULL");
+                        .IsUnique();
 
                     b.ToTable("PrinterMaintenanceSchedules");
                 });
@@ -4885,18 +4607,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("ExternalBaselineInitializedUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<long>("ExternalJobsCompleted")
-                        .HasColumnType("bigint");
-
-                    b.Property<double>("ExternalPrintHours")
-                        .HasColumnType("float");
-
-                    b.Property<DateTime?>("LastExternalHoursAttributionUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("LastSyncTime")
@@ -5359,9 +5069,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<double>("CumulativePrintHours")
-                        .HasColumnType("float");
 
                     b.Property<string>("CurrentFilamentColor")
                         .HasMaxLength(32)
@@ -6192,36 +5899,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Printer");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany()
-                        .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Printer");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroupMember", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.FilamentFallbackGroup", "FallbackGroup")
-                        .WithMany("Members")
-                        .HasForeignKey("FallbackGroupId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("FallbackGroup");
-
-                    b.Navigation("Toolhead");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.GcodeFile", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
@@ -6397,18 +6074,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasForeignKey("PrinterMaintenanceScheduleId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
 
                     b.Navigation("PrinterMaintenanceSchedule");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceLog", b =>
@@ -6432,12 +6102,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.MaintenanceAlert", "ResolvedAlert")
                         .WithMany()
                         .HasForeignKey("ResolvedAlertId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("MaintenanceTask");
 
@@ -6446,8 +6111,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("PrinterMaintenanceSchedule");
 
                     b.Navigation("ResolvedAlert");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenancePlan", b =>
@@ -6552,17 +6215,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Printer");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.DeviceToken", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
@@ -6987,16 +6639,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
-                        .WithMany()
-                        .HasForeignKey("ToolheadId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("MaintenancePlan");
 
                     b.Navigation("Printer");
-
-                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
@@ -7379,11 +7024,6 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldDefinition", b =>
                 {
                     b.Navigation("Values");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.FilamentFallbackGroup", b =>
-                {
-                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FolderNode", b =>

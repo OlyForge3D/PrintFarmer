@@ -1636,6 +1636,65 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("HotendModelDefinitions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.IdempotencyRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<byte[]>("ResponseBody")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("ResponseContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("ResponseStatusCode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RouteKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_IdempotencyRecords_CreatedAt");
+
+                    b.HasIndex("UserId", "RouteKey", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_IdempotencyRecords_User_Route_Key");
+
+                    b.ToTable("IdempotencyRecords");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.JobExecution", b =>
                 {
                     b.Property<Guid>("Id")
