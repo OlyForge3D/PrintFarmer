@@ -91,6 +91,7 @@ vi.mock('@/common/components/ui', () => ({
     children,
     onClick,
     title,
+    iconCenter,
     ...rest
   }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: string;
@@ -98,7 +99,7 @@ vi.mock('@/common/components/ui', () => ({
     iconCenter?: React.ReactNode;
   }) => (
     <button onClick={onClick} title={title} {...rest}>
-      {children}
+      {iconCenter}{children}
     </button>
   ),
 }));
