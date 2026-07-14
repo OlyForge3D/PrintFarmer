@@ -48,8 +48,12 @@ const FREQUENCY_OPTIONS = [
 
 export function NotificationPreferencesPage({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
-  const { data: preferences, isLoading, error } = useNotificationPreferences();
-  const { data: capabilities } = useNotificationCapabilities();
+  const { data: preferences, isLoading: isPrefsLoading, error: prefsError } = useNotificationPreferences();
+  const {
+    data: capabilities,
+    isLoading: isCapsLoading,
+    error: capsError,
+  } = useNotificationCapabilities();
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
 
@@ -58,26 +62,49 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
 
+  // The capability probe explicitly resolves to `null` on legacy servers
+  // (endpoint 404). Any other unresolved state — still loading, or a
+  // non-404 network/server error — must NOT be interpreted as legacy or the
+  // save path silently strips operator edits. `capabilitiesResolved` is
+  // the single source of truth for "safe to build a save payload".
+  const capabilitiesResolved = !isCapsLoading && capsError == null;
+
   useEffect(() => {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
 
   useEffect(() => {
-    if (isDirtyRef.current) return;
-
     const { form, serverSupportsOperatorCategories: supports } = hydratePreferences(
       preferences ?? null,
       capabilities ?? null,
     );
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync server preferences into local form state
-    setFormState(withDerivedLegacyFlags(form));
+    // The banner-visibility flag must sync independently of form dirtiness
+    // so a background capabilities refetch on a capable server (after
+    // preferences hydrated first) always clears the stale legacy banner.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync server capability visibility into local UI state
     setServerSupportsOperatorCategories(supports);
+    if (isDirtyRef.current) return;
+
+    setFormState(withDerivedLegacyFlags(form));
     setIsDirty(false);
   }, [preferences, capabilities]);
 
+  // Only rows the UI actually renders should participate in the "any push
+  // enabled?" heuristic that drives the browser-push enrollment prompt.
+  // Otherwise the hidden `PrinterFailure` row (which defaults push=true) or
+  // any opaque server-returned unknown row could permanently show a prompt
+  // the user cannot dismiss by unchecking a visible toggle.
+  const visibleEventTypes = useMemo(
+    () => new Set<NotificationPreferenceEventType>([
+      ...JOB_EVENT_ROWS.map(r => r.eventType),
+      ...OPERATOR_EVENT_ROWS.map(r => r.eventType),
+    ]),
+    [],
+  );
   const isAnyPushEnabled = useMemo(
-    () => (formState.eventChannelPreferences ?? []).some(item => item.push),
-    [formState.eventChannelPreferences],
+    () => (formState.eventChannelPreferences ?? [])
+      .some(item => visibleEventTypes.has(item.eventType) && item.push),
+    [formState.eventChannelPreferences, visibleEventTypes],
   );
 
   const updateMatrixField = (
@@ -110,6 +137,14 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     (formState.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
 
   const handleSave = async () => {
+    // Refuse to build a save payload from unresolved capability state.
+    // `buildSavePayload(request, undefined)` would treat the server as legacy
+    // and permanently strip operator-row edits, reporting success to the
+    // user — a silent data-loss bug. Guarded by `capabilitiesResolved`.
+    if (!capabilitiesResolved) {
+      toast.error('Still checking notification capabilities — please retry in a moment');
+      return;
+    }
     try {
       await updateMutation.mutateAsync(buildSavePayload(formState, capabilities ?? null));
       setIsDirty(false);
@@ -128,7 +163,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     }
   };
 
-  if (isLoading) {
+  if (isPrefsLoading || isCapsLoading) {
     const loadingContent = (
       <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
         <Spinner size="lg" />
@@ -142,7 +177,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     );
   }
 
-  if (error) {
+  if (prefsError) {
     const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
     if (embedded) return errorContent;
     return (
@@ -156,7 +191,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     <Button
       variant="primary"
       onClick={handleSave}
-      disabled={!isDirty || updateMutation.isPending}
+      disabled={!isDirty || updateMutation.isPending || !capabilitiesResolved}
     >
       {updateMutation.isPending ? 'Saving...' : 'Save Preferences'}
     </Button>
@@ -246,16 +281,22 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
           </p>
         </div>
         <div className="p-4">
-          {!serverSupportsOperatorCategories && (
-            <Alert type="info" className="mb-4">
-              This server does not yet expose operator alert categories. Your selections here will
-              activate automatically once the server is updated; existing print event preferences
-              are unaffected.
+          {capsError ? (
+            <Alert type="warning" className="mb-4">
+              Could not verify notification capabilities. Operator alert changes are disabled
+              until this server responds.
             </Alert>
-          )}
+          ) : !serverSupportsOperatorCategories ? (
+            <Alert type="info" className="mb-4">
+              This server does not yet expose operator alert categories. Toggles are disabled
+              until the server is updated; existing print event preferences are unaffected.
+            </Alert>
+          ) : null}
           {matrixHeader}
           <div className="space-y-3">
-            {OPERATOR_EVENT_ROWS.map(row => renderRow(row))}
+            {OPERATOR_EVENT_ROWS.map(row =>
+              renderRow(row, !serverSupportsOperatorCategories || !!capsError),
+            )}
           </div>
         </div>
       </Card>

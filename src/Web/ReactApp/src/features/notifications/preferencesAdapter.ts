@@ -77,14 +77,22 @@ export function defaultEventChannelPreferences(): NotificationEventChannelPrefer
 
 /**
  * Resolve the effective set of accepted event tokens from the capabilities
- * probe. `null` means the probe returned 404 → treat as legacy job-only.
+ * probe. `null`/`undefined` means the probe returned 404 (or has not been
+ * loaded yet) → treat as legacy job-only. An empty `supportedEventTypes`
+ * array is also treated as legacy: no compliant server returns an empty
+ * matrix (legacy → 404, capable → 9 tokens), and stripping every row would
+ * silently drop even the four job tokens on a degenerate response.
  * Returned as a Set of raw string tokens so we can compare against unknown
  * (future) tokens without widening the client enum.
  */
 export function resolveSupportedEventTypes(
   capabilities: NotificationCapabilitiesResponse | null | undefined,
 ): ReadonlySet<string> {
-  if (!capabilities || !Array.isArray(capabilities.supportedEventTypes)) {
+  if (
+    !capabilities ||
+    !Array.isArray(capabilities.supportedEventTypes) ||
+    capabilities.supportedEventTypes.length === 0
+  ) {
     return new Set<string>(JOB_EVENT_TYPES);
   }
   return new Set<string>(capabilities.supportedEventTypes);
@@ -255,25 +263,34 @@ export function withDerivedLegacyFlags(
  * Prepare the payload sent to `PUT /notifications/preferences`.
  *
  * Filters the outbound matrix to only tokens the server advertised in
- * `GET /notifications/capabilities.supportedEventTypes`. Legacy servers
- * (capabilities probe 404 → `capabilities === null`) accept only the four
- * classic job tokens; every operator or unknown token is stripped so the
- * request cannot fail JsonStringEnumConverter deserialization.
+ * `GET /notifications/preferences/capabilities.supportedEventTypes`, and
+ * ONLY THEN derives the legacy master flags (`enablePushNotifications`,
+ * etc.). This ordering matters because the operator rows carry
+ * `push=true`/`inApp=true` defaults from `DEFAULT_ATTENTION_ROW`, matching
+ * the backend persistence defaults; deriving master flags before stripping
+ * would let those defaults force `enablePushNotifications=true` on a legacy
+ * server even when the user has push off on every job row they can see.
  *
- * All other state (job rows, legacy flags, frequency, retentionDays) is
- * passed through unchanged.
+ * Legacy servers (capabilities probe 404 → `capabilities === null`) accept
+ * only the four classic job tokens; every operator or unknown token is
+ * stripped so the request cannot fail JsonStringEnumConverter
+ * deserialization.
+ *
+ * All other state (frequency, retentionDays, digest schedule) is passed
+ * through unchanged.
  */
 export function buildSavePayload(
   request: UpdateNotificationPreferencesRequest,
   capabilities: NotificationCapabilitiesResponse | null | undefined,
 ): UpdateNotificationPreferencesRequest {
-  const derived = withDerivedLegacyFlags(request);
   const supported = resolveSupportedEventTypes(capabilities);
-  const matrix = derived.eventChannelPreferences ?? [];
-  return {
-    ...derived,
-    eventChannelPreferences: matrix.filter(row => supported.has(row.eventType as string)),
-  };
+  const strippedMatrix = (request.eventChannelPreferences ?? []).filter(row =>
+    supported.has(row.eventType as string),
+  );
+  return withDerivedLegacyFlags({
+    ...request,
+    eventChannelPreferences: strippedMatrix,
+  });
 }
 
 /** Re-exported for tests and other adapter consumers. */

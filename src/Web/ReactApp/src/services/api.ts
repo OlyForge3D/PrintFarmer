@@ -4506,7 +4506,16 @@ export class ApiClient {
       const response = await this.client.get('/notifications/preferences/capabilities');
       return response.data as NotificationCapabilitiesResponse;
     } catch (err: unknown) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
+      // The axios response interceptor above unwraps errors into ApiError
+      // shapes carrying `statusCode`, not raw AxiosError. Treat 404 as the
+      // legacy-server signal per the #708 contract; rethrow everything else
+      // (network, 5xx) so callers/react-query can surface a proper failure
+      // instead of misclassifying an outage as "legacy" and silently
+      // stripping operator tokens on save.
+      const status =
+        typeof err === 'object' && err !== null && 'statusCode' in err
+          ? (err as { statusCode: unknown }).statusCode
+          : undefined;
       if (status === 404) return null;
       throw err;
     }

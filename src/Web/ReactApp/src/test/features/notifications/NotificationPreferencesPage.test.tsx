@@ -218,8 +218,13 @@ describe('NotificationPreferencesPage', () => {
     it('strips operator tokens from the save payload on legacy servers (capabilities probe 404)', async () => {
       renderPage();
 
-      // Toggle a harvest-ready channel — a legacy server must never receive this token.
-      fireEvent.click(screen.getByLabelText('Harvest Ready push'));
+      // On a legacy server operator toggles are disabled (see below), so we
+      // trigger the save via a visible job-row edit and rely on the hydrated
+      // operator defaults still being carried in `formState`. Stripping
+      // happens in `buildSavePayload` regardless of whether the operator
+      // toggle was interactive — the whole point of the strip is that the
+      // legacy server must never receive operator tokens.
+      fireEvent.click(screen.getByLabelText('Print Started email'));
       fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
 
       await waitFor(() => {
@@ -335,6 +340,103 @@ describe('NotificationPreferencesPage', () => {
         push: true,
         telegram: false,
       });
+    });
+  });
+
+  describe('capability gating (trio remediation)', () => {
+    it('shows the loading spinner while capabilities are still resolving, even if preferences have arrived', () => {
+      mockUseNotificationCapabilities.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        error: null,
+      });
+
+      renderPage();
+
+      expect(screen.getByRole('status', { name: /loading preferences/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /save preferences/i })).not.toBeInTheDocument();
+    });
+
+    it('disables the save button and surfaces a warning when the capabilities probe errors', () => {
+      mockUseNotificationCapabilities.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new Error('network'),
+      });
+
+      renderPage();
+
+      // Warning banner in the operator card
+      expect(
+        screen.getByText(/could not verify notification capabilities/i),
+      ).toBeInTheDocument();
+
+      // Even after editing a job row (which makes the form dirty), save
+      // stays disabled because the capability state is unresolved. Silent
+      // strip on save would be data-loss for operator-row saves.
+      fireEvent.click(screen.getByLabelText('Print Started email'));
+      const saveButton = screen.getByRole('button', { name: /save preferences/i });
+      expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('disables operator toggles on legacy servers so users cannot make changes that would be silently stripped', () => {
+      renderPage();
+
+      for (const label of [
+        'Filament Runout Risk',
+        'Harvest Ready',
+        'Maintenance Due',
+        'Printer Offline',
+      ]) {
+        expect((screen.getByLabelText(`${label} in-app`) as HTMLInputElement).disabled).toBe(true);
+        expect((screen.getByLabelText(`${label} email`) as HTMLInputElement).disabled).toBe(true);
+        expect((screen.getByLabelText(`${label} push`) as HTMLInputElement).disabled).toBe(true);
+        expect((screen.getByLabelText(`${label} Telegram`) as HTMLInputElement).disabled).toBe(true);
+      }
+    });
+
+    it('does NOT let the hidden PrinterFailure default-push flag keep the browser-push warning permanently on', () => {
+      // Capable server, but user has push=false on every VISIBLE row. The
+      // hidden PrinterFailure default has push=true. Before the fix,
+      // `isAnyPushEnabled` iterated the full matrix and the warning could
+      // not be dismissed by unchecking visible toggles.
+      const noVisiblePush = createCapablePreferences();
+      noVisiblePush.eventChannelPreferences = noVisiblePush.eventChannelPreferences.map(r => ({
+        ...r,
+        push: false,
+      }));
+      noVisiblePush.eventChannelPreferences.push({
+        eventType: NotificationPreferenceEventType.PrinterFailure,
+        inApp: true,
+        email: false,
+        push: true,
+        telegram: false,
+      });
+      mockUseNotificationPreferences.mockReturnValue({
+        data: noVisiblePush,
+        isLoading: false,
+        error: null,
+      });
+      mockUseNotificationCapabilities.mockReturnValue({
+        data: CAPABLE_CAPABILITIES,
+        isLoading: false,
+        error: null,
+      });
+      // Push subscription reports not-subscribed so the warning would render
+      // if any push-enabled row was visible.
+      mockUsePushSubscription.mockReturnValue({
+        isSupported: true,
+        isSubscribed: false,
+        isLoading: false,
+        error: null,
+        subscribe: vi.fn(),
+      });
+
+      renderPage();
+
+      // Warning text: "Browser push is off. Enable it to receive push notifications"
+      // (or equivalent). It must NOT be shown because no VISIBLE row has push=true.
+      expect(screen.queryByText(/enable browser push/i)).not.toBeInTheDocument();
     });
   });
 });

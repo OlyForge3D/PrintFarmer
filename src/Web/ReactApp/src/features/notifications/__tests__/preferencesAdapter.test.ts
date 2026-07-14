@@ -400,20 +400,58 @@ describe('preferencesAdapter.buildSavePayload', () => {
     expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
   });
 
-  it('preserves job-row values, always-on JobFailed in-app, and derived master flags', () => {
-    const form = formWithOperatorChanges();
-    const started = form.eventChannelPreferences!.find(
-      r => r.eventType === NotificationPreferenceEventType.JobStarted,
-    )!;
-    started.email = true;
-
-    const payload = buildSavePayload(form, null);
-    const failed = payload.eventChannelPreferences?.find(
-      r => r.eventType === NotificationPreferenceEventType.JobFailed,
+  it('derives enablePushNotifications from the OUTBOUND payload — legacy strip happens before derive', () => {
+    // User has push OFF on every visible job row, but the hidden operator
+    // rows carry `push=true` defaults from DEFAULT_ATTENTION_ROW. Before the
+    // strip-before-derive fix, the legacy save payload would still emit
+    // `enablePushNotifications: true` because master flags were computed on
+    // the full matrix. Backend treats that flag as a hard delivery gate, so
+    // silently flipping it on every save was a real corruption.
+    const matrix = defaultEventChannelPreferences().map(r =>
+      // Force ALL push flags off (both job and operator defaults).
+      r.eventType === NotificationPreferenceEventType.JobCompleted
+        ? { ...r, push: false }
+        : r.eventType === NotificationPreferenceEventType.JobFailed
+          ? { ...r, push: false }
+          : r.eventType === NotificationPreferenceEventType.JobPaused
+            ? { ...r, push: false }
+            : r,
     );
-    expect(failed?.inApp).toBe(true);
-    expect(payload.enableEmailNotifications).toBe(true);
-    expect(payload.notifyOnStart).toBe(true);
-    expect(payload.notifyOnFailure).toBe(true);
+    const form: UpdateNotificationPreferencesRequest = {
+      enableEmailNotifications: false,
+      enablePushNotifications: true, // stale value from previous state
+      enableInAppNotifications: false,
+      enableTelegramNotifications: false,
+      notifyOnCompletion: false,
+      notifyOnFailure: false,
+      notifyOnStart: false,
+      notifyOnPause: false,
+      eventChannelPreferences: matrix,
+      frequency: NotificationFrequency.RealTime,
+      retentionDays: 30,
+    };
+    const payload = buildSavePayload(form, null);
+
+    // Every visible job row has push=false → outbound flag must be false.
+    expect(payload.enablePushNotifications).toBe(false);
+    // Sanity: the operator rows were stripped, so their push=true defaults
+    // cannot influence the derived master.
+    expect(payload.eventChannelPreferences?.some(
+      r => r.eventType === NotificationPreferenceEventType.HarvestReady,
+    )).toBe(false);
+  });
+});
+
+describe('preferencesAdapter.resolveSupportedEventTypes (degenerate cases)', () => {
+  it('treats an empty supportedEventTypes array as legacy (job-only)', () => {
+    // No compliant server returns [] (legacy → 404, capable → 9 tokens), but
+    // if one ever does, silently stripping the four job rows on save would
+    // be surprising. Treat empty as legacy fallback.
+    const set = resolveSupportedEventTypes({ supportedEventTypes: [] });
+    expect(set.has(NotificationPreferenceEventType.JobStarted)).toBe(true);
+    expect(set.has(NotificationPreferenceEventType.JobCompleted)).toBe(true);
+    expect(set.has(NotificationPreferenceEventType.JobFailed)).toBe(true);
+    expect(set.has(NotificationPreferenceEventType.JobPaused)).toBe(true);
+    expect(set.has(NotificationPreferenceEventType.HarvestReady)).toBe(false);
   });
 });
