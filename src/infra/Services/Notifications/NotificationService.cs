@@ -868,6 +868,9 @@ public class NotificationService(
             // are simply not visited, so their persisted value is preserved.
             // Duplicate rows for the same event are last-write-wins within
             // this request (mirrors previous controller behavior).
+            // The API wire tokens are the PascalCase enum names: JobStarted,
+            // JobCompleted, JobFailed, JobPaused, PrinterFailure,
+            // FilamentRunout, HarvestReady, MaintenanceDue, and PrinterOffline.
             //
             // Hicks #3: an empty modern matrix (list with zero rows) reaches
             // this branch too so every row is treated as "omitted" and the

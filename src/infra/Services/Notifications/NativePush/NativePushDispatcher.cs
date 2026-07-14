@@ -62,12 +62,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        // Snapshot the current attention state BEFORE the async gate/scope work runs.
-        // A Resolved event fires after the source has already dropped the item, so a
-        // later FindItemAsync returns null and no dismissal push would ever be built.
-        // Capturing here also freezes the mode for the whole fan-out; a mid-flight
-        // mode flip is picked up on the NEXT dispatch (real-time rollback is a
-        // separate control-plane concern, not a per-envelope one).
+        // Snapshot the startup-bound settings for a consistent fan-out. The
+        // NativePush section is validated with ValidateOnStart; configuration
+        // changes require a process restart rather than taking effect mid-flight.
+        // Resolved/dismissed events emit no push because the source removes the
+        // item before the per-owner FindItemAsync lookup below.
         NativePushSettings settings = _optionsMonitor.CurrentValue;
         if (settings.Mode == NativePushMode.Disabled)
         {
@@ -189,11 +188,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
         if (item is null)
         {
-            // Resolved change: the source has already dropped the row so a
-            // targeted find returns null. Skip — the SignalR event already
-            // invalidated in-app; a native "resolved" push is best-effort.
-            // (Snapshot-and-dispatch of resolved items is a future
-            // enhancement; see docs/OPERATOR_NATIVE_PUSH.md rollback notes.)
+            // Resolved/dismissed change: the source has already dropped the row.
+            // Emit no native push; the SignalR event invalidates the in-app item.
             return;
         }
 

@@ -23,11 +23,12 @@ The default is **disabled**. The recommended production topology is **relay**;
 `direct` exists so an operator who signs their own build can bring their own
 provider key without a code change.
 
-> **`NativePush__Mode` is startup-selected — a process restart is required to
-> change it.** The sender that backs `INativePushSender` is bound once at
-> composition time from `NativePush__Mode`; there is no supported way to hot-swap
-> senders mid-process. If you edit `NativePush__Mode` in config, `.env`, or a
-> Kubernetes secret, cycle the API pod / container so the new value takes effect.
+> **All `NativePushSettings` values are startup-bound and require a process
+> restart after changes.** The options are validated with `ValidateOnStart()`,
+> and the sender that backs `INativePushSender` is selected once at composition
+> time from `NativePush__Mode`; there is no supported runtime settings reload.
+> If you edit the `NativePush` section in config, `.env`, or a Kubernetes secret,
+> cycle the API pod / container so every new value takes effect.
 > `OperatorFeatures__nativePushEnabled` and the DB-backed feature flag remain
 > hot-reloadable and are the correct tools for runtime enable/disable.
 
@@ -42,8 +43,9 @@ time (chosen by `Mode`); the disabled sender is a no-op that returns
   Nothing is committed to the repository, nothing is echoed in logs.
 - Direct APNs mode accepts the `.p8` either as a mounted file path
   (`NativePush__Apns__P8KeyPath`) or an inline PEM
-  (`NativePush__Apns__P8KeyPem`). The path form is preferred and validated for
-  existence + readability at startup.
+  (`NativePush__Apns__P8KeyPem`). When both are set, the inline PEM takes
+  precedence and the path is ignored. The path is validated for existence and
+  readability at startup only when no inline PEM is supplied.
 - Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued per
   installation by OlyForge3D. The relay endpoint URL is separate
   (`NativePush__Relay__Endpoint`).
@@ -270,9 +272,9 @@ The dispatcher:
 6. Re-reads the gate (send-side gate) and calls `INativePushSender.SendAsync`
    for each active token.
 
-For `Resolved` events, the dispatcher sends a minimal content-available payload
-that lets the client dismiss the corresponding notification without producing a
-new alert.
+`Resolved` or dismissed events emit no native push. The source removes the item
+before dispatch, so `FindItemAsync` returns `null`; SignalR remains responsible
+for invalidating the in-app item.
 
 ## 7. Observability
 

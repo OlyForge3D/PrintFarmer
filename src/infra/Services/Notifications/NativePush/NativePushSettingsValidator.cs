@@ -23,6 +23,8 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 /// is set (the shipping default) no credentials are validated and the sender is
 /// wired to a no-op — this is intentional: an out-of-the-box deployment must
 /// still start with an empty <c>NativePush</c> section.
+/// Because these settings are bound and validated at startup, changing any
+/// <c>NativePush</c> value requires a process restart.
 ///
 /// Runtime source precedence for the APNs key mirrors
 /// <see cref="DirectApnsNativePushSender.EnsureSigningKey"/> — a VALID inline
