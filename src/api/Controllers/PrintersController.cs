@@ -15,11 +15,13 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using FluentValidation;
@@ -2811,6 +2813,7 @@ public class PrintersController(
     /// assignment (no pre-flight validation 409, no override log/telemetry).
     /// </remarks>
     [HttpPut("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
+    [Idempotent(IdempotencyRouteKeys.PrinterToolheadSpoolBind)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
