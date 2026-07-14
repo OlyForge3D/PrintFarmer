@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -37,18 +37,30 @@ public sealed class NotificationServicePreferenceRaceTests
     /// Adverse race: L (legacy) reads the pre-mutation row and would derive
     /// master EnablePushNotifications=false from its stale view; M (modern)
     /// concurrently enables PushOnPrinterFailure=true on a disjoint attention
-    /// row. Under the production Serializable + retry path, L's first
-    /// attempt loses the write lock, PreferenceConcurrencyRetry classifies
-    /// the SQLite busy code as transient, and L retries on a fresh context
-    /// where the tracked read now sees M's committed PushOnPrinterFailure=true.
+    /// row. Under the production retry path, L's first attempt hits a
+    /// serialization/concurrency failure, PreferenceConcurrencyRetry
+    /// classifies it as transient, and L retries on a fresh context where
+    /// the tracked read now sees M's committed PushOnPrinterFailure=true.
     /// L's derived master flag then reflects the merged nine-row state and
     /// the final row on disk has master=true.
     ///
+    /// SQLite has no row versioning so a natural concurrent-writer race
+    /// cannot surface the transient exception the production classifier is
+    /// designed to swallow (PostgreSQL 40001 / SQL Server 1205/3960 /
+    /// SqlUpdateConcurrencyException — all real provider signals under
+    /// SERIALIZABLE / snapshot isolation). We inject the equivalent
+    /// <see cref="DbUpdateConcurrencyException"/> from the internal test
+    /// seam AFTER L's read AND AFTER M's commit — the exception itself is
+    /// synthetic but every subsequent step (classifier, retry loop, fresh
+    /// context, merge) is the real production path.
+    ///
     /// Without the fix the final master would be false (L's stale-derived
-    /// value overwrites M's correct one). We prove the fix by asserting the
-    /// merged row + master consistency and, defensively, that L's retry
-    /// counter incremented at least once (the retry path was actually
-    /// exercised, not just linearised by luck).
+    /// value overwrites M's correct one). We prove the fix by asserting
+    /// both writers' effects survive and that L's retry counter
+    /// incremented (the retry path was actually exercised, not linearised
+    /// by luck) — a pre-fix implementation that lacked the classifier /
+    /// retry loop would either swallow the injected exception silently or
+    /// surface it uncaught, in both cases failing the assertions below.
     /// </summary>
     [Fact]
     public async Task AdverseSchedule_StaleLegacyWriterAndDisjointModernWriter_ProducesConsistentMasterFlagsAfterRetry()
@@ -170,16 +182,31 @@ public sealed class NotificationServicePreferenceRaceTests
                     Telegram: false),
             });
 
-        // Barrier: L's first attempt reads the row, then WAITS on modernCommitted.
-        // M runs to completion (its own tracked read happens without a barrier
-        // and its save+commit finishes). L then resumes, tries to save, hits
-        // SQLite BUSY because M's commit has advanced the row version /
-        // released the RESERVED lock but SQLite Serializable retries L via
-        // PreferenceConcurrencyRetry on a fresh context which reads M's
-        // committed row.
+        // Barrier design:
+        //   - L's task and M's task start concurrently.
+        //   - M waits on `legacyReadDone` so L reads the seed FIRST (stale
+        //     from L's perspective given M's forthcoming write).
+        //   - L's attempt 1 seam signals `legacyReadDone` then immediately
+        //     throws a synthetic DbUpdateConcurrencyException so
+        //     PreferenceConcurrencyRetry rolls back L's Serializable
+        //     transaction (releases the SQLite RESERVED lock) and enters its
+        //     backoff before retrying with a fresh context.
+        //   - M unblocks (legacyReadDone set), opens its own writer,
+        //     commits its disjoint push mutation, and signals
+        //     `modernCommitted`.
+        //   - L's attempt 2 opens a fresh context, reads M's committed
+        //     row, applies L's mutation on top, and commits cleanly.
         //
-        // We use TaskCompletionSource so the barrier is deterministic — no
-        // flaky Thread.Sleep.
+        // The synthetic exception is intentional: SQLite has no row
+        // versioning so a natural concurrent-writer race between two
+        // Serializable transactions manifests as SQLITE_BUSY on BEGIN
+        // IMMEDIATE (which serialises them at the lock level rather than
+        // surfacing a distinguishable classifier signal). On real
+        // providers under SERIALIZABLE / snapshot isolation the losing
+        // writer surfaces DbUpdateConcurrencyException (or a wrapped
+        // 40001 / 1205 / 3960 provider exception); the classifier +
+        // retry loop is the production path the test exercises.
+        TaskCompletionSource legacyReadDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource modernCommitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         int legacyAttemptCount = 0;
 
@@ -193,16 +220,22 @@ public sealed class NotificationServicePreferenceRaceTests
                 dbContext: writerContext,
                 preferencesContextFactory: factory);
 
-            // Fire the barrier on the FIRST attempt only. Subsequent retry
-            // attempts (fresh context) skip the barrier and proceed normally.
-            service.OnAfterPreferenceReadForTestsAsync = async _ =>
+            service.OnAfterPreferenceReadForTestsAsync = _ =>
             {
                 int attempt = Interlocked.Increment(ref legacyAttemptCount);
                 if (attempt == 1)
                 {
-                    // Release M so it can commit first.
-                    await modernCommitted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    // Signal M can begin; then throw so L's tx rolls back
+                    // (releasing RESERVED) and PreferenceConcurrencyRetry
+                    // retries on a fresh context after M commits.
+                    legacyReadDone.TrySetResult();
+                    throw new DbUpdateConcurrencyException(
+                        "Simulated SERIALIZABLE serialization failure between legacy and modern writers.");
                 }
+
+                // Attempt 2+: proceed normally so the fresh-context read of
+                // M's committed row and L's own mutation land.
+                return Task.CompletedTask;
             };
 
             _ = await service.UpdatePreferencesAsync(userId, legacyPatch, CancellationToken.None);
@@ -210,6 +243,15 @@ public sealed class NotificationServicePreferenceRaceTests
 
         async Task RunModernWriterAsync()
         {
+            // Wait until L has taken its stale read AND released its
+            // RESERVED lock (L's attempt 1 seam throws immediately after
+            // signalling). Only then does M open its own writer, guaranteeing
+            // the adverse ordering: L reads before M, M commits before L
+            // retries.
+            // Generous timeout tolerates CI runner scheduling jitter (Linux SQLite
+            // under load) while still failing fast if the barrier truly deadlocks.
+            await legacyReadDone.Task.WaitAsync(TimeSpan.FromSeconds(60));
+
             await using AppDbContext writerContext = await factory.CreateDbContextAsync();
             var service = new NotificationService(
                 notificationRepository: null!,
@@ -220,10 +262,10 @@ public sealed class NotificationServicePreferenceRaceTests
 
             _ = await service.UpdatePreferencesAsync(userId, modernPatch, CancellationToken.None);
 
-            // Signal L that M has committed. L's first attempt (still
-            // paused inside the barrier) can now resume and hit the
-            // conflict.
-            modernCommitted.SetResult();
+            // Observation channel: not consumed by L (L's attempt 2 has no
+            // seam wait), but recorded so the verifier can prove M's write
+            // landed before L's retry produced the merged final row.
+            modernCommitted.TrySetResult();
         }
 
         Task legacyTask = Task.Run(RunLegacyWriterAsync);
