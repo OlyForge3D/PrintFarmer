@@ -35,6 +35,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // replay safe even when a later opt-in changes.
     private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionSnapshot> _snapshots = new();
 
+    // Snapshot capture, consumption, replacement, and transport invocation share this
+    // short critical section. It closes the ownership-check/send race without holding
+    // a lock while awaiting provider I/O.
+    private readonly object _snapshotOwnershipSync = new();
+
     // One versioned lane per item and delivery audience serializes an active lifecycle
     // transition, coalesces queued transitions to the newest authoritative timestamp,
     // and retains a tombstone so delayed Created work cannot follow Resolved.
@@ -247,6 +252,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     {
         var snapshotKey = new AttentionSnapshotKey(userId, attentionItemId);
         AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
+        AttentionSnapshot? activeSnapshot = null;
         AttentionSnapshot? resolvedSnapshot = null;
 
         if (changeKind == AttentionChangeKind.Resolved)
@@ -255,9 +261,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // snapshot, even when the source has not removed the live row yet.
             // This prevents a newly authorized owner from receiving a dismissal
             // for an alert that was never delivered to that owner.
-            if (!_snapshots.TryRemove(snapshotKey, out resolvedSnapshot))
+            lock (_snapshotOwnershipSync)
             {
-                return;
+                if (!_snapshots.TryRemove(snapshotKey, out resolvedSnapshot))
+                {
+                    return;
+                }
             }
 
             item = null;
@@ -324,13 +333,18 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
 
             // Capture only the minimal routing shape, and only for this owner
-            // after every authorization/preference guard above has passed.
-            _snapshots[snapshotKey] = new AttentionSnapshot(
+            // after every authorization/preference guard above has passed. The exact
+            // instance is the delivery generation checked before every transport try.
+            activeSnapshot = new AttentionSnapshot(
                 Kind: item!.Kind,
                 PrinterId: item.PrinterId,
                 JobId: item.JobId,
                 ToolheadIndex: item.ToolheadIndex,
                 CapturedAtUtc: UtcNow);
+            lock (_snapshotOwnershipSync)
+            {
+                _snapshots[snapshotKey] = activeSnapshot;
+            }
         }
 
         foreach (DeviceToken deviceToken in userTokens)
@@ -351,11 +365,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     changeKind,
                     item,
                     resolvedSnapshot,
+                    snapshotKey,
+                    activeSnapshot,
                     deviceToken,
                     settings,
                     gate,
                     cancellationToken);
-                if (outcome == DeviceDispatchOutcome.FeatureDisabled)
+                if (outcome == DeviceDispatchOutcome.DispatchStopped)
                 {
                     return;
                 }
@@ -385,6 +401,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionChangeKind changeKind,
         AttentionItemDto? item,
         AttentionSnapshot? resolvedSnapshot,
+        AttentionSnapshotKey snapshotKey,
+        AttentionSnapshot? activeSnapshot,
         DeviceToken deviceToken,
         NativePushSettings settings,
         IOperatorFeatureGate gate,
@@ -399,7 +417,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         NativePushDispatchResult? result;
         try
         {
-            result = await SendWithRetriesAsync(envelope, settings, gate, cancellationToken);
+            result = await SendWithRetriesAsync(
+                envelope,
+                snapshotKey,
+                activeSnapshot,
+                settings,
+                gate,
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -410,13 +434,18 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         catch (Exception ex)
         {
+            if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+            {
+                return DeviceDispatchOutcome.DispatchStopped;
+            }
+
             _logger.LogWarning(ex, "[NativePush] Sender threw for deviceTokenId={DeviceTokenId}.", deviceToken.Id);
             result = NativePushDispatchResult.Transient("sender_exception");
         }
 
         if (result is null)
         {
-            return DeviceDispatchOutcome.FeatureDisabled;
+            return DeviceDispatchOutcome.DispatchStopped;
         }
 
         // Every result opens its own DI scope/AppDbContext. Besides isolating a
@@ -425,7 +454,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // delivery/failure attribution or registration mutation.
         try
         {
-            return await ApplyResultAsync(deviceToken, result, settings, cancellationToken);
+            return await ApplyResultAsync(
+                snapshotKey,
+                activeSnapshot,
+                deviceToken,
+                result,
+                settings,
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -499,6 +534,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
     private async Task<NativePushDispatchResult?> SendWithRetriesAsync(
         NativePushEnvelope envelope,
+        AttentionSnapshotKey snapshotKey,
+        AttentionSnapshot? activeSnapshot,
         NativePushSettings settings,
         IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
@@ -516,13 +553,36 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return null;
             }
 
+            bool transportStarted = false;
             try
             {
-                last = await _sender.SendAsync(envelope, cancellationToken);
+                Task<NativePushDispatchResult> sendTask;
+                if (activeSnapshot is null)
+                {
+                    transportStarted = true;
+                    sendTask = _sender.SendAsync(envelope, cancellationToken);
+                }
+                else
+                {
+                    lock (_snapshotOwnershipSync)
+                    {
+                        if (!IsSnapshotCurrentUnderLock(snapshotKey, activeSnapshot))
+                        {
+                            return null;
+                        }
+
+                        // Keep the ownership check and synchronous transport invocation
+                        // in one critical section. Provider I/O is awaited after release.
+                        transportStarted = true;
+                        sendTask = _sender.SendAsync(envelope, cancellationToken);
+                    }
+                }
+
+                last = await sendTask;
             }
             finally
             {
-                if (!attempted)
+                if (transportStarted && !attempted)
                 {
                     _metrics.Attempted.Add(1);
                     attempted = true;
@@ -530,12 +590,18 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
 
             // A sender may complete after an administrator has committed the
-            // emergency disable. Cancellation wins first; otherwise discard the
-            // completed provider result before retry or any result attribution.
+            // emergency disable or after a resolution/replacement consumed this
+            // alert generation. Discard that provider result before retry or any
+            // result attribution.
             cancellationToken.ThrowIfCancellationRequested();
             if (!gate.IsEnabled(OperatorFeature.NativePush))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
+                return null;
+            }
+
+            if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+            {
                 return null;
             }
 
@@ -558,6 +624,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     }
 
     private async Task<DeviceDispatchOutcome> ApplyResultAsync(
+        AttentionSnapshotKey snapshotKey,
+        AttentionSnapshot? activeSnapshot,
         DeviceToken deviceToken,
         NativePushDispatchResult result,
         NativePushSettings settings,
@@ -569,7 +637,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (!gate.IsEnabled(OperatorFeature.NativePush))
         {
             _metrics.SkippedFeatureDisabled.Add(1);
-            return DeviceDispatchOutcome.FeatureDisabled;
+            return DeviceDispatchOutcome.DispatchStopped;
+        }
+
+        // This is the final attribution claim. Resolution/replacement uses the
+        // same lock, so whichever operation enters first defines the ordering.
+        if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+        {
+            return DeviceDispatchOutcome.DispatchStopped;
         }
 
         IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
@@ -749,7 +824,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private enum DeviceDispatchOutcome
     {
         Completed,
-        FeatureDisabled,
+        DispatchStopped,
     }
 
     private readonly record struct AttentionDispatchKey(string AttentionItemId, Guid? TargetUserId);
@@ -838,6 +913,25 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     }
 
     private readonly record struct AttentionSnapshotKey(Guid UserId, string AttentionItemId);
+
+    private bool IsSnapshotCurrent(AttentionSnapshotKey key, AttentionSnapshot? expected)
+    {
+        if (expected is null)
+        {
+            return true;
+        }
+
+        lock (_snapshotOwnershipSync)
+        {
+            return IsSnapshotCurrentUnderLock(key, expected);
+        }
+    }
+
+    private bool IsSnapshotCurrentUnderLock(AttentionSnapshotKey key, AttentionSnapshot expected)
+    {
+        return _snapshots.TryGetValue(key, out AttentionSnapshot? current)
+            && ReferenceEquals(current, expected);
+    }
 
     private sealed record AttentionSnapshot(
         AttentionKind Kind,
@@ -982,11 +1076,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // entries whose source never emits Resolved. Value-comparing removal
         // preserves a concurrently refreshed occurrence.
         DateTime snapshotCutoff = nowUtc - AttentionSnapshotTtl;
-        foreach (KeyValuePair<AttentionSnapshotKey, AttentionSnapshot> kv in _snapshots)
+        lock (_snapshotOwnershipSync)
         {
-            if (kv.Value.CapturedAtUtc < snapshotCutoff)
+            foreach (KeyValuePair<AttentionSnapshotKey, AttentionSnapshot> kv in _snapshots)
             {
-                _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots).Remove(kv);
+                if (kv.Value.CapturedAtUtc < snapshotCutoff)
+                {
+                    _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots).Remove(kv);
+                }
             }
         }
 

@@ -1821,6 +1821,103 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_TargetedUpdatedRetryAfterGlobalResolved_DoesNotResendStaleAlert()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        int lookupCount = 0;
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                item.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref lookupCount) == 1 ? item : null);
+        var sent = new ConcurrentQueue<AttentionChangeKind>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(
+                It.IsAny<NativePushEnvelope>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                sent.Enqueue(envelope.ChangeKind);
+                return Task.FromResult(envelope.ChangeKind == AttentionChangeKind.Updated
+                    ? NativePushDispatchResult.Transient("timeout")
+                    : NativePushDispatchResult.Delivered());
+            });
+        DateTime updatedAt = new(2026, 7, 14, 15, 0, 0, DateTimeKind.Utc);
+        var clock = new ControlledRetryTimeProvider(updatedAt);
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 2,
+            },
+            clock);
+
+        Task updated = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Updated,
+            userId,
+            occurredAtUtc: updatedAt);
+        try
+        {
+            await clock.RetryDelayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+
+            await sut.DispatchAsync(
+                    item.Id,
+                    AttentionChangeKind.Resolved,
+                    targetUserId: null,
+                    occurredAtUtc: updatedAt.AddSeconds(1))
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Should().Equal(AttentionChangeKind.Updated, AttentionChangeKind.Resolved);
+
+            clock.ReleaseRetry();
+            await updated.WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Should().Equal(
+                new[] { AttentionChangeKind.Updated, AttentionChangeKind.Resolved },
+                "the consumed snapshot makes the pending targeted retry obsolete");
+            sender.Verify(value => value.SendAsync(
+                    It.IsAny<NativePushEnvelope>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Exactly(2));
+            tokens.Verify(repository => repository.RecordSuccessAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<long>(),
+                    It.IsAny<DateTime>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+            tokens.Verify(repository => repository.RecordFailureAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<long>(),
+                    It.IsAny<DateTime>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+            tokens.Verify(repository => repository.InvalidateAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<long>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+        finally
+        {
+            clock.ReleaseRetry();
+            await updated.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
     public async Task DispatchAsync_StaleCreatedAfterResolved_IsRejected()
     {
         Guid userId = Guid.NewGuid();
@@ -2429,6 +2526,69 @@ public sealed class NativePushDispatcherTests
             if (exception is not null)
             {
                 _exceptions.Enqueue(exception);
+            }
+        }
+    }
+
+    private sealed class ControlledRetryTimeProvider(DateTime nowUtc) : TimeProvider
+    {
+        private readonly object _sync = new();
+        private readonly DateTimeOffset _now = new(nowUtc, TimeSpan.Zero);
+        private readonly TaskCompletionSource _retryDelayStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private ControlledTimer? _retryTimer;
+
+        public Task RetryDelayStarted => _retryDelayStarted.Task;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            var timer = new ControlledTimer(callback, state);
+            lock (_sync)
+            {
+                _retryTimer = timer;
+            }
+
+            _retryDelayStarted.TrySetResult();
+            return timer;
+        }
+
+        public void ReleaseRetry()
+        {
+            ControlledTimer? timer;
+            lock (_sync)
+            {
+                timer = _retryTimer;
+            }
+
+            timer?.Fire();
+        }
+
+        private sealed class ControlledTimer(TimerCallback callback, object? state) : ITimer
+        {
+            private int _completed;
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => Volatile.Read(ref _completed) == 0;
+
+            public void Dispose() => Interlocked.Exchange(ref _completed, 1);
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+
+            public void Fire()
+            {
+                if (Interlocked.Exchange(ref _completed, 1) == 0)
+                {
+                    callback(state);
+                }
             }
         }
     }
