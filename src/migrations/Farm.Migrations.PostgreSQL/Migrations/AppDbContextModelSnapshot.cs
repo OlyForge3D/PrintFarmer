@@ -2695,8 +2695,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("Token")
                         .IsRequired()
-                        .HasMaxLength(4096)
-                        .HasColumnType("character varying(4096)");
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");

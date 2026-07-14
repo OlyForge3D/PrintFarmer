@@ -81,53 +81,8 @@ public static class TelemetryStartup
                     // RequestUri, so a DelegatingHandler can't scrub it — the OWNER
                     // of that tag is the runtime's primary handler, below every
                     // DelegatingHandler. We must redact on the span itself.
-                    options.EnrichWithHttpRequestMessage = (activity, request) =>
-                    {
-                        System.Uri? uri = request.RequestUri;
-                        if (uri is null)
-                        {
-                            return;
-                        }
-
-                        if (!IsApnsHost(uri.Host))
-                        {
-                            return;
-                        }
-
-                        string redactedPath = RedactApnsTokenPath(uri.AbsolutePath);
-
-                        // Drop uri.Query entirely for APNs — RFC 7540 APNs
-                        // never legitimately uses query strings, so any
-                        // content in Query is either accidental or a token
-                        // that leaked through URI parsing. Zero-trust:
-                        // scrub it (Hicks v4 blocker 1).
-                        string redactedFull = uri.GetLeftPart(System.UriPartial.Authority) + redactedPath;
-
-                        _ = activity.SetTag("url.full", redactedFull);
-                        _ = activity.SetTag("http.url", redactedFull);
-                        _ = activity.SetTag("url.path", redactedPath);
-                        _ = activity.SetTag("http.request.path", redactedPath);
-                    };
-                    options.EnrichWithHttpResponseMessage = (activity, response) =>
-                    {
-                        System.Uri? uri = response.RequestMessage?.RequestUri;
-                        if (uri is null || !IsApnsHost(uri.Host))
-                        {
-                            return;
-                        }
-
-                        string redactedPath = RedactApnsTokenPath(uri.AbsolutePath);
-
-                        // Same rationale as the request enricher: drop Query
-                        // to defend against tokens surfacing there.
-                        string redactedFull = uri.GetLeftPart(System.UriPartial.Authority) + redactedPath;
-
-                        // Re-apply on completion — some processors read tags on span end.
-                        _ = activity.SetTag("url.full", redactedFull);
-                        _ = activity.SetTag("http.url", redactedFull);
-                        _ = activity.SetTag("url.path", redactedPath);
-                        _ = activity.SetTag("http.request.path", redactedPath);
-                    };
+                    options.EnrichWithHttpRequestMessage = EnrichApnsHttpRequest;
+                    options.EnrichWithHttpResponseMessage = EnrichApnsHttpResponse;
                 })
                 .AddEntityFrameworkCoreInstrumentation(options =>
                 {
@@ -206,6 +161,49 @@ public static class TelemetryStartup
     // that consumes it — if someone rewires HTTP instrumentation they will see
     // these callers immediately.
     // -------------------------------------------------------------------------
+
+    /// <summary>Redacts APNs request URI tags on the production HttpClient activity.</summary>
+    internal static void EnrichApnsHttpRequest(
+        System.Diagnostics.Activity activity,
+        HttpRequestMessage request)
+    {
+        ArgumentNullException.ThrowIfNull(activity);
+        ArgumentNullException.ThrowIfNull(request);
+        RedactApnsActivity(activity, request.RequestUri);
+    }
+
+    /// <summary>Re-applies APNs URI redaction when the production HttpClient activity completes.</summary>
+    internal static void EnrichApnsHttpResponse(
+        System.Diagnostics.Activity activity,
+        HttpResponseMessage response)
+    {
+        ArgumentNullException.ThrowIfNull(activity);
+        ArgumentNullException.ThrowIfNull(response);
+        RedactApnsActivity(activity, response.RequestMessage?.RequestUri);
+    }
+
+    private static void RedactApnsActivity(
+        System.Diagnostics.Activity activity,
+        System.Uri? uri)
+    {
+        if (uri is null || !IsApnsHost(uri.Host))
+        {
+            return;
+        }
+
+        string redactedPath = RedactApnsTokenPath(uri.AbsolutePath);
+        string redactedFull = uri.GetLeftPart(System.UriPartial.Authority) + redactedPath;
+        _ = activity.SetTag("url.full", redactedFull);
+        _ = activity.SetTag("http.url", redactedFull);
+        _ = activity.SetTag("url.path", redactedPath);
+        _ = activity.SetTag("http.request.path", redactedPath);
+
+        // APNs does not use query strings. Remove both current and legacy OTel
+        // query tags rather than retaining attacker-controlled/token-bearing data.
+        _ = activity.SetTag("url.query", null);
+        _ = activity.SetTag("http.request.query", null);
+    }
+
     internal static readonly System.Text.RegularExpressions.Regex ApnsTokenPathRegex =
         new(@"(?<prefix>/3/device/).+", System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 

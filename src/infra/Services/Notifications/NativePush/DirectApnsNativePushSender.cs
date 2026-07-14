@@ -264,15 +264,13 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         // failure. We emit `content-available: 1` only so iOS delivers the
         // payload to the app in the background and the client can silently
         // dismiss its cached copy.
-        ApsAlert? alert = envelope.Priority == NativePushPriority.Background
-            ? null
-            : new ApsAlert(envelope.Title, envelope.Subtitle, envelope.Body);
-        var aps = new ApsRoot(
-            alert,
-            envelope.Category,
-            envelope.ThreadId,
-            MutableContent: 1,
-            envelope.Priority == NativePushPriority.Background ? 1 : (int?)null);
+        object aps = envelope.Priority == NativePushPriority.Background
+            ? new ApsBackground(ContentAvailable: 1)
+            : new ApsAlertRoot(
+                new ApsAlert(envelope.Title, envelope.Subtitle, envelope.Body),
+                envelope.Category,
+                envelope.ThreadId,
+                MutableContent: 1);
         var root = new ApsWireRoot(
             aps,
             envelope.AttentionItemId,
@@ -411,15 +409,17 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         [property: JsonPropertyName("subtitle")] string? Subtitle,
         [property: JsonPropertyName("body")] string? Body);
 
-    private sealed record ApsRoot(
-        [property: JsonPropertyName("alert")] ApsAlert? Alert,
+    private sealed record ApsAlertRoot(
+        [property: JsonPropertyName("alert")] ApsAlert Alert,
         [property: JsonPropertyName("category")] string Category,
         [property: JsonPropertyName("thread-id")] string ThreadId,
-        [property: JsonPropertyName("mutable-content")] int MutableContent,
-        [property: JsonPropertyName("content-available")] int? ContentAvailable);
+        [property: JsonPropertyName("mutable-content")] int MutableContent);
+
+    private sealed record ApsBackground(
+        [property: JsonPropertyName("content-available")] int ContentAvailable);
 
     private sealed record ApsWireRoot(
-        [property: JsonPropertyName("aps")] ApsRoot Aps,
+        [property: JsonPropertyName("aps")] object Aps,
         [property: JsonPropertyName("attentionItemId")] string AttentionItemId,
         [property: JsonPropertyName("attentionKind")] string AttentionKind,
         [property: JsonPropertyName("changeKind")] string ChangeKind,

@@ -49,7 +49,7 @@ time (chosen by `Mode`); the disabled sender is a no-op that returns
 - Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued per
   installation by OlyForge3D. The relay endpoint URL is separate
   (`NativePush__Relay__Endpoint`).
-- Deployment templates and `.env.example` document the keys but never contain
+- Deployment template `.env.template` documents the keys but never contains
   live values. See `.env.template` at the repository root.
 - Startup validation (`NativePushSettingsValidator`, wired via
   `AddOptions<NativePushSettings>().ValidateOnStart()`) fails fast when a
@@ -127,7 +127,7 @@ invoked:
 1. A 60-second LRU dedupe on `(userId, attentionItemId, changeKind)` — a
    burst of `attentionchanged` fires for the same source collapses to one
    push per user.
-2. A token bucket per `(printerId, attentionKind)` at 1 push per 30s. Excess
+2. A token bucket per `(userId, printerId, attentionKind)` at 1 logical alert per 30s. Excess
    is dropped (not queued) and counted.
 
 Both guards emit metrics (`native_push_deduplicated`, `native_push_rate_limited`).
@@ -135,7 +135,7 @@ Both guards emit metrics (`native_push_deduplicated`, `native_push_rate_limited`
 ## 2. Actionable categories and deep links
 
 The category identifiers and action ids are stable across the mobile app and
-the server. String enum wire values are camelCase per the API contract.
+the server. String enum wire values are PascalCase per the API contract.
 
 | `attentionKind` | APNs `category`     | actions on lock-screen              | primary deep link                                                                     |
 |-----------------|---------------------|-------------------------------------|---------------------------------------------------------------------------------------|
@@ -200,7 +200,8 @@ Disabling the flag never mutates `DeviceTokens`. Rows are only removed when:
 - The user is deleted (cascade FK).
 
 Consecutive-failure soft-deactivation (`IsActive=false`) triggers after 5
-consecutive send failures for the same token; the row is retained for
+consecutive provider-attributed token failures; relay, configuration, JWT, topic,
+payload, and unknown failures do not affect token health. the row is retained for
 diagnostics and can be reactivated on next successful registration upsert.
 
 ## 5. Persistence
@@ -211,15 +212,15 @@ New entity `DeviceToken` (main app, `AppDbContext`):
 |----------------------------|------------------|-----------------------------------------------------------|
 | `Id`                       | `uuid`           | PK.                                                       |
 | `UserId`                   | `uuid`           | FK → `Users(Id)`, cascade delete.                         |
-| `InstallationId`           | `varchar(64)`    | Per-server installation id from the mobile app.           |
-| `Token`                    | `varchar(256)`   | Provider-issued device token (APNs hex today).            |
+| `InstallationId`           | `varchar(128)`   | Canonical ASCII installation id (1–128 characters).       |
+| `Token`                    | `varchar(256)`   | Canonical lowercase APNs hex token (64–256 characters).   |
 | `Platform`                 | `varchar(16)`    | `ios` today. `android` reserved.                          |
 | `Environment`              | `varchar(16)`    | `development` (sandbox) or `production`.                  |
-| `AppBundleId`              | `varchar(128)`   | Bundle id captured on registration.                        |
+| `AppBundleId`              | `varchar(256)`   | Canonical lowercase bundle id.                             |
 | `CreatedAt`                | `timestamptz`    | UTC creation.                                              |
 | `LastUsedAt`               | `timestamptz?`   | Last successful send (or last upsert).                     |
-| `LastFailureAt`            | `timestamptz?`   | Last transient send failure.                               |
-| `ConsecutiveFailureCount`  | `int`            | Reset on success; deactivates at 5.                        |
+| `LastFailureAt`            | `timestamptz?`   | Last provider-attributed token failure.                    |
+| `ConsecutiveFailureCount`  | `int`            | Token failures only; reset on success; deactivates at 5.  |
 | `IsActive`                 | `bool`           | Soft-deactivated tokens are skipped by fan-out.            |
 
 Indexes:
@@ -272,9 +273,13 @@ The dispatcher:
 6. Re-reads the gate (send-side gate) and calls `INativePushSender.SendAsync`
    for each active token.
 
-`Resolved` or dismissed events emit no native push. The source removes the item
-before dispatch, so `FindItemAsync` returns `null`; SignalR remains responsible
-for invalidating the in-app item.
+For each delivered alert the dispatcher retains a bounded, per-recipient
+pre-resolution routing snapshot. A subsequent `Resolved` change atomically consumes
+that recipient's snapshot and emits an APNs silent dismissal. It bypasses the alert
+rate bucket but remains deduplicated. Direct APNs uses `apns-push-type: background`,
+priority `5`, and an APS object containing only `{ "content-available": 1 }`; no alert,
+category, thread, or mutable-content keys are present. A user without an authorized
+snapshot receives no dismissal.
 
 ## 7. Observability
 
@@ -321,7 +326,7 @@ NativePush__Mode=disabled
 # NativePush__Relay__Endpoint=https://push-relay.olyforge3d.com/v1/dispatch
 # NativePush__Relay__ApiKey=<per-install bearer, obtained from OlyForge3D>
 
-# Direct APNs mode (self-signed / enterprise). Prefer the file path form.
+# Direct APNs mode (self-signed / enterprise). Inline PEM takes precedence over the path.
 # NativePush__Mode=direct
 # NativePush__Apns__TeamId=...
 # NativePush__Apns__KeyId=...

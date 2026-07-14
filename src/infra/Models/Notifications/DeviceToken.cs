@@ -58,8 +58,9 @@ public sealed class DeviceToken
     public DateTime? LastFailureAt { get; set; }
 
     /// <summary>
-    /// Count of consecutive send failures since the last success. Reset to zero on any
-    /// successful send. When it reaches the configured threshold the row is soft-deactivated;
+    /// Count of consecutive provider-attributed token failures since the last success.
+    /// Relay, configuration, JWT, topic, payload, and unknown failures do not increment it.
+    /// When it reaches the configured threshold the row is soft-deactivated;
     /// a subsequent successful registration upsert re-activates it.
     /// </summary>
     public int ConsecutiveFailureCount { get; set; }

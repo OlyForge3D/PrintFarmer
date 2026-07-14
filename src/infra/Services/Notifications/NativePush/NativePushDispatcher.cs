@@ -27,19 +27,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly ConcurrentDictionary<string, DateTime> _dedupe = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<RateLimitKey, RateLimitBucket> _rateLimits = new();
 
-    // Hicks post-merge #1: attention snapshot cache keyed on attentionItemId.
-    // Populated when a Created/Updated dispatch successfully resolves the item;
-    // consulted when a Resolved change arrives after the source has already
-    // removed the item so we can still emit an APNs background push that lets
-    // the client silently dismiss its cached copy. The cache is bounded by the
-    // dedupe/prune cadence — a stale snapshot never leaks past the Resolved
-    // event that consumes it because we drop the entry after use, and any
-    // snapshot older than the dedupe window is pruned in <see cref="PruneCaches"/>.
-    // Authorization is preserved because we RE-EVALUATE per-user gating (role
-    // check, prefs, tokens, category opt-out) against the current DB state on
-    // the Resolved path; the cache only supplies the item shape, never grants
-    // any user access it did not already have when Created/Updated ran.
-    private readonly ConcurrentDictionary<string, AttentionSnapshot> _snapshots = new(StringComparer.Ordinal);
+    // Per-recipient pre-resolution snapshots. A user can consume only a snapshot
+    // captured after that same user passed item visibility, role, preference,
+    // token, dedupe, and rate gates. Keying by user prevents one owner's visible
+    // item (especially admin-only maintenance) from authorizing another owner.
+    // Resolved atomically consumes the entry before any send-side checks, making
+    // replay safe even when a later opt-in changes.
+    private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionSnapshot> _snapshots = new();
+    private static readonly TimeSpan AttentionSnapshotTtl = TimeSpan.FromDays(7);
 
     private long _lastPruneAtTicks;
 
@@ -79,8 +74,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // Snapshot the startup-bound settings for a consistent fan-out. The
         // NativePush section is validated with ValidateOnStart; configuration
         // changes require a process restart rather than taking effect mid-flight.
-        // Resolved/dismissed events emit no push because the source removes the
-        // item before the per-owner FindItemAsync lookup below.
+        // Resolved events consume a per-user pre-resolution snapshot and emit a
+        // silent dismissal even after the source removes the live item.
         NativePushSettings settings = _optionsMonitor.CurrentValue;
         if (settings.Mode == NativePushMode.Disabled)
         {
@@ -199,88 +194,51 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AppDbContext db,
         CancellationToken cancellationToken)
     {
+        var snapshotKey = new AttentionSnapshotKey(userId, attentionItemId);
         AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
         AttentionSnapshot? resolvedSnapshot = null;
-        if (item is null)
+
+        if (changeKind == AttentionChangeKind.Resolved)
         {
-            // Hicks post-merge #1: a Resolved change arriving after the
-            // source dropped the item MUST still emit an APNs background
-            // push (apns-push-type=background, priority=5,
-            // content-available=1, no alert body) so the client can
-            // silently dismiss its cached copy on lock screen /
-            // Notification Center. Fall back to a snapshot captured on the
-            // preceding Created/Updated dispatch; if none exists (dispatcher
-            // was cold, or Created was suppressed) we simply drop the push
-            // — the SignalR event still invalidates the in-app item.
-            if (changeKind != AttentionChangeKind.Resolved)
+            // A dismissal is authorized only by this recipient's pre-resolution
+            // snapshot, even when the source has not removed the live row yet.
+            // This prevents a newly authorized owner from receiving a dismissal
+            // for an alert that was never delivered to that owner.
+            if (!_snapshots.TryRemove(snapshotKey, out resolvedSnapshot))
             {
                 return;
             }
 
-            if (!_snapshots.TryGetValue(attentionItemId, out AttentionSnapshot? snapshot))
-            {
-                return;
-            }
-
-            resolvedSnapshot = snapshot;
+            item = null;
+        }
+        else if (item is null)
+        {
+            return;
         }
 
         AttentionKind kind = item?.Kind ?? resolvedSnapshot!.Kind;
-
-        string? category = AttentionPushCategories.CategoryFor(kind);
-        if (category is null)
+        Guid printerId = item?.PrinterId ?? resolvedSnapshot!.PrinterId;
+        if (AttentionPushCategories.CategoryFor(kind) is null)
         {
             return;
         }
 
-        // Role gate — maintenance items are admin-only. FindItemAsync does not
-        // filter this by role, so the dispatcher must. For the silent-Resolved
-        // path we still re-check role state against the live DB so a user who
-        // lost admin between Created and Resolved does not receive the
-        // dismissal push either.
-        if (kind == AttentionKind.Maintenance)
+        // Maintenance is admin-only. Re-check current role even for a snapshot
+        // so revocation before resolution suppresses the dismissal.
+        if (kind == AttentionKind.Maintenance
+            && !await IsFarmAdminAsync(db, userId, cancellationToken))
         {
-            bool isAdmin = await IsFarmAdminAsync(db, userId, cancellationToken);
-            if (!isAdmin)
-            {
-                return;
-            }
+            return;
         }
 
-        // Per-user category opt-out.
         NotificationPreferences? prefs = await db.NotificationPreferences
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(prefs?.AttentionPushCategoryPreferencesJson);
-        if (!catPrefs.IsEnabled(kind))
-        {
-            _metrics.SkippedCategoryOptOut.Add(1);
-            return;
-        }
-
-        // Hicks v5 H1 master gate: a persisted preferences row with
-        // EnablePushNotifications=false is the shared "no push at all"
-        // opt-out; every attention native push MUST honour it. Missing
-        // row falls back to CLR default (true) so the pre-#708 opt-in
-        // behaviour is preserved for users who never touched the
-        // preference UI. This gate runs BEFORE the per-kind check so
-        // preserved PushOn{Kind} values cannot leak past a global
-        // opt-out.
-        if (prefs is not null && !prefs.EnablePushNotifications)
-        {
-            _metrics.SkippedCategoryOptOut.Add(1);
-            return;
-        }
-
-        // Hicks v4 blocker 3: the shared web preference matrix exposes
-        // per-kind push toggles (PushOnPrinterFailure / FilamentRunout /
-        // HarvestReady / MaintenanceDue / PrinterOffline) that #716 uses
-        // to opt out of native push per event type. Without gating here
-        // the dispatcher would deliver to users who explicitly disabled
-        // that row in the operator matrix. Missing prefs row falls back
-        // to CLR defaults on NotificationPreferences (push=true), which
-        // preserves the historical opt-in behaviour.
-        if (!IsPushEnabledForKind(prefs, kind))
+        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(
+            prefs?.AttentionPushCategoryPreferencesJson);
+        if (!catPrefs.IsEnabled(kind)
+            || (prefs is not null && !prefs.EnablePushNotifications)
+            || !IsPushEnabledForKind(prefs, kind))
         {
             _metrics.SkippedCategoryOptOut.Add(1);
             return;
@@ -301,38 +259,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        // Hicks H2-v5-final: rate-limit ONCE per logical event before device
-        // fan-out. Scope is (userId, printerId, kind) so:
-        //   * a noisy printer/kind cannot suppress unrelated critical alerts
-        //     for the same user (previous per-user scope failed here);
-        //   * a multi-device user does not exhaust their bucket faster than a
-        //     single-device user (previous per-device consumption failed
-        //     here).
-        // If the rate limit rejects the event, we skip ALL devices for this
-        // envelope (a partial delivery would be worse than none — the user
-        // would think their other devices missed the alert).
-        Guid printerIdForRate = item?.PrinterId ?? resolvedSnapshot!.PrinterId;
-        var rateKey = new RateLimitKey(userId, printerIdForRate, kind);
-        if (!TryConsumeRate(rateKey, settings, DateTime.UtcNow))
+        // Charge once per logical alert, never once per device. Silent resolved
+        // dismissals are control messages and bypass the alert budget; otherwise
+        // a just-delivered alert would consume the only slot and prevent its own
+        // timely dismissal. Dedupe still makes the dismissal exactly-once.
+        if (changeKind != AttentionChangeKind.Resolved)
         {
-            _metrics.SkippedRateLimit.Add(1);
-            return;
-        }
+            var rateKey = new RateLimitKey(userId, printerId, kind);
+            if (!TryConsumeRate(rateKey, settings, DateTime.UtcNow))
+            {
+                _metrics.SkippedRateLimit.Add(1);
+                return;
+            }
 
-        // Hicks post-merge #1: populate/refresh the snapshot cache on any
-        // dispatch that resolved the live item. Cached BEFORE fan-out so a
-        // concurrent Resolved for the same id sees the snapshot even if the
-        // source removes the item during fan-out.
-        if (item is not null)
-        {
-            _snapshots[attentionItemId] = new AttentionSnapshot(
-                Kind: item.Kind,
+            // Capture only the minimal routing shape, and only for this owner
+            // after every authorization/preference guard above has passed.
+            _snapshots[snapshotKey] = new AttentionSnapshot(
+                Kind: item!.Kind,
                 PrinterId: item.PrinterId,
                 JobId: item.JobId,
                 ToolheadIndex: item.ToolheadIndex,
-                PrinterName: item.PrinterName,
-                Title: item.Title,
-                DeadlineAt: item.DeadlineAt,
                 CapturedAtUtc: DateTime.UtcNow);
         }
 
@@ -340,22 +286,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Third gate immediately before send: if the flag flipped since
-            // the outer check, drop the rest of this owner's fan-out.
             if (!gate.IsEnabled(OperatorFeature.NativePush))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return;
             }
 
-            // Vasquez v6 B1: isolate the entire per-device send + persist
-            // step so a downstream persistence throw for one token cannot
-            // cost the remaining tokens their delivery attempt.
-            //
-            // Hicks #1: rethrow ANY OperationCanceledException so an internal
-            // linked/timeout cancellation still bubbles out and stops the
-            // dispatch — the caller-token guard swallowed those and let the
-            // generic Exception isolator continue.
             try
             {
                 await SendAndApplyForDeviceAsync(
@@ -385,15 +321,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     userId,
                     attentionItemId);
             }
-        }
-
-        // Hicks post-merge #1: after a Resolved dispatch consumed the
-        // snapshot, drop it so a later spurious Resolved for the same id
-        // (e.g., replayed at-least-once) cannot re-emit the silent push.
-        // The next Created/Updated for a fresh occurrence will repopulate.
-        if (changeKind == AttentionChangeKind.Resolved)
-        {
-            _ = _snapshots.TryRemove(attentionItemId, out _);
         }
     }
 
@@ -538,69 +465,21 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        // Terminal (non-transient, non-invalidating, non-config): reason is
-        // token-specific (e.g., APNs "PayloadTooLarge", "TopicDisallowed") or a
-        // relay 4xx that isn't a rate limit. Count against this token only.
         _metrics.TerminalFailed.Add(
             1,
             new KeyValuePair<string, object?>("mode", _sender.ModeName),
             new KeyValuePair<string, object?>("reason", result.Reason ?? "unknown"));
 
-        // Hicks H5-v5-final: config / payload-shape / topic-mismatch errors
-        // are attributable to the deployment or per-envelope builder, NOT to
-        // the device token. Ticking the failure counter for these would
-        // deactivate every active token in five outages (e.g., wrong .p8,
-        // wrong bundle id) — correcting the config would then require every
-        // client to re-register before delivery resumes. Bail out with the
-        // metric already recorded so operators see the terminal error surface
-        // in dashboards without a token-fleet wipe.
-        if (IsNotTokenAttributable(result.Reason))
+        // Safe default: unknown, relay, configuration, JWT, topic, and payload
+        // failures never poison registrations. Only a sender's explicit typed
+        // attribution may increment/deactivate this token. Known APNs invalid
+        // token responses use TokenInvalidated above and are removed directly.
+        if (result.FailureAttribution != NativePushFailureAttribution.DeviceToken)
         {
             return;
         }
 
         await tokens.RecordFailureAsync(deviceToken.Id, nowUtc, settings.FailureDeactivationThreshold, cancellationToken);
-    }
-
-    /// <summary>
-    /// Reasons that indicate a deployment or per-envelope defect, not a bad
-    /// device token. See Hicks H5-v5-final. Kept as an allow-list so any new
-    /// terminal reason emitted by a sender defaults to the safe token-fault
-    /// behavior; add here only after confirming the reason is genuinely
-    /// deployment/payload-scoped.
-    /// </summary>
-    private static bool IsNotTokenAttributable(string? reason)
-    {
-        if (string.IsNullOrEmpty(reason))
-        {
-            return false;
-        }
-
-        return reason switch
-        {
-            // DirectApnsNativePushSender: JWT signing failed (bad .p8, wrong
-            // KeyId/TeamId, malformed key material). Fully deployment-scoped.
-            "jwt_sign_failed" => true,
-
-            // APNs / relay: bundle id or apns-topic does not match the
-            // registered app id. Deployment misconfiguration; the token is
-            // valid for its actual topic.
-            "TopicDisallowed" => true,
-            "BadTopic" => true,
-
-            // APNs: envelope encoding builder produced an oversized payload.
-            // The token is fine; fix the payload constructor.
-            "PayloadTooLarge" => true,
-            "PayloadEmpty" => true,
-
-            // APNs / relay: envelope failed structural validation. Same
-            // rationale — sender-side defect, not the recipient.
-            "BadMessageId" => true,
-            "BadExpirationDate" => true,
-            "BadPriority" => true,
-            "BadCollapseId" => true,
-            _ => false,
-        };
     }
 
     private static async Task<bool> IsFarmAdminAsync(AppDbContext db, Guid userId, CancellationToken cancellationToken)
@@ -610,27 +489,31 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             .AnyAsync(u => u.Id == userId && u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), cancellationToken);
     }
 
-    private static NativePushEnvelope BuildEnvelope(AttentionItemDto item, AttentionChangeKind changeKind, DeviceToken deviceToken)
+    private static NativePushEnvelope BuildEnvelope(
+        AttentionItemDto item,
+        AttentionChangeKind changeKind,
+        DeviceToken deviceToken)
     {
-        string? category = AttentionPushCategories.CategoryFor(item.Kind);
-        IReadOnlyList<string> actions = AttentionPushCategories.ActionsFor(item.Kind);
-        string threadId = AttentionPushCategories.ThreadIdFor(item.Kind, item.PrinterId, item.ToolheadIndex, item.Id);
-        string deepLink = AttentionDeepLinks.For(item.Kind, item.PrinterId, item.Id, item.ToolheadIndex, item.JobId);
+        bool isResolved = changeKind == AttentionChangeKind.Resolved;
+        string category = AttentionPushCategories.CategoryFor(item.Kind) ?? "PRINTER_FAILURE";
+        string threadId = AttentionPushCategories.ThreadIdFor(
+            item.Kind,
+            item.PrinterId,
+            item.ToolheadIndex,
+            item.Id);
+        string deepLink = AttentionDeepLinks.For(
+            item.Kind,
+            item.PrinterId,
+            item.Id,
+            item.ToolheadIndex,
+            item.JobId);
 
-        NativePushPriority priority = changeKind == AttentionChangeKind.Resolved
-            ? NativePushPriority.Background
-            : NativePushPriority.Alert;
-
-        DateTime? expiresAt = item.DeadlineAt is DateTime deadline
-            ? deadline
-            : DateTime.UtcNow.AddMinutes(30);
-
-        // Hicks post-merge #1: on Resolved emit an APNs background push with
-        // no user-visible alert — the client silently dismisses its cached
-        // copy. The sender uses Body being null to select
-        // `apns-push-type: background` and omits the `alert` dict.
-        string? title = changeKind == AttentionChangeKind.Resolved ? null : item.PrinterName;
-        string? body = changeKind == AttentionChangeKind.Resolved ? null : item.Title;
+        DateTime expiresAt = isResolved
+            ? DateTime.UtcNow.AddMinutes(5)
+            : item.DeadlineAt ?? DateTime.UtcNow.AddMinutes(30);
+        IReadOnlyList<string> actionIds = isResolved
+            ? Array.Empty<string>()
+            : AttentionPushCategories.ActionsFor(item.Kind);
 
         return new NativePushEnvelope(
             DeviceTokenId: deviceToken.Id.ToString("D", CultureInfo.InvariantCulture),
@@ -638,11 +521,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             Platform: deviceToken.Platform,
             Environment: deviceToken.Environment,
             AppBundleId: deviceToken.AppBundleId,
-            Category: category ?? "PRINTER_FAILURE",
+            Category: category,
             ThreadId: threadId,
-            Title: title,
+            Title: isResolved ? null : item.PrinterName,
             Subtitle: null,
-            Body: body,
+            Body: isResolved ? null : item.Title,
             AttentionItemId: item.Id,
             AttentionKind: item.Kind,
             ChangeKind: changeKind,
@@ -650,32 +533,28 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             JobId: item.JobId,
             ToolheadIndex: item.ToolheadIndex,
             DeepLink: deepLink,
-            Priority: priority,
+            Priority: isResolved ? NativePushPriority.Background : NativePushPriority.Alert,
             ExpiresAtUtc: expiresAt,
-            ActionIds: actions);
+            ActionIds: actionIds);
     }
 
-    /// <summary>
-    /// Hicks post-merge #1: build a silent APNs background envelope from a
-    /// pre-resolution snapshot when a Resolved change arrives after the
-    /// source has already dropped the item. Emits <c>apns-push-type=background</c>
-    /// with priority 5, no alert body, and <c>content-available: 1</c> so
-    /// the client can silently dismiss its cached copy on lock screen /
-    /// Notification Center.
-    /// </summary>
     private static NativePushEnvelope BuildSilentEnvelopeFromSnapshot(
         string attentionItemId,
         AttentionSnapshot snapshot,
         DeviceToken deviceToken)
     {
-        string? category = AttentionPushCategories.CategoryFor(snapshot.Kind);
-        IReadOnlyList<string> actions = AttentionPushCategories.ActionsFor(snapshot.Kind);
-        string threadId = AttentionPushCategories.ThreadIdFor(snapshot.Kind, snapshot.PrinterId, snapshot.ToolheadIndex, attentionItemId);
-        string deepLink = AttentionDeepLinks.For(snapshot.Kind, snapshot.PrinterId, attentionItemId, snapshot.ToolheadIndex, snapshot.JobId);
-
-        DateTime? expiresAt = snapshot.DeadlineAt is DateTime deadline
-            ? deadline
-            : DateTime.UtcNow.AddMinutes(30);
+        string category = AttentionPushCategories.CategoryFor(snapshot.Kind) ?? "PRINTER_FAILURE";
+        string threadId = AttentionPushCategories.ThreadIdFor(
+            snapshot.Kind,
+            snapshot.PrinterId,
+            snapshot.ToolheadIndex,
+            attentionItemId);
+        string deepLink = AttentionDeepLinks.For(
+            snapshot.Kind,
+            snapshot.PrinterId,
+            attentionItemId,
+            snapshot.ToolheadIndex,
+            snapshot.JobId);
 
         return new NativePushEnvelope(
             DeviceTokenId: deviceToken.Id.ToString("D", CultureInfo.InvariantCulture),
@@ -683,7 +562,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             Platform: deviceToken.Platform,
             Environment: deviceToken.Environment,
             AppBundleId: deviceToken.AppBundleId,
-            Category: category ?? "PRINTER_FAILURE",
+            Category: category,
             ThreadId: threadId,
             Title: null,
             Subtitle: null,
@@ -696,23 +575,17 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ToolheadIndex: snapshot.ToolheadIndex,
             DeepLink: deepLink,
             Priority: NativePushPriority.Background,
-            ExpiresAtUtc: expiresAt,
-            ActionIds: actions);
+            ExpiresAtUtc: DateTime.UtcNow.AddMinutes(5),
+            ActionIds: Array.Empty<string>());
     }
 
-    /// <summary>
-    /// Snapshot of an attention item captured on a preceding Created/Updated
-    /// dispatch so a subsequent Resolved change can still emit a silent
-    /// APNs background push after the source removes the live item.
-    /// </summary>
+    private readonly record struct AttentionSnapshotKey(Guid UserId, string AttentionItemId);
+
     private sealed record AttentionSnapshot(
         AttentionKind Kind,
         Guid PrinterId,
         Guid? JobId,
         int? ToolheadIndex,
-        string PrinterName,
-        string Title,
-        DateTime? DeadlineAt,
         DateTime CapturedAtUtc);
 
     private bool ShouldEmit(string key, NativePushSettings settings, DateTime nowUtc)
@@ -847,22 +720,15 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        // Hicks post-merge #1: snapshot-side prune. Drop entries older than
-        // the dedupe window; the Resolved silent push is only meaningful if
-        // the client still holds the notification in its Notification
-        // Center, and an item stale beyond the dedupe window has been
-        // superseded by a newer Created for the same id. Bounded so the
-        // dictionary cannot grow unbounded for items whose Resolved never
-        // arrives (source dropped them without emitting the change).
-        TimeSpan snapshotTtl = settings.DedupeWindow > TimeSpan.Zero
-            ? settings.DedupeWindow
-            : TimeSpan.FromMinutes(15);
-        DateTime snapshotCutoff = nowUtc - snapshotTtl;
-        foreach (KeyValuePair<string, AttentionSnapshot> kv in _snapshots)
+        // Keep snapshots long enough for real attention lifetimes while bounding
+        // entries whose source never emits Resolved. Value-comparing removal
+        // preserves a concurrently refreshed occurrence.
+        DateTime snapshotCutoff = nowUtc - AttentionSnapshotTtl;
+        foreach (KeyValuePair<AttentionSnapshotKey, AttentionSnapshot> kv in _snapshots)
         {
             if (kv.Value.CapturedAtUtc < snapshotCutoff)
             {
-                _ = ((ICollection<KeyValuePair<string, AttentionSnapshot>>)_snapshots).Remove(kv);
+                _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots).Remove(kv);
             }
         }
     }

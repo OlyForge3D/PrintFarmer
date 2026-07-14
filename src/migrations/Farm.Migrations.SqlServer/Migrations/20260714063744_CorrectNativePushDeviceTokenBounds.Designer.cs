@@ -2703,8 +2703,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("Token")
                         .IsRequired()
-                        .HasMaxLength(4096)
-                        .HasColumnType("nvarchar(4096)");
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");

@@ -395,21 +395,22 @@ public class NotificationsController(INotificationService notificationService) :
         }
 
         if (request is null
-            || string.IsNullOrWhiteSpace(request.InstallationId)
-            || string.IsNullOrWhiteSpace(request.Token)
-            || string.IsNullOrWhiteSpace(request.Platform)
-            || string.IsNullOrWhiteSpace(request.Environment))
+            || !NativePushRegistrationContract.IsCanonicalInstallationId(request.InstallationId)
+            || !NativePushRegistrationContract.IsCanonicalApnsToken(request.Token)
+            || !NativePushRegistrationContract.IsCanonicalPlatform(request.Platform)
+            || !NativePushRegistrationContract.IsCanonicalEnvironment(request.Environment)
+            || !NativePushRegistrationContract.IsCanonicalAppBundleId(request.AppBundleId))
         {
-            return BadRequest(new { error = "installationId, token, platform and environment are required" });
+            return BadRequest(new { error = "Native-push registration values are not in canonical form." });
         }
 
         _ = await deviceTokens.UpsertAsync(
             userId,
-            request.InstallationId.Trim(),
-            request.Token.Trim(),
-            request.Platform.Trim().ToLowerInvariant(),
-            request.Environment.Trim().ToLowerInvariant(),
-            string.IsNullOrWhiteSpace(request.AppBundleId) ? null : request.AppBundleId.Trim(),
+            request.InstallationId,
+            request.Token,
+            request.Platform,
+            request.Environment,
+            request.AppBundleId,
             cancellationToken);
         return NoContent();
     }
@@ -441,12 +442,13 @@ public class NotificationsController(INotificationService notificationService) :
             return Unauthorized(new { error = "User ID not found in claims" });
         }
 
-        if (request is null || string.IsNullOrWhiteSpace(request.InstallationId))
+        if (request is null
+            || !NativePushRegistrationContract.IsCanonicalInstallationId(request.InstallationId))
         {
-            return BadRequest(new { error = "installationId is required" });
+            return BadRequest(new { error = "installationId must be in canonical form" });
         }
 
-        _ = await deviceTokens.DeleteByInstallationAsync(userId, request.InstallationId.Trim(), cancellationToken);
+        _ = await deviceTokens.DeleteByInstallationAsync(userId, request.InstallationId, cancellationToken);
         return NoContent();
     }
 
@@ -1122,29 +1124,38 @@ public class DeviceTokenRegistrationRequest
 {
     /// <summary>Per-server installation identifier supplied by the mobile app.</summary>
     [Required]
-    [StringLength(128)]
+    [StringLength(NativePushRegistrationContract.InstallationIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.InstallationIdPattern,
+        ErrorMessage = "InstallationId must use canonical ASCII identifier syntax.")]
     public string InstallationId { get; set; } = string.Empty;
 
     /// <summary>Provider-issued device token (APNs hex).</summary>
     [Required]
-    [StringLength(4096)]
-    [RegularExpression("^[0-9a-f]+$", ErrorMessage = "Token must be lowercase hexadecimal.")]
+    [StringLength(
+        NativePushRegistrationContract.TokenMaxLength,
+        MinimumLength = NativePushRegistrationContract.TokenMinLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.ApnsTokenPattern,
+        ErrorMessage = "Token must be a byte-aligned lowercase hexadecimal APNs token.")]
     public string Token { get; set; } = string.Empty;
 
     /// <summary>Client platform: <c>ios</c> today; <c>android</c> reserved.</summary>
     [Required]
-    [StringLength(16)]
+    [StringLength(NativePushRegistrationContract.PlatformMaxLength)]
+    [RegularExpression(NativePushRegistrationContract.PlatformPattern)]
     public string Platform { get; set; } = "ios";
 
     /// <summary>APNs environment: <c>development</c> or <c>production</c>.</summary>
     [Required]
-    [StringLength(16)]
+    [StringLength(NativePushRegistrationContract.EnvironmentMaxLength)]
+    [RegularExpression(NativePushRegistrationContract.EnvironmentPattern)]
     public string Environment { get; set; } = "production";
 
     /// <summary>App bundle identifier reported by the mobile app (diagnostics only).</summary>
-    [StringLength(256)]
+    [StringLength(NativePushRegistrationContract.AppBundleIdMaxLength)]
     [RegularExpression(
-        "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+        NativePushRegistrationContract.AppBundleIdPattern,
         ErrorMessage = "AppBundleId must use canonical lowercase bundle-id syntax.")]
     public string? AppBundleId { get; set; }
 }
@@ -1154,7 +1165,10 @@ public class DeviceTokenUnregistrationRequest
 {
     /// <summary>Per-server installation identifier to remove.</summary>
     [Required]
-    [StringLength(128)]
+    [StringLength(NativePushRegistrationContract.InstallationIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.InstallationIdPattern,
+        ErrorMessage = "InstallationId must use canonical ASCII identifier syntax.")]
     public string InstallationId { get; set; } = string.Empty;
 }
 

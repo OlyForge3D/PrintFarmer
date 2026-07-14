@@ -97,41 +97,46 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
     {
         ArgumentNullException.ThrowIfNull(exception);
 
+        const string indexName = "IX_DeviceTokens_UserId_InstallationId";
         return exception.InnerException switch
         {
             SqliteException sqlite =>
                 sqlite.SqliteErrorCode == 19
                 && sqlite.SqliteExtendedErrorCode == 2067
-                && IsDeviceTokenUniqueConstraint(sqlite.Message),
+                && IsExactSqliteUpsertKey(sqlite.Message),
             PostgresException postgres =>
                 postgres.SqlState == PostgresErrorCodes.UniqueViolation
-                && IsDeviceTokenUniqueConstraint(postgres.ConstraintName),
+                && string.Equals(postgres.ConstraintName, indexName, StringComparison.Ordinal),
             SqlException sqlServer =>
                 sqlServer.Number is 2601 or 2627
-                && IsDeviceTokenUniqueConstraint(sqlServer.Message),
+                && NamesDelimitedSqlServerIndex(sqlServer.Message, indexName),
             _ => false,
         };
     }
 
-    private static bool IsDeviceTokenUniqueConstraint(string? value)
+    private static bool IsExactSqliteUpsertKey(string message)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        const string sqliteMarker = "UNIQUE constraint failed:";
+        int markerIndex = message.IndexOf(sqliteMarker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
         {
             return false;
         }
 
-        return value.Contains(
-                "IX_DeviceTokens_UserId_InstallationId",
-                StringComparison.OrdinalIgnoreCase)
-            || value.Contains(
-                "DeviceTokens.UserId, DeviceTokens.InstallationId",
-                StringComparison.OrdinalIgnoreCase)
-            || value.Contains(
-                "IX_DeviceTokens_Token",
-                StringComparison.OrdinalIgnoreCase)
-            || value.Contains(
-                "DeviceTokens.Token",
-                StringComparison.OrdinalIgnoreCase);
+        string columns = message[(markerIndex + sqliteMarker.Length)..]
+            .Trim()
+            .Trim('\'', '"', '.');
+        return string.Equals(
+            columns,
+            "DeviceTokens.UserId, DeviceTokens.InstallationId",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool NamesDelimitedSqlServerIndex(string message, string indexName)
+    {
+        return message.Contains($"'{indexName}'", StringComparison.OrdinalIgnoreCase)
+            || message.Contains($"\"{indexName}\"", StringComparison.OrdinalIgnoreCase)
+            || message.Contains($"[{indexName}]", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />

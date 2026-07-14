@@ -19,23 +19,23 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
         _ = builder.Property(t => t.UserId).IsRequired();
 
         _ = builder.Property(t => t.InstallationId)
-            .HasMaxLength(128)
+            .HasMaxLength(NativePushRegistrationContract.InstallationIdMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.Token)
-            .HasMaxLength(4096)
+            .HasMaxLength(NativePushRegistrationContract.TokenMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.Platform)
-            .HasMaxLength(16)
+            .HasMaxLength(NativePushRegistrationContract.PlatformMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.Environment)
-            .HasMaxLength(16)
+            .HasMaxLength(NativePushRegistrationContract.EnvironmentMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.AppBundleId)
-            .HasMaxLength(256);
+            .HasMaxLength(NativePushRegistrationContract.AppBundleIdMaxLength);
 
         _ = builder.Property(t => t.CreatedAt).IsRequired();
         _ = builder.Property(t => t.LastUsedAt);

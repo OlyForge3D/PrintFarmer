@@ -11,16 +11,6 @@ public partial class CorrectNativePushDeviceTokenBounds : Migration
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.AlterColumn<string>(
-            name: "Token",
-            table: "DeviceTokens",
-            type: "nvarchar(4096)",
-            maxLength: 4096,
-            nullable: false,
-            oldClrType: typeof(string),
-            oldType: "nvarchar(256)",
-            oldMaxLength: 256);
-
-        migrationBuilder.AlterColumn<string>(
             name: "InstallationId",
             table: "DeviceTokens",
             type: "nvarchar(128)",
@@ -45,16 +35,6 @@ public partial class CorrectNativePushDeviceTokenBounds : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.AlterColumn<string>(
-            name: "Token",
-            table: "DeviceTokens",
-            type: "nvarchar(256)",
-            maxLength: 256,
-            nullable: false,
-            oldClrType: typeof(string),
-            oldType: "nvarchar(4096)",
-            oldMaxLength: 4096);
-
         migrationBuilder.AlterColumn<string>(
             name: "InstallationId",
             table: "DeviceTokens",
