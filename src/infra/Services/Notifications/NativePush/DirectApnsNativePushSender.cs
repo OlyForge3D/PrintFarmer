@@ -22,6 +22,7 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
 
     private const string ProductionHost = "https://api.push.apple.com";
     private const string SandboxHost = "https://api.sandbox.push.apple.com";
+    private static readonly EventId JwtSignFailedEvent = new(70801, "NativePushJwtSignFailed");
 
     // Provider JWTs must be rotated ≤60m per Apple; we rotate at 50m for headroom.
     private static readonly TimeSpan JwtLifetime = TimeSpan.FromMinutes(50);
@@ -127,7 +128,15 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "[NativePush/direct] Failed to sign provider JWT for attentionItemId={AttentionItemId}.", envelope.AttentionItemId);
+            // File-system and PEM exceptions routinely embed the absolute key path or key
+            // material in Message/ToString. Never attach the exception to the log event and
+            // never include credential-bearing settings in structured state. A fixed category
+            // retains enough operational signal without disclosing the .p8 path, key ids,
+            // provider token, or PEM contents.
+            _logger.LogError(
+                JwtSignFailedEvent,
+                "[NativePush/direct] Provider JWT signing failed; category={FailureCategory}.",
+                ClassifySigningFailure(ex));
             return NativePushDispatchResult.Terminal("jwt_sign_failed");
         }
 
@@ -320,6 +329,17 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         {
             return null;
         }
+    }
+
+    private static string ClassifySigningFailure(Exception exception)
+    {
+        return exception switch
+        {
+            FileNotFoundException or DirectoryNotFoundException => "key_file_missing",
+            UnauthorizedAccessException or IOException => "key_file_unreadable",
+            CryptographicException or ArgumentException or FormatException => "key_material_invalid",
+            _ => "signing_failed",
+        };
     }
 
     private async Task<string> GetOrRefreshJwtAsync(NativePushApnsSettings apns, CancellationToken cancellationToken)

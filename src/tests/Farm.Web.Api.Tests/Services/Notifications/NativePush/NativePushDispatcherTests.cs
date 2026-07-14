@@ -1,15 +1,19 @@
 ﻿using System.Collections.Concurrent;
 using System.Data.Common;
+using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Notifications;
+using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -418,6 +422,152 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_PersistedKillSwitchDisabledMidFanOut_StopsRemainingDevicesAndOwners()
+    {
+        Guid firstOwner = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        Guid laterOwner = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"native-push-kill-switch-{Guid.NewGuid():N}.db");
+        string connectionString =
+            $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        try
+        {
+            await using (AppDbContext seed = new(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.AddRange(
+                    BuildUser(firstOwner, "kill-switch-first"),
+                    BuildUser(laterOwner, "kill-switch-later"));
+                seed.NotificationPreferences.AddRange(
+                    BuildPushPreferences(firstOwner),
+                    BuildPushPreferences(laterOwner));
+                seed.AppSettingsEntities.Add(new AppSettingsEntity
+                {
+                    Key = OperatorFeatureSettings.SectionName,
+                    SettingsJson = JsonSerializer.Serialize(new OperatorFeatureSettings
+                    {
+                        NativePushEnabled = true,
+                    }),
+                    UpdatedAt = DateTime.UtcNow,
+                });
+                await seed.SaveChangesAsync();
+
+                var registrations = new EfDeviceTokenRepository(seed);
+                _ = await registrations.UpsertAsync(
+                    firstOwner,
+                    "kill-switch-first-a",
+                    new string('a', 64),
+                    "ios",
+                    "production",
+                    "com.example.app");
+                _ = await registrations.UpsertAsync(
+                    firstOwner,
+                    "kill-switch-first-b",
+                    new string('b', 64),
+                    "ios",
+                    "production",
+                    "com.example.app");
+                _ = await registrations.UpsertAsync(
+                    laterOwner,
+                    "kill-switch-later",
+                    new string('c', 64),
+                    "ios",
+                    "production",
+                    "com.example.app");
+            }
+
+            var attention = new Mock<IAttentionService>();
+            attention.Setup(service => service.FindItemAsync(
+                    It.IsAny<Guid>(),
+                    item.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(item);
+
+            var services = new ServiceCollection();
+            services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(connectionString));
+            services.AddScoped<IAppSettingsRepository, EfAppSettingsRepository>();
+            services.AddScoped<IOperatorFeatureGate, OperatorFeatureGate>();
+            services.AddScoped<IDeviceTokenRepository, EfDeviceTokenRepository>();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            services.AddSingleton<ILogger<OperatorFeatureGate>>(
+                NullLogger<OperatorFeatureGate>.Instance);
+            services.AddSingleton<IAttentionService>(attention.Object);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            int persistedDisableCount = 0;
+            var sent = new ConcurrentQueue<NativePushEnvelope>();
+            var sender = new Mock<INativePushSender>();
+            sender.SetupGet(value => value.ModeName).Returns("direct");
+            sender.Setup(value => value.SendAsync(
+                    It.IsAny<NativePushEnvelope>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<NativePushEnvelope, CancellationToken>(async (envelope, cancellationToken) =>
+                {
+                    sent.Enqueue(envelope);
+                    if (sent.Count == 1)
+                    {
+                        await using AppDbContext disable = new(options);
+                        int updated = await disable.AppSettingsEntities
+                            .Where(row => row.Key == OperatorFeatureSettings.SectionName)
+                            .ExecuteUpdateAsync(
+                                setters => setters
+                                    .SetProperty(
+                                        row => row.SettingsJson,
+                                        JsonSerializer.Serialize(new OperatorFeatureSettings
+                                        {
+                                            NativePushEnabled = false,
+                                        }))
+                                    .SetProperty(row => row.UpdatedAt, DateTime.UtcNow),
+                                cancellationToken);
+                        Interlocked.Exchange(ref persistedDisableCount, updated);
+                    }
+
+                    return NativePushDispatchResult.Delivered();
+                });
+
+            using var sut = new NativePushDispatcher(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                sender.Object,
+                new StaticOptionsMonitor(new NativePushSettings
+                {
+                    Mode = NativePushMode.Direct,
+                    MaxAttempts = 1,
+                }),
+                new NativePushMetrics(),
+                NullLogger<NativePushDispatcher>.Instance);
+
+            await sut.DispatchAsync(
+                    item.Id,
+                    AttentionChangeKind.Created,
+                    targetUserId: null)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            Volatile.Read(ref persistedDisableCount).Should().Be(1);
+            sent.Should().ContainSingle(
+                "the first send commits the persisted kill-switch before the next device check");
+            sent.Single().Token.Should().BeOneOf(new string('a', 64), new string('b', 64));
+            attention.Verify(service => service.FindItemAsync(
+                    laterOwner,
+                    item.Id,
+                    It.IsAny<CancellationToken>()),
+                Times.Never,
+                "the owner-level gate must stop fan-out before resolving the later owner");
+        }
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
+    }
+
+    [Fact]
     public async Task DispatchAsync_ConcurrentDeleteMakesStaleOutcomeNoOpAndContinuesWithFreshContexts()
     {
         Guid ownerA = Guid.Parse("00000000-0000-0000-0000-000000000001");
@@ -793,10 +943,24 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_RegistrationRefreshDuringTransientFailure_PreservesReplacement()
+    {
+        await AssertRegistrationRefreshRejectsStaleOutcomeAsync(
+            NativePushDispatchResult.Transient("provider-timeout"));
+    }
+
+    [Fact]
     public async Task DispatchAsync_RegistrationRefreshDuringTokenFailure_StaleFailureDoesNotMutateReplacement()
     {
         await AssertRegistrationRefreshRejectsStaleOutcomeAsync(
             NativePushDispatchResult.TokenFailure("device-token-failure"));
+    }
+
+    [Fact]
+    public async Task DispatchAsync_RegistrationRefreshDuringNonTokenTerminalFailure_PreservesReplacement()
+    {
+        await AssertRegistrationRefreshRejectsStaleOutcomeAsync(
+            NativePushDispatchResult.Terminal("provider-configuration-failure"));
     }
 
     [Fact]

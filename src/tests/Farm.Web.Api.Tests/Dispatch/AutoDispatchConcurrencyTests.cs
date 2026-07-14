@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -32,6 +33,7 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// </summary>
 public class AutoDispatchConcurrencyTests : IDisposable
 {
+    private readonly string _connectionString;
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _db;
     private readonly AutoDispatchTrigger _trigger;
@@ -45,12 +47,14 @@ public class AutoDispatchConcurrencyTests : IDisposable
 
     public AutoDispatchConcurrencyTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connectionString =
+            $"Data Source=auto-dispatch-{Guid.NewGuid():N};Mode=Memory;Cache=Shared;Default Timeout=5";
+        _connection = new SqliteConnection(_connectionString);
         _connection.Open();
         TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled(_connection);
 
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlite(_connection)
+            .UseSqlite(_connectionString)
             .Options;
 
         _db = new AppDbContext(options);
@@ -191,20 +195,20 @@ public class AutoDispatchConcurrencyTests : IDisposable
         return jobId;
     }
 
-    private IServiceScopeFactory BuildScopeFactory(Mock<IDispatchScorer> scorerMock, Mock<IJobDispatchService> dispatchMock)
+    private ServiceProvider BuildServiceProvider(Mock<IDispatchScorer> scorerMock, Mock<IJobDispatchService> dispatchMock)
     {
         ServiceCollection services = new();
         services.AddScoped<AppDbContext>(_ =>
         {
             var opts = new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite(_connection)
+                .UseSqlite(_connectionString)
                 .Options;
             return new AppDbContext(opts);
         });
         services.AddScoped<IDispatchScorer>(_ => scorerMock.Object);
         services.AddScoped<IJobDispatchService>(_ => dispatchMock.Object);
 
-        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+        return services.BuildServiceProvider();
     }
 
     // =========================================================================
@@ -272,7 +276,8 @@ public class AutoDispatchConcurrencyTests : IDisposable
                 return Task.FromResult(new QueuedPrintJobDto());
             });
 
-        IServiceScopeFactory scopeFactory = BuildScopeFactory(scorerMock, dispatchMock);
+        await using ServiceProvider provider = BuildServiceProvider(scorerMock, dispatchMock);
+        IServiceScopeFactory scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 
         using CancellationTokenSource shutdown = new();
         using AutoDispatchBackgroundService svc = new(
@@ -320,7 +325,6 @@ public class AutoDispatchConcurrencyTests : IDisposable
     [Trait("Phase", "2")]
     public async Task MultiplePrintersIdle_MultipleJobs_EachGetsUniqueJob()
     {
-        // Arrange: 3 printers, 3 jobs — each printer should get a different job
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0, maxConcurrentDispatches: 5);
         Guid p1 = SeedPrinter("P1", 20);
         Guid p2 = SeedPrinter("P2", 21);
@@ -329,10 +333,21 @@ public class AutoDispatchConcurrencyTests : IDisposable
         Guid j2 = SeedQueuedJob("Job-2", priority: 0, queuePosition: 2);
         Guid j3 = SeedQueuedJob("Job-3", priority: 0, queuePosition: 3);
 
+        foreach (Guid printerId in new[] { p1, p2, p3 })
+        {
+            Printer printer = _db.Printers.Single(value => value.Id == printerId);
+            printer.AutoDispatchEnabled = true;
+            printer.DispatchState = new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                AutoDispatchState = AutoDispatchState.Ready,
+            };
+        }
+
+        _db.SaveChanges();
+
         var scorerMock = new Mock<IDispatchScorer>();
         var dispatchMock = new Mock<IJobDispatchService>();
-
-        // All printers score well for all jobs
         scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid _, CancellationToken _) =>
@@ -341,54 +356,67 @@ public class AutoDispatchConcurrencyTests : IDisposable
                 new DispatchScore(p2, "P2", 75.0, new Dictionary<string, FactorScore>(), false, []),
                 new DispatchScore(p3, "P3", 70.0, new Dictionary<string, FactorScore>(), false, []),
             ]);
-
         dispatchMock
             .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid jId, Guid pId, string _, DispatchScore _, CancellationToken _) =>
+            .Returns((Guid jobId, Guid printerId, string _, DispatchScore _, CancellationToken _) =>
             {
                 lock (_dispatchLock)
                 {
-                    _dispatchedPairs.Add((jId, pId));
+                    _dispatchedPairs.Add((jobId, printerId));
                 }
 
-                // Simulate real dispatch: mark job as assigned so the next cycle won't re-dispatch it
-                PrintJob? job = _db.PrintJobs.FirstOrDefault(j => j.Id == jId);
-                if (job is not null)
-                {
-                    job.AssignedPrinterId = pId;
-                    job.Status = PrintJobStatus.Starting;
-                    _db.SaveChanges();
-                }
-
+                PrintJob job = _db.PrintJobs.Single(value => value.Id == jobId);
+                job.AssignedPrinterId = printerId;
+                job.Status = PrintJobStatus.Starting;
+                _db.SaveChanges();
                 return Task.FromResult(new QueuedPrintJobDto());
             });
 
-        IServiceScopeFactory scopeFactory = BuildScopeFactory(scorerMock, dispatchMock);
-
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, scopeFactory, _hubMock.Object,
+        await using ServiceProvider provider = BuildServiceProvider(scorerMock, dispatchMock);
+        IServiceScopeFactory scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        using CancellationTokenSource shutdown = new();
+        using AutoDispatchBackgroundService svc = new(
+            _trigger,
+            scopeFactory,
+            _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        Task serviceTask = svc.StartAsync(cts.Token);
+        async Task ProcessAfterStartGateAsync(Guid printerId)
+        {
+            await startGate.Task.WaitAsync(shutdown.Token);
+            await svc.ProcessPrinterIdleAsync(
+                printerId,
+                skipIdleThreshold: false,
+                shutdown.Token);
+        }
 
-        _trigger.NotifyPrinterIdle(p1);
-        _trigger.NotifyPrinterIdle(p2);
-        _trigger.NotifyPrinterIdle(p3);
-
-        await Task.Delay(2000, cts.Token);
-        await cts.CancelAsync();
+        Task[] cycles =
+        [
+            ProcessAfterStartGateAsync(p1),
+            ProcessAfterStartGateAsync(p2),
+            ProcessAfterStartGateAsync(p3),
+        ];
+        Task allCycles = Task.WhenAll(cycles);
 
         try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        {
+            startGate.TrySetResult();
+            await allCycles.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            await shutdown.CancelAsync();
+            await allCycles.WaitAsync(TimeSpan.FromSeconds(10));
+        }
 
-        // Verify no job was assigned to more than one printer
         lock (_dispatchLock)
         {
-            List<Guid> dispatchedJobIds = _dispatchedPairs.Select(p => p.jobId).ToList();
-            dispatchedJobIds.Should().OnlyHaveUniqueItems(
-                "each job should be dispatched to at most one printer");
+            _dispatchedPairs.Should().HaveCount(3);
+            _dispatchedPairs.Select(pair => pair.jobId).Should().BeEquivalentTo([j1, j2, j3]);
+            _dispatchedPairs.Select(pair => pair.jobId).Should().OnlyHaveUniqueItems();
+            _dispatchedPairs.Select(pair => pair.printerId).Should().BeEquivalentTo([p1, p2, p3]);
+            _dispatchedPairs.Select(pair => pair.printerId).Should().OnlyHaveUniqueItems();
         }
     }
 
@@ -397,65 +425,117 @@ public class AutoDispatchConcurrencyTests : IDisposable
     [Trait("Phase", "2")]
     public async Task MaxConcurrentReached_ExcessIdlePrintersWait()
     {
-        // Arrange: max concurrent = 1, but 2 printers go idle
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0, maxConcurrentDispatches: 1);
-        Guid p1 = SeedPrinter("P1-max", 30);
-        Guid p2 = SeedPrinter("P2-max", 31);
-        Guid j1 = SeedQueuedJob("Job-max-1");
-        Guid j2 = SeedQueuedJob("Job-max-2");
+        Guid firstPrinter = SeedPrinter("P1-max", 30);
+        Guid blockedPrinter = SeedPrinter("P2-max", 31);
+        Guid firstJob = SeedQueuedJob("Job-max-1", queuePosition: 1);
+        _ = SeedQueuedJob("Job-max-2", queuePosition: 2);
+
+        foreach (Guid printerId in new[] { firstPrinter, blockedPrinter })
+        {
+            Printer printer = _db.Printers.Single(value => value.Id == printerId);
+            printer.AutoDispatchEnabled = true;
+            printer.DispatchState = new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                AutoDispatchState = AutoDispatchState.Ready,
+            };
+        }
+
+        _db.SaveChanges();
 
         var scorerMock = new Mock<IDispatchScorer>();
-        var dispatchMock = new Mock<IJobDispatchService>();
-
         scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid _, CancellationToken _) =>
             [
-                new DispatchScore(p1, "P1-max", 80.0, new Dictionary<string, FactorScore>(), false, []),
-                new DispatchScore(p2, "P2-max", 75.0, new Dictionary<string, FactorScore>(), false, []),
+                new DispatchScore(firstPrinter, "P1-max", 80.0, new Dictionary<string, FactorScore>(), false, []),
+                new DispatchScore(blockedPrinter, "P2-max", 75.0, new Dictionary<string, FactorScore>(), false, []),
             ]);
 
-        // Simulate a slow dispatch (takes 500ms)
+        var firstDispatchEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstDispatch = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int dispatchAttempts = 0;
+        var dispatchMock = new Mock<IJobDispatchService>();
         dispatchMock
             .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
-            .Returns(async (Guid jId, Guid pId, string _, DispatchScore _, CancellationToken _) =>
-            {
-                await Task.Delay(500);
-                lock (_dispatchLock)
+            .Returns<Guid, Guid, string, DispatchScore, CancellationToken>(
+                async (jobId, printerId, _, _, cancellationToken) =>
                 {
-                    _dispatchedPairs.Add((jId, pId));
-                }
+                    Interlocked.Increment(ref dispatchAttempts).Should().Be(1);
+                    lock (_dispatchLock)
+                    {
+                        _dispatchedPairs.Add((jobId, printerId));
+                    }
 
-                return new QueuedPrintJobDto();
-            });
+                    firstDispatchEntered.TrySetResult();
+                    await releaseFirstDispatch.Task.WaitAsync(cancellationToken);
+                    return new QueuedPrintJobDto();
+                });
 
-        IServiceScopeFactory scopeFactory = BuildScopeFactory(scorerMock, dispatchMock);
+        await using ServiceProvider provider = BuildServiceProvider(scorerMock, dispatchMock);
+        IServiceScopeFactory scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        var logger = new RecordingAutoDispatchLogger();
+        using CancellationTokenSource shutdown = new();
+        using AutoDispatchBackgroundService svc = new(
+            _trigger,
+            scopeFactory,
+            _hubMock.Object,
+            logger);
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
-        AutoDispatchBackgroundService svc = new(
-            _trigger, scopeFactory, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
-
-        Task serviceTask = svc.StartAsync(cts.Token);
-
-        // Both printers go idle simultaneously
-        _trigger.NotifyPrinterIdle(p1);
-        _trigger.NotifyPrinterIdle(p2);
-
-        await Task.Delay(2000, cts.Token);
-        await cts.CancelAsync();
-
+        Task firstCycle = svc.ProcessPrinterIdleAsync(
+            firstPrinter,
+            skipIdleThreshold: false,
+            shutdown.Token);
+        Task? blockedCycle = null;
         try
-        { await serviceTask; }
-        catch (OperationCanceledException) { }
+        {
+            await firstDispatchEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            firstCycle.IsCompleted.Should().BeFalse(
+                "the first dispatch remains in flight behind the deterministic release barrier");
 
-        // With maxConcurrent=1, the second printer's dispatch should be skipped
-        // (it checks the in-flight count before acquiring the lock)
+            blockedCycle = svc.ProcessPrinterIdleAsync(
+                blockedPrinter,
+                skipIdleThreshold: false,
+                shutdown.Token);
+
+            Guid observedBlockedPrinter = await logger.BlockedPrinter.Task
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            observedBlockedPrinter.Should().Be(blockedPrinter);
+            await blockedCycle.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Volatile.Read(ref dispatchAttempts).Should().Be(1);
+            logger.BlockedCount.Should().Be(1);
+            firstCycle.IsCompleted.Should().BeFalse(
+                "the blocked cycle must return without waiting for the active dispatch");
+
+            releaseFirstDispatch.TrySetResult();
+            await firstCycle.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            releaseFirstDispatch.TrySetResult();
+            await shutdown.CancelAsync();
+            Task cleanup = blockedCycle is null
+                ? firstCycle
+                : Task.WhenAll(firstCycle, blockedCycle);
+            await cleanup.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
         lock (_dispatchLock)
         {
-            _dispatchedPairs.Count.Should().BeInRange(0, 2,
-                "with max concurrent = 1 and the lock, at most the sequentially-processed dispatches should occur");
+            _dispatchedPairs.Should().ContainSingle().Which.Should().Be((firstJob, firstPrinter));
         }
+
+        dispatchMock.Verify(d => d.DispatchJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<DispatchScore>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     // =========================================================================
@@ -543,6 +623,51 @@ public class AutoDispatchConcurrencyTests : IDisposable
     // =========================================================================
     // DISPATCH SETTINGS ENTITY TESTS
     // =========================================================================
+
+    private sealed class RecordingAutoDispatchLogger : ILogger<AutoDispatchBackgroundService>
+    {
+        private int _blockedCount;
+
+        public TaskCompletionSource<Guid> BlockedPrinter { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int BlockedCount => Volatile.Read(ref _blockedCount);
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel != LogLevel.Warning
+                || state is not IEnumerable<KeyValuePair<string, object?>> values)
+            {
+                return;
+            }
+
+            Dictionary<string, object?> properties = values.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value,
+                StringComparer.Ordinal);
+            if (!properties.TryGetValue("{OriginalFormat}", out object? template)
+                || template is not string format
+                || !format.Contains("MaxConcurrentDispatches", StringComparison.Ordinal)
+                || !properties.TryGetValue("PrinterId", out object? printerValue)
+                || printerValue is not Guid printerId)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref _blockedCount);
+            BlockedPrinter.TrySetResult(printerId);
+        }
+    }
 
     [Fact]
     [Trait("Category", "Dispatch")]

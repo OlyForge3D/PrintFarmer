@@ -162,6 +162,102 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task RecordSuccess_StaleVersionAfterSurvivingRotation_IsNoOpAndCurrentVersionApplies()
+    {
+        (DeviceToken original, DeviceToken rotated) = await SeedSurvivingRotationAsync();
+        DateTime existingFailureAt = new(2031, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        await _repo.RecordFailureAsync(
+            rotated.Id,
+            rotated.RegistrationVersion,
+            existingFailureAt,
+            failureThreshold: 3);
+        DeviceToken baseline = await ReadPersistedAsync(rotated.Id);
+        baseline.ConsecutiveFailureCount.Should().Be(1);
+        baseline.LastFailureAt.Should().Be(existingFailureAt);
+        baseline.IsActive.Should().BeTrue();
+
+        DateTime staleSuccessAt = new(2032, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+        await _repo.RecordSuccessAsync(
+            original.Id,
+            original.RegistrationVersion,
+            staleSuccessAt);
+
+        DeviceToken afterStale = await ReadPersistedAsync(rotated.Id);
+        AssertPersistedStateUnchanged(afterStale, baseline);
+
+        DateTime currentSuccessAt = new(2033, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        await _repo.RecordSuccessAsync(
+            rotated.Id,
+            rotated.RegistrationVersion,
+            currentSuccessAt);
+
+        DeviceToken afterCurrent = await ReadPersistedAsync(rotated.Id);
+        afterCurrent.RegistrationVersion.Should().Be(rotated.RegistrationVersion);
+        afterCurrent.Token.Should().Be(rotated.Token);
+        afterCurrent.IsActive.Should().BeTrue();
+        afterCurrent.ConsecutiveFailureCount.Should().Be(0);
+        afterCurrent.LastFailureAt.Should().BeNull();
+        afterCurrent.LastUsedAt.Should().Be(currentSuccessAt);
+    }
+
+    [Fact]
+    public async Task RecordFailure_StaleVersionAfterSurvivingRotation_IsNoOpAndCurrentVersionApplies()
+    {
+        (DeviceToken original, DeviceToken rotated) = await SeedSurvivingRotationAsync();
+        DeviceToken baseline = await ReadPersistedAsync(rotated.Id);
+        DateTime staleFailureAt = new(2032, 4, 5, 6, 7, 8, DateTimeKind.Utc);
+
+        await _repo.RecordFailureAsync(
+            original.Id,
+            original.RegistrationVersion,
+            staleFailureAt,
+            failureThreshold: 2);
+
+        DeviceToken afterStale = await ReadPersistedAsync(rotated.Id);
+        AssertPersistedStateUnchanged(afterStale, baseline);
+
+        DateTime currentFailureAt = new(2033, 5, 6, 7, 8, 9, DateTimeKind.Utc);
+        await _repo.RecordFailureAsync(
+            rotated.Id,
+            rotated.RegistrationVersion,
+            currentFailureAt,
+            failureThreshold: 2);
+
+        DeviceToken afterCurrent = await ReadPersistedAsync(rotated.Id);
+        afterCurrent.RegistrationVersion.Should().Be(rotated.RegistrationVersion);
+        afterCurrent.Token.Should().Be(rotated.Token);
+        afterCurrent.LastUsedAt.Should().Be(baseline.LastUsedAt);
+        afterCurrent.IsActive.Should().BeTrue();
+        afterCurrent.ConsecutiveFailureCount.Should().Be(1);
+        afterCurrent.LastFailureAt.Should().Be(currentFailureAt);
+    }
+
+    [Fact]
+    public async Task Invalidate_StaleVersionAfterSurvivingRotation_ReturnsFalseAndCurrentVersionDeletes()
+    {
+        (DeviceToken original, DeviceToken rotated) = await SeedSurvivingRotationAsync();
+        DeviceToken baseline = await ReadPersistedAsync(rotated.Id);
+
+        bool staleRemoved = await _repo.InvalidateAsync(
+            original.Id,
+            original.RegistrationVersion);
+
+        staleRemoved.Should().BeFalse();
+        DeviceToken afterStale = await ReadPersistedAsync(rotated.Id);
+        AssertPersistedStateUnchanged(afterStale, baseline);
+        afterStale.IsActive.Should().BeTrue();
+
+        bool currentRemoved = await _repo.InvalidateAsync(
+            rotated.Id,
+            rotated.RegistrationVersion);
+
+        currentRemoved.Should().BeTrue();
+        await using AppDbContext verify = CreateSiblingContext();
+        (await verify.DeviceTokens.AsNoTracking().CountAsync(token => token.Id == rotated.Id))
+            .Should().Be(0);
+    }
+
+    [Fact]
     public async Task Invalidate_ExactRegistration_PreservesDuplicateTokenAcrossProviderScopes()
     {
         Guid userA = Guid.NewGuid();
@@ -468,6 +564,67 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
                 constraintName: constraintName));
 
         EfDeviceTokenRepository.IsUniqueDeviceTokenConflict(exception).Should().Be(expected);
+    }
+
+    private async Task<(DeviceToken Original, DeviceToken Rotated)> SeedSurvivingRotationAsync()
+    {
+        Guid userId = Guid.NewGuid();
+        string installationId = $"surviving-rotation-{Guid.NewGuid():N}";
+        DeviceToken original = await _repo.UpsertAsync(
+            userId,
+            installationId,
+            new string('a', 64),
+            "ios",
+            "production",
+            "com.example.original");
+
+        await using AppDbContext refreshContext = CreateSiblingContext();
+        var refreshRepository = new EfDeviceTokenRepository(refreshContext);
+        DeviceToken rotated = await refreshRepository.UpsertAsync(
+            userId,
+            installationId,
+            new string('b', 64),
+            "ios",
+            "development",
+            "com.example.rotated");
+
+        rotated.Id.Should().Be(original.Id, "registration refresh updates the surviving row");
+        rotated.RegistrationVersion.Should().Be(original.RegistrationVersion + 1);
+        rotated.IsActive.Should().BeTrue();
+        return (original, rotated);
+    }
+
+    private AppDbContext CreateSiblingContext()
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(_connection)
+            .Options;
+        return new AppDbContext(options);
+    }
+
+    private async Task<DeviceToken> ReadPersistedAsync(Guid id)
+    {
+        await using AppDbContext read = CreateSiblingContext();
+        return await read.DeviceTokens
+            .AsNoTracking()
+            .SingleAsync(token => token.Id == id);
+    }
+
+    private static void AssertPersistedStateUnchanged(DeviceToken actual, DeviceToken expected)
+    {
+        actual.Id.Should().Be(expected.Id);
+        actual.RegistrationVersion.Should().Be(expected.RegistrationVersion);
+        actual.UserId.Should().Be(expected.UserId);
+        actual.InstallationId.Should().Be(expected.InstallationId);
+        actual.Token.Should().Be(expected.Token);
+        actual.Platform.Should().Be(expected.Platform);
+        actual.Environment.Should().Be(expected.Environment);
+        actual.AppBundleId.Should().Be(expected.AppBundleId);
+        actual.CreatedAt.Should().Be(expected.CreatedAt);
+        actual.LastUsedAt.Should().Be(expected.LastUsedAt);
+        actual.LastFailureAt.Should().Be(expected.LastFailureAt);
+        actual.ConsecutiveFailureCount.Should().Be(expected.ConsecutiveFailureCount);
+        actual.IsActive.Should().Be(expected.IsActive);
     }
 
     private sealed class ConcurrentInsertBarrierInterceptor : SaveChangesInterceptor

@@ -6,6 +6,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -468,14 +469,76 @@ public sealed class DirectApnsNativePushSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_MissingP8File_LogsOnlySanitizedSigningCategory()
+    {
+        string secretLeaf = $"native-push-missing-secret-{Guid.NewGuid():N}.p8";
+        string keyPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), secretLeaf));
+        File.Delete(keyPath);
+        NativePushSettings settings = MakePathSettings(keyPath);
+        var logger = new RecordingDirectSenderLogger();
+
+        using DirectApnsNativePushSender sut = CreateSender(
+            settings,
+            _ => throw new InvalidOperationException("HTTP must not run when the key file is missing."),
+            logger);
+
+        NativePushDispatchResult result = await sut.SendAsync(Sample);
+
+        result.Reason.Should().Be("jwt_sign_failed");
+        AssertSanitizedSigningLog(
+            logger,
+            "key_file_missing",
+            keyPath,
+            secretLeaf,
+            settings.Apns.KeyId!,
+            settings.Apns.TeamId!,
+            Sample.Token);
+    }
+
+    [Fact]
+    public async Task SendAsync_UnreadableP8Path_LogsOnlySanitizedSigningCategory()
+    {
+        string secretLeaf = $"native-push-unreadable-secret-{Guid.NewGuid():N}.p8";
+        string keyPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), secretLeaf));
+        Directory.CreateDirectory(keyPath);
+        NativePushSettings settings = MakePathSettings(keyPath);
+        var logger = new RecordingDirectSenderLogger();
+
+        try
+        {
+            using DirectApnsNativePushSender sut = CreateSender(
+                settings,
+                _ => throw new InvalidOperationException("HTTP must not run when the key path is unreadable."),
+                logger);
+
+            NativePushDispatchResult result = await sut.SendAsync(Sample);
+
+            result.Reason.Should().Be("jwt_sign_failed");
+            AssertSanitizedSigningLog(
+                logger,
+                "key_file_unreadable",
+                keyPath,
+                secretLeaf,
+                settings.Apns.KeyId!,
+                settings.Apns.TeamId!,
+                Sample.Token);
+        }
+        finally
+        {
+            Directory.Delete(keyPath);
+        }
+    }
+
+    [Fact]
     public async Task SendAsync_CorruptedOnDiskPem_DisposesReplacementKeyWhenImportThrows()
     {
         string keyPath = Path.Combine(
             Path.GetTempPath(),
             $"native-push-corrupt-key-{Guid.NewGuid():N}.p8");
+        const string secretPemFragment = "corrupted-private-material-secret";
         await File.WriteAllTextAsync(
             keyPath,
-            "-----BEGIN PRIVATE KEY-----\ncorrupted-after-startup\n-----END PRIVATE KEY-----");
+            $"-----BEGIN PRIVATE KEY-----\n{secretPemFragment}\n-----END PRIVATE KEY-----");
         var settings = new NativePushSettings
         {
             Mode = NativePushMode.Direct,
@@ -489,12 +552,14 @@ public sealed class DirectApnsNativePushSenderTests
             },
         };
         var replacementKey = new ImportThrowingEcdsa();
+        var logger = new RecordingDirectSenderLogger();
 
         try
         {
             using DirectApnsNativePushSender sut = CreateSender(
                 settings,
-                _ => throw new InvalidOperationException("HTTP must not run when key import fails."));
+                _ => throw new InvalidOperationException("HTTP must not run when key import fails."),
+                logger);
             sut.SigningKeyFactoryForTests = () => replacementKey;
 
             NativePushDispatchResult result = await sut.SendAsync(Sample);
@@ -503,10 +568,62 @@ public sealed class DirectApnsNativePushSenderTests
             replacementKey.ImportAttempted.Should().BeTrue();
             replacementKey.IsDisposed.Should().BeTrue(
                 "ownership must be released immediately when on-disk PEM import fails");
+            AssertSanitizedSigningLog(
+                logger,
+                "key_material_invalid",
+                keyPath,
+                Path.GetFileName(keyPath),
+                secretPemFragment,
+                settings.Apns.KeyId!,
+                settings.Apns.TeamId!,
+                Sample.Token);
         }
         finally
         {
             File.Delete(keyPath);
+        }
+    }
+
+    private static NativePushSettings MakePathSettings(string keyPath)
+    {
+        return new NativePushSettings
+        {
+            Mode = NativePushMode.Direct,
+            Apns = new NativePushApnsSettings
+            {
+                TeamId = "TEAM-PATH-SECRET",
+                KeyId = "KEY-PATH-SECRET",
+                BundleId = "com.example.secret-path",
+                P8KeyPath = keyPath,
+                Environment = "production",
+            },
+        };
+    }
+
+    private static void AssertSanitizedSigningLog(
+        RecordingDirectSenderLogger logger,
+        string expectedCategory,
+        params string[] forbiddenFragments)
+    {
+        CapturedLog entry = logger.Entries.Should().ContainSingle().Subject;
+        entry.EventId.Id.Should().Be(70801);
+        entry.EventId.Name.Should().Be("NativePushJwtSignFailed");
+        entry.Exception.Should().BeNull(
+            "exceptions from key loading/import can carry absolute paths or key material");
+        entry.Properties.Should().ContainKey("FailureCategory")
+            .WhoseValue.Should().Be(expectedCategory);
+
+        foreach (string fragment in forbiddenFragments.Where(value => !string.IsNullOrEmpty(value)))
+        {
+            entry.State.Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                $"structured log state must not disclose '{fragment}'");
+            entry.Message.Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                $"rendered log text must not disclose '{fragment}'");
+            entry.StructuredState.Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                $"structured properties must not disclose '{fragment}'");
+            (entry.Exception?.ToString() ?? string.Empty)
+                .Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                    $"no logged exception may carry '{fragment}'");
         }
     }
 
@@ -531,12 +648,16 @@ public sealed class DirectApnsNativePushSenderTests
 
     private static DirectApnsNativePushSender CreateSender(
         NativePushSettings settings,
-        Func<HttpRequestMessage, HttpResponseMessage> responder)
+        Func<HttpRequestMessage, HttpResponseMessage> responder,
+        ILogger<DirectApnsNativePushSender>? logger = null)
     {
         var handler = new StubHandler(responder);
         var factory = new StubHttpClientFactory(new HttpClient(handler));
         IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
-        return new DirectApnsNativePushSender(factory, monitor, NullLogger<DirectApnsNativePushSender>.Instance);
+        return new DirectApnsNativePushSender(
+            factory,
+            monitor,
+            logger ?? NullLogger<DirectApnsNativePushSender>.Instance);
     }
 
     private static DirectApnsNativePushSender CreateSender(
@@ -578,6 +699,61 @@ public sealed class DirectApnsNativePushSenderTests
         {
             IsDisposed |= disposing;
             base.Dispose(disposing);
+        }
+    }
+
+    private sealed record CapturedLog(
+        EventId EventId,
+        string State,
+        string Message,
+        string StructuredState,
+        Exception? Exception,
+        IReadOnlyDictionary<string, string> Properties);
+
+    private sealed class RecordingDirectSenderLogger : ILogger<DirectApnsNativePushSender>
+    {
+        private readonly List<CapturedLog> _entries = [];
+
+        public IReadOnlyList<CapturedLog> Entries => _entries;
+
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+            => NoopScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> values
+                ? values.ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value?.ToString() ?? string.Empty,
+                    StringComparer.Ordinal)
+                : new Dictionary<string, string>(StringComparer.Ordinal);
+            string structuredState = string.Join(
+                "|",
+                properties.Select(pair => $"{pair.Key}={pair.Value}"));
+            _entries.Add(new CapturedLog(
+                eventId,
+                state?.ToString() ?? string.Empty,
+                formatter(state, exception),
+                structuredState,
+                exception,
+                properties));
+        }
+
+        private sealed class NoopScope : IDisposable
+        {
+            public static NoopScope Instance { get; } = new();
+
+            public void Dispose()
+            {
+            }
         }
     }
 
