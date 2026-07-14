@@ -27,6 +27,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly ConcurrentDictionary<string, DateTime> _dedupe = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<RateLimitKey, RateLimitBucket> _rateLimits = new();
 
+    // Hicks post-merge #1: attention snapshot cache keyed on attentionItemId.
+    // Populated when a Created/Updated dispatch successfully resolves the item;
+    // consulted when a Resolved change arrives after the source has already
+    // removed the item so we can still emit an APNs background push that lets
+    // the client silently dismiss its cached copy. The cache is bounded by the
+    // dedupe/prune cadence — a stale snapshot never leaks past the Resolved
+    // event that consumes it because we drop the entry after use, and any
+    // snapshot older than the dedupe window is pruned in <see cref="PruneCaches"/>.
+    // Authorization is preserved because we RE-EVALUATE per-user gating (role
+    // check, prefs, tokens, category opt-out) against the current DB state on
+    // the Resolved path; the cache only supplies the item shape, never grants
+    // any user access it did not already have when Created/Updated ran.
+    private readonly ConcurrentDictionary<string, AttentionSnapshot> _snapshots = new(StringComparer.Ordinal);
+
     private long _lastPruneAtTicks;
 
     private readonly IServiceScopeFactory _scopeFactory;
@@ -186,22 +200,45 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         CancellationToken cancellationToken)
     {
         AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
+        AttentionSnapshot? resolvedSnapshot = null;
         if (item is null)
         {
-            // Resolved/dismissed change: the source has already dropped the row.
-            // Emit no native push; the SignalR event invalidates the in-app item.
-            return;
+            // Hicks post-merge #1: a Resolved change arriving after the
+            // source dropped the item MUST still emit an APNs background
+            // push (apns-push-type=background, priority=5,
+            // content-available=1, no alert body) so the client can
+            // silently dismiss its cached copy on lock screen /
+            // Notification Center. Fall back to a snapshot captured on the
+            // preceding Created/Updated dispatch; if none exists (dispatcher
+            // was cold, or Created was suppressed) we simply drop the push
+            // — the SignalR event still invalidates the in-app item.
+            if (changeKind != AttentionChangeKind.Resolved)
+            {
+                return;
+            }
+
+            if (!_snapshots.TryGetValue(attentionItemId, out AttentionSnapshot? snapshot))
+            {
+                return;
+            }
+
+            resolvedSnapshot = snapshot;
         }
 
-        string? category = AttentionPushCategories.CategoryFor(item.Kind);
+        AttentionKind kind = item?.Kind ?? resolvedSnapshot!.Kind;
+
+        string? category = AttentionPushCategories.CategoryFor(kind);
         if (category is null)
         {
             return;
         }
 
         // Role gate — maintenance items are admin-only. FindItemAsync does not
-        // filter this by role, so the dispatcher must.
-        if (item.Kind == AttentionKind.Maintenance)
+        // filter this by role, so the dispatcher must. For the silent-Resolved
+        // path we still re-check role state against the live DB so a user who
+        // lost admin between Created and Resolved does not receive the
+        // dismissal push either.
+        if (kind == AttentionKind.Maintenance)
         {
             bool isAdmin = await IsFarmAdminAsync(db, userId, cancellationToken);
             if (!isAdmin)
@@ -215,7 +252,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
         AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(prefs?.AttentionPushCategoryPreferencesJson);
-        if (!catPrefs.IsEnabled(item.Kind))
+        if (!catPrefs.IsEnabled(kind))
         {
             _metrics.SkippedCategoryOptOut.Add(1);
             return;
@@ -243,7 +280,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // that row in the operator matrix. Missing prefs row falls back
         // to CLR defaults on NotificationPreferences (push=true), which
         // preserves the historical opt-in behaviour.
-        if (!IsPushEnabledForKind(prefs, item.Kind))
+        if (!IsPushEnabledForKind(prefs, kind))
         {
             _metrics.SkippedCategoryOptOut.Add(1);
             return;
@@ -274,11 +311,29 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // If the rate limit rejects the event, we skip ALL devices for this
         // envelope (a partial delivery would be worse than none — the user
         // would think their other devices missed the alert).
-        var rateKey = new RateLimitKey(userId, item.PrinterId, item.Kind);
+        Guid printerIdForRate = item?.PrinterId ?? resolvedSnapshot!.PrinterId;
+        var rateKey = new RateLimitKey(userId, printerIdForRate, kind);
         if (!TryConsumeRate(rateKey, settings, DateTime.UtcNow))
         {
             _metrics.SkippedRateLimit.Add(1);
             return;
+        }
+
+        // Hicks post-merge #1: populate/refresh the snapshot cache on any
+        // dispatch that resolved the live item. Cached BEFORE fan-out so a
+        // concurrent Resolved for the same id sees the snapshot even if the
+        // source removes the item during fan-out.
+        if (item is not null)
+        {
+            _snapshots[attentionItemId] = new AttentionSnapshot(
+                Kind: item.Kind,
+                PrinterId: item.PrinterId,
+                JobId: item.JobId,
+                ToolheadIndex: item.ToolheadIndex,
+                PrinterName: item.PrinterName,
+                Title: item.Title,
+                DeadlineAt: item.DeadlineAt,
+                CapturedAtUtc: DateTime.UtcNow);
         }
 
         foreach (DeviceToken deviceToken in userTokens)
@@ -308,6 +363,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     attentionItemId,
                     changeKind,
                     item,
+                    resolvedSnapshot,
                     deviceToken,
                     settings,
                     tokens,
@@ -330,13 +386,23 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     attentionItemId);
             }
         }
+
+        // Hicks post-merge #1: after a Resolved dispatch consumed the
+        // snapshot, drop it so a later spurious Resolved for the same id
+        // (e.g., replayed at-least-once) cannot re-emit the silent push.
+        // The next Created/Updated for a fresh occurrence will repopulate.
+        if (changeKind == AttentionChangeKind.Resolved)
+        {
+            _ = _snapshots.TryRemove(attentionItemId, out _);
+        }
     }
 
     private async Task SendAndApplyForDeviceAsync(
         Guid userId,
         string attentionItemId,
         AttentionChangeKind changeKind,
-        AttentionItemDto item,
+        AttentionItemDto? item,
+        AttentionSnapshot? resolvedSnapshot,
         DeviceToken deviceToken,
         NativePushSettings settings,
         IDeviceTokenRepository tokens,
@@ -345,7 +411,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // Rate limit consumption has moved to DispatchForOwnerAsync so it
         // runs after logical-event dedupe and is charged exactly once per
         // envelope regardless of how many devices this user has.
-        NativePushEnvelope envelope = BuildEnvelope(item, changeKind, deviceToken);
+        NativePushEnvelope envelope = item is not null
+            ? BuildEnvelope(item, changeKind, deviceToken)
+            : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken);
         _metrics.Attempted.Add(1);
 
         NativePushDispatchResult result;
@@ -557,6 +625,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ? deadline
             : DateTime.UtcNow.AddMinutes(30);
 
+        // Hicks post-merge #1: on Resolved emit an APNs background push with
+        // no user-visible alert — the client silently dismisses its cached
+        // copy. The sender uses Body being null to select
+        // `apns-push-type: background` and omits the `alert` dict.
+        string? title = changeKind == AttentionChangeKind.Resolved ? null : item.PrinterName;
+        string? body = changeKind == AttentionChangeKind.Resolved ? null : item.Title;
+
         return new NativePushEnvelope(
             DeviceTokenId: deviceToken.Id.ToString("D", CultureInfo.InvariantCulture),
             Token: deviceToken.Token,
@@ -565,9 +640,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             AppBundleId: deviceToken.AppBundleId,
             Category: category ?? "PRINTER_FAILURE",
             ThreadId: threadId,
-            Title: item.PrinterName,
+            Title: title,
             Subtitle: null,
-            Body: item.Title,
+            Body: body,
             AttentionItemId: item.Id,
             AttentionKind: item.Kind,
             ChangeKind: changeKind,
@@ -579,6 +654,66 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ExpiresAtUtc: expiresAt,
             ActionIds: actions);
     }
+
+    /// <summary>
+    /// Hicks post-merge #1: build a silent APNs background envelope from a
+    /// pre-resolution snapshot when a Resolved change arrives after the
+    /// source has already dropped the item. Emits <c>apns-push-type=background</c>
+    /// with priority 5, no alert body, and <c>content-available: 1</c> so
+    /// the client can silently dismiss its cached copy on lock screen /
+    /// Notification Center.
+    /// </summary>
+    private static NativePushEnvelope BuildSilentEnvelopeFromSnapshot(
+        string attentionItemId,
+        AttentionSnapshot snapshot,
+        DeviceToken deviceToken)
+    {
+        string? category = AttentionPushCategories.CategoryFor(snapshot.Kind);
+        IReadOnlyList<string> actions = AttentionPushCategories.ActionsFor(snapshot.Kind);
+        string threadId = AttentionPushCategories.ThreadIdFor(snapshot.Kind, snapshot.PrinterId, snapshot.ToolheadIndex, attentionItemId);
+        string deepLink = AttentionDeepLinks.For(snapshot.Kind, snapshot.PrinterId, attentionItemId, snapshot.ToolheadIndex, snapshot.JobId);
+
+        DateTime? expiresAt = snapshot.DeadlineAt is DateTime deadline
+            ? deadline
+            : DateTime.UtcNow.AddMinutes(30);
+
+        return new NativePushEnvelope(
+            DeviceTokenId: deviceToken.Id.ToString("D", CultureInfo.InvariantCulture),
+            Token: deviceToken.Token,
+            Platform: deviceToken.Platform,
+            Environment: deviceToken.Environment,
+            AppBundleId: deviceToken.AppBundleId,
+            Category: category ?? "PRINTER_FAILURE",
+            ThreadId: threadId,
+            Title: null,
+            Subtitle: null,
+            Body: null,
+            AttentionItemId: attentionItemId,
+            AttentionKind: snapshot.Kind,
+            ChangeKind: AttentionChangeKind.Resolved,
+            PrinterId: snapshot.PrinterId,
+            JobId: snapshot.JobId,
+            ToolheadIndex: snapshot.ToolheadIndex,
+            DeepLink: deepLink,
+            Priority: NativePushPriority.Background,
+            ExpiresAtUtc: expiresAt,
+            ActionIds: actions);
+    }
+
+    /// <summary>
+    /// Snapshot of an attention item captured on a preceding Created/Updated
+    /// dispatch so a subsequent Resolved change can still emit a silent
+    /// APNs background push after the source removes the live item.
+    /// </summary>
+    private sealed record AttentionSnapshot(
+        AttentionKind Kind,
+        Guid PrinterId,
+        Guid? JobId,
+        int? ToolheadIndex,
+        string PrinterName,
+        string Title,
+        DateTime? DeadlineAt,
+        DateTime CapturedAtUtc);
 
     private bool ShouldEmit(string key, NativePushSettings settings, DateTime nowUtc)
     {
@@ -709,6 +844,25 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 // it acquires the lock and will retry with a fresh bucket.
                 kv.Value.IsDead = true;
                 _ = ((ICollection<KeyValuePair<RateLimitKey, RateLimitBucket>>)_rateLimits).Remove(kv);
+            }
+        }
+
+        // Hicks post-merge #1: snapshot-side prune. Drop entries older than
+        // the dedupe window; the Resolved silent push is only meaningful if
+        // the client still holds the notification in its Notification
+        // Center, and an item stale beyond the dedupe window has been
+        // superseded by a newer Created for the same id. Bounded so the
+        // dictionary cannot grow unbounded for items whose Resolved never
+        // arrives (source dropped them without emitting the change).
+        TimeSpan snapshotTtl = settings.DedupeWindow > TimeSpan.Zero
+            ? settings.DedupeWindow
+            : TimeSpan.FromMinutes(15);
+        DateTime snapshotCutoff = nowUtc - snapshotTtl;
+        foreach (KeyValuePair<string, AttentionSnapshot> kv in _snapshots)
+        {
+            if (kv.Value.CapturedAtUtc < snapshotCutoff)
+            {
+                _ = ((ICollection<KeyValuePair<string, AttentionSnapshot>>)_snapshots).Remove(kv);
             }
         }
     }

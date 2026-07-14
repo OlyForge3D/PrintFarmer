@@ -129,6 +129,145 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_ResolvedAfterCreated_EmitsSilentBackgroundPush()
+    {
+        // Hicks post-merge #1: when a Resolved change arrives after the
+        // source has already dropped the live item, the dispatcher must
+        // still emit a silent APNs background push so the client can
+        // dismiss its cached copy on lock screen / Notification Center.
+        // The envelope MUST advertise Background priority with no user-
+        // visible alert body, and the sender path exercised end-to-end
+        // must send exactly one background envelope.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+
+        // Attention service: Created returns the live item; Resolved returns
+        // null (source dropped the row). The dispatcher must fall back to
+        // the snapshot captured on the Created dispatch.
+        var attention = new Mock<IAttentionService>();
+        int findCount = 0;
+        attention
+            .Setup(s => s.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref findCount) == 1 ? item : null);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((env, _) => captured.Add(env))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        captured.Should().HaveCount(2);
+        captured[0].ChangeKind.Should().Be(AttentionChangeKind.Created);
+        captured[0].Priority.Should().Be(NativePushPriority.Alert);
+        captured[0].Body.Should().Be(item.Title);
+
+        NativePushEnvelope resolved = captured[1];
+        resolved.ChangeKind.Should().Be(AttentionChangeKind.Resolved);
+        resolved.Priority.Should().Be(NativePushPriority.Background);
+        resolved.Body.Should().BeNull();
+        resolved.Title.Should().BeNull();
+        resolved.Subtitle.Should().BeNull();
+        resolved.AttentionItemId.Should().Be(item.Id);
+        resolved.AttentionKind.Should().Be(AttentionKind.Offline);
+        resolved.PrinterId.Should().Be(item.PrinterId);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResolvedWithoutPriorCreated_NoSenderCall()
+    {
+        // Hicks post-merge #1: a Resolved arriving with no cached snapshot
+        // (dispatcher was cold or Created was suppressed) must NOT emit any
+        // push. The SignalR event still invalidates the in-app copy; a
+        // synthesised silent push without prior authorization would leak an
+        // envelope for a user who never received a Created event.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+
+        var attention = new Mock<IAttentionService>();
+        attention
+            .Setup(s => s.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AttentionItemDto?)null);
+
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        sender.Verify(
+            s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResolvedSilentPush_HonoursGlobalOptOut()
+    {
+        // Hicks post-merge #1 authorization safety: even when a snapshot
+        // exists from a prior Created dispatch, the Resolved silent push
+        // MUST re-evaluate the user's current preferences. Flipping
+        // EnablePushNotifications to false between Created and Resolved
+        // must suppress the silent envelope — otherwise the snapshot cache
+        // becomes an authorization side-channel.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+
+        var attention = new Mock<IAttentionService>();
+        int findCount = 0;
+        attention
+            .Setup(s => s.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref findCount) == 1 ? item : null);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((env, _) => captured.Add(env))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        // Created dispatch with no persisted prefs (CLR default opt-in).
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        // User flips global push off between the events.
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = false,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        captured.Should().HaveCount(1);
+        captured[0].ChangeKind.Should().Be(AttentionChangeKind.Created);
+    }
+
+    [Fact]
     public async Task DispatchAsync_PerKindPushOffButMasterOn_DoesNotCallSender()
     {
         // Bishop v6 hardening: EnablePushNotifications=true crossed with

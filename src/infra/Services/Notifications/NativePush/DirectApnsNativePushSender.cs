@@ -138,7 +138,15 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("bearer", jwt);
         request.Headers.TryAddWithoutValidation("apns-topic", bundleId);
-        request.Headers.TryAddWithoutValidation("apns-push-type", "alert");
+
+        // Hicks post-merge #1: a silent Resolved push (no user-visible alert)
+        // MUST advertise `apns-push-type: background` — APNs otherwise rejects
+        // priority 5 combined with a missing alert dict. Alert pushes retain
+        // the "alert" type. We select on Priority so the sender never
+        // second-guesses the dispatcher's intent.
+        request.Headers.TryAddWithoutValidation(
+            "apns-push-type",
+            envelope.Priority == NativePushPriority.Background ? "background" : "alert");
         request.Headers.TryAddWithoutValidation(
             "apns-priority",
             envelope.Priority == NativePushPriority.Background ? "5" : "10");
@@ -249,8 +257,18 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         // Wire shape: standard APS root + typed custom keys the mobile app reads to route
         // the tap / action to the correct in-app destination. Deep link is the fallback for
         // out-of-band launches; category drives which registered action buttons render.
+        //
+        // Hicks post-merge #1: a Background push (silent Resolved) MUST omit
+        // the alert dict entirely — the client SDK on iOS treats presence of
+        // `alert` on an apns-push-type=background push as a validation
+        // failure. We emit `content-available: 1` only so iOS delivers the
+        // payload to the app in the background and the client can silently
+        // dismiss its cached copy.
+        ApsAlert? alert = envelope.Priority == NativePushPriority.Background
+            ? null
+            : new ApsAlert(envelope.Title, envelope.Subtitle, envelope.Body);
         var aps = new ApsRoot(
-            new ApsAlert(envelope.Title, envelope.Subtitle, envelope.Body),
+            alert,
             envelope.Category,
             envelope.ThreadId,
             MutableContent: 1,
@@ -394,7 +412,7 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         [property: JsonPropertyName("body")] string? Body);
 
     private sealed record ApsRoot(
-        [property: JsonPropertyName("alert")] ApsAlert Alert,
+        [property: JsonPropertyName("alert")] ApsAlert? Alert,
         [property: JsonPropertyName("category")] string Category,
         [property: JsonPropertyName("thread-id")] string ThreadId,
         [property: JsonPropertyName("mutable-content")] int MutableContent,
