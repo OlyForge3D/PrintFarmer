@@ -142,13 +142,13 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             // sender loops until natural JWT expiry (up to ~55 min).
             if (string.Equals(apnsReason, "InvalidProviderToken", StringComparison.OrdinalIgnoreCase))
             {
-                InvalidateJwtCache(jwt);
+                await InvalidateJwtCacheAsync(jwt, cancellationToken);
                 return NativePushDispatchResult.Transient("invalid_provider_token");
             }
 
             if (string.Equals(apnsReason, "ExpiredProviderToken", StringComparison.OrdinalIgnoreCase))
             {
-                InvalidateJwtCache(jwt);
+                await InvalidateJwtCacheAsync(jwt, cancellationToken);
                 return NativePushDispatchResult.Transient("expired_provider_token");
             }
 
@@ -311,9 +311,16 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         _cachedSigningKey = ecdsa;
     }
 
-    private void InvalidateJwtCache(string failedJwt)
+    private async Task InvalidateJwtCacheAsync(string failedJwt, CancellationToken cancellationToken)
     {
-        _jwtLock.Wait();
+        // Vasquez v6 B2: never call SemaphoreSlim.Wait() from an async send
+        // path — under a burst of InvalidProviderToken responses that
+        // synchronously blocks a ThreadPool thread per concurrent send and can
+        // deadlock the runtime under load. WaitAsync respects the caller's
+        // cancellation token, so a shutdown signal aborts the wait cleanly
+        // without leaving the semaphore leaked (semaphore is not entered on
+        // cancellation).
+        await _jwtLock.WaitAsync(cancellationToken);
         try
         {
             // Compare-and-clear: only invalidate if the still-cached JWT is the one

@@ -117,125 +117,37 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     return;
                 }
 
-                AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
-                if (item is null)
+                // Vasquez v6 B1: isolate the entire per-owner resolution +
+                // fan-out under a scope that never swallows cancellation but
+                // continues to the next owner on any other exception. Without
+                // this a transient DB read failure for one owner (attention
+                // lookup, preferences read, token list) would abort every
+                // remaining owner in the current dispatch.
+                try
                 {
-                    // Resolved change: the source has already dropped the row so a
-                    // targeted find returns null. Skip — the SignalR event already
-                    // invalidated in-app; a native "resolved" push is best-effort.
-                    // (Snapshot-and-dispatch of resolved items is a future
-                    // enhancement; see docs/OPERATOR_NATIVE_PUSH.md rollback notes.)
-                    continue;
+                    await DispatchForOwnerAsync(
+                        userId,
+                        attentionItemId,
+                        changeKind,
+                        settings,
+                        gate,
+                        tokens,
+                        attention,
+                        db,
+                        cancellationToken);
                 }
-
-                string? category = AttentionPushCategories.CategoryFor(item.Kind);
-                if (category is null)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    continue;
+                    throw;
                 }
-
-                // Role gate — maintenance items are admin-only. FindItemAsync does not
-                // filter this by role, so the dispatcher must.
-                if (item.Kind == AttentionKind.Maintenance)
+                catch (Exception ex)
                 {
-                    bool isAdmin = await IsFarmAdminAsync(db, userId, cancellationToken);
-                    if (!isAdmin)
-                    {
-                        continue;
-                    }
-                }
-
-                // Per-user category opt-out.
-                NotificationPreferences? prefs = await db.NotificationPreferences
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-                AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(prefs?.AttentionPushCategoryPreferencesJson);
-                if (!catPrefs.IsEnabled(item.Kind))
-                {
-                    _metrics.SkippedCategoryOptOut.Add(1);
-                    continue;
-                }
-
-                // Hicks v5 H1 master gate: a persisted preferences row with
-                // EnablePushNotifications=false is the shared "no push at all"
-                // opt-out; every attention native push MUST honour it. Missing
-                // row falls back to CLR default (true) so the pre-#708 opt-in
-                // behaviour is preserved for users who never touched the
-                // preference UI. This gate runs BEFORE the per-kind check so
-                // preserved PushOn{Kind} values cannot leak past a global
-                // opt-out.
-                if (prefs is not null && !prefs.EnablePushNotifications)
-                {
-                    _metrics.SkippedCategoryOptOut.Add(1);
-                    continue;
-                }
-
-                // Hicks v4 blocker 3: the shared web preference matrix exposes
-                // per-kind push toggles (PushOnPrinterFailure / FilamentRunout /
-                // HarvestReady / MaintenanceDue / PrinterOffline) that #716 uses
-                // to opt out of native push per event type. Without gating here
-                // the dispatcher would deliver to users who explicitly disabled
-                // that row in the operator matrix. Missing prefs row falls back
-                // to CLR defaults on NotificationPreferences (push=true), which
-                // preserves the historical opt-in behaviour.
-                if (!IsPushEnabledForKind(prefs, item.Kind))
-                {
-                    _metrics.SkippedCategoryOptOut.Add(1);
-                    continue;
-                }
-
-                IReadOnlyList<DeviceToken> userTokens = await tokens.GetActiveByUserAsync(userId, cancellationToken);
-                if (userTokens.Count == 0)
-                {
-                    continue;
-                }
-
-                foreach (DeviceToken deviceToken in userTokens)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    // Third gate immediately before send: if the flag flipped since the
-                    // outer check, drop with metric.
-                    if (!gate.IsEnabled(OperatorFeature.NativePush))
-                    {
-                        _metrics.SkippedFeatureDisabled.Add(1);
-                        return;
-                    }
-
-                    string dedupeKey = string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"{userId:D}|{deviceToken.Id:D}|{attentionItemId}|{changeKind}");
-                    if (!ShouldEmit(dedupeKey, settings, DateTime.UtcNow))
-                    {
-                        _metrics.SkippedDedupe.Add(1);
-                        continue;
-                    }
-
-                    if (!TryConsumeRate(userId, settings, DateTime.UtcNow))
-                    {
-                        _metrics.SkippedRateLimit.Add(1);
-                        continue;
-                    }
-
-                    NativePushEnvelope envelope = BuildEnvelope(item, changeKind, deviceToken);
-                    _metrics.Attempted.Add(1);
-
-                    NativePushDispatchResult result;
-                    try
-                    {
-                        result = await SendWithRetriesAsync(envelope, settings, cancellationToken);
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "[NativePush] Sender threw for deviceTokenId={DeviceTokenId}.", deviceToken.Id);
-                        result = NativePushDispatchResult.Transient("sender_exception");
-                    }
-
-                    await ApplyResultAsync(tokens, deviceToken, result, settings, cancellationToken);
+                    _metrics.IsolatedOwnerFailure.Add(1);
+                    _logger.LogWarning(
+                        ex,
+                        "[NativePush] Isolated per-owner failure for userId={UserId} attentionItemId={AttentionItemId}; continuing with remaining owners.",
+                        userId,
+                        attentionItemId);
                 }
             }
         }
@@ -247,6 +159,207 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             // Delivery failures must never break the attention broadcast path.
             _logger.LogWarning(ex, "[NativePush] Dispatch failed for attentionItemId={AttentionItemId}", attentionItemId);
+        }
+    }
+
+    private async Task DispatchForOwnerAsync(
+        Guid userId,
+        string attentionItemId,
+        AttentionChangeKind changeKind,
+        NativePushSettings settings,
+        IOperatorFeatureGate gate,
+        IDeviceTokenRepository tokens,
+        IAttentionService attention,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
+        if (item is null)
+        {
+            // Resolved change: the source has already dropped the row so a
+            // targeted find returns null. Skip — the SignalR event already
+            // invalidated in-app; a native "resolved" push is best-effort.
+            // (Snapshot-and-dispatch of resolved items is a future
+            // enhancement; see docs/OPERATOR_NATIVE_PUSH.md rollback notes.)
+            return;
+        }
+
+        string? category = AttentionPushCategories.CategoryFor(item.Kind);
+        if (category is null)
+        {
+            return;
+        }
+
+        // Role gate — maintenance items are admin-only. FindItemAsync does not
+        // filter this by role, so the dispatcher must.
+        if (item.Kind == AttentionKind.Maintenance)
+        {
+            bool isAdmin = await IsFarmAdminAsync(db, userId, cancellationToken);
+            if (!isAdmin)
+            {
+                return;
+            }
+        }
+
+        // Per-user category opt-out.
+        NotificationPreferences? prefs = await db.NotificationPreferences
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(prefs?.AttentionPushCategoryPreferencesJson);
+        if (!catPrefs.IsEnabled(item.Kind))
+        {
+            _metrics.SkippedCategoryOptOut.Add(1);
+            return;
+        }
+
+        // Hicks v5 H1 master gate: a persisted preferences row with
+        // EnablePushNotifications=false is the shared "no push at all"
+        // opt-out; every attention native push MUST honour it. Missing
+        // row falls back to CLR default (true) so the pre-#708 opt-in
+        // behaviour is preserved for users who never touched the
+        // preference UI. This gate runs BEFORE the per-kind check so
+        // preserved PushOn{Kind} values cannot leak past a global
+        // opt-out.
+        if (prefs is not null && !prefs.EnablePushNotifications)
+        {
+            _metrics.SkippedCategoryOptOut.Add(1);
+            return;
+        }
+
+        // Hicks v4 blocker 3: the shared web preference matrix exposes
+        // per-kind push toggles (PushOnPrinterFailure / FilamentRunout /
+        // HarvestReady / MaintenanceDue / PrinterOffline) that #716 uses
+        // to opt out of native push per event type. Without gating here
+        // the dispatcher would deliver to users who explicitly disabled
+        // that row in the operator matrix. Missing prefs row falls back
+        // to CLR defaults on NotificationPreferences (push=true), which
+        // preserves the historical opt-in behaviour.
+        if (!IsPushEnabledForKind(prefs, item.Kind))
+        {
+            _metrics.SkippedCategoryOptOut.Add(1);
+            return;
+        }
+
+        IReadOnlyList<DeviceToken> userTokens = await tokens.GetActiveByUserAsync(userId, cancellationToken);
+        if (userTokens.Count == 0)
+        {
+            return;
+        }
+
+        foreach (DeviceToken deviceToken in userTokens)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Third gate immediately before send: if the flag flipped since
+            // the outer check, drop the rest of this owner's fan-out.
+            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            {
+                _metrics.SkippedFeatureDisabled.Add(1);
+                return;
+            }
+
+            // Vasquez v6 B1: isolate the entire per-device send + persist
+            // step so a downstream persistence throw for one token cannot
+            // cost the remaining tokens their delivery attempt. Cancellation
+            // still propagates.
+            try
+            {
+                await SendAndApplyForDeviceAsync(
+                    userId,
+                    attentionItemId,
+                    changeKind,
+                    item,
+                    deviceToken,
+                    settings,
+                    tokens,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _metrics.IsolatedDeviceFailure.Add(
+                    1,
+                    new KeyValuePair<string, object?>("stage", "device"));
+                _logger.LogWarning(
+                    ex,
+                    "[NativePush] Isolated per-device failure for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; continuing with remaining devices.",
+                    deviceToken.Id,
+                    userId,
+                    attentionItemId);
+            }
+        }
+    }
+
+    private async Task SendAndApplyForDeviceAsync(
+        Guid userId,
+        string attentionItemId,
+        AttentionChangeKind changeKind,
+        AttentionItemDto item,
+        DeviceToken deviceToken,
+        NativePushSettings settings,
+        IDeviceTokenRepository tokens,
+        CancellationToken cancellationToken)
+    {
+        string dedupeKey = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{userId:D}|{deviceToken.Id:D}|{attentionItemId}|{changeKind}");
+        if (!ShouldEmit(dedupeKey, settings, DateTime.UtcNow))
+        {
+            _metrics.SkippedDedupe.Add(1);
+            return;
+        }
+
+        if (!TryConsumeRate(userId, settings, DateTime.UtcNow))
+        {
+            _metrics.SkippedRateLimit.Add(1);
+            return;
+        }
+
+        NativePushEnvelope envelope = BuildEnvelope(item, changeKind, deviceToken);
+        _metrics.Attempted.Add(1);
+
+        NativePushDispatchResult result;
+        try
+        {
+            result = await SendWithRetriesAsync(envelope, settings, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[NativePush] Sender threw for deviceTokenId={DeviceTokenId}.", deviceToken.Id);
+            result = NativePushDispatchResult.Transient("sender_exception");
+        }
+
+        // Vasquez v6 B1: persistence of the send outcome must not be able to
+        // abort the outer fan-out. A transient DB error while recording
+        // success/failure for one token is a per-token concern, not a
+        // pipeline-wide one, so we scope it here with a targeted
+        // cancellation-preserving catch. Cancellation still propagates.
+        try
+        {
+            await ApplyResultAsync(tokens, deviceToken, result, settings, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _metrics.IsolatedDeviceFailure.Add(
+                1,
+                new KeyValuePair<string, object?>("stage", "persist"));
+            _logger.LogWarning(
+                ex,
+                "[NativePush] Failed to persist send result for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; continuing.",
+                deviceToken.Id,
+                userId,
+                attentionItemId);
         }
     }
 

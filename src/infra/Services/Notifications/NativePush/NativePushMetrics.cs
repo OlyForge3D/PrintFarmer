@@ -44,6 +44,23 @@ public sealed class NativePushMetrics : IDisposable
     /// (treated as no-op — no failure counter mutation).</summary>
     public Counter<long> SkippedNotConfigured { get; }
 
+    /// <summary>
+    /// Counter of exceptions that were safely attributable to a single device
+    /// send/persist step and therefore isolated so the fan-out continued for
+    /// remaining devices/owners. Tag <c>stage</c> distinguishes send vs persist.
+    /// Fires only for non-cancellation exceptions. Vasquez v6 B1 remediation.
+    /// </summary>
+    public Counter<long> IsolatedDeviceFailure { get; }
+
+    /// <summary>
+    /// Counter of exceptions that were safely attributable to a single owner's
+    /// resolution step (attention lookup, preference read, per-owner token
+    /// list) and therefore isolated so the fan-out continued for remaining
+    /// owners. Fires only for non-cancellation exceptions. Vasquez v6 B1
+    /// remediation.
+    /// </summary>
+    public Counter<long> IsolatedOwnerFailure { get; }
+
     /// <summary>Constructs the meter and counters.</summary>
     public NativePushMetrics()
     {
@@ -58,6 +75,8 @@ public sealed class NativePushMetrics : IDisposable
         SkippedRateLimit = _meter.CreateCounter<long>("native_push.skipped_rate_limit");
         SkippedCategoryOptOut = _meter.CreateCounter<long>("native_push.skipped_category_opt_out");
         SkippedNotConfigured = _meter.CreateCounter<long>("native_push.skipped_not_configured");
+        IsolatedDeviceFailure = _meter.CreateCounter<long>("native_push.isolated_device_failure");
+        IsolatedOwnerFailure = _meter.CreateCounter<long>("native_push.isolated_owner_failure");
     }
 
     /// <inheritdoc />

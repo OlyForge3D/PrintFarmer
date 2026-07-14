@@ -145,6 +145,22 @@ public interface INotificationService
     Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Authoritative preference-patch update. Applies <paramref name="patch"/> as a
+    /// diff over the persisted preferences row: supplied matrix rows overwrite the
+    /// corresponding four columns on the tracked entity, every omitted job/attention
+    /// row is preserved, and the four master <c>Enable{Channel}Notifications</c> flags
+    /// are derived from the final nine-row state (Vasquez v6 B3). The read/mutate/save
+    /// runs under a serializable transaction on relational providers so a concurrent
+    /// legacy PUT cannot leave the master flags in a stale-derived state (Bishop v6
+    /// hardening). Returns the persisted entity so controllers can build a response DTO
+    /// that matches the row on disk rather than the caller's transient request view.
+    /// </summary>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="patch">The preference patch to apply.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<NotificationPreferences> UpdatePreferencesAsync(Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Cleanup old notifications based on retention policy
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -462,6 +478,26 @@ public class NotificationService(
 
     public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default)
     {
+        // Bishop v6 master-flag stale-order race: same rationale as the
+        // patch overload — a legacy PUT that lands between a concurrent
+        // modern read and save can leave the master flags describing the
+        // pre-modern-save state. Wrapping under Serializable makes the
+        // read/mutate/save atomic on relational providers; InMemory
+        // fall-through remains safe for unit tests where no cross-context
+        // race exists.
+        if (dbContext.Database.IsRelational())
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            await UpdatePreferencesCoreAsync(userId, preferences, preserveAttentionFields, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        await UpdatePreferencesCoreAsync(userId, preferences, preserveAttentionFields, cancellationToken);
+    }
+
+    private async Task UpdatePreferencesCoreAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields, CancellationToken cancellationToken)
+    {
         var existing = await dbContext.NotificationPreferences
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
 
@@ -553,6 +589,200 @@ public class NotificationService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Updated notification preferences for user {UserId}", userId);
+    }
+
+    public async Task<NotificationPreferences> UpdatePreferencesAsync(Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+
+        // Vasquez v6 B3 + Bishop v6 master-flag stale-order race: the entire
+        // read/mutate/derive-master-flags/save sequence must be a single
+        // atomic step so a concurrent legacy PUT cannot land BETWEEN this
+        // request's read and save, leaving derived master flags stale. On
+        // relational providers we wrap under Serializable which forces
+        // conflict detection at commit; a losing writer retries above this
+        // layer (through the controller's normal error path). Non-relational
+        // providers (InMemory used only in unit tests) fall through without
+        // a transaction — the mutation is still single-context and no cross-
+        // context race is possible there.
+        if (dbContext.Database.IsRelational())
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            var persisted = await ApplyPatchAsync(userId, patch, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return persisted;
+        }
+
+        return await ApplyPatchAsync(userId, patch, cancellationToken);
+    }
+
+    private async Task<NotificationPreferences> ApplyPatchAsync(Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken)
+    {
+        var tracked = await dbContext.NotificationPreferences
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+
+        bool isNew = tracked is null;
+        if (tracked is null)
+        {
+            // For a brand-new user the tracked entity carries the finalized
+            // #708 defaults (attention InApp/Push=true; Email/Telegram=false;
+            // one representative default for each job row) so that any row
+            // omitted from a patch preserves a sensible starting value rather
+            // than reverting to "everything off".
+            tracked = BuildDefaultPreferences(userId);
+            tracked.Id = Guid.NewGuid().ToString();
+            tracked.CreatedAt = DateTime.UtcNow;
+            dbContext.NotificationPreferences.Add(tracked);
+        }
+
+        // Scalars always apply.
+        tracked.Frequency = patch.Frequency;
+        tracked.RetentionDays = patch.RetentionDays;
+
+        if (patch.MatrixRows is null)
+        {
+            // Legacy branch. Only the four job rows are addressed, derived
+            // from the top-level per-event toggles crossed with the four
+            // top-level per-channel toggles. Attention rows on the tracked
+            // entity are preserved untouched — this is Vasquez H2-v5's core
+            // invariant: a stale legacy PUT never clobbers a concurrent modern
+            // attention update.
+            tracked.NotifyOnStart = patch.NotifyOnStart;
+            tracked.NotifyOnCompletion = patch.NotifyOnCompletion;
+            tracked.NotifyOnFailure = patch.NotifyOnFailure;
+            tracked.NotifyOnPause = patch.NotifyOnPause;
+
+            tracked.InAppOnJobStarted = patch.EnableInAppNotifications && patch.NotifyOnStart;
+            tracked.InAppOnJobCompleted = patch.EnableInAppNotifications && patch.NotifyOnCompletion;
+
+            // Legacy contract: job-failed always stays in-app so a user can
+            // never accidentally silence critical failure surfaces.
+            tracked.InAppOnJobFailed = true;
+            tracked.InAppOnJobPaused = patch.EnableInAppNotifications && patch.NotifyOnPause;
+
+            tracked.EmailOnJobStarted = patch.EnableEmailNotifications && patch.NotifyOnStart;
+            tracked.EmailOnJobCompleted = patch.EnableEmailNotifications && patch.NotifyOnCompletion;
+            tracked.EmailOnJobFailed = patch.EnableEmailNotifications && patch.NotifyOnFailure;
+            tracked.EmailOnJobPaused = patch.EnableEmailNotifications && patch.NotifyOnPause;
+
+            tracked.PushOnJobStarted = patch.EnablePushNotifications && patch.NotifyOnStart;
+            tracked.PushOnJobCompleted = patch.EnablePushNotifications && patch.NotifyOnCompletion;
+            tracked.PushOnJobFailed = patch.EnablePushNotifications && patch.NotifyOnFailure;
+            tracked.PushOnJobPaused = patch.EnablePushNotifications && patch.NotifyOnPause;
+
+            tracked.TelegramOnJobStarted = patch.EnableTelegramNotifications && patch.NotifyOnStart;
+            tracked.TelegramOnJobCompleted = patch.EnableTelegramNotifications && patch.NotifyOnCompletion;
+            tracked.TelegramOnJobFailed = patch.EnableTelegramNotifications && patch.NotifyOnFailure;
+            tracked.TelegramOnJobPaused = patch.EnableTelegramNotifications && patch.NotifyOnPause;
+        }
+        else
+        {
+            // Modern branch. Each supplied row overwrites the four columns for
+            // that event on the tracked entity. Rows omitted from the request
+            // are simply not visited, so their persisted value is preserved.
+            // Duplicate rows for the same event are last-write-wins within
+            // this request (mirrors previous controller behavior).
+            foreach (var row in patch.MatrixRows)
+            {
+                ApplyRow(tracked, row);
+            }
+
+            // Derive the four legacy per-event toggles from the tracked job
+            // rows so downstream consumers reading NotifyOn* still see a
+            // consistent view. A job row is considered "on" if any of its
+            // four channels is enabled.
+            tracked.NotifyOnStart = tracked.InAppOnJobStarted || tracked.EmailOnJobStarted || tracked.PushOnJobStarted || tracked.TelegramOnJobStarted;
+            tracked.NotifyOnCompletion = tracked.InAppOnJobCompleted || tracked.EmailOnJobCompleted || tracked.PushOnJobCompleted || tracked.TelegramOnJobCompleted;
+            tracked.NotifyOnFailure = tracked.InAppOnJobFailed || tracked.EmailOnJobFailed || tracked.PushOnJobFailed || tracked.TelegramOnJobFailed;
+            tracked.NotifyOnPause = tracked.InAppOnJobPaused || tracked.EmailOnJobPaused || tracked.PushOnJobPaused || tracked.TelegramOnJobPaused;
+
+            // Legacy contract preservation: in-app job-failed never turns off.
+            tracked.InAppOnJobFailed = true;
+        }
+
+        // Master flags are always derived from the final nine-row tracked
+        // state — the ONLY authoritative source. Whether this call came from
+        // a legacy PUT or a modern matrix PUT, the flags describe what's
+        // actually persisted, not what the caller asked for.
+        ApplyMasterFlagsFromMatrix(tracked);
+        tracked.UpdatedAt = DateTime.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogInformation(
+            "Updated notification preferences for user {UserId} (matrix rows: {RowCount}, new row: {IsNew})",
+            userId,
+            patch.MatrixRows?.Count ?? 0,
+            isNew);
+
+        return tracked;
+    }
+
+    private static void ApplyRow(NotificationPreferences tracked, NotificationPreferencesRowPatch row)
+    {
+        switch (row.EventType)
+        {
+            case NotificationPreferenceEvent.JobStarted:
+                tracked.InAppOnJobStarted = row.InApp;
+                tracked.EmailOnJobStarted = row.Email;
+                tracked.PushOnJobStarted = row.Push;
+                tracked.TelegramOnJobStarted = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.JobCompleted:
+                tracked.InAppOnJobCompleted = row.InApp;
+                tracked.EmailOnJobCompleted = row.Email;
+                tracked.PushOnJobCompleted = row.Push;
+                tracked.TelegramOnJobCompleted = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.JobFailed:
+                // Legacy contract: in-app for job-failed is pinned true. All
+                // three other channels are freely toggled.
+                tracked.InAppOnJobFailed = true;
+                tracked.EmailOnJobFailed = row.Email;
+                tracked.PushOnJobFailed = row.Push;
+                tracked.TelegramOnJobFailed = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.JobPaused:
+                tracked.InAppOnJobPaused = row.InApp;
+                tracked.EmailOnJobPaused = row.Email;
+                tracked.PushOnJobPaused = row.Push;
+                tracked.TelegramOnJobPaused = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.PrinterFailure:
+                tracked.InAppOnPrinterFailure = row.InApp;
+                tracked.EmailOnPrinterFailure = row.Email;
+                tracked.PushOnPrinterFailure = row.Push;
+                tracked.TelegramOnPrinterFailure = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.FilamentRunout:
+                tracked.InAppOnFilamentRunout = row.InApp;
+                tracked.EmailOnFilamentRunout = row.Email;
+                tracked.PushOnFilamentRunout = row.Push;
+                tracked.TelegramOnFilamentRunout = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.HarvestReady:
+                tracked.InAppOnHarvestReady = row.InApp;
+                tracked.EmailOnHarvestReady = row.Email;
+                tracked.PushOnHarvestReady = row.Push;
+                tracked.TelegramOnHarvestReady = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.MaintenanceDue:
+                tracked.InAppOnMaintenanceDue = row.InApp;
+                tracked.EmailOnMaintenanceDue = row.Email;
+                tracked.PushOnMaintenanceDue = row.Push;
+                tracked.TelegramOnMaintenanceDue = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.PrinterOffline:
+                tracked.InAppOnPrinterOffline = row.InApp;
+                tracked.EmailOnPrinterOffline = row.Email;
+                tracked.PushOnPrinterOffline = row.Push;
+                tracked.TelegramOnPrinterOffline = row.Telegram;
+                break;
+            default:
+                // Unknown enum values cannot reach here — the controller-side
+                // JSON binder rejects them with 400 before the service is
+                // called. Defensive throw keeps future contract changes noisy.
+                throw new ArgumentOutOfRangeException(nameof(row), row.EventType, "Unknown notification preference event.");
+        }
     }
 
     private static void ApplyMasterFlagsFromMatrix(NotificationPreferences prefs)

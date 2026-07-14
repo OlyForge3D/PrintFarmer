@@ -128,6 +128,238 @@ public sealed class NativePushDispatcherTests
             Times.AtLeastOnce);
     }
 
+    [Fact]
+    public async Task DispatchAsync_PerKindPushOffButMasterOn_DoesNotCallSender()
+    {
+        // Bishop v6 hardening: EnablePushNotifications=true crossed with
+        // PushOnPrinterFailure=false must still short-circuit before the
+        // sender is touched. This closes the missing symmetric coverage for
+        // the per-kind gate (Hicks v5 H1 covers only the master gate).
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Failure);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterFailure = false,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        sender.Verify(
+            s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_PersistFailureForOneToken_ContinuesRemainingTokensAndOwners()
+    {
+        // Vasquez v6 B1 regression: when persisting the send result for the
+        // first token throws (RecordSuccessAsync), the remaining tokens for
+        // the same owner AND the other owner's tokens must still be
+        // dispatched. Before the fix a single-line try/catch wrapped the
+        // entire fan-out and any per-token persistence failure aborted every
+        // remaining device. This regression exercises two owners with two
+        // tokens each, and forces the first-token persist to throw.
+        var ownerA = Guid.NewGuid();
+        var ownerB = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        foreach (Guid u in new[] { ownerA, ownerB })
+        {
+            db.NotificationPreferences.Add(new NotificationPreferences
+            {
+                Id = Guid.NewGuid().ToString(),
+                UserId = u,
+                EnablePushNotifications = true,
+                PushOnPrinterOffline = true,
+                AttentionPushCategoryPreferencesJson = null,
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        // Attention service resolves the item for BOTH owners (attention is
+        // per-user in the current model but the same synthesized item is fine
+        // for our purposes — the dispatcher will call FindItemAsync once per
+        // owner).
+        var attention = new Mock<IAttentionService>();
+        attention
+            .Setup(s => s.FindItemAsync(ownerA, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+        attention
+            .Setup(s => s.FindItemAsync(ownerB, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+
+        // Two tokens for owner A, two for owner B.
+        DeviceToken ownerAToken1 = MakeToken(ownerA, "install-a1");
+        DeviceToken ownerAToken2 = MakeToken(ownerA, "install-a2");
+        DeviceToken ownerBToken1 = MakeToken(ownerB, "install-b1");
+        DeviceToken ownerBToken2 = MakeToken(ownerB, "install-b2");
+
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens
+            .Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid> { ownerA, ownerB });
+        tokens
+            .Setup(r => r.GetActiveByUserAsync(ownerA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { ownerAToken1, ownerAToken2 });
+        tokens
+            .Setup(r => r.GetActiveByUserAsync(ownerB, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { ownerBToken1, ownerBToken2 });
+
+        // The first token's persistence throws. Every subsequent persistence
+        // succeeds. This isolates the failure precisely to the ApplyResultAsync
+        // step for exactly one token — mirroring an operator database blip.
+        int recordSuccessCallCount = 0;
+        tokens
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, DateTime, CancellationToken>((id, ts, ct) =>
+            {
+                int callIndex = System.Threading.Interlocked.Increment(ref recordSuccessCallCount);
+                if (callIndex == 1)
+                {
+                    return Task.FromException(new InvalidOperationException("simulated persist failure for first token"));
+                }
+
+                return Task.CompletedTask;
+            });
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+
+        int sendCallCount = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((env, ct) =>
+            {
+                System.Threading.Interlocked.Increment(ref sendCallCount);
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        // Every token must have received a send attempt — 4 total.
+        sendCallCount.Should().Be(4, "the first token's persist failure must not abort remaining tokens or owners");
+        recordSuccessCallCount.Should().Be(4, "every device should still be persisted after the isolated failure");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_SenderFailureForOneOwner_ContinuesOtherOwners()
+    {
+        // Vasquez v6 B1 regression: if the sender itself throws unexpectedly
+        // for the first owner's token, the second owner must still receive
+        // their fan-out. Cancellation is not signalled — only a random
+        // exception (simulated as InvalidOperationException) inside the
+        // per-token send scope.
+        var ownerA = Guid.NewGuid();
+        var ownerB = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        foreach (Guid u in new[] { ownerA, ownerB })
+        {
+            db.NotificationPreferences.Add(new NotificationPreferences
+            {
+                Id = Guid.NewGuid().ToString(),
+                UserId = u,
+                EnablePushNotifications = true,
+                PushOnPrinterOffline = true,
+                AttentionPushCategoryPreferencesJson = null,
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        var attention = new Mock<IAttentionService>();
+        attention
+            .Setup(s => s.FindItemAsync(It.IsAny<Guid>(), item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+
+        DeviceToken ownerAToken = MakeToken(ownerA, "install-a");
+        DeviceToken ownerBToken = MakeToken(ownerB, "install-b");
+
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens
+            .Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid> { ownerA, ownerB });
+        tokens
+            .Setup(r => r.GetActiveByUserAsync(ownerA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { ownerAToken });
+        tokens
+            .Setup(r => r.GetActiveByUserAsync(ownerB, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { ownerBToken });
+        tokens
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+
+        int totalSendAttempts = 0;
+        int ownerBSendAttempts = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((env, ct) =>
+            {
+                System.Threading.Interlocked.Increment(ref totalSendAttempts);
+                if (string.Equals(env.Token, ownerAToken.Token, StringComparison.Ordinal))
+                {
+                    // Sender throws for owner A only. The dispatcher must
+                    // catch this at the per-device scope and continue on to
+                    // owner B, which must still be able to deliver.
+                    throw new InvalidOperationException("simulated sender failure for owner A");
+                }
+
+                System.Threading.Interlocked.Increment(ref ownerBSendAttempts);
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        // Owner A's send was attempted (and threw). SendWithRetriesAsync
+        // catches the sender throw and re-shapes it into a transient result,
+        // so the outer per-device scope may still complete normally. What
+        // this test is really pinning is that owner B's send was ALSO
+        // attempted — which proves owner A's failure did not abort the loop.
+        totalSendAttempts.Should().BeGreaterThanOrEqualTo(2, "owner A and owner B both need a send attempt");
+        ownerBSendAttempts.Should().BeGreaterThanOrEqualTo(1, "owner A's failure must not abort owner B");
+    }
+
+    private static DeviceToken MakeToken(Guid userId, string installationId)
+    {
+        return new DeviceToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            InstallationId = installationId,
+            Token = installationId + "-token".PadRight(64, 'A'),
+            Platform = "ios",
+            Environment = "development",
+            IsActive = true,
+        };
+    }
+
     private static NativePushDispatcher Build(INativePushSender sender, IServiceScopeFactory scopes, NativePushMode mode)
     {
         IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(new NativePushSettings { Mode = mode });

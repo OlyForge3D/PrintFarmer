@@ -292,34 +292,19 @@ public class NotificationsController(INotificationService notificationService) :
                 return BadRequest(new { error = "Request body cannot be empty" });
             }
 
-            // Issue #708 H2-v5: attention-row preservation MUST happen inside
-            // NotificationService's single tracked read/write unit so a
-            // concurrent newer-client attention update cannot be overwritten
-            // by a stale pre-read snapshot. The controller no longer touches
-            // the persisted row up-front; it only builds the transient
-            // request-view of preferences and hands the service a signal for
-            // whether the incoming matrix addressed any attention row. The
-            // service then either overwrites the 20 attention columns or
-            // leaves them untouched.
-            var preferences = new NotificationPreferences
-            {
-                UserId = userId,
-                EnableEmailNotifications = request.EnableEmailNotifications,
-                EnablePushNotifications = request.EnablePushNotifications,
-                EnableInAppNotifications = request.EnableInAppNotifications,
-                EnableTelegramNotifications = request.EnableTelegramNotifications,
-                NotifyOnCompletion = request.NotifyOnCompletion,
-                NotifyOnFailure = request.NotifyOnFailure,
-                NotifyOnStart = request.NotifyOnStart,
-                NotifyOnPause = request.NotifyOnPause,
-                Frequency = request.Frequency,
-                RetentionDays = request.RetentionDays ?? 30,
-            };
-
-            ApplyEventChannelPreferences(preferences, request);
-            bool preserveAttentionFields = !RequestMatrixIncludesAttentionRow(request);
-            await notificationService.UpdatePreferencesAsync(userId, preferences, preserveAttentionFields, cancellationToken);
-            return Ok(ToDto(preferences));
+            // Issue #708 H3-v6 (Vasquez v6 B3): matrix application is now
+            // service-owned patch semantics. The controller builds a patch
+            // object (scalars + optional row list) and hands it to the
+            // service, which applies it over the single tracked persisted
+            // row. Omitted rows are preserved — the previous controller-side
+            // "reset all attention rows to defaults when any matrix row is
+            // present" behavior would silently revert omitted rows on partial
+            // modern PUTs. The response DTO is built from the persisted
+            // tracked entity the service returns, not from a transient
+            // controller-assembled object.
+            NotificationPreferencesUpdate patch = BuildPreferencesPatch(request);
+            NotificationPreferences persisted = await notificationService.UpdatePreferencesAsync(userId, patch, cancellationToken);
+            return Ok(ToDto(persisted));
         }
         catch (InvalidOperationException)
         {
@@ -593,6 +578,7 @@ public class NotificationsController(INotificationService notificationService) :
     /// </summary>
     [HttpPut("attention-push-preferences")]
     [ProducesResponseType(typeof(AttentionPushPreferencesDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AttentionPushPreferencesDto>> UpdateAttentionPushPreferencesAsync(
         [FromBody] AttentionPushPreferencesDto request,
@@ -605,6 +591,46 @@ public class NotificationsController(INotificationService notificationService) :
         if (!operatorFeatures.IsEnabled(OperatorFeature.NativePush))
         {
             return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
+        }
+
+        // Bishop v6 hardening: attention category keys are attacker-controlled
+        // free-form strings persisted verbatim into a JSON column. Without a
+        // bound the payload can grow unbounded (per-request and per-user over
+        // time) and can push the persisted column past reasonable row size.
+        // Both limits are deliberately generous — the finalized #708 category
+        // universe currently has fewer than 20 kinds, and any real
+        // AttentionKind key is well under 64 characters — so no real client is
+        // rejected. Forward compatibility with as-yet-unadded categories is
+        // preserved because we only bound cardinality/length of the incoming
+        // patch; existing persisted keys are read back unchanged.
+        if (request?.Categories is { Count: > 0 } incoming)
+        {
+            if (incoming.Count > MaxAttentionCategoryKeysPerRequest)
+            {
+                return Problem(
+                    detail: $"At most {MaxAttentionCategoryKeysPerRequest} attention category keys may be updated per request.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category batch too large");
+            }
+
+            foreach (string key in incoming.Keys)
+            {
+                if (string.IsNullOrEmpty(key))
+                {
+                    return Problem(
+                        detail: "Attention category keys must not be empty.",
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "Invalid attention category key");
+                }
+
+                if (key.Length > MaxAttentionCategoryKeyLength)
+                {
+                    return Problem(
+                        detail: $"Attention category keys must be {MaxAttentionCategoryKeyLength} characters or fewer.",
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "Invalid attention category key");
+                }
+            }
         }
 
         try
@@ -638,6 +664,21 @@ public class NotificationsController(INotificationService notificationService) :
         }
     }
 
+    /// <summary>
+    /// Maximum number of attention-category keys accepted in a single
+    /// <c>PUT /api/notifications/attention-push-preferences</c> request. The
+    /// bound protects against unbounded attacker-controlled growth of the
+    /// persisted JSON column while comfortably exceeding the count of real
+    /// AttentionKind categories in the finalized #708 contract (Bishop v6).
+    /// </summary>
+    private const int MaxAttentionCategoryKeysPerRequest = 32;
+
+    /// <summary>
+    /// Maximum length in characters of each attention-category key in a single
+    /// update request. Real AttentionKind enum names are well under this bound.
+    /// </summary>
+    private const int MaxAttentionCategoryKeyLength = 64;
+
     private static NotificationPreferencesDto ToDto(NotificationPreferences preferences)
     {
         return new NotificationPreferencesDto
@@ -659,12 +700,63 @@ public class NotificationsController(INotificationService notificationService) :
 
     private static NotificationPreferences CreateDefaultPreferences(Guid userId)
     {
-        var defaults = new NotificationPreferences
+        // Materialize the same nine-row shape a first-visit GET would return
+        // if the user actually had a persisted row. Job rows follow the
+        // legacy default (start off, others on for in-app + push; email + telegram
+        // conservative), and attention rows follow the #708 finalized defaults
+        // (InApp/Push=true, Email/Telegram=false). Kept in-controller because
+        // it is purely a response-shaping concern for the no-row-yet case; no
+        // persistence occurs on this path.
+        return new NotificationPreferences
         {
-            UserId = userId
+            UserId = userId,
+            EnableEmailNotifications = false,
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
+            EnableTelegramNotifications = false,
+            NotifyOnStart = false,
+            NotifyOnCompletion = true,
+            NotifyOnFailure = true,
+            NotifyOnPause = true,
+            InAppOnJobStarted = false,
+            InAppOnJobCompleted = true,
+            InAppOnJobFailed = true,
+            InAppOnJobPaused = true,
+            EmailOnJobStarted = false,
+            EmailOnJobCompleted = false,
+            EmailOnJobFailed = false,
+            EmailOnJobPaused = false,
+            PushOnJobStarted = false,
+            PushOnJobCompleted = true,
+            PushOnJobFailed = true,
+            PushOnJobPaused = true,
+            TelegramOnJobStarted = false,
+            TelegramOnJobCompleted = false,
+            TelegramOnJobFailed = false,
+            TelegramOnJobPaused = false,
+            InAppOnPrinterFailure = true,
+            EmailOnPrinterFailure = false,
+            PushOnPrinterFailure = true,
+            TelegramOnPrinterFailure = false,
+            InAppOnFilamentRunout = true,
+            EmailOnFilamentRunout = false,
+            PushOnFilamentRunout = true,
+            TelegramOnFilamentRunout = false,
+            InAppOnHarvestReady = true,
+            EmailOnHarvestReady = false,
+            PushOnHarvestReady = true,
+            TelegramOnHarvestReady = false,
+            InAppOnMaintenanceDue = true,
+            EmailOnMaintenanceDue = false,
+            PushOnMaintenanceDue = true,
+            TelegramOnMaintenanceDue = false,
+            InAppOnPrinterOffline = true,
+            EmailOnPrinterOffline = false,
+            PushOnPrinterOffline = true,
+            TelegramOnPrinterOffline = false,
+            Frequency = NotificationFrequency.RealTime,
+            RetentionDays = 30,
         };
-        ApplyEventChannelPreferences(defaults, new UpdateNotificationPreferencesRequest());
-        return defaults;
     }
 
     private static List<NotificationEventChannelPreferenceDto> BuildEventChannelPreferences(NotificationPreferences preferences)
@@ -746,186 +838,69 @@ public class NotificationsController(INotificationService notificationService) :
         };
     }
 
-    private static void ApplyEventChannelPreferences(NotificationPreferences preferences, UpdateNotificationPreferencesRequest request)
+    private static NotificationPreferencesUpdate BuildPreferencesPatch(UpdateNotificationPreferencesRequest request)
     {
         List<NotificationEventChannelPreferenceDto>? matrix = request.EventChannelPreferences;
-        if (matrix is null || matrix.Count == 0)
+        IReadOnlyList<NotificationPreferencesRowPatch>? rows = null;
+
+        if (matrix is not null && matrix.Count > 0)
         {
-            preferences.InAppOnJobStarted = request.EnableInAppNotifications && request.NotifyOnStart;
-            preferences.InAppOnJobCompleted = request.EnableInAppNotifications && request.NotifyOnCompletion;
-            preferences.InAppOnJobFailed = true;
-            preferences.InAppOnJobPaused = request.EnableInAppNotifications && request.NotifyOnPause;
-            preferences.EmailOnJobStarted = request.EnableEmailNotifications && request.NotifyOnStart;
-            preferences.EmailOnJobCompleted = request.EnableEmailNotifications && request.NotifyOnCompletion;
-            preferences.EmailOnJobFailed = request.EnableEmailNotifications && request.NotifyOnFailure;
-            preferences.EmailOnJobPaused = request.EnableEmailNotifications && request.NotifyOnPause;
-            preferences.PushOnJobStarted = request.EnablePushNotifications && request.NotifyOnStart;
-            preferences.PushOnJobCompleted = request.EnablePushNotifications && request.NotifyOnCompletion;
-            preferences.PushOnJobFailed = request.EnablePushNotifications && request.NotifyOnFailure;
-            preferences.PushOnJobPaused = request.EnablePushNotifications && request.NotifyOnPause;
-            preferences.TelegramOnJobStarted = request.EnableTelegramNotifications && request.NotifyOnStart;
-            preferences.TelegramOnJobCompleted = request.EnableTelegramNotifications && request.NotifyOnCompletion;
-            preferences.TelegramOnJobFailed = request.EnableTelegramNotifications && request.NotifyOnFailure;
-            preferences.TelegramOnJobPaused = request.EnableTelegramNotifications && request.NotifyOnPause;
-            return;
-        }
-
-        preferences.InAppOnJobStarted = false;
-        preferences.InAppOnJobCompleted = true;
-        preferences.InAppOnJobFailed = true;
-        preferences.InAppOnJobPaused = true;
-        preferences.EmailOnJobStarted = false;
-        preferences.EmailOnJobCompleted = true;
-        preferences.EmailOnJobFailed = true;
-        preferences.EmailOnJobPaused = true;
-        preferences.PushOnJobStarted = false;
-        preferences.PushOnJobCompleted = true;
-        preferences.PushOnJobFailed = true;
-        preferences.PushOnJobPaused = true;
-        preferences.TelegramOnJobStarted = false;
-        preferences.TelegramOnJobCompleted = false;
-        preferences.TelegramOnJobFailed = false;
-        preferences.TelegramOnJobPaused = false;
-
-        // Attention-row toggles are only reset when the incoming matrix
-        // actually addresses attention rows. A legacy client that knows only
-        // the four job rows must NOT clobber attention preferences a newer
-        // client saved earlier — this preserves user intent across mixed
-        // client versions (Vasquez v3 B1). When the matrix contains any
-        // attention token, we reset every attention row to opt-in-safe
-        // defaults first so that omitted attention rows land at defaults
-        // rather than stale values, then per-row overrides in the loop below
-        // apply the sender's actual choices.
-        bool matrixIncludesAttentionRow = RequestMatrixIncludesAttentionRow(request);
-
-        if (matrixIncludesAttentionRow)
-        {
-            preferences.InAppOnPrinterFailure = true;
-            preferences.EmailOnPrinterFailure = false;
-            preferences.PushOnPrinterFailure = true;
-            preferences.TelegramOnPrinterFailure = false;
-            preferences.InAppOnFilamentRunout = true;
-            preferences.EmailOnFilamentRunout = false;
-            preferences.PushOnFilamentRunout = true;
-            preferences.TelegramOnFilamentRunout = false;
-            preferences.InAppOnHarvestReady = true;
-            preferences.EmailOnHarvestReady = false;
-            preferences.PushOnHarvestReady = true;
-            preferences.TelegramOnHarvestReady = false;
-            preferences.InAppOnMaintenanceDue = true;
-            preferences.EmailOnMaintenanceDue = false;
-            preferences.PushOnMaintenanceDue = true;
-            preferences.TelegramOnMaintenanceDue = false;
-            preferences.InAppOnPrinterOffline = true;
-            preferences.EmailOnPrinterOffline = false;
-            preferences.PushOnPrinterOffline = true;
-            preferences.TelegramOnPrinterOffline = false;
-        }
-
-        foreach (NotificationEventChannelPreferenceDto item in matrix)
-        {
-            if (item is null)
+            // Vasquez v6 B3: translate the wire matrix rows into service-layer
+            // patch rows without ever synthesizing rows for events the caller
+            // did not send. Null entries in the list are ignored — this
+            // matches the previous controller behavior and avoids reflecting
+            // JSON parser artifacts into the service.
+            var buffered = new List<NotificationPreferencesRowPatch>(matrix.Count);
+            foreach (NotificationEventChannelPreferenceDto? item in matrix)
             {
-                continue;
+                if (item is null)
+                {
+                    continue;
+                }
+
+                buffered.Add(new NotificationPreferencesRowPatch(
+                    MapEventType(item.EventType),
+                    item.InApp,
+                    item.Email,
+                    item.Push,
+                    item.Telegram));
             }
 
-            switch (item.EventType)
-            {
-                case NotificationPreferenceEventType.JobStarted:
-                    preferences.InAppOnJobStarted = item.InApp;
-                    preferences.EmailOnJobStarted = item.Email;
-                    preferences.PushOnJobStarted = item.Push;
-                    preferences.TelegramOnJobStarted = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.JobCompleted:
-                    preferences.InAppOnJobCompleted = item.InApp;
-                    preferences.EmailOnJobCompleted = item.Email;
-                    preferences.PushOnJobCompleted = item.Push;
-                    preferences.TelegramOnJobCompleted = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.JobFailed:
-                    preferences.InAppOnJobFailed = true;
-                    preferences.EmailOnJobFailed = item.Email;
-                    preferences.PushOnJobFailed = item.Push;
-                    preferences.TelegramOnJobFailed = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.JobPaused:
-                    preferences.InAppOnJobPaused = item.InApp;
-                    preferences.EmailOnJobPaused = item.Email;
-                    preferences.PushOnJobPaused = item.Push;
-                    preferences.TelegramOnJobPaused = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.PrinterFailure:
-                    preferences.InAppOnPrinterFailure = item.InApp;
-                    preferences.EmailOnPrinterFailure = item.Email;
-                    preferences.PushOnPrinterFailure = item.Push;
-                    preferences.TelegramOnPrinterFailure = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.FilamentRunout:
-                    preferences.InAppOnFilamentRunout = item.InApp;
-                    preferences.EmailOnFilamentRunout = item.Email;
-                    preferences.PushOnFilamentRunout = item.Push;
-                    preferences.TelegramOnFilamentRunout = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.HarvestReady:
-                    preferences.InAppOnHarvestReady = item.InApp;
-                    preferences.EmailOnHarvestReady = item.Email;
-                    preferences.PushOnHarvestReady = item.Push;
-                    preferences.TelegramOnHarvestReady = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.MaintenanceDue:
-                    preferences.InAppOnMaintenanceDue = item.InApp;
-                    preferences.EmailOnMaintenanceDue = item.Email;
-                    preferences.PushOnMaintenanceDue = item.Push;
-                    preferences.TelegramOnMaintenanceDue = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.PrinterOffline:
-                    preferences.InAppOnPrinterOffline = item.InApp;
-                    preferences.EmailOnPrinterOffline = item.Email;
-                    preferences.PushOnPrinterOffline = item.Push;
-                    preferences.TelegramOnPrinterOffline = item.Telegram;
-                    break;
-            }
+            rows = buffered;
         }
 
-        // Master flags (EnableInAppNotifications, EnableEmailNotifications,
-        // EnablePushNotifications, EnableTelegramNotifications) are derived
-        // in NotificationService from the OR of all nine event rows on the
-        // tracked entity (issue #708 H1-v5). Deriving them here would be
-        // wrong for legacy PUTs because the controller does not see the
-        // persisted attention rows any more.
-        preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted || preferences.TelegramOnJobStarted;
-        preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted || preferences.TelegramOnJobCompleted;
-        preferences.NotifyOnFailure = true;
-        preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused || preferences.TelegramOnJobPaused;
+        return new NotificationPreferencesUpdate(
+            request.EnableEmailNotifications,
+            request.EnablePushNotifications,
+            request.EnableInAppNotifications,
+            request.EnableTelegramNotifications,
+            request.NotifyOnStart,
+            request.NotifyOnCompletion,
+            request.NotifyOnFailure,
+            request.NotifyOnPause,
+            request.Frequency,
+            request.RetentionDays ?? 30,
+            rows);
     }
 
-    private static bool RequestMatrixIncludesAttentionRow(UpdateNotificationPreferencesRequest request)
+    private static NotificationPreferenceEvent MapEventType(NotificationPreferenceEventType wireEvent)
     {
-        List<NotificationEventChannelPreferenceDto>? matrix = request.EventChannelPreferences;
-        if (matrix is null || matrix.Count == 0)
+        // Kept as an explicit switch so the compiler catches any future wire
+        // enum addition — an unmapped value must not silently degrade into a
+        // default row.
+        return wireEvent switch
         {
-            return false;
-        }
-
-        foreach (NotificationEventChannelPreferenceDto item in matrix)
-        {
-            if (item is null)
-            {
-                continue;
-            }
-
-            if (item.EventType is NotificationPreferenceEventType.PrinterFailure
-                or NotificationPreferenceEventType.FilamentRunout
-                or NotificationPreferenceEventType.HarvestReady
-                or NotificationPreferenceEventType.MaintenanceDue
-                or NotificationPreferenceEventType.PrinterOffline)
-            {
-                return true;
-            }
-        }
-
-        return false;
+            NotificationPreferenceEventType.JobStarted => NotificationPreferenceEvent.JobStarted,
+            NotificationPreferenceEventType.JobCompleted => NotificationPreferenceEvent.JobCompleted,
+            NotificationPreferenceEventType.JobFailed => NotificationPreferenceEvent.JobFailed,
+            NotificationPreferenceEventType.JobPaused => NotificationPreferenceEvent.JobPaused,
+            NotificationPreferenceEventType.PrinterFailure => NotificationPreferenceEvent.PrinterFailure,
+            NotificationPreferenceEventType.FilamentRunout => NotificationPreferenceEvent.FilamentRunout,
+            NotificationPreferenceEventType.HarvestReady => NotificationPreferenceEvent.HarvestReady,
+            NotificationPreferenceEventType.MaintenanceDue => NotificationPreferenceEvent.MaintenanceDue,
+            NotificationPreferenceEventType.PrinterOffline => NotificationPreferenceEvent.PrinterOffline,
+            _ => throw new ArgumentOutOfRangeException(nameof(wireEvent), wireEvent, "Unknown notification preference event type."),
+        };
     }
 
     /// <summary>

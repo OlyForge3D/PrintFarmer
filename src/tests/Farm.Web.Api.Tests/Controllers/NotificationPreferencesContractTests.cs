@@ -232,17 +232,26 @@ public sealed class NotificationPreferencesContractTests
     }
 
     [Fact]
-    public void LegacyClientMatrix_DoesNotClobberAttentionPreferences()
+    public async System.Threading.Tasks.Task LegacyClientMatrix_DoesNotClobberAttentionPreferences()
     {
-        // Vasquez v3 B1 regression: a legacy mobile client that only knows
-        // about the 4 job rows must not wipe out the attention preferences a
-        // newer client saved. We simulate an existing user whose attention
-        // rows are all OFF (they deliberately opted out), then send an
-        // UpdateNotificationPreferencesRequest whose matrix contains only
-        // JobStarted+JobCompleted, and assert the attention rows survive.
-        var prefs = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        // Vasquez v3 B1 regression, now enforced through the full controller
+        // path against the patch-oriented service API. A legacy mobile client
+        // that only knows the 4 job rows must not wipe attention preferences a
+        // newer client saved. Seed a user whose attention rows are all OFF
+        // (deliberate opt-out), send a matrix with only two job rows, then
+        // re-query the DB and assert attention rows survived.
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        System.Guid userId = System.Guid.NewGuid();
+        var existing = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
         {
-            UserId = System.Guid.NewGuid(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
             InAppOnPrinterFailure = false,
             EmailOnPrinterFailure = false,
             PushOnPrinterFailure = false,
@@ -256,8 +265,15 @@ public sealed class NotificationPreferencesContractTests
             InAppOnPrinterOffline = false,
             PushOnPrinterOffline = false,
         };
+        dbContext.NotificationPreferences.Add(existing);
+        await dbContext.SaveChangesAsync();
+
+        NotificationsController controller = BuildController(dbContext, userId);
+
         var request = new UpdateNotificationPreferencesRequest
         {
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
             EventChannelPreferences = new System.Collections.Generic.List<NotificationEventChannelPreferenceDto>
             {
                 new()
@@ -279,48 +295,97 @@ public sealed class NotificationPreferencesContractTests
             },
         };
 
-        // Invoke the private helper via reflection — we specifically want to
-        // pin the exact matrix-legacy-detection code path this test exists to
-        // guard, not the surrounding controller/service graph.
-        System.Reflection.MethodInfo apply = typeof(NotificationsController)
-            .GetMethod(
-                "ApplyEventChannelPreferences",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        apply.Invoke(null, new object[] { prefs, request });
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+        var ok = result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.OkObjectResult>().Subject;
+        ok.StatusCode.Should().Be(200);
 
-        // Attention rows must remain OFF — the legacy matrix didn't address them.
-        prefs.InAppOnPrinterFailure.Should().BeFalse("legacy matrix did not address PrinterFailure");
-        prefs.PushOnPrinterFailure.Should().BeFalse();
-        prefs.InAppOnFilamentRunout.Should().BeFalse();
-        prefs.PushOnFilamentRunout.Should().BeFalse();
-        prefs.InAppOnHarvestReady.Should().BeFalse();
-        prefs.PushOnHarvestReady.Should().BeFalse();
-        prefs.InAppOnMaintenanceDue.Should().BeFalse();
-        prefs.PushOnMaintenanceDue.Should().BeFalse();
-        prefs.InAppOnPrinterOffline.Should().BeFalse();
-        prefs.PushOnPrinterOffline.Should().BeFalse();
+        // Attention rows must remain OFF — the legacy matrix didn't address them,
+        // so the patch semantics preserve the persisted values.
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.InAppOnPrinterFailure.Should().BeFalse("legacy matrix did not address PrinterFailure");
+        persisted.PushOnPrinterFailure.Should().BeFalse();
+        persisted.InAppOnFilamentRunout.Should().BeFalse();
+        persisted.PushOnFilamentRunout.Should().BeFalse();
+        persisted.InAppOnHarvestReady.Should().BeFalse();
+        persisted.PushOnHarvestReady.Should().BeFalse();
+        persisted.InAppOnMaintenanceDue.Should().BeFalse();
+        persisted.PushOnMaintenanceDue.Should().BeFalse();
+        persisted.InAppOnPrinterOffline.Should().BeFalse();
+        persisted.PushOnPrinterOffline.Should().BeFalse();
 
-        // Job rows must have been applied.
-        prefs.InAppOnJobStarted.Should().BeTrue();
-        prefs.InAppOnJobCompleted.Should().BeTrue();
+        // Job rows were applied.
+        persisted.InAppOnJobStarted.Should().BeTrue();
+        persisted.InAppOnJobCompleted.Should().BeTrue();
     }
 
     [Fact]
-    public void NewClientMatrixWithAttentionRow_ResetsAndAppliesAttentionOverrides()
+    public async System.Threading.Tasks.Task PartialModernMatrix_OnlySuppliedRowsAreApplied_OmittedRowsPreserved()
     {
-        // Complementary to the legacy-preservation test: when the matrix DOES
-        // contain at least one attention row, the reset-to-defaults block
-        // fires so omitted attention rows land at safe defaults rather than
-        // whatever stale state was in the DB.
-        var prefs = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        // Vasquez v6 B3 regression: a partial modern PUT that carries one
+        // attention row must apply ONLY that row to the tracked entity and
+        // preserve every omitted job and attention row's persisted value.
+        // Previous behavior reset all 20 attention columns AND all 16 job
+        // columns to hard-coded defaults when any matrix row was present,
+        // silently reverting omitted user choices. This test exercises the
+        // full controller path against a real in-memory database.
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        System.Guid userId = System.Guid.NewGuid();
+        var existing = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
         {
-            UserId = System.Guid.NewGuid(),
-            InAppOnPrinterFailure = false, // stale: newer client's reset must fix this to true
+            UserId = userId,
+
+            // Non-default persisted values for attention rows the request does
+            // NOT address — every one of these must survive the PUT.
+            InAppOnPrinterFailure = false,
+            EmailOnPrinterFailure = true,
             PushOnPrinterFailure = false,
-            InAppOnHarvestReady = true,    // matrix will override this to false
+            TelegramOnPrinterFailure = true,
+            InAppOnFilamentRunout = false,
+            EmailOnFilamentRunout = true,
+            PushOnFilamentRunout = false,
+            TelegramOnFilamentRunout = true,
+            InAppOnMaintenanceDue = false,
+            EmailOnMaintenanceDue = true,
+            PushOnMaintenanceDue = false,
+            TelegramOnMaintenanceDue = true,
+            InAppOnPrinterOffline = false,
+            EmailOnPrinterOffline = true,
+            PushOnPrinterOffline = false,
+            TelegramOnPrinterOffline = true,
+
+            // Non-default persisted values for the three job rows the request
+            // does NOT address.
+            InAppOnJobStarted = true,
+            EmailOnJobStarted = true,
+            PushOnJobStarted = true,
+            TelegramOnJobStarted = true,
+            InAppOnJobFailed = true,
+            EmailOnJobFailed = true,
+            PushOnJobFailed = true,
+            TelegramOnJobFailed = true,
+            InAppOnJobPaused = true,
+            EmailOnJobPaused = true,
+            PushOnJobPaused = true,
+            TelegramOnJobPaused = true,
         };
+        dbContext.NotificationPreferences.Add(existing);
+        await dbContext.SaveChangesAsync();
+
+        NotificationsController controller = BuildController(dbContext, userId);
+
+        // Modern client sends exactly ONE attention row and ONE job row.
         var request = new UpdateNotificationPreferencesRequest
         {
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
             EventChannelPreferences = new System.Collections.Generic.List<NotificationEventChannelPreferenceDto>
             {
                 new()
@@ -331,23 +396,286 @@ public sealed class NotificationPreferencesContractTests
                     Push = false,
                     Telegram = false,
                 },
+                new()
+                {
+                    EventType = NotificationPreferenceEventType.JobCompleted,
+                    InApp = false,
+                    Email = false,
+                    Push = false,
+                    Telegram = false,
+                },
             },
         };
 
-        System.Reflection.MethodInfo apply = typeof(NotificationsController)
-            .GetMethod(
-                "ApplyEventChannelPreferences",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        apply.Invoke(null, new object[] { prefs, request });
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+        var ok = result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.OkObjectResult>().Subject;
+        var dto = ok.Value.Should().BeOfType<NotificationPreferencesDto>().Subject;
 
-        // HarvestReady row explicitly present → matrix values applied.
-        prefs.InAppOnHarvestReady.Should().BeFalse();
+        // The single supplied HarvestReady row is applied.
+        dto.EventChannelPreferences!
+            .Single(r => r.EventType == NotificationPreferenceEventType.HarvestReady)
+            .Should().BeEquivalentTo(new NotificationEventChannelPreferenceDto
+            {
+                EventType = NotificationPreferenceEventType.HarvestReady,
+                InApp = false,
+                Email = false,
+                Push = false,
+                Telegram = false,
+            });
 
-        // Attention rows NOT in the matrix but reset was triggered → defaults.
-        prefs.InAppOnPrinterFailure.Should().BeTrue("reset block fires when matrix contains any attention row");
-        prefs.PushOnPrinterFailure.Should().BeTrue();
-        prefs.InAppOnFilamentRunout.Should().BeTrue();
-        prefs.PushOnFilamentRunout.Should().BeTrue();
+        // Every omitted attention row's non-default persisted value MUST be
+        // preserved — asserting on the returned DTO also proves the response
+        // reflects the persisted state, not the transient request view.
+        NotificationEventChannelPreferenceDto printerFailureRow = dto.EventChannelPreferences!
+            .Single(r => r.EventType == NotificationPreferenceEventType.PrinterFailure);
+        printerFailureRow.InApp.Should().BeFalse();
+        printerFailureRow.Email.Should().BeTrue();
+        printerFailureRow.Push.Should().BeFalse();
+        printerFailureRow.Telegram.Should().BeTrue();
+
+        NotificationEventChannelPreferenceDto filamentRunoutRow = dto.EventChannelPreferences!
+            .Single(r => r.EventType == NotificationPreferenceEventType.FilamentRunout);
+        filamentRunoutRow.Email.Should().BeTrue();
+        filamentRunoutRow.Telegram.Should().BeTrue();
+
+        NotificationEventChannelPreferenceDto maintenanceDueRow = dto.EventChannelPreferences!
+            .Single(r => r.EventType == NotificationPreferenceEventType.MaintenanceDue);
+        maintenanceDueRow.Email.Should().BeTrue();
+        maintenanceDueRow.Telegram.Should().BeTrue();
+
+        NotificationEventChannelPreferenceDto printerOfflineRow = dto.EventChannelPreferences!
+            .Single(r => r.EventType == NotificationPreferenceEventType.PrinterOffline);
+        printerOfflineRow.Email.Should().BeTrue();
+        printerOfflineRow.Telegram.Should().BeTrue();
+
+        // Omitted job rows also survive.
+        NotificationEventChannelPreferenceDto jobStartedRow = dto.EventChannelPreferences!
+            .Single(r => r.EventType == NotificationPreferenceEventType.JobStarted);
+        jobStartedRow.InApp.Should().BeTrue();
+        jobStartedRow.Email.Should().BeTrue();
+        jobStartedRow.Push.Should().BeTrue();
+        jobStartedRow.Telegram.Should().BeTrue();
+
+        NotificationEventChannelPreferenceDto jobPausedRow = dto.EventChannelPreferences!
+            .Single(r => r.EventType == NotificationPreferenceEventType.JobPaused);
+        jobPausedRow.InApp.Should().BeTrue();
+
+        // Re-query DB to prove the DTO faithfully reflects persisted state.
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+        persisted!.EmailOnPrinterFailure.Should().BeTrue("omitted attention rows must survive partial modern PUT");
+        persisted.EmailOnMaintenanceDue.Should().BeTrue();
+        persisted.EmailOnPrinterOffline.Should().BeTrue();
+        persisted.PushOnJobStarted.Should().BeTrue("omitted job rows must survive partial modern PUT");
+
+        // The supplied JobCompleted row is applied.
+        persisted.InAppOnJobCompleted.Should().BeFalse();
+        persisted.EmailOnJobCompleted.Should().BeFalse();
+        persisted.PushOnJobCompleted.Should().BeFalse();
+        persisted.TelegramOnJobCompleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task FullNineRowMatrix_IsDeterministicAndFullyApplied()
+    {
+        // A full 9-row modern PUT must overwrite every column deterministically
+        // regardless of persisted state. Also verifies the response DTO
+        // returns the persisted state.
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        System.Guid userId = System.Guid.NewGuid();
+        var existing = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            InAppOnPrinterFailure = false,
+            EmailOnPrinterFailure = false,
+            PushOnPrinterFailure = false,
+            TelegramOnPrinterFailure = false,
+        };
+        dbContext.NotificationPreferences.Add(existing);
+        await dbContext.SaveChangesAsync();
+
+        NotificationsController controller = BuildController(dbContext, userId);
+
+        NotificationPreferenceEventType[] allNineEvents =
+        [
+            NotificationPreferenceEventType.JobStarted,
+            NotificationPreferenceEventType.JobCompleted,
+            NotificationPreferenceEventType.JobFailed,
+            NotificationPreferenceEventType.JobPaused,
+            NotificationPreferenceEventType.PrinterFailure,
+            NotificationPreferenceEventType.FilamentRunout,
+            NotificationPreferenceEventType.HarvestReady,
+            NotificationPreferenceEventType.MaintenanceDue,
+            NotificationPreferenceEventType.PrinterOffline,
+        ];
+
+        var request = new UpdateNotificationPreferencesRequest
+        {
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
+            EventChannelPreferences = allNineEvents
+                .Select(e => new NotificationEventChannelPreferenceDto
+                {
+                    EventType = e,
+                    InApp = true,
+                    Email = false,
+                    Push = true,
+                    Telegram = false,
+                })
+                .ToList(),
+        };
+
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+        var ok = result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.OkObjectResult>().Subject;
+        var dto = ok.Value.Should().BeOfType<NotificationPreferencesDto>().Subject;
+
+        // Response must contain all nine rows in a deterministic shape.
+        dto.EventChannelPreferences.Should().HaveCount(9);
+        foreach (NotificationPreferenceEventType e in allNineEvents)
+        {
+            NotificationEventChannelPreferenceDto row = dto.EventChannelPreferences!.Single(r => r.EventType == e);
+            row.InApp.Should().BeTrue();
+            row.Email.Should().BeFalse();
+            row.Push.Should().BeTrue();
+            row.Telegram.Should().BeFalse();
+        }
+
+        // Master flags derived from final tracked state: push=true (all rows
+        // have push=true), inApp=true, email/telegram=false.
+        dto.EnablePushNotifications.Should().BeTrue();
+        dto.EnableInAppNotifications.Should().BeTrue();
+        dto.EnableEmailNotifications.Should().BeFalse();
+        dto.EnableTelegramNotifications.Should().BeFalse();
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task EmptyMatrix_UsesLegacyDerivationAndPreservesAttentionRows()
+    {
+        // An empty matrix (or null) is the legacy branch: job rows are derived
+        // from top-level scalars; attention rows are untouched.
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        System.Guid userId = System.Guid.NewGuid();
+        var existing = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            PushOnHarvestReady = false,
+            InAppOnHarvestReady = false,
+            EmailOnMaintenanceDue = true,
+        };
+        dbContext.NotificationPreferences.Add(existing);
+        await dbContext.SaveChangesAsync();
+
+        NotificationsController controller = BuildController(dbContext, userId);
+
+        var request = new UpdateNotificationPreferencesRequest
+        {
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
+            EnableEmailNotifications = true,
+            NotifyOnStart = false,
+            NotifyOnCompletion = true,
+            NotifyOnFailure = true,
+            NotifyOnPause = false,
+            EventChannelPreferences = null,
+        };
+
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+        result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.OkObjectResult>();
+
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+
+        // Job rows derived from top-level scalars.
+        persisted!.PushOnJobStarted.Should().BeFalse();
+        persisted.PushOnJobCompleted.Should().BeTrue();
+        persisted.PushOnJobPaused.Should().BeFalse();
+
+        // Attention rows preserved.
+        persisted.PushOnHarvestReady.Should().BeFalse();
+        persisted.InAppOnHarvestReady.Should().BeFalse();
+        persisted.EmailOnMaintenanceDue.Should().BeTrue();
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task UnknownEnumTokenOnPut_Returns400ProblemDetails()
+    {
+        // The unknown-enum → 400 contract must survive the patch refactor.
+        // JsonStringEnumConverter (no naming policy) rejects unknown tokens at
+        // model binding, before the controller action runs. We simulate that
+        // by handing the controller a request assembled with an out-of-range
+        // enum, which the service maps back to a 400 via ArgumentException →
+        // BadRequest fallback in the catch block. (The end-to-end 400 comes
+        // from the ApiController model-binding path in production.)
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        System.Guid userId = System.Guid.NewGuid();
+        NotificationsController controller = BuildController(dbContext, userId);
+
+        var request = new UpdateNotificationPreferencesRequest
+        {
+            EventChannelPreferences = new System.Collections.Generic.List<NotificationEventChannelPreferenceDto>
+            {
+                new()
+                {
+                    EventType = (NotificationPreferenceEventType)9999,
+                    InApp = true,
+                    Email = false,
+                    Push = true,
+                    Telegram = false,
+                },
+            },
+        };
+
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+
+        result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>();
+    }
+
+    private static NotificationsController BuildController(
+        Farm.Infrastructure.Data.AppDbContext dbContext,
+        System.Guid userId)
+    {
+        var service = new Farm.Infrastructure.Services.Notifications.NotificationService(
+            notificationRepository: null!,
+            usersRepository: null!,
+            logger: Microsoft.Extensions.Logging.Abstractions
+                .NullLogger<Farm.Infrastructure.Services.Notifications.NotificationService>
+                .Instance,
+            dbContext: dbContext);
+
+        return new NotificationsController(service)
+        {
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+            {
+                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+                {
+                    User = new System.Security.Claims.ClaimsPrincipal(
+                        new System.Security.Claims.ClaimsIdentity(
+                            new[] { new System.Security.Claims.Claim("sub", userId.ToString()) },
+                            authenticationType: "test")),
+                },
+            },
+        };
     }
 
     [Fact]
