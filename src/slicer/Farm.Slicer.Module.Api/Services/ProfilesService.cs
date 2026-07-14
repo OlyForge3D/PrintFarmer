@@ -1905,9 +1905,10 @@ public class ProfilesService(
         HttpClient httpClient,
         string manufacturer,
         string model,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -1935,9 +1936,10 @@ public class ProfilesService(
     public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(
         HttpClient httpClient,
         string printerModel,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -1964,7 +1966,8 @@ public class ProfilesService(
     public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
         HttpClient httpClient,
         IEnumerable<string> orcaAliases,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
         List<string> aliases = orcaAliases
             .Where(alias => !string.IsNullOrWhiteSpace(alias))
@@ -1976,7 +1979,7 @@ public class ProfilesService(
 
         foreach (string alias in aliases)
         {
-            IReadOnlyList<MachineProfileDto> profiles = await GetMachineProfilesByAliasAsync(httpClient, alias, ct);
+            IReadOnlyList<MachineProfileDto> profiles = await GetMachineProfilesByAliasAsync(httpClient, alias, ct, engineVersion);
             if (profiles.Count == 0)
             {
                 _logger.LogDebug("No machine profiles found for OrcaSlicer alias '{Alias}'", alias);
@@ -1999,9 +2002,10 @@ public class ProfilesService(
     public async Task<IReadOnlyList<ProcessProfileDto>> GetProcessProfilesForMachinesAsync(
         HttpClient httpClient,
         IEnumerable<string> machineNames,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -2032,9 +2036,10 @@ public class ProfilesService(
     public async Task<IReadOnlyList<FilamentProfileDto>> GetFilamentProfilesForMachinesAsync(
         HttpClient httpClient,
         IEnumerable<string> machineNames,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -2814,31 +2819,88 @@ public class ProfilesService(
         return string.IsNullOrWhiteSpace(input) ? fallback : input.Trim();
     }
 
-    private async Task<string?> GetOrcaSlicerWorkerUrlAsync()
+    /// <summary>
+    /// Selects an OrcaSlicer worker URL for profile browsing / metadata queries.
+    /// Issue #578: when <paramref name="engineVersion"/> is supplied, prefer a
+    /// worker whose registered <c>SlicerService.Version</c> matches — otherwise
+    /// a UI pinned to 2.3.1 could read profile metadata from a 2.4.1 worker
+    /// (or vice versa) and hand version-exclusive profile names off to a
+    /// worker that has never seen them, producing a "profile not found"
+    /// slicing failure at the moment the job is claimed.
+    /// </summary>
+    /// <param name="engineVersion">
+    /// Optional exact engine version string (e.g. "2.4.1"). When null/empty the
+    /// caller does not care which version answers the query and any Online
+    /// OrcaSlicer worker is acceptable.
+    /// </param>
+    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(string? engineVersion = null)
     {
         try
         {
             // Query SlicerService entities via ISlicersService (not the old Worker table)
             IReadOnlyList<SlicerService> allSlicers = await _slicersService.ListAsync(CancellationToken.None);
 
-            // SlicerType 1 = OrcaSlicer (per SlicerType enum)
-            SlicerService? orcaWorker = allSlicers.FirstOrDefault(s =>
-                s.Status == "Online" &&
+            // SlicerType 1 = OrcaSlicer (per SlicerType enum). Materialize once
+            // to avoid multi-enumeration warnings when we probe four times.
+            List<SlicerService> orcaCandidates = allSlicers.Where(s =>
                 s.SlicerType == 1 &&
-                !string.IsNullOrEmpty(s.Host));
+                !string.IsNullOrEmpty(s.Host)).ToList();
 
-            if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
+            // Freshness cutoff mirrors SlicersController.ListEnginesAsync
+            // (issue #578, Hicks R4 #1). A row can linger with Status="Online"
+            // after a worker is killed abruptly — worse, the host it advertised
+            // can be reused by a NEW worker running a DIFFERENT engine version
+            // before the old row is reaped. Requiring a recent heartbeat before
+            // trusting either the Status or the (host, version) mapping closes
+            // that wrong-version data-serving gap.
+            const int OnlineFreshnessSeconds = 60;
+            DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-OnlineFreshnessSeconds);
+
+            string? trimmedVersion = string.IsNullOrWhiteSpace(engineVersion) ? null : engineVersion.Trim();
+
+            // Preference 1: Fresh, online worker of the requested version.
+            SlicerService? orcaWorker = null;
+            if (trimmedVersion is not null)
+            {
+                orcaWorker = orcaCandidates.FirstOrDefault(s =>
+                    s.Status == "Online" &&
+                    s.LastSeen >= freshnessCutoff &&
+                    string.Equals(s.Version?.Trim(), trimmedVersion, StringComparison.OrdinalIgnoreCase));
+                if (orcaWorker != null)
+                {
+                    _logger.LogInformation(
+                        "Using OrcaSlicer worker {OrcaWorkerName} (v{Version}) at {OrcaWorkerHost} for version-scoped query",
+                        orcaWorker.Name, orcaWorker.Version, orcaWorker.Host);
+                    return orcaWorker.Host;
+                }
+
+                // Version explicitly requested but no FRESH ONLINE candidate
+                // exists. Do NOT fall back to a stale/offline row — the host
+                // it advertised may now belong to a different-version worker
+                // (Hicks R4 #1). Returning null forces the caller to surface
+                // an "engine unavailable" error rather than serving profiles
+                // that could mismatch the executing binary.
+                _logger.LogWarning(
+                    "No fresh online OrcaSlicer worker (v{Version}) found in slicer registry",
+                    trimmedVersion);
+                return null;
+            }
+
+            // Preference 2: Any fresh online OrcaSlicer worker (unpinned query).
+            orcaWorker = orcaCandidates.FirstOrDefault(s =>
+                s.Status == "Online" && s.LastSeen >= freshnessCutoff);
+            if (orcaWorker != null)
             {
                 _logger.LogInformation("Using OrcaSlicer worker from registry: {OrcaWorkerName} at {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
                 return orcaWorker.Host;
             }
 
-            // Fallback: any OrcaSlicer worker regardless of status
-            orcaWorker = allSlicers.FirstOrDefault(s =>
-                s.SlicerType == 1 &&
-                !string.IsNullOrEmpty(s.Host));
-
-            if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
+            // Preference 3: any OrcaSlicer worker regardless of status
+            // (legacy fallback when no version was requested and nothing is
+            // fresh/online). Best-effort browsing only — never used for
+            // version-scoped queries.
+            orcaWorker = orcaCandidates.FirstOrDefault();
+            if (orcaWorker != null)
             {
                 _logger.LogWarning("OrcaSlicer worker '{OrcaWorkerName}' is not online, but using endpoint anyway: {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
                 return orcaWorker.Host;

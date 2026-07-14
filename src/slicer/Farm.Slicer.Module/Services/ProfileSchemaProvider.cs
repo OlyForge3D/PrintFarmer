@@ -3,38 +3,123 @@
 namespace Farm.Slicer.Module.Services;
 
 /// <summary>
-/// Provides static schema metadata for slicer profile types, enabling schema-driven settings editors.
-/// All metadata is compile-time constant — no database or async required.
+/// Provides schema metadata for slicer profile types, enabling schema-driven settings editors.
+///
+/// Field metadata is compile-time constant (no database/async), but the provider is
+/// engine-version-aware: callers can pass an OrcaSlicer engine version (e.g. "2.3.1",
+/// "2.4.1") to receive the field set applicable to that engine, with fields renamed to
+/// match that engine's key convention when the field went through a version-boundary rename.
+///
+/// Version filtering rules (issue #578):
+///   - When <c>engineVersion</c> is null or unparsable, all fields are returned unfiltered.
+///   - A field with <see cref="ProfileFieldMetadata.MinEngineVersion"/> set is dropped when
+///     the requested engine is older than that minimum.
+///   - A field with <see cref="ProfileFieldMetadata.MaxEngineVersion"/> set is dropped when
+///     the requested engine is newer than that maximum.
+///   - A field with <see cref="ProfileFieldMetadata.RenamedFromKey"/> is emitted with the
+///     old key when the requested engine is older than <see cref="ProfileFieldMetadata.RenamedInVersion"/>.
+///
+/// The example field-version windows below (wallGenerator, enableArcFitting,
+/// legacyPreviewSetting, bedAdhesion) are illustrative of the added/removed/renamed
+/// mechanic. Real OrcaSlicer 2.3.1 vs 2.4.1 field research should refine these before
+/// consumers depend on the exact windows.
 /// </summary>
 public static class ProfileSchemaProvider
 {
-    public static ProfileSchemasResponseDto GetAllSchemas() => new()
+    public static ProfileSchemasResponseDto GetAllSchemas(string? engineVersion = null) => new()
     {
-        Process = GetProcessSchema(),
-        Machine = GetMachineSchema(),
-        Filament = GetFilamentSchema(),
+        Process = GetProcessSchema(engineVersion),
+        Machine = GetMachineSchema(engineVersion),
+        Filament = GetFilamentSchema(engineVersion),
     };
 
-    public static ProfileTypeSchemaDto GetProcessSchema() => new()
+    public static ProfileTypeSchemaDto GetProcessSchema(string? engineVersion = null) => new()
     {
         ProfileType = "process",
         Categories = ["quality", "strength", "speed", "support", "adhesion", "temperature", "other"],
-        Fields = BuildProcessFields(),
+        Fields = ApplyEngineVersion(BuildProcessFields(), engineVersion),
     };
 
-    public static ProfileTypeSchemaDto GetMachineSchema() => new()
+    public static ProfileTypeSchemaDto GetMachineSchema(string? engineVersion = null) => new()
     {
         ProfileType = "machine",
         Categories = ["general", "buildVolume", "extruder", "retraction", "bed", "gcode", "motion"],
-        Fields = BuildMachineFields(),
+        Fields = ApplyEngineVersion(BuildMachineFields(), engineVersion),
     };
 
-    public static ProfileTypeSchemaDto GetFilamentSchema() => new()
+    public static ProfileTypeSchemaDto GetFilamentSchema(string? engineVersion = null) => new()
     {
         ProfileType = "filament",
         Categories = ["temperature", "flow", "retraction", "cooling", "physical", "gcode"],
-        Fields = BuildFilamentFields(),
+        Fields = ApplyEngineVersion(BuildFilamentFields(), engineVersion),
     };
+
+    // ── Engine-version filter/rename ─────────────────────────────────
+
+    /// <summary>
+    /// Applies the version window filter and rename resolution to a raw field list.
+    /// Callers pass the requested engineVersion (e.g. "2.3.1"); unparsable or null values
+    /// return the fields unchanged.
+    /// </summary>
+    internal static List<ProfileFieldMetadata> ApplyEngineVersion(
+        List<ProfileFieldMetadata> fields,
+        string? engineVersion)
+    {
+        if (string.IsNullOrWhiteSpace(engineVersion)
+            || !Version.TryParse(engineVersion, out Version? requested))
+        {
+            return fields;
+        }
+
+        List<ProfileFieldMetadata> result = new(fields.Count);
+        foreach (ProfileFieldMetadata field in fields)
+        {
+            if (field.MinEngineVersion is { } minStr
+                && Version.TryParse(minStr, out Version? minVer)
+                && requested < minVer)
+            {
+                continue;
+            }
+
+            if (field.MaxEngineVersion is { } maxStr
+                && Version.TryParse(maxStr, out Version? maxVer)
+                && requested > maxVer)
+            {
+                continue;
+            }
+
+            if (field.RenamedFromKey is { Length: > 0 } renamedFromKey
+                && field.RenamedInVersion is { } renamedInStr
+                && Version.TryParse(renamedInStr, out Version? renamedInVer)
+                && requested < renamedInVer)
+            {
+                result.Add(new ProfileFieldMetadata
+                {
+                    Key = renamedFromKey,
+                    Label = field.Label,
+                    FieldType = field.FieldType,
+                    Category = field.Category,
+                    Description = field.Description,
+                    DefaultValue = field.DefaultValue,
+                    Min = field.Min,
+                    Max = field.Max,
+                    Step = field.Step,
+                    Unit = field.Unit,
+                    Options = field.Options,
+                    IsAdvanced = field.IsAdvanced,
+                    MinEngineVersion = field.MinEngineVersion,
+                    MaxEngineVersion = field.MaxEngineVersion,
+                    RenamedFromKey = field.RenamedFromKey,
+                    RenamedInVersion = field.RenamedInVersion,
+                });
+                continue;
+            }
+
+            result.Add(field);
+        }
+
+        return result;
+    }
 
     // ── Process profile fields ───────────────────────────────────────
     private static List<ProfileFieldMetadata> BuildProcessFields() =>
@@ -99,6 +184,33 @@ public static class ProfileSchemaProvider
         Int("outerWallAcceleration", "Outer Wall Acceleration", "speed", unit: "mm/s²", min: 0, max: 50000, adv: true),
         Int("innerWallAcceleration", "Inner Wall Acceleration", "speed", unit: "mm/s²", min: 0, max: 50000, adv: true),
         Int("topSurfaceAcceleration", "Top Surface Acceleration", "speed", unit: "mm/s²", min: 0, max: 50000, adv: true),
+
+        // ── Engine-version-scoped example fields (issue #578) ────────
+        // These illustrate the added/removed/renamed mechanic that lets the schema
+        // provider emit different field sets for OrcaSlicer 2.3.1 vs 2.4.1. The exact
+        // version windows are placeholders; real OrcaSlicer field research should
+        // refine them before production consumers depend on the specific fields.
+
+        // Added in 2.4.0 (Arachne wall generator, arc fitting)
+        Enum("wallGenerator", "Wall Generator", "quality",
+            opts: [("classic", "Classic"), ("arachne", "Arachne")],
+            def: "classic", adv: true, minEngineVersion: "2.4.0",
+            desc: "Perimeter generation strategy — Arachne available in OrcaSlicer 2.4+."),
+        Bool("enableArcFitting", "Enable Arc Fitting", "quality",
+            def: false, adv: true, minEngineVersion: "2.4.0",
+            desc: "Emit G2/G3 arc moves instead of many small linear moves — 2.4+."),
+
+        // Removed in 2.4.0 (retired legacy preview toggle)
+        Bool("legacyPreviewSetting", "Legacy Preview Setting", "other",
+            def: false, adv: true, maxEngineVersion: "2.3.99",
+            desc: "Deprecated preview toggle from 2.3.x; retired in 2.4.0."),
+
+        // Renamed in 2.4.0: 2.3.x used "firstLayerAdhesion", 2.4.x uses "bedAdhesionOverride"
+        Enum("bedAdhesionOverride", "Bed Adhesion Override", "adhesion",
+            opts: [("none", "None"), ("skirt", "Skirt"), ("brim", "Brim"), ("raft", "Raft")],
+            def: "skirt", adv: true,
+            renamedFromKey: "firstLayerAdhesion", renamedInVersion: "2.4.0",
+            desc: "2.3.x key: firstLayerAdhesion. Renamed to bedAdhesionOverride in 2.4.0."),
     ];
 
     // ── Machine profile fields ───────────────────────────────────────
@@ -245,7 +357,9 @@ public static class ProfileSchemaProvider
 
     private static ProfileFieldMetadata Bool(
         string key, string label, string category,
-        bool? def = null, string? desc = null, bool adv = false) => new()
+        bool? def = null, string? desc = null, bool adv = false,
+        string? minEngineVersion = null, string? maxEngineVersion = null,
+        string? renamedFromKey = null, string? renamedInVersion = null) => new()
         {
             Key = key,
             Label = label,
@@ -254,11 +368,17 @@ public static class ProfileSchemaProvider
             DefaultValue = def,
             Description = desc,
             IsAdvanced = adv,
+            MinEngineVersion = minEngineVersion,
+            MaxEngineVersion = maxEngineVersion,
+            RenamedFromKey = renamedFromKey,
+            RenamedInVersion = renamedInVersion,
         };
 
     private static ProfileFieldMetadata Str(
         string key, string label, string category,
-        string? desc = null, bool adv = false) => new()
+        string? desc = null, bool adv = false,
+        string? minEngineVersion = null, string? maxEngineVersion = null,
+        string? renamedFromKey = null, string? renamedInVersion = null) => new()
         {
             Key = key,
             Label = label,
@@ -266,13 +386,19 @@ public static class ProfileSchemaProvider
             Category = category,
             Description = desc,
             IsAdvanced = adv,
+            MinEngineVersion = minEngineVersion,
+            MaxEngineVersion = maxEngineVersion,
+            RenamedFromKey = renamedFromKey,
+            RenamedInVersion = renamedInVersion,
         };
 
     private static ProfileFieldMetadata Enum(
         string key, string label, string category,
         List<EnumOptionDto>? opts = null,
         (string val, string lbl)[]? tuples = null,
-        string? def = null, string? desc = null, bool adv = false) => new()
+        string? def = null, string? desc = null, bool adv = false,
+        string? minEngineVersion = null, string? maxEngineVersion = null,
+        string? renamedFromKey = null, string? renamedInVersion = null) => new()
         {
             Key = key,
             Label = label,
@@ -282,12 +408,20 @@ public static class ProfileSchemaProvider
             Description = desc,
             IsAdvanced = adv,
             Options = opts ?? tuples?.Select(t => new EnumOptionDto { Value = t.val, Label = t.lbl }).ToList(),
+            MinEngineVersion = minEngineVersion,
+            MaxEngineVersion = maxEngineVersion,
+            RenamedFromKey = renamedFromKey,
+            RenamedInVersion = renamedInVersion,
         };
 
     // Overload accepting tuple array directly (used by most callsites)
     private static ProfileFieldMetadata Enum(
         string key, string label, string category,
         (string val, string lbl)[] opts,
-        string? def = null, string? desc = null, bool adv = false) =>
-        Enum(key, label, category, opts: null, tuples: opts, def: def, desc: desc, adv: adv);
+        string? def = null, string? desc = null, bool adv = false,
+        string? minEngineVersion = null, string? maxEngineVersion = null,
+        string? renamedFromKey = null, string? renamedInVersion = null) =>
+        Enum(key, label, category, opts: null, tuples: opts, def: def, desc: desc, adv: adv,
+            minEngineVersion: minEngineVersion, maxEngineVersion: maxEngineVersion,
+            renamedFromKey: renamedFromKey, renamedInVersion: renamedInVersion);
 }

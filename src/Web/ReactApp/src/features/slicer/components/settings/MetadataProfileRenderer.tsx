@@ -18,8 +18,8 @@ import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
 import { MetadataTabRenderer } from '@/features/slicer/components/settings/MetadataTabRenderer';
-import metadata from '@/features/slicer/generated/orcaSettingsMetadata.json';
-import type { ProfileType, ProfileTypeMetadata, TabLayout } from '@/features/slicer/components/settings/metadataTypes';
+import { getMetadataForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
+import type { ProfileType, TabLayout } from '@/features/slicer/components/settings/metadataTypes';
 
 // Re-export all types for backward compatibility
 export type {
@@ -49,6 +49,13 @@ export interface MetadataProfileEditorProps {
   onUpdate: (key: string, value: unknown) => void;
   disabled?: boolean;
   className?: string;
+  /**
+   * Optional OrcaSlicer engine version (e.g. "2.4.1", "2.3.1") to scope the
+   * rendered settings/tabs to that version's real field set. When omitted or
+   * unparsable, the full (union) metadata bundle is used — this is the safe
+   * fallback for engine-agnostic profile management pages.
+   */
+  engineVersion?: string;
 }
 
 export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
@@ -58,8 +65,13 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   onUpdate,
   disabled = false,
   className = '',
+  engineVersion,
 }) => {
-  const profileMeta = (metadata as unknown as Record<string, ProfileTypeMetadata>)[profileType];
+  const scopedBundle = useMemo(
+    () => getMetadataForVersion(engineVersion),
+    [engineVersion],
+  );
+  const profileMeta = scopedBundle.profileTypes[profileType];
   const [viewMode, toggleViewMode] = useSlicerViewMode();
   const [activeTabIdx, setActiveTabIdx] = useState(0);
 

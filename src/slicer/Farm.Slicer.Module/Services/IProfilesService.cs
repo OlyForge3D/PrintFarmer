@@ -76,7 +76,8 @@ public interface IProfilesService
     /// <param name="manufacturer">Manufacturer name.</param>
     /// <param name="model">Model name.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForModelAsync(HttpClient httpClient, string manufacturer, string model, CancellationToken ct);
+    /// <param name="engineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
+    Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForModelAsync(HttpClient httpClient, string manufacturer, string model, CancellationToken ct, string? engineVersion = null);
 
     /// <summary>Gets names of profiles already imported for a specific printer model.</summary>
     /// <param name="printerModelId">The printer model ID.</param>
@@ -87,28 +88,33 @@ public interface IProfilesService
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="printerModel">The OrcaSlicer alias (printer_model value).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(HttpClient httpClient, string printerModel, CancellationToken ct);
+    /// <param name="engineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
+    Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(HttpClient httpClient, string printerModel, CancellationToken ct, string? engineVersion = null);
 
     /// <summary>Fetches machine profiles for a catalog model by matching configured OrcaSlicer aliases.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="orcaAliases">OrcaSlicer aliases configured for the catalog model.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="engineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
         HttpClient httpClient,
         IEnumerable<string> orcaAliases,
-        CancellationToken ct);
+        CancellationToken ct,
+        string? engineVersion = null);
 
     /// <summary>Fetches process profiles compatible with specific machines from the worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="machineNames">Machine profile names to find compatible processes for.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<ProcessProfileDto>> GetProcessProfilesForMachinesAsync(HttpClient httpClient, IEnumerable<string> machineNames, CancellationToken ct);
+    /// <param name="engineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
+    Task<IReadOnlyList<ProcessProfileDto>> GetProcessProfilesForMachinesAsync(HttpClient httpClient, IEnumerable<string> machineNames, CancellationToken ct, string? engineVersion = null);
 
     /// <summary>Fetches filament profiles compatible with specific machines from the worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="machineNames">Machine profile names to find compatible filaments for.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<FilamentProfileDto>> GetFilamentProfilesForMachinesAsync(HttpClient httpClient, IEnumerable<string> machineNames, CancellationToken ct);
+    /// <param name="engineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
+    Task<IReadOnlyList<FilamentProfileDto>> GetFilamentProfilesForMachinesAsync(HttpClient httpClient, IEnumerable<string> machineNames, CancellationToken ct, string? engineVersion = null);
 
     /// <summary>Fetches template filament profiles from the OrcaFilamentLibrary.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>

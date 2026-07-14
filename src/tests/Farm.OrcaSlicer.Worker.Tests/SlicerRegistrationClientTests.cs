@@ -44,7 +44,8 @@ public sealed class SlicerRegistrationClientTests
         SlicerRegistrationClient client = new SlicerRegistrationClient(
             httpClient,
             configuration,
-            NullLogger<SlicerRegistrationClient>.Instance);
+            NullLogger<SlicerRegistrationClient>.Instance,
+            new WorkerCapabilityProvider(configuration));
 
         (Guid serviceId, string apiKey) = await client.RegisterAsync();
 

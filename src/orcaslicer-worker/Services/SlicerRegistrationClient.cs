@@ -44,6 +44,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SlicerRegistrationClient> _logger;
+    private readonly WorkerCapabilityProvider _capabilityProvider;
     private readonly string _apiBaseUrl;
     private readonly string _serviceName;
     private readonly string _serviceVersion;
@@ -52,11 +53,13 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     public SlicerRegistrationClient(
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<SlicerRegistrationClient> logger)
+        ILogger<SlicerRegistrationClient> logger,
+        WorkerCapabilityProvider capabilityProvider)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
 
         // Load configuration — prefer unified SlicerApi:BaseUrl, then legacy keys
         _apiBaseUrl = configuration["SlicerApi:BaseUrl"]
@@ -86,7 +89,8 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 {
                     supportedFormats = new[] { "stl", "obj", "3mf", "step", "stp" },
                     supportedFeatures = new[] { "multi-material", "variable-layer-height", "auto-arrange" },
-                    capabilities = WorkerConstants.Capabilities
+                    capabilities = _capabilityProvider.GetCapabilities(),
+                    engineVersion = _capabilityProvider.EngineVersion,
                 }),
                 MaxConcurrentJobs = _configuration.GetValue("Worker:MaxConcurrentJobs", 1),
                 Tags = "orcaslicer,production",
