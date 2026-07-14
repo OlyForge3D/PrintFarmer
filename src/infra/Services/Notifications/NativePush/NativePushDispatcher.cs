@@ -25,7 +25,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // multi-node deployments better than false-negative suppression, so we keep the LRU
     // simple and un-distributed.
     private readonly ConcurrentDictionary<string, DateTime> _dedupe = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<Guid, RateLimitBucket> _rateLimits = new();
+    private readonly ConcurrentDictionary<RateLimitKey, RateLimitBucket> _rateLimits = new();
 
     private long _lastPruneAtTicks;
 
@@ -259,6 +259,23 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
+        // Hicks H2-v5-final: rate-limit ONCE per logical event before device
+        // fan-out. Scope is (userId, printerId, kind) so:
+        //   * a noisy printer/kind cannot suppress unrelated critical alerts
+        //     for the same user (previous per-user scope failed here);
+        //   * a multi-device user does not exhaust their bucket faster than a
+        //     single-device user (previous per-device consumption failed
+        //     here).
+        // If the rate limit rejects the event, we skip ALL devices for this
+        // envelope (a partial delivery would be worse than none — the user
+        // would think their other devices missed the alert).
+        var rateKey = new RateLimitKey(userId, item.PrinterId, item.Kind);
+        if (!TryConsumeRate(rateKey, settings, DateTime.UtcNow))
+        {
+            _metrics.SkippedRateLimit.Add(1);
+            return;
+        }
+
         foreach (DeviceToken deviceToken in userTokens)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -329,12 +346,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        if (!TryConsumeRate(userId, settings, DateTime.UtcNow))
-        {
-            _metrics.SkippedRateLimit.Add(1);
-            return;
-        }
-
+        // Rate limit consumption has moved to DispatchForOwnerAsync so it
+        // scopes per (userId, printerId, kind) and is charged exactly once
+        // per envelope regardless of how many devices this user has. See
+        // Hicks H2-v5-final.
         NativePushEnvelope envelope = BuildEnvelope(item, changeKind, deviceToken);
         _metrics.Attempted.Add(1);
 
@@ -467,7 +482,62 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             1,
             new KeyValuePair<string, object?>("mode", _sender.ModeName),
             new KeyValuePair<string, object?>("reason", result.Reason ?? "unknown"));
+
+        // Hicks H5-v5-final: config / payload-shape / topic-mismatch errors
+        // are attributable to the deployment or per-envelope builder, NOT to
+        // the device token. Ticking the failure counter for these would
+        // deactivate every active token in five outages (e.g., wrong .p8,
+        // wrong bundle id) — correcting the config would then require every
+        // client to re-register before delivery resumes. Bail out with the
+        // metric already recorded so operators see the terminal error surface
+        // in dashboards without a token-fleet wipe.
+        if (IsNotTokenAttributable(result.Reason))
+        {
+            return;
+        }
+
         await tokens.RecordFailureAsync(deviceToken.Id, nowUtc, settings.FailureDeactivationThreshold, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reasons that indicate a deployment or per-envelope defect, not a bad
+    /// device token. See Hicks H5-v5-final. Kept as an allow-list so any new
+    /// terminal reason emitted by a sender defaults to the safe token-fault
+    /// behavior; add here only after confirming the reason is genuinely
+    /// deployment/payload-scoped.
+    /// </summary>
+    private static bool IsNotTokenAttributable(string? reason)
+    {
+        if (string.IsNullOrEmpty(reason))
+        {
+            return false;
+        }
+
+        return reason switch
+        {
+            // DirectApnsNativePushSender: JWT signing failed (bad .p8, wrong
+            // KeyId/TeamId, malformed key material). Fully deployment-scoped.
+            "jwt_sign_failed" => true,
+
+            // APNs / relay: bundle id or apns-topic does not match the
+            // registered app id. Deployment misconfiguration; the token is
+            // valid for its actual topic.
+            "TopicDisallowed" => true,
+            "BadTopic" => true,
+
+            // APNs: envelope encoding builder produced an oversized payload.
+            // The token is fine; fix the payload constructor.
+            "PayloadTooLarge" => true,
+            "PayloadEmpty" => true,
+
+            // APNs / relay: envelope failed structural validation. Same
+            // rationale — sender-side defect, not the recipient.
+            "BadMessageId" => true,
+            "BadExpirationDate" => true,
+            "BadPriority" => true,
+            "BadCollapseId" => true,
+            _ => false,
+        };
     }
 
     private static async Task<bool> IsFarmAdminAsync(AppDbContext db, Guid userId, CancellationToken cancellationToken)
@@ -544,7 +614,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         return emit;
     }
 
-    private bool TryConsumeRate(Guid userId, NativePushSettings settings, DateTime nowUtc)
+    private bool TryConsumeRate(RateLimitKey key, NativePushSettings settings, DateTime nowUtc)
     {
         if (settings.RateLimitPerUser <= 0)
         {
@@ -557,7 +627,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // Instead we spin — bounded by the pruner's per-call cadence.
         while (true)
         {
-            RateLimitBucket bucket = _rateLimits.GetOrAdd(userId, _ => new RateLimitBucket());
+            RateLimitBucket bucket = _rateLimits.GetOrAdd(key, _ => new RateLimitBucket());
             lock (bucket)
             {
                 if (bucket.IsDead)
@@ -627,7 +697,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         TimeSpan evictAfter = settings.RateLimitWindow > TimeSpan.Zero
             ? settings.RateLimitWindow
             : TimeSpan.FromMinutes(5);
-        foreach (KeyValuePair<Guid, RateLimitBucket> kv in _rateLimits)
+        foreach (KeyValuePair<RateLimitKey, RateLimitBucket> kv in _rateLimits)
         {
             lock (kv.Value)
             {
@@ -643,7 +713,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 // grabbed this instance via GetOrAdd sees IsDead=true after
                 // it acquires the lock and will retry with a fresh bucket.
                 kv.Value.IsDead = true;
-                _ = ((ICollection<KeyValuePair<Guid, RateLimitBucket>>)_rateLimits).Remove(kv);
+                _ = ((ICollection<KeyValuePair<RateLimitKey, RateLimitBucket>>)_rateLimits).Remove(kv);
             }
         }
     }
@@ -657,6 +727,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // registered in the dictionary and they must retry.
         public bool IsDead { get; set; }
     }
+
+    // Hicks H2-v5-final rate-limit scope key. Rate-limiting per (user,
+    // printer, kind) means a noisy printer/kind cannot silence unrelated
+    // critical alerts for the same user, and multi-device users no longer
+    // consume the bucket faster than single-device users.
+    private readonly record struct RateLimitKey(Guid UserId, Guid PrinterId, AttentionKind Kind);
 
     // Maps the internal <see cref="AttentionKind"/> to the shared web
     // preference PushOn{Kind} bool exposed via #716's operator matrix. If

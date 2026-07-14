@@ -44,11 +44,16 @@ time (chosen by `Mode`); the disabled sender is a no-op that returns
   (`NativePush__Apns__P8KeyPath`) or an inline PEM
   (`NativePush__Apns__P8KeyPem`). The path form is preferred and validated for
   existence + readability at startup.
-- Relay mode uses a bearer token (`NativePush__RelayApiKey`) issued per
+- Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued per
   installation by OlyForge3D. The relay endpoint URL is separate
-  (`NativePush__RelayEndpoint`).
+  (`NativePush__Relay__Endpoint`).
 - Deployment templates and `.env.example` document the keys but never contain
-  live values. See `scripts/docker/env.template`.
+  live values. See `.env.template` at the repository root.
+- Startup validation (`NativePushSettingsValidator`, wired via
+  `AddOptions<NativePushSettings>().ValidateOnStart()`) fails fast when a
+  non-disabled mode is missing its required keys, points at a `.p8` that
+  cannot be read, or has an obviously malformed endpoint. Diagnostics never
+  echo secrets.
 
 ### JWT / expiry / retry (direct mode)
 
@@ -303,7 +308,7 @@ Structured logs use `attentionItemId`, `changeKind`, `installationId`,
 
 ## 8. Deployment
 
-`scripts/docker/env.template` documents the new configuration keys:
+`.env.template` at the repository root documents the new configuration keys:
 
 ```dotenv
 # Native push (F3 / #708). Default: disabled.
@@ -311,8 +316,8 @@ NativePush__Mode=disabled
 
 # Relay mode (production)
 # NativePush__Mode=relay
-# NativePush__RelayEndpoint=https://push-relay.olyforge3d.com/v1/dispatch
-# NativePush__RelayApiKey=<per-install bearer, obtained from OlyForge3D>
+# NativePush__Relay__Endpoint=https://push-relay.olyforge3d.com/v1/dispatch
+# NativePush__Relay__ApiKey=<per-install bearer, obtained from OlyForge3D>
 
 # Direct APNs mode (self-signed / enterprise). Prefer the file path form.
 # NativePush__Mode=direct

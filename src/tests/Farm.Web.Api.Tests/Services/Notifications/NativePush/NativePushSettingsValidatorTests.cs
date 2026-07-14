@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Security.Cryptography;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -135,6 +136,10 @@ public sealed class NativePushSettingsValidatorTests
     [Fact]
     public void Validate_DirectMode_WithInlinePem_Succeeds()
     {
+        // Generate a real P-256 ECDSA key so the crypto probe (Hicks #6/#7) accepts it.
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string pem = key.ExportPkcs8PrivateKeyPem();
+
         var settings = new NativePushSettings
         {
             Mode = NativePushMode.Direct,
@@ -143,7 +148,7 @@ public sealed class NativePushSettingsValidatorTests
                 TeamId = "TEAM123",
                 KeyId = "KEY456",
                 BundleId = "com.example.app",
-                P8KeyPem = "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----",
+                P8KeyPem = pem,
             },
         };
         NativePushSettingsValidator validator = BuildValidator();

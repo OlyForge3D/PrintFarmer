@@ -19,9 +19,15 @@ public class NotificationPreferencesConfiguration : IEntityTypeConfiguration<Not
         _ = builder.Property(np => np.InAppOnJobFailed).IsRequired().HasDefaultValue(true);
         _ = builder.Property(np => np.InAppOnJobPaused).IsRequired().HasDefaultValue(true);
         _ = builder.Property(np => np.EmailOnJobStarted).IsRequired().HasDefaultValue(false);
-        _ = builder.Property(np => np.EmailOnJobCompleted).IsRequired().HasDefaultValue(true);
-        _ = builder.Property(np => np.EmailOnJobFailed).IsRequired().HasDefaultValue(true);
-        _ = builder.Property(np => np.EmailOnJobPaused).IsRequired().HasDefaultValue(true);
+
+        // Hicks #5: EmailOnJobCompleted/Failed/Paused canonical baseline is
+        // false — every email column is opt-in so a fresh row from a bare
+        // `{}` PUT (or a first insert against the CLR defaults) never sends
+        // surprise email. Aligned with NotificationPreferencesDefaults.Apply
+        // and the CLR entity defaults.
+        _ = builder.Property(np => np.EmailOnJobCompleted).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.EmailOnJobFailed).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.EmailOnJobPaused).IsRequired().HasDefaultValue(false);
         _ = builder.Property(np => np.PushOnJobStarted).IsRequired().HasDefaultValue(false);
         _ = builder.Property(np => np.PushOnJobCompleted).IsRequired().HasDefaultValue(true);
         _ = builder.Property(np => np.PushOnJobFailed).IsRequired().HasDefaultValue(true);

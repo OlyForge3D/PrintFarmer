@@ -445,6 +445,289 @@ public sealed class NativePushDispatcherTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    [Fact]
+    public async Task DispatchAsync_JwtSignFailedTerminal_DoesNotDeactivateToken()
+    {
+        // Hicks H5-v5-final regression: JWT sign failure is a deployment
+        // problem (wrong .p8 / TeamId / KeyId), not a bad device token. The
+        // dispatcher must NOT tick the token failure counter — otherwise the
+        // 5th outage would deactivate every registered token and require
+        // every client to re-register once the config was corrected.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        int recordFailureCount = 0;
+        tokens
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback(() => System.Threading.Interlocked.Increment(ref recordFailureCount))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NativePushDispatchResult.Terminal("jwt_sign_failed"));
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        recordFailureCount.Should().Be(0, "jwt_sign_failed is deployment-scoped and MUST NOT tick the token failure counter");
+    }
+
+    [Theory]
+    [InlineData("TopicDisallowed")]
+    [InlineData("PayloadTooLarge")]
+    [InlineData("BadTopic")]
+    [InlineData("PayloadEmpty")]
+    [InlineData("BadMessageId")]
+    public async Task DispatchAsync_ConfigOrPayloadTerminal_DoesNotDeactivateToken(string reason)
+    {
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        int recordFailureCount = 0;
+        tokens
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback(() => System.Threading.Interlocked.Increment(ref recordFailureCount))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NativePushDispatchResult.Terminal(reason));
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        recordFailureCount.Should().Be(0, $"terminal reason '{reason}' is not token-attributable and must not deactivate");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_UnknownTerminalReason_StillDeactivatesToken()
+    {
+        // Contra-positive to the H5 allow-list: novel terminal reasons must
+        // still tick the failure counter so genuinely broken tokens retire.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        int recordFailureCount = 0;
+        tokens
+            .Setup(r => r.RecordFailureAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback(() => System.Threading.Interlocked.Increment(ref recordFailureCount))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NativePushDispatchResult.Terminal("BadDeviceToken"));
+
+        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        recordFailureCount.Should().Be(1, "unrecognised terminal reasons still count against the token");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_RateLimit_IsChargedOncePerEnvelopeAcrossDevices()
+    {
+        // Hicks H2-v5-final regression: rate limit is (userId, printerId,
+        // kind)-scoped and charged BEFORE per-device fan-out. A three-device
+        // user must not exhaust the bucket three times faster than a
+        // one-device user.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item1 = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto item2 = BuildAttentionItem(AttentionKind.Offline) with { PrinterId = item1.PrinterId };
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken t1 = MakeToken(userId, "install-1");
+        DeviceToken t2 = MakeToken(userId, "install-2");
+        DeviceToken t3 = MakeToken(userId, "install-3");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens
+            .Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid> { userId });
+        tokens
+            .Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { t1, t2, t3 });
+        tokens
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(s => s.FindItemAsync(userId, item1.Id, It.IsAny<CancellationToken>())).ReturnsAsync(item1);
+        attention.Setup(s => s.FindItemAsync(userId, item2.Id, It.IsAny<CancellationToken>())).ReturnsAsync(item2);
+
+        int sendCount = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                System.Threading.Interlocked.Increment(ref sendCount);
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton<IAttentionService>(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        var monitor = new StaticOptionsMonitor(new NativePushSettings
+        {
+            Mode = NativePushMode.Relay,
+            RateLimitPerUser = 1,
+            RateLimitWindow = TimeSpan.FromMinutes(5),
+        });
+        var sut = new NativePushDispatcher(
+            scopeFactory,
+            sender.Object,
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+
+        await sut.DispatchAsync(item1.Id, AttentionChangeKind.Created, targetUserId: null);
+        int sendCountAfterFirstEnvelope = sendCount;
+
+        await sut.DispatchAsync(item2.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        sendCountAfterFirstEnvelope.Should().Be(3, "rate bucket is consumed once per envelope; all three devices must be reached");
+        sendCount.Should().Be(3, "second envelope for the same (user, printer, kind) is rate-limited");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_RateLimit_ScopedPerKindNotPerUser()
+    {
+        // Hicks H2-v5-final regression: a noisy kind must not silence
+        // unrelated critical alerts (different kind) for the same user.
+        var userId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        AttentionItemDto offline = BuildAttentionItem(AttentionKind.Offline) with { PrinterId = printerId };
+        AttentionItemDto failure = BuildAttentionItem(AttentionKind.Failure) with { PrinterId = printerId };
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            PushOnPrinterFailure = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens
+            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(s => s.FindItemAsync(userId, offline.Id, It.IsAny<CancellationToken>())).ReturnsAsync(offline);
+        attention.Setup(s => s.FindItemAsync(userId, failure.Id, It.IsAny<CancellationToken>())).ReturnsAsync(failure);
+
+        int sendCount = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                System.Threading.Interlocked.Increment(ref sendCount);
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton<IAttentionService>(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        var monitor = new StaticOptionsMonitor(new NativePushSettings
+        {
+            Mode = NativePushMode.Relay,
+            RateLimitPerUser = 1,
+            RateLimitWindow = TimeSpan.FromMinutes(5),
+        });
+        var sut = new NativePushDispatcher(
+            scopeFactory,
+            sender.Object,
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+
+        await sut.DispatchAsync(offline.Id, AttentionChangeKind.Created, targetUserId: null);
+        await sut.DispatchAsync(offline.Id, AttentionChangeKind.Updated, targetUserId: null);
+        int sendsAfterOfflineFlood = sendCount;
+
+        await sut.DispatchAsync(failure.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        sendsAfterOfflineFlood.Should().Be(1, "second offline envelope hits its own kind-scoped rate bucket");
+        sendCount.Should().Be(2, "a different kind (failure) has its own rate bucket and must not be silenced");
+    }
+
     private static DeviceToken MakeToken(Guid userId, string installationId)
     {
         return new DeviceToken

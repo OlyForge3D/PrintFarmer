@@ -11,17 +11,43 @@ namespace Farm.Infrastructure.Services.Notifications;
 /// Bounded transient-retry helper for preference writes that lose a race against
 /// a concurrent legacy or attention writer. Only known relational transient
 /// failure signals trigger a retry — provider serialization/deadlock errors, EF
-/// concurrency exceptions, and the unique-index violation raised when two
-/// concurrent first-creations both try to insert the same UserId row (Bishop
-/// minor #1). Cancellation propagates unconditionally.
+/// concurrency exceptions, and the unique-index violation raised on the
+/// <c>NotificationPreferences.UserId</c> unique index when two concurrent
+/// first-creations both try to insert the same UserId row (Bishop minor #1,
+/// Hicks #2). Cancellation propagates unconditionally.
 ///
 /// The helper takes a delegate that opens a FRESH <see cref="AppDbContext"/> via
 /// <see cref="IDbContextFactory{TContext}"/> per attempt (Hicks #2). This
 /// guarantees that a stale change-tracker snapshot from the losing attempt
-/// never leaks into the retried transaction.
+/// never leaks into the retried transaction. Both wrapped (<see cref="DbUpdateException"/>-
+/// nested) and RAW provider exceptions surfaced from a query / BeginTransaction /
+/// Commit call are classified through the full <see cref="Exception.InnerException"/>
+/// chain: EF only wraps provider exceptions raised by <see cref="DbContext.SaveChanges()"/>,
+/// so a serialization failure raised while opening the serializable transaction
+/// would otherwise escape unwrapped.
 /// </summary>
 public static class PreferenceConcurrencyRetry
 {
+    /// <summary>
+    /// Diagnostic classification of a caught exception. Public so the tests can
+    /// assert the classifier directly without staging a database.
+    /// </summary>
+    internal enum ClassifierDecision
+    {
+        /// <summary>Not a recognised transient — do not retry, rethrow verbatim.</summary>
+        Rethrow,
+
+        /// <summary>Provider serialization / deadlock / lock timeout — safe to retry.</summary>
+        TransientProviderConflict,
+
+        /// <summary>
+        /// Unique-index violation on the <c>NotificationPreferences.UserId</c>
+        /// index — retry so the losing writer re-reads and merges into the
+        /// existing row (first-create convergence, Bishop minor #1).
+        /// </summary>
+        UserIdUniqueConflict,
+    }
+
     /// <summary>Maximum number of whole-operation retry attempts before surfacing the last failure.</summary>
     /// <remarks>
     /// A modest fixed bound: the finalized #708 contract has ≤2 concurrent legacy vs
@@ -98,25 +124,21 @@ public static class PreferenceConcurrencyRetry
                 {
                     return await operation(freshContext, cancellationToken).ConfigureAwait(false);
                 }
-                catch (DbUpdateConcurrencyException ex)
+                catch (OperationCanceledException)
                 {
-                    // Hicks #1 parity: OperationCanceledException surfaces on
-                    // its own catch (see filter below); this catch handles
-                    // ONLY the concurrency conflict and never masks cancels.
-                    lastTransient = ex;
-                    LogRetry(logger, attempt, "concurrency", ex);
-                    if (attempt == MaxAttempts)
-                    {
-                        break;
-                    }
-
-                    await BackoffAsync(attempt, cancellationToken).ConfigureAwait(false);
-                    continue;
+                    // Hicks #1/#2 parity: OperationCanceledException MUST propagate
+                    // BEFORE any generic-provider/EF catches. A cancelled call
+                    // consumes no retry budget and never counts as a transient.
+                    throw;
                 }
-                catch (DbUpdateException ex) when (IsTransientRelationalConflict(ex))
+                catch (Exception ex) when (Classify(ex) != ClassifierDecision.Rethrow)
                 {
+                    ClassifierDecision decision = Classify(ex);
+                    string reason = decision == ClassifierDecision.UserIdUniqueConflict
+                        ? "userid-unique"
+                        : "provider-conflict";
                     lastTransient = ex;
-                    LogRetry(logger, attempt, "provider-conflict", ex);
+                    LogRetry(logger, attempt, reason, ex);
                     if (attempt == MaxAttempts)
                     {
                         break;
@@ -161,96 +183,241 @@ public static class PreferenceConcurrencyRetry
     }
 
     /// <summary>
-    /// Recognises the narrow set of relational provider transient failures we retry:
-    /// SQLite BUSY/LOCKED, PostgreSQL serialization/deadlock, SQL Server deadlock/
-    /// snapshot conflicts, MySQL deadlock, and — critical for Bishop minor #1 — the
-    /// unique-index violation surfaced when two concurrent first-creation writers
-    /// both insert the same UserId row. Any other DbUpdateException (schema error,
-    /// non-transient FK violation, etc.) is a genuine fault and is NOT retried.
+    /// Classifies a caught exception into a retry decision. Traverses the entire
+    /// <see cref="Exception.InnerException"/> chain because a raw provider
+    /// exception can appear either at the outermost level (BeginTransaction /
+    /// query / Commit) or wrapped inside <see cref="DbUpdateException"/> from a
+    /// <see cref="DbContext.SaveChanges()"/> call. <see cref="DbUpdateConcurrencyException"/>
+    /// is always transient (an EF optimistic concurrency conflict).
+    ///
+    /// Uniqueness is treated as transient ONLY when the unique-index name that
+    /// the provider surfaces on the exception references
+    /// <c>NotificationPreferences.UserId</c> — arbitrary FK/CHECK/NOT-NULL/other
+    /// unique failures fall through to <see cref="ClassifierDecision.Rethrow"/>
+    /// so a genuine schema fault is surfaced, not masked by a retry loop.
     /// </summary>
-    private static bool IsTransientRelationalConflict(DbUpdateException exception)
+    internal static ClassifierDecision Classify(Exception exception)
     {
         Exception? current = exception;
         while (current is not null)
         {
+            if (current is DbUpdateConcurrencyException)
+            {
+                return ClassifierDecision.TransientProviderConflict;
+            }
+
             string typeName = current.GetType().Name;
             string message = current.Message ?? string.Empty;
 
-            // SQLite: SQLITE_BUSY (5), SQLITE_LOCKED (6). Also detect the
-            // constraint failure (SQLITE_CONSTRAINT_UNIQUE = 2067, code 19) that
-            // fires when two concurrent inserts both target the same UserId.
-            if (typeName == "SqliteException")
+            switch (typeName)
             {
-                if (TryGetSqliteErrorCode(current, out int sqliteCode))
-                {
-                    if (sqliteCode == 5 || sqliteCode == 6)
+                case "SqliteException":
                     {
-                        return true;
+                        ClassifierDecision? decision = ClassifySqlite(current, message);
+                        if (decision.HasValue)
+                        {
+                            return decision.Value;
+                        }
+
+                        break;
                     }
 
-                    if (sqliteCode == 19)
+                case "PostgresException":
                     {
-                        // Bishop minor #1: concurrent first-creation collision.
-                        // The retry path re-reads and merges into the existing row.
-                        return true;
+                        ClassifierDecision? decision = ClassifyNpgsql(current);
+                        if (decision.HasValue)
+                        {
+                            return decision.Value;
+                        }
+
+                        break;
                     }
-                }
 
-                if (message.Contains("UNIQUE constraint", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            // PostgreSQL / Npgsql: 40001 serialization_failure, 40P01 deadlock_detected,
-            // 23505 unique_violation.
-            if (typeName == "PostgresException")
-            {
-                if (TryGetNpgsqlSqlState(current, out string? state))
-                {
-                    if (state is "40001" or "40P01" or "23505")
+                case "SqlException":
                     {
-                        return true;
-                    }
-                }
-            }
+                        ClassifierDecision? decision = ClassifySqlServer(current, message);
+                        if (decision.HasValue)
+                        {
+                            return decision.Value;
+                        }
 
-            // SQL Server: 1205 deadlock victim, 3960 snapshot conflict, 2601/2627 unique.
-            if (typeName == "SqlException")
-            {
-                if (TryGetSqlServerErrorNumber(current, out int number))
-                {
-                    if (number is 1205 or 3960 or 2601 or 2627)
-                    {
-                        return true;
+                        break;
                     }
-                }
-            }
 
-            // MySQL / MariaDB: 1213 deadlock, 1062 duplicate entry.
-            if (typeName == "MySqlException")
-            {
-                if (TryGetMySqlErrorNumber(current, out int mysqlNumber))
-                {
-                    if (mysqlNumber is 1213 or 1062)
+                case "MySqlException":
                     {
-                        return true;
+                        ClassifierDecision? decision = ClassifyMySql(current, message);
+                        if (decision.HasValue)
+                        {
+                            return decision.Value;
+                        }
+
+                        break;
                     }
-                }
             }
 
             current = current.InnerException;
         }
 
-        return false;
+        return ClassifierDecision.Rethrow;
+    }
+
+    /// <summary>
+    /// The unique index/constraint the classifier accepts as a first-create
+    /// UserId conflict. Every relational provider we ship migrations for
+    /// names this artefact identically (EF's default index-name convention
+    /// is <c>IX_{Table}_{Column}</c>; the SQL Server column-uniqueness
+    /// constraint uses <c>UQ_</c> prefixes but still carries the column
+    /// name).
+    /// </summary>
+    private const string UserIdIndexNeedle = "NotificationPreferences_UserId";
+
+    /// <summary>
+    /// SQLite BUSY (5) / LOCKED (6) → transient. Extended constraint code
+    /// 2067 (SQLITE_CONSTRAINT_UNIQUE) or primary code 19 with a message that
+    /// names <c>NotificationPreferences.UserId</c> → UserId unique conflict.
+    /// Anything else → not our conflict.
+    /// </summary>
+    private static ClassifierDecision? ClassifySqlite(Exception ex, string message)
+    {
+        if (TryGetSqliteErrorCode(ex, out int sqliteCode))
+        {
+            if (sqliteCode is 5 or 6)
+            {
+                return ClassifierDecision.TransientProviderConflict;
+            }
+
+            // 2067 = SQLITE_CONSTRAINT_UNIQUE (extended). 19 = SQLITE_CONSTRAINT
+            // (primary) — we still need the message to tell UserId apart from
+            // some other unique constraint the schema may add later.
+            if (sqliteCode is 2067 or 19
+                && (message.Contains(UserIdIndexNeedle, StringComparison.OrdinalIgnoreCase)
+                    || (message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase)
+                        && message.Contains("NotificationPreferences.UserId", StringComparison.OrdinalIgnoreCase))))
+            {
+                return ClassifierDecision.UserIdUniqueConflict;
+            }
+        }
+
+        // No error code exposed. Fall back to the SQLite standard "UNIQUE
+        // constraint failed: NotificationPreferences.UserId" message shape.
+        if (message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase)
+            && message.Contains("NotificationPreferences.UserId", StringComparison.OrdinalIgnoreCase))
+        {
+            return ClassifierDecision.UserIdUniqueConflict;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// PostgreSQL / Npgsql SQLSTATE classification:
+    /// 40001 serialization_failure, 40P01 deadlock_detected → transient.
+    /// 23505 unique_violation → UserId conflict only when the constraint name
+    /// on the exception references the <c>NotificationPreferences.UserId</c>
+    /// index, otherwise rethrow.
+    /// </summary>
+    private static ClassifierDecision? ClassifyNpgsql(Exception ex)
+    {
+        if (!TryGetNpgsqlSqlState(ex, out string? state))
+        {
+            return null;
+        }
+
+        if (state is "40001" or "40P01")
+        {
+            return ClassifierDecision.TransientProviderConflict;
+        }
+
+        if (state != "23505")
+        {
+            return null;
+        }
+
+        string constraint = TryGetStringProperty(ex, "ConstraintName") ?? string.Empty;
+        string tableName = TryGetStringProperty(ex, "TableName") ?? string.Empty;
+        string columnName = TryGetStringProperty(ex, "ColumnName") ?? string.Empty;
+        if (constraint.Contains(UserIdIndexNeedle, StringComparison.OrdinalIgnoreCase)
+            || (tableName.Equals("NotificationPreferences", StringComparison.OrdinalIgnoreCase)
+                && columnName.Equals("UserId", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ClassifierDecision.UserIdUniqueConflict;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// SQL Server: 1205 deadlock victim, 3960 snapshot conflict, 1222 lock
+    /// timeout → transient. 2601 (duplicate key on unique index) and 2627
+    /// (unique constraint violation) → UserId conflict only when the message
+    /// references the <c>IX_NotificationPreferences_UserId</c> index.
+    /// </summary>
+    private static ClassifierDecision? ClassifySqlServer(Exception ex, string message)
+    {
+        if (!TryGetIntProperty(ex, "Number", out int number))
+        {
+            return null;
+        }
+
+        if (number is 1205 or 3960 or 1222)
+        {
+            return ClassifierDecision.TransientProviderConflict;
+        }
+
+        if (number is 2601 or 2627
+            && message.Contains(UserIdIndexNeedle, StringComparison.OrdinalIgnoreCase))
+        {
+            return ClassifierDecision.UserIdUniqueConflict;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// MySQL / MariaDB: 1213 deadlock, 1205 lock wait timeout → transient.
+    /// 1062 duplicate entry → UserId conflict only when the offending index
+    /// message references the <c>NotificationPreferences.UserId</c> index.
+    /// </summary>
+    private static ClassifierDecision? ClassifyMySql(Exception ex, string message)
+    {
+        if (!TryGetIntProperty(ex, "Number", out int number))
+        {
+            return null;
+        }
+
+        if (number is 1213 or 1205)
+        {
+            return ClassifierDecision.TransientProviderConflict;
+        }
+
+        if (number == 1062
+            && message.Contains(UserIdIndexNeedle, StringComparison.OrdinalIgnoreCase))
+        {
+            return ClassifierDecision.UserIdUniqueConflict;
+        }
+
+        return null;
     }
 
     private static bool TryGetSqliteErrorCode(Exception ex, out int code)
     {
+        // Try SqliteErrorCode first; fall back to SqliteExtendedErrorCode when
+        // the primary code is the generic SQLITE_CONSTRAINT (19) so the
+        // classifier can tell UNIQUE (2067) apart from CHECK/FK.
         System.Reflection.PropertyInfo? prop = ex.GetType().GetProperty("SqliteErrorCode");
         if (prop is not null && prop.GetValue(ex) is int extracted)
         {
             code = extracted;
+            if (extracted == 19)
+            {
+                System.Reflection.PropertyInfo? extProp = ex.GetType().GetProperty("SqliteExtendedErrorCode");
+                if (extProp is not null && extProp.GetValue(ex) is int extendedCode)
+                {
+                    code = extendedCode;
+                }
+            }
+
             return true;
         }
 
@@ -271,12 +438,6 @@ public static class PreferenceConcurrencyRetry
         return false;
     }
 
-    private static bool TryGetSqlServerErrorNumber(Exception ex, out int number)
-        => TryGetIntProperty(ex, "Number", out number);
-
-    private static bool TryGetMySqlErrorNumber(Exception ex, out int number)
-        => TryGetIntProperty(ex, "Number", out number);
-
     /// <summary>
     /// Reads an integer property (like SqlException.Number / MySqlException.Number)
     /// via reflection so this helper avoids a hard dependency on any specific
@@ -295,5 +456,16 @@ public static class PreferenceConcurrencyRetry
 
         number = 0;
         return false;
+    }
+
+    private static string? TryGetStringProperty(Exception ex, string propertyName)
+    {
+        System.Reflection.PropertyInfo? prop = ex.GetType().GetProperty(propertyName);
+        if (prop is not null && prop.GetValue(ex) is string extracted)
+        {
+            return extracted;
+        }
+
+        return null;
     }
 }

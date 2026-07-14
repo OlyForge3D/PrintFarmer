@@ -150,6 +150,15 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
                 unix.ToString(CultureInfo.InvariantCulture));
         }
 
+        // Hicks #1: no OperationCanceledException catch here. TaskCanceledException
+        // is an OperationCanceledException subclass — HttpClient uses it for both
+        // caller-token cancellation AND its own internal per-request timer. A
+        // previous version filtered on `cancellationToken.IsCancellationRequested`
+        // and mapped the internal-timer OCE into a Transient("timeout") result,
+        // which silently swallowed cancellation when the caller passed
+        // CancellationToken.None. Cancellation is a first-class control-flow
+        // signal, not a transient wire condition; letting every OCE propagate
+        // unchanged is the mandated behaviour.
         try
         {
             using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
@@ -191,19 +200,10 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
 
             return NativePushDispatchResult.Terminal(apnsReason ?? $"http_{status}");
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (HttpRequestException ex)
         {
             _logger.LogWarning(ex, "[NativePush/direct] Transient network failure sending envelope for attentionItemId={AttentionItemId}.", envelope.AttentionItemId);
             return NativePushDispatchResult.Transient("network");
-        }
-        catch (TaskCanceledException ex)
-        {
-            _logger.LogWarning(ex, "[NativePush/direct] Timeout sending envelope for attentionItemId={AttentionItemId}.", envelope.AttentionItemId);
-            return NativePushDispatchResult.Transient("timeout");
         }
     }
 

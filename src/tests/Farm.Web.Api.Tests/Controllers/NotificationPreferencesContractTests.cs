@@ -612,6 +612,140 @@ public sealed class NotificationPreferencesContractTests
     }
 
     [Fact]
+    public async System.Threading.Tasks.Task LegacyPut_ChannelMasterFalse_ZeroesAttentionRowsForThatChannel()
+    {
+        // Hicks H1-v5-final regression: a legacy-shaped PUT (no matrix) that
+        // sets EnablePushNotifications=false must also drop the five
+        // attention PushOn* rows for that user. Otherwise
+        // ApplyMasterFlagsFromMatrix (OR across all 9 push rows) sees the
+        // preserved attention PushOn*=true values and recomputes
+        // EnablePushNotifications back to true — silently reactivating the
+        // channel the legacy client tried to disable and letting the
+        // dispatcher's master gate fall open. The fix is symmetric across
+        // all four channels; this test proves it for push and in-app.
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        System.Guid userId = System.Guid.NewGuid();
+        var existing = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            EnablePushNotifications = true,
+            EnableInAppNotifications = true,
+            // Attention rows all opted in — the state a modern client would
+            // leave behind after enabling the F3 attention channels.
+            PushOnPrinterFailure = true,
+            PushOnFilamentRunout = true,
+            PushOnHarvestReady = true,
+            PushOnMaintenanceDue = true,
+            PushOnPrinterOffline = true,
+            InAppOnPrinterFailure = true,
+            InAppOnFilamentRunout = true,
+            InAppOnHarvestReady = true,
+            InAppOnMaintenanceDue = true,
+            InAppOnPrinterOffline = true,
+        };
+        dbContext.NotificationPreferences.Add(existing);
+        await dbContext.SaveChangesAsync();
+
+        NotificationsController controller = BuildController(dbContext, userId);
+
+        // Legacy client sends channel masters FALSE with no matrix.
+        var request = new UpdateNotificationPreferencesRequest
+        {
+            EnablePushNotifications = false,
+            EnableInAppNotifications = false,
+            EnableEmailNotifications = false,
+            EnableTelegramNotifications = false,
+            NotifyOnStart = false,
+            NotifyOnCompletion = false,
+            NotifyOnFailure = false,
+            NotifyOnPause = false,
+            EventChannelPreferences = null,
+        };
+
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+        result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.OkObjectResult>();
+
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted.Should().NotBeNull();
+
+        // All five attention PushOn* rows are now OFF — proving the master
+        // OR cannot silently reactivate push.
+        persisted!.PushOnPrinterFailure.Should().BeFalse();
+        persisted.PushOnFilamentRunout.Should().BeFalse();
+        persisted.PushOnHarvestReady.Should().BeFalse();
+        persisted.PushOnMaintenanceDue.Should().BeFalse();
+        persisted.PushOnPrinterOffline.Should().BeFalse();
+
+        // Same symmetric guarantee for in-app attention rows.
+        persisted.InAppOnPrinterFailure.Should().BeFalse();
+        persisted.InAppOnFilamentRunout.Should().BeFalse();
+        persisted.InAppOnHarvestReady.Should().BeFalse();
+        persisted.InAppOnMaintenanceDue.Should().BeFalse();
+        persisted.InAppOnPrinterOffline.Should().BeFalse();
+
+        // The push master recomputed by ApplyMasterFlagsFromMatrix now holds
+        // the OFF value the caller intended — this is the dispatcher master
+        // gate and the whole point of H1-v5-final.
+        persisted.EnablePushNotifications.Should().BeFalse();
+
+        // Note: EnableInAppNotifications remains TRUE by legacy contract —
+        // InAppOnJobFailed is force-set to true in the legacy branch so
+        // critical failures can never be fully silenced. The push master
+        // has no such override, which is why the H1-v5 dispatcher-gate
+        // reactivation defect only manifested on push.
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task LegacyPut_ChannelMasterTrue_PreservesAttentionRowsForThatChannel()
+    {
+        // Companion to H1-v5-final: when a legacy PUT keeps a channel ON,
+        // the attention rows for that channel are untouched (this is the
+        // property Vasquez H2-v5 already enforced). Guards against the H1
+        // fix becoming an over-eager wipe.
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
+                Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        System.Guid userId = System.Guid.NewGuid();
+        dbContext.NotificationPreferences.Add(new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
+        {
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterFailure = true,
+            PushOnFilamentRunout = false, // user explicitly opted OUT of runout
+        });
+        await dbContext.SaveChangesAsync();
+
+        NotificationsController controller = BuildController(dbContext, userId);
+
+        var request = new UpdateNotificationPreferencesRequest
+        {
+            EnablePushNotifications = true, // still ON
+            EnableInAppNotifications = true,
+            NotifyOnStart = true,
+            EventChannelPreferences = null,
+        };
+
+        Microsoft.AspNetCore.Mvc.ActionResult<NotificationPreferencesDto> result =
+            await controller.UpdatePreferencesAsync(request, dbContext);
+        result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.OkObjectResult>();
+
+        Farm.Infrastructure.Domain.Notifications.NotificationPreferences? persisted =
+            await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
+        persisted!.PushOnPrinterFailure.Should().BeTrue("attention row preserved when channel master stays ON");
+        persisted.PushOnFilamentRunout.Should().BeFalse("prior opt-out preserved when channel master stays ON");
+    }
+
+    [Fact]
     public async System.Threading.Tasks.Task UnknownEnumTokenOnPut_Returns400ProblemDetails()
     {
         // The unknown-enum → 400 contract must survive the patch refactor.
@@ -1135,7 +1269,7 @@ public sealed class NotificationPreferencesContractTests
         }
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
 
         var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
         objectResult.Should().NotBeNull();
@@ -1159,7 +1293,7 @@ public sealed class NotificationPreferencesContractTests
         payload.Categories[new string('k', 65)] = true;
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
 
         var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
         objectResult.Should().NotBeNull();
@@ -1183,7 +1317,7 @@ public sealed class NotificationPreferencesContractTests
         payload.Categories[string.Empty] = true;
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
 
         var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
         objectResult.Should().NotBeNull();
@@ -1212,7 +1346,7 @@ public sealed class NotificationPreferencesContractTests
         }
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
 
         Microsoft.AspNetCore.Mvc.OkObjectResult? ok = result.Result as Microsoft.AspNetCore.Mvc.OkObjectResult;
         ok.Should().NotBeNull();
@@ -1255,7 +1389,7 @@ public sealed class NotificationPreferencesContractTests
         payload.Categories["one-more-key"] = true;
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
 
         var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
         objectResult.Should().NotBeNull();
@@ -1323,7 +1457,7 @@ public sealed class NotificationPreferencesContractTests
         }
 
         Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
-            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, System.Threading.CancellationToken.None);
 
         var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
         objectResult.Should().NotBeNull();

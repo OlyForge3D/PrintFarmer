@@ -15,9 +15,11 @@ public class NotificationPreferences
     public virtual User? User { get; set; }
 
     /// <summary>
-    /// Enable email notifications
+    /// Master flag: email is a routing channel at all for this user.
+    /// Hicks #5: canonical baseline is <c>false</c> — email is strictly
+    /// opt-in. Aligned with <see cref="Farm.Infrastructure.Services.Notifications.NotificationPreferencesDefaults"/>.
     /// </summary>
-    public bool EnableEmailNotifications { get; set; } = true;
+    public bool EnableEmailNotifications { get; set; } = false;
 
     /// <summary>
     /// Enable push notifications (web push / mobile)
@@ -81,19 +83,22 @@ public class NotificationPreferences
     public bool EmailOnJobStarted { get; set; } = false;
 
     /// <summary>
-    /// Enable email delivery for job completion events.
+    /// Enable email delivery for job completion events. Hicks #5 canonical
+    /// baseline is <c>false</c> — email is opt-in.
     /// </summary>
-    public bool EmailOnJobCompleted { get; set; } = true;
+    public bool EmailOnJobCompleted { get; set; } = false;
 
     /// <summary>
-    /// Enable email delivery for job failure events.
+    /// Enable email delivery for job failure events. Hicks #5 canonical
+    /// baseline is <c>false</c> — email is opt-in.
     /// </summary>
-    public bool EmailOnJobFailed { get; set; } = true;
+    public bool EmailOnJobFailed { get; set; } = false;
 
     /// <summary>
-    /// Enable email delivery for job pause/resume events.
+    /// Enable email delivery for job pause/resume events. Hicks #5 canonical
+    /// baseline is <c>false</c> — email is opt-in.
     /// </summary>
-    public bool EmailOnJobPaused { get; set; } = true;
+    public bool EmailOnJobPaused { get; set; } = false;
 
     /// <summary>
     /// Enable push delivery for job start events.
