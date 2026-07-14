@@ -94,7 +94,7 @@ public sealed class NotificationPreferencesEndpointTests : IAsyncLifetime
         supported.ValueKind.Should().Be(JsonValueKind.Array);
 
         string[] tokens = supported.EnumerateArray().Select(e => e.GetString()!).ToArray();
-        tokens.Should().BeEquivalentTo(new[]
+        tokens.Should().Equal(new[]
         {
             "JobStarted",
             "JobCompleted",

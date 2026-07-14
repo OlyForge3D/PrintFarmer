@@ -40,6 +40,31 @@ public sealed class NotificationPreferencesHttpBoundaryTests
     }
 
     [Fact]
+    public async Task AttentionPreferences_SerializedRequestUtf8Overflow_Return400WithoutMutation()
+    {
+        await using var factory = new CustomWebApplicationFactory();
+        (HttpClient client, Guid userId) = await CreateNativePushClientAsync(factory, "request-bytes");
+        Dictionary<string, bool> categories = Enumerable.Range(0, 32)
+            .ToDictionary(
+                index => $"{index:D2}" + new string('�', 62),
+                _ => false);
+        byte[] serialized = JsonSerializer.SerializeToUtf8Bytes(new { categories });
+        serialized.Length.Should().BeGreaterThan(
+            AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes);
+
+        using var content = new ByteArrayContent(serialized);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        HttpResponseMessage response = await client.PutAsync(
+            "/api/notifications/attention-push-preferences",
+            content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.NotificationPreferences.CountAsync(preferences => preferences.UserId == userId)).Should().Be(0);
+    }
+
+    [Fact]
     public async Task AttentionPreferences_ExactRequestBounds_Return200AndPersist()
     {
         await using var factory = new CustomWebApplicationFactory();
@@ -57,6 +82,41 @@ public sealed class NotificationPreferencesHttpBoundaryTests
         NotificationPreferences persisted = await ReadPreferencesAsync(factory, userId);
         AttentionPushCategoryPreferences.FromJson(persisted.AttentionPushCategoryPreferencesJson)
             .Categories.Should().BeEquivalentTo(categories);
+    }
+
+    [Fact]
+    public async Task AttentionPreferences_ExactSerializedUtf8Boundary_Accepts8192ThenRejectsGrowthWithoutMutation()
+    {
+        await using var factory = new CustomWebApplicationFactory();
+        (HttpClient client, Guid userId) = await CreateNativePushClientAsync(factory, "utf8-exact");
+        Dictionary<string, bool> categories = Enumerable.Range(0, 112)
+            .ToDictionary(
+                index => $"k{index:D3}-".PadRight(64, 'x'),
+                _ => false);
+        var expected = new AttentionPushCategoryPreferences { Categories = categories };
+        Encoding.UTF8.GetByteCount(expected.ToJson()).Should().Be(
+            AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes);
+
+        foreach (Dictionary<string, bool> batch in categories
+            .Chunk(32)
+            .Select(entries => entries.ToDictionary(entry => entry.Key, entry => entry.Value)))
+        {
+            HttpResponseMessage accepted = await client.PutAsJsonAsync(
+                "/api/notifications/attention-push-preferences",
+                new { categories = batch });
+            accepted.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        string before = (await ReadPreferencesAsync(factory, userId)).AttentionPushCategoryPreferencesJson!;
+        Encoding.UTF8.GetByteCount(before).Should().Be(
+            AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes);
+        HttpResponseMessage rejected = await client.PutAsJsonAsync(
+            "/api/notifications/attention-push-preferences",
+            new { categories = new Dictionary<string, bool> { ["overflow"] = true } });
+
+        rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReadPreferencesAsync(factory, userId)).AttentionPushCategoryPreferencesJson
+            .Should().Be(before);
     }
 
     [Fact]

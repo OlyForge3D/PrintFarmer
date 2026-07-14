@@ -102,6 +102,50 @@ public sealed class DirectApnsNativePushSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_BackgroundDismissal_UsesSilentHeadersAndContentAvailableOnlyAps()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        HttpRequestMessage? captured = null;
+        string? capturedJson = null;
+        DirectApnsNativePushSender sut = CreateSender(settings, request =>
+        {
+            captured = request;
+            capturedJson = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        NativePushEnvelope background = Sample with
+        {
+            Title = null,
+            Subtitle = null,
+            Body = null,
+            ChangeKind = AttentionChangeKind.Resolved,
+            Priority = NativePushPriority.Background,
+            ActionIds = Array.Empty<string>(),
+        };
+
+        try
+        {
+            NativePushDispatchResult result = await sut.SendAsync(background);
+
+            result.Success.Should().BeTrue();
+            captured.Should().NotBeNull();
+            captured!.Headers.GetValues("apns-push-type").Should().Equal("background");
+            captured.Headers.GetValues("apns-priority").Should().Equal("5");
+            capturedJson.Should().NotBeNull();
+            using JsonDocument payload = JsonDocument.Parse(capturedJson!);
+            JsonElement aps = payload.RootElement.GetProperty("aps");
+            aps.EnumerateObject().Select(property => property.Name)
+                .Should().Equal("content-available");
+            aps.GetProperty("content-available").GetInt32().Should().Be(1);
+        }
+        finally
+        {
+            key.Dispose();
+            sut.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task SendAsync_Http410_ReturnsInvalidated()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();

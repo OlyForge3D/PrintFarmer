@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Npgsql;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Repositories.Notifications;
@@ -223,10 +224,10 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     [Fact]
     public async Task Upsert_NonUniqueDbUpdateException_IsNotRetried()
     {
-        var interceptor = new ThrowingSaveInterceptor(
-            new DbUpdateException(
-                "foreign key violation",
-                new SqliteException("FOREIGN KEY constraint failed", errorCode: 19, extendedErrorCode: 787)));
+        var original = new DbUpdateException(
+            "foreign key violation",
+            new SqliteException("FOREIGN KEY constraint failed", errorCode: 19, extendedErrorCode: 787));
+        var interceptor = new ThrowingSaveInterceptor(original);
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .AddInterceptors(interceptor)
@@ -242,9 +243,43 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
             "production",
             "com.example.app");
 
-        await act.Should().ThrowAsync<DbUpdateException>()
-            .WithMessage("foreign key violation");
+        (await act.Should().ThrowAsync<DbUpdateException>())
+            .Which.Should().BeSameAs(original);
         interceptor.InvocationCount.Should().Be(1, "non-unique failures must not consume the retry budget");
+    }
+
+    [Theory]
+    [InlineData("UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId", true)]
+    [InlineData("UNIQUE constraint failed: DeviceTokens.Token", false)]
+    [InlineData("UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId, DeviceTokens.Token", false)]
+    [InlineData("UNIQUE constraint failed: Other.UserId, Other.InstallationId", false)]
+    public void IsUniqueDeviceTokenConflict_OnlyAcceptsExactUpsertKey(string message, bool expected)
+    {
+        var exception = new DbUpdateException(
+            "save failed",
+            new SqliteException(message, errorCode: 19, extendedErrorCode: 2067));
+
+        EfDeviceTokenRepository.IsUniqueDeviceTokenConflict(exception).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("IX_DeviceTokens_UserId_InstallationId", true)]
+    [InlineData("ix_devicetokens_userid_installationid", false)]
+    [InlineData("IX_DeviceTokens_UserId_InstallationId_Extra", false)]
+    public void IsUniqueDeviceTokenConflict_PostgresRequiresExactConstraintName(
+        string constraintName,
+        bool expected)
+    {
+        var exception = new DbUpdateException(
+            "save failed",
+            new PostgresException(
+                "unique violation",
+                "ERROR",
+                "ERROR",
+                PostgresErrorCodes.UniqueViolation,
+                constraintName: constraintName));
+
+        EfDeviceTokenRepository.IsUniqueDeviceTokenConflict(exception).Should().Be(expected);
     }
 
     private sealed class CollisionInterceptor(

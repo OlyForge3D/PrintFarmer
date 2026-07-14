@@ -1,12 +1,9 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Notifications.NativePush;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,192 +14,148 @@ namespace Farm.Web.Api.Tests.Services.Notifications;
 public sealed class NotificationServicePreferenceRaceTests
 {
     [Fact]
-    public async Task FirstCreate_TwoPooledFactoryCallers_ConvergeAndRetryWithFreshContext()
+    public async Task FirstCreate_BothReadMissing_WinnerCommitsBeforeFreshRetryReread()
     {
         await using var host = new CustomWebApplicationFactory();
         using var client = host.CreateClient();
         IDbContextFactory<AppDbContext> factory =
             host.Services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         factory.GetType().Name.Should().Contain("PooledDbContextFactory");
-
         Guid userId = Guid.NewGuid();
-        await SeedUserAsync(factory, userId, "first-create");
-
-        NotificationPreferencesUpdate patchA = MatrixPatch(
+        await SeedUserAsync(factory, userId, createPreferences: false);
+        var coordinator = new AdverseRaceCoordinator(
+            userId,
+            initialRowShouldExist: false,
+            retryWinnerPredicate: preferences => preferences?.TelegramOnMaintenanceDue == true);
+        NotificationPreferencesUpdate loserPatch = MatrixPatch(
             NotificationPreferenceEvent.JobStarted,
             inApp: false,
             email: true,
             push: false,
             telegram: false);
-        NotificationPreferencesUpdate patchB = MatrixPatch(
+        NotificationPreferencesUpdate winnerPatch = MatrixPatch(
             NotificationPreferenceEvent.MaintenanceDue,
             inApp: false,
             email: false,
             push: false,
             telegram: true);
 
-        var contexts = new ConcurrentBag<string>();
-        var firstRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondCommitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int firstAttempts = 0;
-        int classifierCalls = 0;
-
-        async Task FirstHook(AppDbContext context, CancellationToken _)
-        {
-            contexts.Add(context.ContextId.ToString());
-            if (Interlocked.Increment(ref firstAttempts) == 1)
-            {
-                firstRead.TrySetResult();
-                throw new DbUpdateConcurrencyException("Forced stale first-create read.");
-            }
-
-            await Task.CompletedTask;
-        }
-
-        Task second = RunAfterSignalAsync(
-            firstRead.Task,
-            () => RunPatchAsync(
+        Task loser = Task.Run(() => RunPreferencePatchAsync(
+            host,
+            userId,
+            loserPatch,
+            coordinator.LoserReadHookAsync,
+            coordinator.ClassifyAfterWinnerCommit));
+        Task winner = Task.Run(() => RunWinnerAsync(
+            () => RunPreferencePatchAsync(
                 host,
                 userId,
-                patchB,
-                (context, _) =>
-                {
-                    contexts.Add(context.ContextId.ToString());
-                    return Task.CompletedTask;
-                },
-                () => { }),
-            secondCommitted);
-        Task first = Task.Run(() => RunPatchAsync(host, userId, patchA, FirstHook, () =>
-        {
-            Interlocked.Increment(ref classifierCalls);
-            secondCommitted.Task.WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
-        }));
-        await Task.WhenAll(first, second);
+                winnerPatch,
+                coordinator.WinnerReadHookAsync,
+                classifier: null),
+            coordinator));
+        await Task.WhenAll(loser, winner).WaitAsync(TimeSpan.FromSeconds(30));
 
         await using AppDbContext verify = await factory.CreateDbContextAsync();
         NotificationPreferences[] rows = await verify.NotificationPreferences
             .AsNoTracking()
-            .Where(p => p.UserId == userId)
+            .Where(preferences => preferences.UserId == userId)
             .ToArrayAsync();
-
         rows.Should().ContainSingle();
         rows[0].EmailOnJobStarted.Should().BeTrue();
         rows[0].TelegramOnMaintenanceDue.Should().BeTrue();
-        classifierCalls.Should().BeGreaterThan(0, "one concurrent insert must be classified and retried");
-        contexts.Distinct().Should().HaveCountGreaterThan(2, "the retry must lease a fresh pooled context");
+        coordinator.AssertExactOrderingAndRetry();
     }
 
     [Fact]
-    public async Task DisjointAttentionColumns_TwoPooledFactoryCallers_PreserveBothWritesAfterRetry()
+    public async Task DisjointCategoryUpdates_BothReadSameMap_WinnerCommitsBeforeFreshRetryMerge()
     {
         await using var host = new CustomWebApplicationFactory();
         using var client = host.CreateClient();
         IDbContextFactory<AppDbContext> factory =
             host.Services.GetRequiredService<IDbContextFactory<AppDbContext>>();
-
+        factory.GetType().Name.Should().Contain("PooledDbContextFactory");
         Guid userId = Guid.NewGuid();
-        var seed = NotificationPreferencesDefaults.Create(userId);
-        seed.InAppOnJobStarted = false;
-        seed.PushOnPrinterFailure = false;
-        await SeedUserAsync(factory, userId, "disjoint-columns", seed);
+        await SeedUserAsync(factory, userId, createPreferences: true);
+        var coordinator = new AdverseRaceCoordinator(
+            userId,
+            initialRowShouldExist: true,
+            retryWinnerPredicate: preferences =>
+                preferences is not null
+                && AttentionPushCategoryPreferences
+                    .FromJson(preferences.AttentionPushCategoryPreferencesJson)
+                    .Categories.TryGetValue("winner-key", out bool enabled)
+                && enabled);
 
-        NotificationPreferencesUpdate patchA = MatrixPatch(
-            NotificationPreferenceEvent.JobStarted,
-            inApp: true,
-            email: false,
-            push: false,
-            telegram: false);
-        NotificationPreferencesUpdate patchB = MatrixPatch(
-            NotificationPreferenceEvent.PrinterFailure,
-            inApp: false,
-            email: false,
-            push: true,
-            telegram: false);
-
-        var contexts = new ConcurrentBag<string>();
-        var firstRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondCommitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int firstAttempts = 0;
-        int classifierCalls = 0;
-
-        async Task FirstHook(AppDbContext context, CancellationToken _)
-        {
-            contexts.Add(context.ContextId.ToString());
-            if (Interlocked.Increment(ref firstAttempts) == 1)
-            {
-                firstRead.TrySetResult();
-                throw new DbUpdateConcurrencyException("Forced stale disjoint-column read.");
-            }
-
-            await Task.CompletedTask;
-        }
-
-        Task second = RunAfterSignalAsync(
-            firstRead.Task,
-            () => RunPatchAsync(
+        Task loser = Task.Run(() => RunCategoryPatchAsync(
+            host,
+            userId,
+            new Dictionary<string, bool> { ["loser-key"] = false },
+            coordinator.LoserReadHookAsync,
+            coordinator.ClassifyAfterWinnerCommit));
+        Task winner = Task.Run(() => RunWinnerAsync(
+            () => RunCategoryPatchAsync(
                 host,
                 userId,
-                patchB,
-                (context, _) =>
-                {
-                    contexts.Add(context.ContextId.ToString());
-                    return Task.CompletedTask;
-                },
-                () => { }),
-            secondCommitted);
-        Task first = Task.Run(() => RunPatchAsync(host, userId, patchA, FirstHook, () =>
-        {
-            Interlocked.Increment(ref classifierCalls);
-            secondCommitted.Task.WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
-        }));
-        await Task.WhenAll(first, second);
+                new Dictionary<string, bool> { ["winner-key"] = true },
+                coordinator.WinnerReadHookAsync,
+                classifier: null),
+            coordinator));
+        await Task.WhenAll(loser, winner).WaitAsync(TimeSpan.FromSeconds(30));
 
         await using AppDbContext verify = await factory.CreateDbContextAsync();
         NotificationPreferences persisted = await verify.NotificationPreferences
             .AsNoTracking()
-            .SingleAsync(p => p.UserId == userId);
-
-        persisted.InAppOnJobStarted.Should().BeTrue();
-        persisted.PushOnPrinterFailure.Should().BeTrue();
-        persisted.EnableInAppNotifications.Should().BeTrue();
-        persisted.EnablePushNotifications.Should().BeTrue();
-        classifierCalls.Should().BeGreaterThan(0, "the forced adverse interleaving must exercise retry classification");
-        contexts.Distinct().Should().HaveCountGreaterThan(2, "the losing write must retry in a fresh context");
+            .SingleAsync(preferences => preferences.UserId == userId);
+        AttentionPushCategoryPreferences map = AttentionPushCategoryPreferences.FromJson(
+            persisted.AttentionPushCategoryPreferencesJson);
+        map.Categories.Should().ContainKey("loser-key").WhoseValue.Should().BeFalse();
+        map.Categories.Should().ContainKey("winner-key").WhoseValue.Should().BeTrue();
+        coordinator.AssertExactOrderingAndRetry();
     }
 
-    private static async Task RunPatchAsync(
+    private static async Task RunPreferencePatchAsync(
         CustomWebApplicationFactory host,
         Guid userId,
         NotificationPreferencesUpdate patch,
-        Func<AppDbContext, CancellationToken, Task> barrier,
-        Action recordClassification)
+        Func<AppDbContext, CancellationToken, Task> hook,
+        Func<Exception, PreferenceConcurrencyRetry.ClassifierDecision>? classifier)
     {
         await using AsyncServiceScope scope = host.Services.CreateAsyncScope();
         var service = (NotificationService)scope.ServiceProvider.GetRequiredService<INotificationService>();
-        service.OnAfterPreferenceReadForTestsAsync = barrier;
-        service.PreferenceConflictClassifierForTests = exception =>
-        {
-            recordClassification();
-            return PreferenceConcurrencyRetry.Classify(exception);
-        };
-
+        service.OnAfterPreferenceReadForTestsAsync = hook;
+        service.PreferenceConflictClassifierForTests = classifier;
         _ = await service.UpdatePreferencesAsync(userId, patch, CancellationToken.None);
     }
 
-    private static async Task RunAfterSignalAsync(
-        Task signal,
-        Func<Task> operation,
-        TaskCompletionSource completion)
+    private static async Task RunCategoryPatchAsync(
+        CustomWebApplicationFactory host,
+        Guid userId,
+        IReadOnlyDictionary<string, bool> patch,
+        Func<AppDbContext, CancellationToken, Task> hook,
+        Func<Exception, PreferenceConcurrencyRetry.ClassifierDecision>? classifier)
     {
-        await signal.WaitAsync(TimeSpan.FromSeconds(30));
+        await using AsyncServiceScope scope = host.Services.CreateAsyncScope();
+        var service = (NotificationService)scope.ServiceProvider.GetRequiredService<INotificationService>();
+        service.OnAfterPreferenceReadForTestsAsync = hook;
+        service.PreferenceConflictClassifierForTests = classifier;
+        AttentionCategoryUpdateResult result = await service.UpdateAttentionCategoryPreferencesAsync(
+            userId,
+            patch,
+            CancellationToken.None);
+        result.Status.Should().Be(AttentionCategoryUpdateStatus.Success);
+    }
+
+    private static async Task RunWinnerAsync(Func<Task> operation, AdverseRaceCoordinator coordinator)
+    {
         try
         {
             await operation();
-            completion.TrySetResult();
+            coordinator.WinnerCommitted.TrySetResult();
         }
         catch (Exception exception)
         {
-            completion.TrySetException(exception);
+            coordinator.WinnerCommitted.TrySetException(exception);
             throw;
         }
     }
@@ -210,23 +163,22 @@ public sealed class NotificationServicePreferenceRaceTests
     private static async Task SeedUserAsync(
         IDbContextFactory<AppDbContext> factory,
         Guid userId,
-        string username,
-        NotificationPreferences? preferences = null)
+        bool createPreferences)
     {
-        await using AppDbContext db = await factory.CreateDbContextAsync();
-        db.Users.Add(new User
+        await using AppDbContext context = await factory.CreateDbContextAsync();
+        context.Users.Add(new User
         {
             Id = userId,
-            Username = $"{username}-{userId:N}",
-            Email = $"{username}-{userId:N}@test.local",
+            Username = $"race-{userId:N}",
+            Email = $"race-{userId:N}@test.local",
             PasswordHash = "x",
         });
-        if (preferences is not null)
+        if (createPreferences)
         {
-            db.NotificationPreferences.Add(preferences);
+            context.NotificationPreferences.Add(NotificationPreferencesDefaults.Create(userId));
         }
 
-        await db.SaveChangesAsync();
+        await context.SaveChangesAsync();
     }
 
     private static NotificationPreferencesUpdate MatrixPatch(
@@ -250,4 +202,90 @@ public sealed class NotificationServicePreferenceRaceTests
             [
                 new NotificationPreferencesRowPatch(eventType, inApp, email, push, telegram),
             ]);
+
+    private sealed class AdverseRaceCoordinator
+    {
+        private readonly Guid _userId;
+        private readonly bool _initialRowShouldExist;
+        private readonly Func<NotificationPreferences?, bool> _retryWinnerPredicate;
+        private readonly TaskCompletionSource _loserRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _winnerRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _loserClassifying = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ConcurrentQueue<string> _contextIds = new();
+        private int _loserReadCount;
+        private int _winnerReadCount;
+        private int _classifierCalls;
+        private bool _retryStartedAfterWinnerCommit;
+        private bool _retryObservedWinner;
+
+        public AdverseRaceCoordinator(
+            Guid userId,
+            bool initialRowShouldExist,
+            Func<NotificationPreferences?, bool> retryWinnerPredicate)
+        {
+            _userId = userId;
+            _initialRowShouldExist = initialRowShouldExist;
+            _retryWinnerPredicate = retryWinnerPredicate;
+        }
+
+        public TaskCompletionSource WinnerCommitted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task LoserReadHookAsync(AppDbContext context, CancellationToken cancellationToken)
+        {
+            _contextIds.Enqueue(context.ContextId.ToString());
+            int readNumber = Interlocked.Increment(ref _loserReadCount);
+            NotificationPreferences? observed = await ReadAsync(context, cancellationToken);
+            if (readNumber == 1)
+            {
+                (observed is not null).Should().Be(_initialRowShouldExist);
+                _loserRead.TrySetResult();
+                await _winnerRead.Task.WaitAsync(TimeSpan.FromSeconds(20), cancellationToken);
+                throw new DbUpdateConcurrencyException("forced losing serializable transaction");
+            }
+
+            _retryStartedAfterWinnerCommit = WinnerCommitted.Task.IsCompletedSuccessfully;
+            _retryObservedWinner = _retryWinnerPredicate(observed);
+        }
+
+        public async Task WinnerReadHookAsync(AppDbContext context, CancellationToken cancellationToken)
+        {
+            _contextIds.Enqueue(context.ContextId.ToString());
+            Interlocked.Increment(ref _winnerReadCount).Should().Be(1);
+            await _loserRead.Task.WaitAsync(TimeSpan.FromSeconds(20), cancellationToken);
+            NotificationPreferences? observed = await ReadAsync(context, cancellationToken);
+            (observed is not null).Should().Be(_initialRowShouldExist);
+            _winnerRead.TrySetResult();
+            await _loserClassifying.Task.WaitAsync(TimeSpan.FromSeconds(20), cancellationToken);
+        }
+
+        public PreferenceConcurrencyRetry.ClassifierDecision ClassifyAfterWinnerCommit(Exception exception)
+        {
+            Interlocked.Increment(ref _classifierCalls).Should().Be(1);
+            exception.GetType().Should().Be(typeof(DbUpdateConcurrencyException));
+            _loserClassifying.TrySetResult();
+            WinnerCommitted.Task.WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult();
+            return PreferenceConcurrencyRetry.Classify(exception);
+        }
+
+        public void AssertExactOrderingAndRetry()
+        {
+            _loserReadCount.Should().Be(2, "the loser must have one initial read and one retry reread");
+            _winnerReadCount.Should().Be(1, "the winner must commit without retry");
+            _classifierCalls.Should().Be(1, "exactly one losing transaction must be classified");
+            _contextIds.Should().HaveCount(3);
+            _contextIds.Should().OnlyHaveUniqueItems("each attempt must use a fresh pooled context lease");
+            _retryStartedAfterWinnerCommit.Should().BeTrue();
+            _retryObservedWinner.Should().BeTrue("the retry reread must merge the competing commit");
+        }
+
+        private async Task<NotificationPreferences?> ReadAsync(
+            AppDbContext context,
+            CancellationToken cancellationToken)
+        {
+            return await context.NotificationPreferences
+                .AsNoTracking()
+                .SingleOrDefaultAsync(preferences => preferences.UserId == _userId, cancellationToken);
+        }
+    }
 }
