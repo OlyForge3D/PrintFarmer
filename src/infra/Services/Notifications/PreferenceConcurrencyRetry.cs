@@ -212,48 +212,48 @@ public static class PreferenceConcurrencyRetry
             switch (typeName)
             {
                 case "SqliteException":
+                {
+                    ClassifierDecision? decision = ClassifySqlite(current, message);
+                    if (decision.HasValue)
                     {
-                        ClassifierDecision? decision = ClassifySqlite(current, message);
-                        if (decision.HasValue)
-                        {
-                            return decision.Value;
-                        }
-
-                        break;
+                        return decision.Value;
                     }
+
+                    break;
+                }
 
                 case "PostgresException":
+                {
+                    ClassifierDecision? decision = ClassifyNpgsql(current);
+                    if (decision.HasValue)
                     {
-                        ClassifierDecision? decision = ClassifyNpgsql(current);
-                        if (decision.HasValue)
-                        {
-                            return decision.Value;
-                        }
-
-                        break;
+                        return decision.Value;
                     }
+
+                    break;
+                }
 
                 case "SqlException":
+                {
+                    ClassifierDecision? decision = ClassifySqlServer(current, message);
+                    if (decision.HasValue)
                     {
-                        ClassifierDecision? decision = ClassifySqlServer(current, message);
-                        if (decision.HasValue)
-                        {
-                            return decision.Value;
-                        }
-
-                        break;
+                        return decision.Value;
                     }
+
+                    break;
+                }
 
                 case "MySqlException":
+                {
+                    ClassifierDecision? decision = ClassifyMySql(current, message);
+                    if (decision.HasValue)
                     {
-                        ClassifierDecision? decision = ClassifyMySql(current, message);
-                        if (decision.HasValue)
-                        {
-                            return decision.Value;
-                        }
-
-                        break;
+                        return decision.Value;
                     }
+
+                    break;
+                }
             }
 
             current = current.InnerException;
