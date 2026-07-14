@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Data.Common;
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
@@ -572,6 +573,28 @@ public sealed class NativePushDispatcherTests
             File.Delete(databasePath + "-shm");
             File.Delete(databasePath + "-wal");
         }
+    }
+
+    [Theory]
+    [InlineData(NativePushMode.Direct)]
+    [InlineData(NativePushMode.Relay)]
+    public async Task DispatchAsync_InvalidationCompletesAfterPersistedDisable_DiscardsResultAndStopsFanOut(
+        NativePushMode mode)
+    {
+        await AssertPostSendDisableDiscardsResultAsync(
+            mode,
+            NativePushDispatchResult.Invalidated("BadDeviceToken"));
+    }
+
+    [Theory]
+    [InlineData(NativePushMode.Direct)]
+    [InlineData(NativePushMode.Relay)]
+    public async Task DispatchAsync_TokenFailureCompletesAfterPersistedDisable_DiscardsResultAndStopsFanOut(
+        NativePushMode mode)
+    {
+        await AssertPostSendDisableDiscardsResultAsync(
+            mode,
+            NativePushDispatchResult.TokenFailure("provider-token-failure"));
     }
 
     [Fact]
@@ -1833,6 +1856,288 @@ public sealed class NativePushDispatcherTests
             Times.Once);
     }
 
+    private static async Task AssertPostSendDisableDiscardsResultAsync(
+        NativePushMode mode,
+        NativePushDispatchResult completedResult)
+    {
+        Guid firstOwner = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        Guid laterOwner = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        Guid firstRegistrationId = Guid.Parse("00000000-0000-0000-0000-000000000101");
+        Guid sameOwnerRegistrationId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        Guid laterOwnerRegistrationId = Guid.Parse("00000000-0000-0000-0000-000000000201");
+        const string installationId = "kill-switch-primary";
+        string originalToken = new('a', 64);
+        string replacementToken = new('z', 64);
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"native-push-post-send-disable-{Guid.NewGuid():N}.db");
+        string connectionString =
+            $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        try
+        {
+            await using (AppDbContext seed = new(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.AddRange(
+                    BuildUser(firstOwner, "post-disable-first"),
+                    BuildUser(laterOwner, "post-disable-later"));
+                seed.NotificationPreferences.AddRange(
+                    BuildPushPreferences(firstOwner),
+                    BuildPushPreferences(laterOwner));
+                seed.AppSettingsEntities.Add(new AppSettingsEntity
+                {
+                    Key = OperatorFeatureSettings.SectionName,
+                    SettingsJson = JsonSerializer.Serialize(new OperatorFeatureSettings
+                    {
+                        NativePushEnabled = true,
+                    }),
+                    UpdatedAt = DateTime.UtcNow,
+                });
+                seed.DeviceTokens.AddRange(
+                    new DeviceToken
+                    {
+                        Id = firstRegistrationId,
+                        UserId = firstOwner,
+                        RegistrationVersion = 1,
+                        InstallationId = installationId,
+                        Token = originalToken,
+                        Platform = "ios",
+                        Environment = "production",
+                        AppBundleId = "com.example.primary",
+                        CreatedAt = DateTime.UtcNow,
+                        LastUsedAt = DateTime.UtcNow,
+                        IsActive = true,
+                    },
+                    new DeviceToken
+                    {
+                        Id = sameOwnerRegistrationId,
+                        UserId = firstOwner,
+                        RegistrationVersion = 1,
+                        InstallationId = "kill-switch-same-owner",
+                        Token = new string('b', 64),
+                        Platform = "ios",
+                        Environment = "production",
+                        AppBundleId = "com.example.same-owner",
+                        CreatedAt = DateTime.UtcNow,
+                        LastUsedAt = DateTime.UtcNow,
+                        IsActive = true,
+                    },
+                    new DeviceToken
+                    {
+                        Id = laterOwnerRegistrationId,
+                        UserId = laterOwner,
+                        RegistrationVersion = 1,
+                        InstallationId = "kill-switch-later-owner",
+                        Token = new string('c', 64),
+                        Platform = "ios",
+                        Environment = "production",
+                        AppBundleId = "com.example.later-owner",
+                        CreatedAt = DateTime.UtcNow,
+                        LastUsedAt = DateTime.UtcNow,
+                        IsActive = true,
+                    });
+                await seed.SaveChangesAsync();
+            }
+
+            var attention = new Mock<IAttentionService>();
+            attention.Setup(service => service.FindItemAsync(
+                    It.IsAny<Guid>(),
+                    item.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(item);
+            var outcomeProbe = new TokenOutcomeProbe();
+            var services = new ServiceCollection();
+            services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(connectionString));
+            services.AddScoped<IAppSettingsRepository, EfAppSettingsRepository>();
+            services.AddScoped<IOperatorFeatureGate, OperatorFeatureGate>();
+            services.AddSingleton(outcomeProbe);
+            services.AddScoped<IDeviceTokenRepository>(provider =>
+                new OutcomeRecordingDeviceTokenRepository(
+                    new EfDeviceTokenRepository(provider.GetRequiredService<AppDbContext>()),
+                    provider.GetRequiredService<TokenOutcomeProbe>()));
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            services.AddSingleton<ILogger<OperatorFeatureGate>>(
+                NullLogger<OperatorFeatureGate>.Instance);
+            services.AddSingleton<IAttentionService>(attention.Object);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            var sendStarted = new TaskCompletionSource<NativePushEnvelope>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseSend = new TaskCompletionSource<NativePushDispatchResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var sent = new ConcurrentQueue<NativePushEnvelope>();
+            var sender = new Mock<INativePushSender>();
+            sender.SetupGet(value => value.ModeName).Returns(mode.ToString().ToLowerInvariant());
+            sender.Setup(value => value.SendAsync(
+                    It.IsAny<NativePushEnvelope>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<NativePushEnvelope, CancellationToken>(async (envelope, cancellationToken) =>
+                {
+                    sent.Enqueue(envelope);
+                    if (sent.Count == 1)
+                    {
+                        sendStarted.TrySetResult(envelope);
+                        return await releaseSend.Task.WaitAsync(cancellationToken);
+                    }
+
+                    return NativePushDispatchResult.Delivered();
+                });
+
+            using var metrics = new NativePushMetrics();
+            long attempted = 0;
+            long disabled = 0;
+            long delivered = 0;
+            long invalidated = 0;
+            long terminalFailed = 0;
+            long transientFailed = 0;
+            using var meterListener = new MeterListener();
+            meterListener.InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted)
+                    || ReferenceEquals(instrument, metrics.SkippedFeatureDisabled)
+                    || ReferenceEquals(instrument, metrics.Delivered)
+                    || ReferenceEquals(instrument, metrics.TokensInvalidated)
+                    || ReferenceEquals(instrument, metrics.TerminalFailed)
+                    || ReferenceEquals(instrument, metrics.TransientFailed))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            };
+            meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted))
+                {
+                    Interlocked.Add(ref attempted, measurement);
+                }
+                else if (ReferenceEquals(instrument, metrics.SkippedFeatureDisabled))
+                {
+                    Interlocked.Add(ref disabled, measurement);
+                }
+                else if (ReferenceEquals(instrument, metrics.Delivered))
+                {
+                    Interlocked.Add(ref delivered, measurement);
+                }
+                else if (ReferenceEquals(instrument, metrics.TokensInvalidated))
+                {
+                    Interlocked.Add(ref invalidated, measurement);
+                }
+                else if (ReferenceEquals(instrument, metrics.TerminalFailed))
+                {
+                    Interlocked.Add(ref terminalFailed, measurement);
+                }
+                else if (ReferenceEquals(instrument, metrics.TransientFailed))
+                {
+                    Interlocked.Add(ref transientFailed, measurement);
+                }
+            });
+            meterListener.Start();
+
+            using var sut = new NativePushDispatcher(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                sender.Object,
+                new StaticOptionsMonitor(new NativePushSettings
+                {
+                    Mode = mode,
+                    MaxAttempts = 3,
+                    FailureDeactivationThreshold = 1,
+                }),
+                metrics,
+                NullLogger<NativePushDispatcher>.Instance);
+            Task dispatch = sut.DispatchAsync(
+                item.Id,
+                AttentionChangeKind.Created,
+                targetUserId: null);
+            try
+            {
+                NativePushEnvelope inFlight = await sendStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                inFlight.DeviceTokenId.Should().Be(firstRegistrationId.ToString("D"));
+                inFlight.Token.Should().Be(originalToken);
+
+                await using (AppDbContext mutate = new(options))
+                {
+                    DeviceToken replacement = await new EfDeviceTokenRepository(mutate).UpsertAsync(
+                        firstOwner,
+                        installationId,
+                        replacementToken,
+                        "ios",
+                        "development",
+                        "com.example.replacement");
+                    replacement.RegistrationVersion.Should().Be(2);
+
+                    AppSettingsEntity settingsRow = await mutate.AppSettingsEntities
+                        .SingleAsync(row => row.Key == OperatorFeatureSettings.SectionName);
+                    settingsRow.SettingsJson = JsonSerializer.Serialize(new OperatorFeatureSettings
+                    {
+                        NativePushEnabled = false,
+                    });
+                    settingsRow.UpdatedAt = DateTime.UtcNow;
+                    await mutate.SaveChangesAsync();
+                }
+
+                DeviceToken replacementBaseline;
+                await using (AppDbContext baseline = new(options))
+                {
+                    replacementBaseline = await baseline.DeviceTokens
+                        .AsNoTracking()
+                        .SingleAsync(token => token.Id == firstRegistrationId);
+                }
+
+                releaseSend.TrySetResult(completedResult);
+                await dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+
+                sent.Should().ContainSingle(
+                    "a post-send disable must stop retries, later devices, and later owners");
+                outcomeProbe.SuccessWrites.Should().Be(0);
+                outcomeProbe.FailureWrites.Should().Be(0);
+                outcomeProbe.InvalidationWrites.Should().Be(0);
+                Volatile.Read(ref attempted).Should().Be(1);
+                Volatile.Read(ref disabled).Should().BeGreaterThan(
+                    0,
+                    "the completed result must be reported as stopped by the persisted kill switch");
+                Volatile.Read(ref delivered).Should().Be(0);
+                Volatile.Read(ref invalidated).Should().Be(0);
+                Volatile.Read(ref terminalFailed).Should().Be(0);
+                Volatile.Read(ref transientFailed).Should().Be(0);
+
+                await using AppDbContext verify = new(options);
+                DeviceToken[] persisted = await verify.DeviceTokens
+                    .AsNoTracking()
+                    .OrderBy(token => token.Id)
+                    .ToArrayAsync();
+                persisted.Should().HaveCount(3);
+                DeviceToken replacementAfter = persisted.Single(token => token.Id == firstRegistrationId);
+                replacementAfter.RegistrationVersion.Should().Be(replacementBaseline.RegistrationVersion);
+                replacementAfter.Token.Should().Be(replacementBaseline.Token);
+                replacementAfter.Environment.Should().Be(replacementBaseline.Environment);
+                replacementAfter.AppBundleId.Should().Be(replacementBaseline.AppBundleId);
+                replacementAfter.LastUsedAt.Should().Be(replacementBaseline.LastUsedAt);
+                replacementAfter.LastFailureAt.Should().Be(replacementBaseline.LastFailureAt);
+                replacementAfter.ConsecutiveFailureCount.Should().Be(replacementBaseline.ConsecutiveFailureCount);
+                replacementAfter.IsActive.Should().BeTrue();
+                persisted.Should().OnlyContain(token =>
+                    token.ConsecutiveFailureCount == 0
+                    && token.LastFailureAt == null
+                    && token.IsActive);
+            }
+            finally
+            {
+                releaseSend.TrySetResult(NativePushDispatchResult.Transient("test-cleanup"));
+                await dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
+    }
+
     private static Farm.Infrastructure.Domain.User BuildUser(Guid userId, string name)
     {
         return new Farm.Infrastructure.Domain.User
@@ -1968,6 +2273,101 @@ public sealed class NativePushDispatcherTests
             Detail: "Test detail",
             OccurredAt: DateTime.UtcNow,
             Actions: Array.Empty<AttentionActionDto>());
+    }
+
+    private sealed class TokenOutcomeProbe
+    {
+        private int _successWrites;
+        private int _failureWrites;
+        private int _invalidationWrites;
+
+        public int SuccessWrites => Volatile.Read(ref _successWrites);
+
+        public int FailureWrites => Volatile.Read(ref _failureWrites);
+
+        public int InvalidationWrites => Volatile.Read(ref _invalidationWrites);
+
+        public void RecordSuccess() => Interlocked.Increment(ref _successWrites);
+
+        public void RecordFailure() => Interlocked.Increment(ref _failureWrites);
+
+        public void RecordInvalidation() => Interlocked.Increment(ref _invalidationWrites);
+    }
+
+    private sealed class OutcomeRecordingDeviceTokenRepository(
+        IDeviceTokenRepository inner,
+        TokenOutcomeProbe probe) : IDeviceTokenRepository
+    {
+        public Task<DeviceToken> UpsertAsync(
+            Guid userId,
+            string installationId,
+            string token,
+            string platform,
+            string environment,
+            string? appBundleId,
+            CancellationToken cancellationToken = default)
+            => inner.UpsertAsync(
+                userId,
+                installationId,
+                token,
+                platform,
+                environment,
+                appBundleId,
+                cancellationToken);
+
+        public Task<bool> DeleteByInstallationAsync(
+            Guid userId,
+            string installationId,
+            CancellationToken cancellationToken = default)
+            => inner.DeleteByInstallationAsync(userId, installationId, cancellationToken);
+
+        public Task<IReadOnlyList<DeviceToken>> GetActiveByUserAsync(
+            Guid userId,
+            CancellationToken cancellationToken = default)
+            => inner.GetActiveByUserAsync(userId, cancellationToken);
+
+        public Task<IReadOnlyList<Guid>> GetActiveTokenOwnersAsync(
+            CancellationToken cancellationToken = default)
+            => inner.GetActiveTokenOwnersAsync(cancellationToken);
+
+        public Task RecordSuccessAsync(
+            Guid deviceTokenId,
+            long registrationVersion,
+            DateTime nowUtc,
+            CancellationToken cancellationToken = default)
+        {
+            probe.RecordSuccess();
+            return inner.RecordSuccessAsync(
+                deviceTokenId,
+                registrationVersion,
+                nowUtc,
+                cancellationToken);
+        }
+
+        public Task RecordFailureAsync(
+            Guid deviceTokenId,
+            long registrationVersion,
+            DateTime nowUtc,
+            int failureThreshold,
+            CancellationToken cancellationToken = default)
+        {
+            probe.RecordFailure();
+            return inner.RecordFailureAsync(
+                deviceTokenId,
+                registrationVersion,
+                nowUtc,
+                failureThreshold,
+                cancellationToken);
+        }
+
+        public Task<bool> InvalidateAsync(
+            Guid deviceTokenId,
+            long registrationVersion,
+            CancellationToken cancellationToken = default)
+        {
+            probe.RecordInvalidation();
+            return inner.InvalidateAsync(deviceTokenId, registrationVersion, cancellationToken);
+        }
     }
 
     private sealed class TokenOutcomeDeleteRaceInterceptor(Guid doomedTokenId) : DbCommandInterceptor

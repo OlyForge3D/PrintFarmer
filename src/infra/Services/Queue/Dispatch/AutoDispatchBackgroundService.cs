@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.SignalR;
@@ -25,7 +24,6 @@ public sealed class AutoDispatchBackgroundService(
 {
     private readonly SemaphoreSlim _selectionLock = new(1, 1);
     private readonly ResizableDispatchSemaphore _dispatchCapacity = new();
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _printerLocks = new();
     private readonly object _workerSync = new();
     private readonly object _claimSync = new();
     private readonly HashSet<Task> _workers = [];
@@ -36,11 +34,6 @@ public sealed class AutoDispatchBackgroundService(
     {
         _selectionLock.Dispose();
         _dispatchCapacity.Dispose();
-        foreach (SemaphoreSlim printerLock in _printerLocks.Values)
-        {
-            printerLock.Dispose();
-        }
-
         base.Dispose();
     }
 
@@ -64,6 +57,7 @@ public sealed class AutoDispatchBackgroundService(
         }
         finally
         {
+            trigger.StopAccepting();
             await DrainWorkersAsync();
             logger.LogInformation("[AutoDispatch] Background service stopped");
         }
@@ -74,10 +68,7 @@ public sealed class AutoDispatchBackgroundService(
         CancellationToken stoppingToken)
     {
         Task worker = Task.Run(
-            () => ProcessPrinterIdleAsync(
-                triggerEvent.PrinterId,
-                triggerEvent.SkipIdleThreshold,
-                stoppingToken),
+            () => ProcessOwnedPrinterAsync(triggerEvent, stoppingToken),
             CancellationToken.None);
         lock (_workerSync)
         {
@@ -95,6 +86,55 @@ public sealed class AutoDispatchBackgroundService(
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+    }
+
+    internal int TrackedWorkerCount
+    {
+        get
+        {
+            lock (_workerSync)
+            {
+                return _workers.Count;
+            }
+        }
+    }
+
+    private async Task ProcessOwnedPrinterAsync(
+        DispatchTriggerEvent triggerEvent,
+        CancellationToken stoppingToken)
+    {
+        DispatchTriggerEvent current = triggerEvent;
+        bool ownsIntent = true;
+        try
+        {
+            while (true)
+            {
+                await ProcessPrinterIdleAsync(
+                    current.PrinterId,
+                    current.SkipIdleThreshold,
+                    stoppingToken);
+                if (!trigger.TryCompleteProcessing(
+                        current,
+                        allowRerun: !stoppingToken.IsCancellationRequested,
+                        out DispatchTriggerEvent rerun))
+                {
+                    ownsIntent = false;
+                    return;
+                }
+
+                current = rerun;
+            }
+        }
+        finally
+        {
+            if (ownsIntent)
+            {
+                _ = trigger.TryCompleteProcessing(
+                    current,
+                    allowRerun: false,
+                    out _);
+            }
+        }
     }
 
     private async Task DrainWorkersAsync()
@@ -161,14 +201,11 @@ public sealed class AutoDispatchBackgroundService(
         bool skipIdleThreshold,
         CancellationToken serviceCt)
     {
-        SemaphoreSlim printerLock = _printerLocks.GetOrAdd(
-            printerId,
-            static _ => new SemaphoreSlim(1, 1));
-        bool entered = false;
+        // Hosted-loop callers already hold trigger ownership for this printer. Keeping
+        // ownership outside the dispatch body avoids one waiting task per notification;
+        // direct test callers use this method only for independent printers.
         try
         {
-            await printerLock.WaitAsync(serviceCt);
-            entered = true;
             await ProcessPrinterIdleOwnedAsync(printerId, skipIdleThreshold, serviceCt);
         }
         catch (OperationCanceledException) when (serviceCt.IsCancellationRequested)
@@ -178,13 +215,6 @@ public sealed class AutoDispatchBackgroundService(
         catch (Exception ex)
         {
             logger.LogError(ex, "[AutoDispatch] Unhandled error for printer {PrinterId}", printerId);
-        }
-        finally
-        {
-            if (entered)
-            {
-                printerLock.Release();
-            }
         }
     }
 

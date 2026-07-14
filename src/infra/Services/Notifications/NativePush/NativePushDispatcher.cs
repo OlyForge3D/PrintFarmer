@@ -345,7 +345,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
             try
             {
-                await SendAndApplyForDeviceAsync(
+                DeviceDispatchOutcome outcome = await SendAndApplyForDeviceAsync(
                     userId,
                     attentionItemId,
                     changeKind,
@@ -355,6 +355,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     settings,
                     gate,
                     cancellationToken);
+                if (outcome == DeviceDispatchOutcome.FeatureDisabled)
+                {
+                    return;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -375,7 +379,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
-    private async Task SendAndApplyForDeviceAsync(
+    private async Task<DeviceDispatchOutcome> SendAndApplyForDeviceAsync(
         Guid userId,
         string attentionItemId,
         AttentionChangeKind changeKind,
@@ -412,16 +416,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
         if (result is null)
         {
-            return;
+            return DeviceDispatchOutcome.FeatureDisabled;
         }
 
-        // Every mutating outcome opens its own DI scope/AppDbContext. A failed
-        // SaveChanges can leave an EF tracker poisoned; isolating that tracker
-        // prevents token A's persistence race from contaminating token B or a
-        // later owner. Non-cancellation failures remain per-device concerns.
+        // Every result opens its own DI scope/AppDbContext. Besides isolating a
+        // failed token write from later devices, this gives the final result
+        // boundary a fresh persisted kill-switch read immediately before any
+        // delivery/failure attribution or registration mutation.
         try
         {
-            await ApplyResultAsync(deviceToken, result, settings, cancellationToken);
+            return await ApplyResultAsync(deviceToken, result, settings, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -438,6 +442,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 deviceToken.Id,
                 userId,
                 attentionItemId);
+            return DeviceDispatchOutcome.Completed;
         }
     }
 
@@ -524,6 +529,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 }
             }
 
+            // A sender may complete after an administrator has committed the
+            // emergency disable. Cancellation wins first; otherwise discard the
+            // completed provider result before retry or any result attribution.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            {
+                _metrics.SkippedFeatureDisabled.Add(1);
+                return null;
+            }
+
             if (last.Success || last.TokenInvalidated || !last.IsTransient)
             {
                 return last;
@@ -542,39 +557,42 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         return last;
     }
 
-    private async Task ApplyResultAsync(
+    private async Task<DeviceDispatchOutcome> ApplyResultAsync(
         DeviceToken deviceToken,
         NativePushDispatchResult result,
         NativePushSettings settings,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IOperatorFeatureGate gate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
+        if (!gate.IsEnabled(OperatorFeature.NativePush))
+        {
+            _metrics.SkippedFeatureDisabled.Add(1);
+            return DeviceDispatchOutcome.FeatureDisabled;
+        }
+
+        IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
         DateTime nowUtc = UtcNow;
         if (result.Success)
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
-            await PersistOutcomeInFreshScopeAsync(
-                (tokens, ct) => tokens.RecordSuccessAsync(
-                    deviceToken.Id,
-                    deviceToken.RegistrationVersion,
-                    nowUtc,
-                    ct),
+            await tokens.RecordSuccessAsync(
+                deviceToken.Id,
+                deviceToken.RegistrationVersion,
+                nowUtc,
                 cancellationToken);
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
         if (result.TokenInvalidated)
         {
             _metrics.TokensInvalidated.Add(1);
-            await PersistOutcomeInFreshScopeAsync(
-                async (tokens, ct) =>
-                {
-                    _ = await tokens.InvalidateAsync(
-                        deviceToken.Id,
-                        deviceToken.RegistrationVersion,
-                        ct);
-                },
+            _ = await tokens.InvalidateAsync(
+                deviceToken.Id,
+                deviceToken.RegistrationVersion,
                 cancellationToken);
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
         // NotConfigured is a config-typo skip, not a device fault. Log-and-drop with
@@ -583,7 +601,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (string.Equals(result.Reason, "notConfigured", StringComparison.Ordinal))
         {
             _metrics.SkippedNotConfigured.Add(1);
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
         if (result.IsTransient)
@@ -598,7 +616,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // increment the per-token failure counter — that would deactivate every
             // active token in five outages. Retry orchestration already retried this
             // send N times; the outage is process-wide.
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
         _metrics.TerminalFailed.Add(
@@ -612,26 +630,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // token responses use TokenInvalidated above and are removed directly.
         if (result.FailureAttribution != NativePushFailureAttribution.DeviceToken)
         {
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
-        await PersistOutcomeInFreshScopeAsync(
-            (tokens, ct) => tokens.RecordFailureAsync(
-                deviceToken.Id,
-                deviceToken.RegistrationVersion,
-                nowUtc,
-                settings.FailureDeactivationThreshold,
-                ct),
+        await tokens.RecordFailureAsync(
+            deviceToken.Id,
+            deviceToken.RegistrationVersion,
+            nowUtc,
+            settings.FailureDeactivationThreshold,
             cancellationToken);
-    }
-
-    private async Task PersistOutcomeInFreshScopeAsync(
-        Func<IDeviceTokenRepository, CancellationToken, Task> persist,
-        CancellationToken cancellationToken)
-    {
-        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
-        IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
-        await persist(tokens, cancellationToken);
+        return DeviceDispatchOutcome.Completed;
     }
 
     private static async Task<bool> IsFarmAdminAsync(AppDbContext db, Guid userId, CancellationToken cancellationToken)
@@ -736,6 +744,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             Priority: NativePushPriority.Background,
             ExpiresAtUtc: UtcNow.Add(InformationalAlertTtl),
             ActionIds: Array.Empty<string>());
+    }
+
+    private enum DeviceDispatchOutcome
+    {
+        Completed,
+        FeatureDisabled,
     }
 
     private readonly record struct AttentionDispatchKey(string AttentionItemId, Guid? TargetUserId);

@@ -4,7 +4,10 @@ using System.Threading.Channels;
 namespace Farm.Infrastructure.Services.Queue.Dispatch;
 
 /// <summary>Payload carried through the dispatch trigger channel.</summary>
-public readonly record struct DispatchTriggerEvent(Guid PrinterId, bool SkipIdleThreshold);
+public readonly record struct DispatchTriggerEvent(Guid PrinterId, bool SkipIdleThreshold)
+{
+    internal long OwnershipGeneration { get; init; }
+}
 
 /// <summary>
 /// Owns one generation of a pending per-printer idle wait.
@@ -81,8 +84,9 @@ public interface IAutoDispatchTriggerReader
 }
 
 /// <summary>
-/// Keyed coalescing trigger. At most one unread channel entry exists per printer,
-/// so duplicate notifications consume bounded memory without dropping distinct printers.
+/// Keyed coalescing trigger. Ownership remains attached to a printer from channel dequeue
+/// through worker completion. Notifications received while that owner is active merge into
+/// one rerun intent rather than creating waiting worker tasks.
 /// </summary>
 public sealed class AutoDispatchTrigger : IAutoDispatchTrigger, IAutoDispatchTriggerReader
 {
@@ -93,8 +97,10 @@ public sealed class AutoDispatchTrigger : IAutoDispatchTrigger, IAutoDispatchTri
             AllowSynchronousContinuations = false,
         });
 
-    private readonly ConcurrentDictionary<Guid, DispatchTriggerEvent> _pendingIntents = new();
+    private readonly ConcurrentDictionary<Guid, DispatchIntentState> _intentStates = new();
     private readonly ConcurrentCancellationMap _pendingCancellations = new();
+    private long _nextOwnershipGeneration;
+    private int _acceptingNotifications = 1;
 
     /// <inheritdoc />
     public void NotifyPrinterIdle(Guid printerId)
@@ -120,9 +126,100 @@ public sealed class AutoDispatchTrigger : IAutoDispatchTrigger, IAutoDispatchTri
         while (true)
         {
             Guid printerId = await _channel.Reader.ReadAsync(ct);
-            if (_pendingIntents.TryRemove(printerId, out DispatchTriggerEvent triggerEvent))
+            if (!_intentStates.TryGetValue(printerId, out DispatchIntentState? state))
             {
-                return triggerEvent;
+                continue;
+            }
+
+            lock (state)
+            {
+                if (state.IsRetired || !state.IsQueued || !state.HasPendingIntent)
+                {
+                    continue;
+                }
+
+                state.IsQueued = false;
+                state.IsInFlight = true;
+                state.OwnershipGeneration = Interlocked.Increment(ref _nextOwnershipGeneration);
+                return state.TakePendingIntent(printerId) with
+                {
+                    OwnershipGeneration = state.OwnershipGeneration,
+                };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Completes one owned evaluation. If a newer notification arrived, ownership stays with
+    /// the same worker and exactly one merged rerun is returned. Otherwise the idle state is
+    /// retired and removed with value identity so a racing enqueue can safely create a new one.
+    /// </summary>
+    internal bool TryCompleteProcessing(
+        DispatchTriggerEvent completed,
+        bool allowRerun,
+        out DispatchTriggerEvent rerun)
+    {
+        rerun = default;
+        if (!_intentStates.TryGetValue(completed.PrinterId, out DispatchIntentState? state))
+        {
+            return false;
+        }
+
+        lock (state)
+        {
+            if (state.IsRetired
+                || !state.IsInFlight
+                || state.OwnershipGeneration != completed.OwnershipGeneration)
+            {
+                return false;
+            }
+
+            if (allowRerun && state.HasPendingIntent)
+            {
+                rerun = state.TakePendingIntent(completed.PrinterId) with
+                {
+                    OwnershipGeneration = state.OwnershipGeneration,
+                };
+                return true;
+            }
+
+            state.HasPendingIntent = false;
+            state.SkipIdleThreshold = false;
+            state.IsInFlight = false;
+            state.IsRetired = true;
+            _ = ((ICollection<KeyValuePair<Guid, DispatchIntentState>>)_intentStates)
+                .Remove(new KeyValuePair<Guid, DispatchIntentState>(completed.PrinterId, state));
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Stops accepting host-lifetime notifications and retires every state not owned by a
+    /// draining worker. In-flight owners remove their own state after cancellation.
+    /// </summary>
+    internal void StopAccepting()
+    {
+        if (Interlocked.Exchange(ref _acceptingNotifications, 0) == 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Guid, DispatchIntentState> entry in _intentStates)
+        {
+            DispatchIntentState state = entry.Value;
+            lock (state)
+            {
+                state.HasPendingIntent = false;
+                state.SkipIdleThreshold = false;
+                if (state.IsInFlight)
+                {
+                    continue;
+                }
+
+                state.IsQueued = false;
+                state.IsRetired = true;
+                _ = ((ICollection<KeyValuePair<Guid, DispatchIntentState>>)_intentStates)
+                    .Remove(entry);
             }
         }
     }
@@ -146,38 +243,119 @@ public sealed class AutoDispatchTrigger : IAutoDispatchTrigger, IAutoDispatchTri
         return _pendingCancellations.IsRegistered(printerId);
     }
 
+    internal int IntentStateCount => _intentStates.Count;
+
+    internal int PendingRerunCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (DispatchIntentState state in _intentStates.Values)
+            {
+                lock (state)
+                {
+                    if (!state.IsRetired && state.IsInFlight && state.HasPendingIntent)
+                    {
+                        count++;
+                    }
+                }
+            }
+
+            return count;
+        }
+    }
+
     private void Enqueue(Guid printerId, bool skipIdleThreshold)
     {
-        // A fresh event supersedes an active idle timer. The coalesced replacement
-        // below is then processed in per-printer order by the background service.
+        // A fresh event supersedes an active idle timer. Its replacement intent is merged
+        // under the same state lock used by worker completion, closing the handoff race.
         _pendingCancellations.Cancel(printerId);
-        var incoming = new DispatchTriggerEvent(printerId, skipIdleThreshold);
+        if (Volatile.Read(ref _acceptingNotifications) == 0)
+        {
+            return;
+        }
+
         while (true)
         {
-            if (_pendingIntents.TryGetValue(printerId, out DispatchTriggerEvent current))
+            DispatchIntentState state = _intentStates.GetOrAdd(
+                printerId,
+                static _ => new DispatchIntentState());
+            bool queueState = false;
+            lock (state)
             {
-                var merged = new DispatchTriggerEvent(
-                    printerId,
-                    current.SkipIdleThreshold || skipIdleThreshold);
-                if (_pendingIntents.TryUpdate(printerId, merged, current))
+                if (Volatile.Read(ref _acceptingNotifications) == 0)
                 {
+                    state.IsRetired = true;
+                    _ = ((ICollection<KeyValuePair<Guid, DispatchIntentState>>)_intentStates)
+                        .Remove(new KeyValuePair<Guid, DispatchIntentState>(printerId, state));
                     return;
                 }
 
-                continue;
-            }
-
-            if (_pendingIntents.TryAdd(printerId, incoming))
-            {
-                if (!_channel.Writer.TryWrite(printerId))
+                if (state.IsRetired)
                 {
-                    _ = ((ICollection<KeyValuePair<Guid, DispatchTriggerEvent>>)_pendingIntents)
-                        .Remove(new KeyValuePair<Guid, DispatchTriggerEvent>(printerId, incoming));
-                    throw new InvalidOperationException("Auto-dispatch trigger channel rejected an intent.");
+                    continue;
                 }
 
+                state.Merge(skipIdleThreshold);
+                if (!state.IsQueued && !state.IsInFlight)
+                {
+                    state.IsQueued = true;
+                    queueState = true;
+                }
+            }
+
+            if (!queueState)
+            {
                 return;
             }
+
+            if (_channel.Writer.TryWrite(printerId))
+            {
+                return;
+            }
+
+            // The channel is intentionally unbounded and never completed during normal host
+            // lifetime. Keep failure handling identity-safe if that policy changes later.
+            lock (state)
+            {
+                state.IsQueued = false;
+                state.HasPendingIntent = false;
+                state.SkipIdleThreshold = false;
+                state.IsRetired = true;
+                _ = ((ICollection<KeyValuePair<Guid, DispatchIntentState>>)_intentStates)
+                    .Remove(new KeyValuePair<Guid, DispatchIntentState>(printerId, state));
+            }
+
+            throw new InvalidOperationException("Auto-dispatch trigger channel rejected an intent.");
+        }
+    }
+
+    private sealed class DispatchIntentState
+    {
+        public bool IsQueued { get; set; }
+
+        public bool IsInFlight { get; set; }
+
+        public bool IsRetired { get; set; }
+
+        public bool HasPendingIntent { get; set; }
+
+        public bool SkipIdleThreshold { get; set; }
+
+        public long OwnershipGeneration { get; set; }
+
+        public void Merge(bool skipIdleThreshold)
+        {
+            HasPendingIntent = true;
+            SkipIdleThreshold |= skipIdleThreshold;
+        }
+
+        public DispatchTriggerEvent TakePendingIntent(Guid printerId)
+        {
+            var result = new DispatchTriggerEvent(printerId, SkipIdleThreshold);
+            HasPendingIntent = false;
+            SkipIdleThreshold = false;
+            return result;
         }
     }
 
