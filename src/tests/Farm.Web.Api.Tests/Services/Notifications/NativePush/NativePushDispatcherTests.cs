@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Notifications;
@@ -7,7 +8,9 @@ using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -412,100 +415,118 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_PersistFailureForOneToken_ContinuesRemainingTokensAndOwners()
+    public async Task DispatchAsync_ConcurrentDeletePersistenceFailure_UsesFreshContextsAndContinuesFanOut()
     {
-        // Vasquez v6 B1 regression: when persisting the send result for the
-        // first token throws (RecordSuccessAsync), the remaining tokens for
-        // the same owner AND the other owner's tokens must still be
-        // dispatched. Before the fix a single-line try/catch wrapped the
-        // entire fan-out and any per-token persistence failure aborted every
-        // remaining device. This regression exercises two owners with two
-        // tokens each, and forces the first-token persist to throw.
-        var ownerA = Guid.NewGuid();
-        var ownerB = Guid.NewGuid();
+        Guid ownerA = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        Guid ownerB = Guid.Parse("00000000-0000-0000-0000-000000000002");
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        DeviceToken tokenA = MakeToken(ownerA, "install-a1");
+        DeviceToken tokenB = MakeToken(ownerA, "install-a2");
+        DeviceToken laterOwnerToken = MakeToken(ownerB, "install-b1");
+        tokenA.Id = Guid.Parse("00000000-0000-0000-0000-000000000101");
+        tokenB.Id = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        laterOwnerToken.Id = Guid.Parse("00000000-0000-0000-0000-000000000201");
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"native-push-persistence-{Guid.NewGuid():N}.db");
+        string connectionString =
+            $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> plainOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var interceptor = new TokenOutcomeDeleteRaceInterceptor(tokenA.Id);
 
-        await using AppDbContext db = BuildDbContext();
-        foreach (Guid u in new[] { ownerA, ownerB })
+        try
         {
-            db.NotificationPreferences.Add(new NotificationPreferences
+            await using (AppDbContext seed = new(plainOptions))
             {
-                Id = Guid.NewGuid().ToString(),
-                UserId = u,
-                EnablePushNotifications = true,
-                PushOnPrinterOffline = true,
-                AttentionPushCategoryPreferencesJson = null,
-            });
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.AddRange(
+                    BuildUser(ownerA, "owner-a"),
+                    BuildUser(ownerB, "owner-b"));
+                seed.NotificationPreferences.AddRange(
+                    BuildPushPreferences(ownerA),
+                    BuildPushPreferences(ownerB));
+                seed.DeviceTokens.AddRange(tokenA, tokenB, laterOwnerToken);
+                await seed.SaveChangesAsync();
+            }
+
+            var services = new ServiceCollection();
+            services.AddDbContext<AppDbContext>(options => options
+                .UseSqlite(connectionString)
+                .AddInterceptors(interceptor));
+            services.AddScoped<IDeviceTokenRepository, EfDeviceTokenRepository>();
+            services.AddSingleton<IOperatorFeatureGate>(BuildGate(enabled: true).Object);
+            var attention = new Mock<IAttentionService>();
+            attention.Setup(service => service.FindItemAsync(
+                    It.IsAny<Guid>(),
+                    item.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(item);
+            services.AddSingleton<IAttentionService>(attention.Object);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            var sentTokenIds = new List<Guid>();
+            var sender = new Mock<INativePushSender>();
+            sender.SetupGet(value => value.ModeName).Returns("direct");
+            sender.Setup(value => value.SendAsync(
+                    It.IsAny<NativePushEnvelope>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<NativePushEnvelope, CancellationToken>((envelope, _) =>
+                    sentTokenIds.Add(Guid.Parse(envelope.DeviceTokenId)))
+                .ReturnsAsync(NativePushDispatchResult.Delivered());
+            var logger = new RecordingDispatcherLogger();
+            using var sut = new NativePushDispatcher(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                sender.Object,
+                new StaticOptionsMonitor(new NativePushSettings { Mode = NativePushMode.Direct }),
+                new NativePushMetrics(),
+                logger);
+
+            Task dispatch = sut.DispatchAsync(
+                item.Id,
+                AttentionChangeKind.Created,
+                targetUserId: null);
+            await interceptor.TokenAUpdateReady.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            try
+            {
+                await using AppDbContext concurrentDelete = new(plainOptions);
+                DeviceToken doomed = await concurrentDelete.DeviceTokens
+                    .SingleAsync(token => token.Id == tokenA.Id);
+                concurrentDelete.DeviceTokens.Remove(doomed);
+                await concurrentDelete.SaveChangesAsync();
+                interceptor.DeleteCommitted.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                interceptor.DeleteCommitted.TrySetException(exception);
+                throw;
+            }
+
+            await dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+
+            sentTokenIds.Should().Equal(tokenA.Id, tokenB.Id, laterOwnerToken.Id);
+            interceptor.PersistenceContextIds.Should().HaveCount(3);
+            interceptor.PersistenceContextIds.Should().OnlyHaveUniqueItems(
+                "every token outcome must use an independent scoped AppDbContext");
+            DbUpdateConcurrencyException original = logger.Exceptions
+                .Should().ContainSingle()
+                .Subject.Should().BeOfType<DbUpdateConcurrencyException>().Subject;
+            original.Entries.Should().ContainSingle();
+            original.Entries.Single().Entity.Should().BeOfType<DeviceToken>()
+                .Which.Id.Should().Be(tokenA.Id);
+
+            await using AppDbContext verify = new(plainOptions);
+            DeviceToken[] remaining = await verify.DeviceTokens.AsNoTracking().ToArrayAsync();
+            remaining.Select(token => token.Id).Should().BeEquivalentTo(new[] { tokenB.Id, laterOwnerToken.Id });
+            remaining.Select(token => token.LastUsedAt).Should().OnlyContain(lastUsedAt => lastUsedAt.HasValue);
         }
-
-        await db.SaveChangesAsync();
-
-        // Attention service resolves the item for BOTH owners (attention is
-        // per-user in the current model but the same synthesized item is fine
-        // for our purposes — the dispatcher will call FindItemAsync once per
-        // owner).
-        var attention = new Mock<IAttentionService>();
-        attention
-            .Setup(s => s.FindItemAsync(ownerA, item.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(item);
-        attention
-            .Setup(s => s.FindItemAsync(ownerB, item.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(item);
-
-        // Two tokens for owner A, two for owner B.
-        DeviceToken ownerAToken1 = MakeToken(ownerA, "install-a1");
-        DeviceToken ownerAToken2 = MakeToken(ownerA, "install-a2");
-        DeviceToken ownerBToken1 = MakeToken(ownerB, "install-b1");
-        DeviceToken ownerBToken2 = MakeToken(ownerB, "install-b2");
-
-        var tokens = new Mock<IDeviceTokenRepository>();
-        tokens
-            .Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Guid> { ownerA, ownerB });
-        tokens
-            .Setup(r => r.GetActiveByUserAsync(ownerA, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DeviceToken> { ownerAToken1, ownerAToken2 });
-        tokens
-            .Setup(r => r.GetActiveByUserAsync(ownerB, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DeviceToken> { ownerBToken1, ownerBToken2 });
-
-        // The first token's persistence throws. Every subsequent persistence
-        // succeeds. This isolates the failure precisely to the ApplyResultAsync
-        // step for exactly one token — mirroring an operator database blip.
-        int recordSuccessCallCount = 0;
-        tokens
-            .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Returns<Guid, DateTime, CancellationToken>((id, ts, ct) =>
-            {
-                int callIndex = System.Threading.Interlocked.Increment(ref recordSuccessCallCount);
-                if (callIndex == 1)
-                {
-                    return Task.FromException(new InvalidOperationException("simulated persist failure for first token"));
-                }
-
-                return Task.CompletedTask;
-            });
-
-        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
-
-        int sendCallCount = 0;
-        var sender = new Mock<INativePushSender>();
-        sender.SetupGet(s => s.ModeName).Returns("direct");
-        sender
-            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
-            .Returns<NativePushEnvelope, CancellationToken>((env, ct) =>
-            {
-                System.Threading.Interlocked.Increment(ref sendCallCount);
-                return Task.FromResult(NativePushDispatchResult.Delivered());
-            });
-
-        NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
-
-        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
-
-        // Every token must have received a send attempt — 4 total.
-        sendCallCount.Should().Be(4, "the first token's persist failure must not abort remaining tokens or owners");
-        recordSuccessCallCount.Should().Be(4, "every device should still be persisted after the isolated failure");
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
     }
 
     [Fact]
@@ -594,16 +615,263 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_TransientTimeout_RetriesExactlyAndContinuesDevicesAndOwners()
+    {
+        Guid ownerA = Guid.NewGuid();
+        Guid ownerB = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.AddRange(
+            BuildPushPreferences(ownerA),
+            BuildPushPreferences(ownerB));
+        await db.SaveChangesAsync();
+
+        DeviceToken timeoutToken = MakeToken(ownerA, "timeout-device");
+        DeviceToken laterDevice = MakeToken(ownerA, "later-device");
+        DeviceToken laterOwner = MakeToken(ownerB, "later-owner");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([ownerA, ownerB]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(ownerA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([timeoutToken, laterDevice]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(ownerB, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([laterOwner]);
+        var persistedSuccesses = new ConcurrentBag<Guid>();
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, DateTime, CancellationToken>((id, _, _) => persistedSuccesses.Add(id))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                It.IsAny<Guid>(),
+                item.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+        var attempts = new ConcurrentQueue<Guid>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(
+                It.IsAny<NativePushEnvelope>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
+                attempts.Enqueue(tokenId);
+                return Task.FromResult(tokenId == timeoutToken.Id
+                    ? NativePushDispatchResult.Transient("timeout")
+                    : NativePushDispatchResult.Delivered());
+            });
+        DateTime nowUtc = new(2026, 7, 14, 10, 0, 0, DateTimeKind.Utc);
+        var clock = new ImmediateTimeProvider(nowUtc);
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            BuildGate(enabled: true).Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 3,
+            },
+            clock);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        attempts.Should().Equal(
+            timeoutToken.Id,
+            timeoutToken.Id,
+            timeoutToken.Id,
+            laterDevice.Id,
+            laterOwner.Id);
+        persistedSuccesses.Should().BeEquivalentTo(new[] { laterDevice.Id, laterOwner.Id });
+    }
+
+    [Theory]
+    [InlineData(AttentionSeverity.Info, 5)]
+    [InlineData(AttentionSeverity.Warning, 30)]
+    [InlineData(AttentionSeverity.Critical, 30)]
+    public async Task DispatchAsync_LongDeadline_CapsExpirationBySeverity(
+        AttentionSeverity severity,
+        int expectedMinutes)
+    {
+        Guid userId = Guid.NewGuid();
+        DateTime nowUtc = new(2026, 7, 14, 11, 0, 0, DateTimeKind.Utc);
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline) with
+        {
+            Severity = severity,
+            DeadlineAt = nowUtc.AddDays(2),
+        };
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+        });
+        await db.SaveChangesAsync();
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+        NativePushEnvelope? captured = null;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(
+                It.IsAny<NativePushEnvelope>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => captured = envelope)
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+        var clock = new ImmediateTimeProvider(nowUtc);
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            BuildGate(enabled: true).Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            timeProvider: clock);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: userId);
+
+        captured.Should().NotBeNull();
+        captured!.ExpiresAtUtc.Should().Be(nowUtc.AddMinutes(expectedMinutes));
+    }
+
+    [Fact]
+    public async Task DispatchAsync_DeadlineEarlierThanSeverityCap_UsesDeadline()
+    {
+        Guid userId = Guid.NewGuid();
+        DateTime nowUtc = new(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc);
+        DateTime deadline = nowUtc.AddMinutes(2);
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline) with
+        {
+            Severity = AttentionSeverity.Critical,
+            DeadlineAt = deadline,
+        };
+        await using AppDbContext db = BuildDbContext();
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+        NativePushEnvelope? captured = null;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(
+                It.IsAny<NativePushEnvelope>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => captured = envelope)
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            BuildGate(enabled: true).Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            timeProvider: new ImmediateTimeProvider(nowUtc));
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: userId);
+
+        captured!.ExpiresAtUtc.Should().Be(deadline);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_SandboxBadDeviceToken_DeletesOnlyExactSandboxRegistration()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        string sharedProviderToken = new string('a', 64);
+        DeviceToken sandbox = MakeToken(userId, "sandbox-install");
+        sandbox.Token = sharedProviderToken;
+        sandbox.Environment = "development";
+        sandbox.AppBundleId = "com.example.sandbox";
+        DeviceToken production = MakeToken(userId, "production-install");
+        production.Token = sharedProviderToken;
+        production.Environment = "production";
+        production.AppBundleId = "com.example.production";
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"native-push-invalidation-{Guid.NewGuid():N}.db");
+        string connectionString =
+            $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        try
+        {
+            await using (AppDbContext seed = new(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.Add(BuildUser(userId, "invalidation-owner"));
+                seed.NotificationPreferences.Add(BuildPushPreferences(userId));
+                seed.DeviceTokens.AddRange(sandbox, production);
+                await seed.SaveChangesAsync();
+            }
+
+            var services = new ServiceCollection();
+            services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(connectionString));
+            services.AddScoped<IDeviceTokenRepository, EfDeviceTokenRepository>();
+            services.AddSingleton<IOperatorFeatureGate>(BuildGate(enabled: true).Object);
+            var attention = new Mock<IAttentionService>();
+            attention.Setup(service => service.FindItemAsync(
+                    userId,
+                    item.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(item);
+            services.AddSingleton<IAttentionService>(attention.Object);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            var sender = new Mock<INativePushSender>();
+            sender.SetupGet(value => value.ModeName).Returns("direct");
+            sender.Setup(value => value.SendAsync(
+                    It.IsAny<NativePushEnvelope>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+                    Task.FromResult(envelope.Environment == "development"
+                        ? NativePushDispatchResult.Invalidated("BadDeviceToken")
+                        : NativePushDispatchResult.Delivered()));
+            using var sut = new NativePushDispatcher(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                sender.Object,
+                new StaticOptionsMonitor(new NativePushSettings { Mode = NativePushMode.Direct }),
+                new NativePushMetrics(),
+                NullLogger<NativePushDispatcher>.Instance);
+
+            await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: userId);
+
+            await using AppDbContext verify = new(options);
+            DeviceToken remaining = await verify.DeviceTokens.AsNoTracking().SingleAsync();
+            remaining.Id.Should().Be(production.Id);
+            remaining.Token.Should().Be(sharedProviderToken);
+            remaining.Environment.Should().Be("production");
+            remaining.LastUsedAt.Should().NotBeNull();
+        }
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
+    }
+
+    [Fact]
     public async Task DispatchAsync_SenderThrowsOceWithInternalToken_PropagatesWhenCallerTokenIsNone()
     {
-        // Hicks #1 regression: an OperationCanceledException raised from an
-        // INTERNAL or linked token (a timeout inside the sender, an inner
-        // linked cts, etc.) must propagate out of DispatchAsync even when
-        // the caller passed CancellationToken.None. The prior code guarded
-        // every isolation catch on `cancellationToken.IsCancellationRequested`
-        // which was false when only the internal token tripped — so the OCE
-        // fell through into the generic Exception catch and was swallowed,
-        // masking cancellation as a delivery blip.
+        // An unexpected OperationCanceledException raised from an arbitrary
+        // sender's internal or linked token must still propagate when the
+        // caller passed CancellationToken.None. Concrete HTTP senders convert
+        // only their own HttpClient.Timeout into a typed transient result;
+        // the dispatcher must not guess that every unrelated OCE is a timeout.
         var userId = Guid.NewGuid();
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
 
@@ -625,8 +893,9 @@ public sealed class NativePushDispatcherTests
             .Returns(Task.CompletedTask);
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
-        // Sender throws OCE with an internal token that has ALREADY been
-        // cancelled — mimicking a per-attempt timeout inside the sender.
+        // Sender throws OCE with an internal token that has already been
+        // cancelled, modeling an unexpected linked cancellation rather than
+        // the concrete senders' classified HttpClient.Timeout path.
         using var innerCts = new CancellationTokenSource();
         innerCts.Cancel();
 
@@ -639,8 +908,8 @@ public sealed class NativePushDispatcherTests
 
         NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
 
-        // Caller cancellation token is None — the whole point of Hicks #1 is
-        // that this MUST still propagate the inner OCE out of DispatchAsync.
+        // Caller cancellation token is None; the unexpected inner OCE still
+        // propagates instead of being swallowed by fan-out isolation.
         Func<Task> act = () => sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, cancellationToken: CancellationToken.None);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
@@ -1071,6 +1340,29 @@ public sealed class NativePushDispatcherTests
             "the duplicate must be discarded before rate capacity is consumed, leaving room for the distinct third event");
     }
 
+    private static Farm.Infrastructure.Domain.User BuildUser(Guid userId, string name)
+    {
+        return new Farm.Infrastructure.Domain.User
+        {
+            Id = userId,
+            Username = $"{name}-{userId:N}",
+            Email = $"{name}-{userId:N}@test.local",
+            PasswordHash = "x",
+        };
+    }
+
+    private static NotificationPreferences BuildPushPreferences(Guid userId)
+    {
+        return new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        };
+    }
+
     private static DeviceToken MakeToken(Guid userId, string installationId)
     {
         return new DeviceToken
@@ -1102,7 +1394,8 @@ public sealed class NativePushDispatcherTests
         IDeviceTokenRepository tokens,
         IAttentionService attention,
         AppDbContext db,
-        NativePushSettings? settings = null)
+        NativePushSettings? settings = null,
+        TimeProvider? timeProvider = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(gate);
@@ -1118,7 +1411,8 @@ public sealed class NativePushDispatcherTests
             sender.Object,
             monitor,
             new NativePushMetrics(),
-            NullLogger<NativePushDispatcher>.Instance);
+            NullLogger<NativePushDispatcher>.Instance,
+            timeProvider);
     }
 
     private static AppDbContext BuildDbContext()
@@ -1181,6 +1475,91 @@ public sealed class NativePushDispatcherTests
             Detail: "Test detail",
             OccurredAt: DateTime.UtcNow,
             Actions: Array.Empty<AttentionActionDto>());
+    }
+
+    private sealed class TokenOutcomeDeleteRaceInterceptor(Guid doomedTokenId) : SaveChangesInterceptor
+    {
+        private readonly ConcurrentQueue<DbContextId> _persistenceContextIds = new();
+        private int _doomedSaveObserved;
+
+        public TaskCompletionSource TokenAUpdateReady { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource DeleteCommitted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IReadOnlyCollection<DbContextId> PersistenceContextIds =>
+            _persistenceContextIds.ToArray();
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            AppDbContext context = (AppDbContext)eventData.Context!;
+            DeviceToken[] modifiedTokens = context.ChangeTracker.Entries<DeviceToken>()
+                .Where(entry => entry.State == EntityState.Modified)
+                .Select(entry => entry.Entity)
+                .ToArray();
+            if (modifiedTokens.Length == 0)
+            {
+                return result;
+            }
+
+            _persistenceContextIds.Enqueue(context.ContextId);
+            if (modifiedTokens.Any(token => token.Id == doomedTokenId)
+                && Interlocked.CompareExchange(ref _doomedSaveObserved, 1, 0) == 0)
+            {
+                TokenAUpdateReady.TrySetResult();
+                await DeleteCommitted.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+
+            return result;
+        }
+    }
+
+    private sealed class RecordingDispatcherLogger : ILogger<NativePushDispatcher>
+    {
+        private readonly ConcurrentQueue<Exception> _exceptions = new();
+
+        public IReadOnlyCollection<Exception> Exceptions => _exceptions.ToArray();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (exception is not null)
+            {
+                _exceptions.Enqueue(exception);
+            }
+        }
+    }
+
+    private sealed class ImmediateTimeProvider(DateTime nowUtc) : TimeProvider
+    {
+        private readonly DateTimeOffset _now = new(nowUtc, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            TimeSpan immediateDueTime = dueTime == Timeout.InfiniteTimeSpan
+                ? Timeout.InfiniteTimeSpan
+                : TimeSpan.Zero;
+            return new Timer(callback, state, immediateDueTime, Timeout.InfiniteTimeSpan);
+        }
     }
 
     private sealed class StaticOptionsMonitor(NativePushSettings value) : IOptionsMonitor<NativePushSettings>

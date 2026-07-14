@@ -53,25 +53,37 @@ public sealed class DirectApnsNativePushSenderTests
     }
 
     [Fact]
-    public async Task SendAsync_Success_SignsWellFormedProviderJwtAndSetsApnsTopic()
+    public async Task SendAsync_Alert_EmitsExactHeadersPayloadAndValidProviderJwt()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
         HttpRequestMessage? captured = null;
+        string? capturedJson = null;
+        DateTime expiration = new(2030, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        NativePushEnvelope alert = Sample with { ExpiresAtUtc = expiration };
         DirectApnsNativePushSender sut = CreateSender(settings, req =>
         {
             captured = req;
+            capturedJson = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        NativePushDispatchResult result = await sut.SendAsync(Sample);
+        NativePushDispatchResult result = await sut.SendAsync(alert);
 
         try
         {
             result.Success.Should().BeTrue();
             captured.Should().NotBeNull();
-            captured!.Headers.GetValues("apns-topic").Should().Contain("com.example.app");
-            captured.Headers.GetValues("apns-push-type").Should().Contain("alert");
-            captured.Headers.GetValues("apns-priority").Should().Contain("10");
+            captured!.RequestUri.Should().Be(new Uri("https://api.push.apple.com/3/device/device-token-abc"));
+            captured.Version.Should().Be(HttpVersion.Version20);
+            captured.VersionPolicy.Should().Be(HttpVersionPolicy.RequestVersionOrHigher);
+            captured.Headers.GetValues("apns-topic").Should().Equal("com.example.app");
+            captured.Headers.GetValues("apns-push-type").Should().Equal("alert");
+            captured.Headers.GetValues("apns-priority").Should().Equal("10");
+            captured.Headers.GetValues("apns-expiration").Should().Equal(
+                new DateTimeOffset(expiration).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            string expectedJson = $$"""{"aps":{"alert":{"title":"Printer A","body":"Print failed"},"sound":"default","badge":1,"category":"PRINTER_FAILURE","thread-id":"printer:x:failure","mutable-content":1},"attentionItemId":"att-1","attentionKind":"failure","changeKind":"created","printerId":"{{Sample.PrinterId:D}}","deepLink":"printfarmer://attention/att-1","actions":["PAUSE"]}""";
+            capturedJson.Should().Be(expectedJson);
 
             captured.Headers.Authorization!.Scheme.Should().Be("bearer");
             string jwt = captured.Headers.Authorization.Parameter!;
@@ -238,38 +250,68 @@ public sealed class DirectApnsNativePushSenderTests
         }
     }
 
-    /// <summary>
-    /// Hicks #1 regression: an internally-generated <see cref="TaskCanceledException"/>
-    /// (which <see cref="HttpClient"/> raises when its own timeout timer fires, distinct
-    /// from a caller-token cancellation) MUST propagate as an
-    /// <see cref="OperationCanceledException"/>. The previous implementation filtered
-    /// on <c>cancellationToken.IsCancellationRequested</c> and, when the caller passed
-    /// <see cref="CancellationToken.None"/>, the filter was ALWAYS false and the OCE
-    /// fell through into a generic catch that mapped it to
-    /// <see cref="NativePushDispatchResult.Transient(string)"/>("timeout"). This
-    /// silently converted a real send failure into a spurious transient retry.
-    ///
-    /// The fix removed the OCE catch — OCE propagates naturally past the remaining
-    /// <see cref="HttpRequestException"/> catch.
-    /// </summary>
     [Fact]
-    public async Task SendAsync_InternalTaskCanceledException_PropagatesAsOperationCanceled()
+    public async Task SendAsync_InternalTaskCanceledException_ReturnsTransientTimeout()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
         try
         {
             DirectApnsNativePushSender sut = CreateSender(settings, _ =>
-            {
-                // TaskCanceledException is a subclass of OperationCanceledException;
-                // raised without a triggered token, it models HttpClient's internal
-                // timeout-timer cancellation.
-                throw new TaskCanceledException("internal HttpClient timeout");
-            });
+                throw new TaskCanceledException("internal HttpClient timeout"));
 
-            Func<Task> act = () => sut.SendAsync(Sample, CancellationToken.None);
+            NativePushDispatchResult result = await sut.SendAsync(Sample, CancellationToken.None);
 
-            await act.Should().ThrowAsync<OperationCanceledException>(
-                "internal-timeout OCE MUST propagate; it must NOT be turned into a Transient result");
+            result.IsTransient.Should().BeTrue();
+            result.Reason.Should().Be("timeout");
+            result.TokenInvalidated.Should().BeFalse();
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_HttpClientTimeout_ReturnsTransientWithoutCallerCancellation()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        using var handler = new BlockingUntilCanceledHandler();
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(100) };
+        using DirectApnsNativePushSender sut = CreateSender(settings, client);
+        try
+        {
+            Task<NativePushDispatchResult> send = sut.SendAsync(Sample, CancellationToken.None);
+            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            NativePushDispatchResult result = await send.WaitAsync(TimeSpan.FromSeconds(5));
+
+            result.IsTransient.Should().BeTrue();
+            result.Reason.Should().Be("timeout");
+            handler.ObservedCancellation.Should().BeTrue();
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_CallerCancellation_PropagatesFromBlockedHttpRequest()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        using var handler = new BlockingUntilCanceledHandler();
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        using DirectApnsNativePushSender sut = CreateSender(settings, client);
+        using var cts = new CancellationTokenSource();
+        try
+        {
+            Task<NativePushDispatchResult> send = sut.SendAsync(Sample, cts.Token);
+            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await send.WaitAsync(TimeSpan.FromSeconds(5)));
+            handler.ObservedCancellation.Should().BeTrue();
         }
         finally
         {
@@ -454,6 +496,18 @@ public sealed class DirectApnsNativePushSenderTests
         return new DirectApnsNativePushSender(factory, monitor, NullLogger<DirectApnsNativePushSender>.Instance);
     }
 
+    private static DirectApnsNativePushSender CreateSender(
+        NativePushSettings settings,
+        HttpClient client)
+    {
+        var factory = new StubHttpClientFactory(client);
+        IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
+        return new DirectApnsNativePushSender(
+            factory,
+            monitor,
+            NullLogger<DirectApnsNativePushSender>.Instance);
+    }
+
     private static byte[] Base64UrlDecode(string value)
     {
         string padded = value.Replace('-', '+').Replace('_', '/');
@@ -468,6 +522,31 @@ public sealed class DirectApnsNativePushSenderTests
         public NativePushSettings Get(string? name) => CurrentValue;
 
         public IDisposable? OnChange(Action<NativePushSettings, string?> listener) => null;
+    }
+
+    private sealed class BlockingUntilCanceledHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool ObservedCancellation { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("The request cancellation token was not signaled.");
+            }
+            catch (OperationCanceledException)
+            {
+                ObservedCancellation = true;
+                throw;
+            }
+        }
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler

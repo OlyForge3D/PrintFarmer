@@ -165,6 +165,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         List<DeviceToken> rows = await _dbContext.DeviceTokens
             .AsNoTracking()
             .Where(t => t.UserId == userId && t.IsActive)
+            .OrderBy(t => t.Id)
             .ToListAsync(cancellationToken);
         return rows;
     }
@@ -177,6 +178,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
             .Where(t => t.IsActive)
             .Select(t => t.UserId)
             .Distinct()
+            .OrderBy(userId => userId)
             .ToListAsync(cancellationToken);
         return owners;
     }
@@ -216,23 +218,17 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
     }
 
     /// <inheritdoc />
-    public async Task<int> InvalidateByTokenAsync(string providerToken, CancellationToken cancellationToken = default)
+    public async Task<bool> InvalidateAsync(Guid deviceTokenId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(providerToken))
+        DeviceToken? registration = await _dbContext.DeviceTokens
+            .FirstOrDefaultAsync(token => token.Id == deviceTokenId, cancellationToken);
+        if (registration is null)
         {
-            return 0;
+            return false;
         }
 
-        List<DeviceToken> matches = await _dbContext.DeviceTokens
-            .Where(t => t.Token == providerToken)
-            .ToListAsync(cancellationToken);
-        if (matches.Count == 0)
-        {
-            return 0;
-        }
-
-        _dbContext.DeviceTokens.RemoveRange(matches);
+        _dbContext.DeviceTokens.Remove(registration);
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return matches.Count;
+        return true;
     }
 }

@@ -53,7 +53,7 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
             .IsUnique()
             .HasDatabaseName("IX_DeviceTokens_UserId_InstallationId");
 
-        // Reverse lookup for inbound 410 Gone invalidations.
+        // Non-unique provider-token lookup for diagnostics; invalidation uses the row Id.
         _ = builder.HasIndex(t => t.Token)
             .HasDatabaseName("IX_DeviceTokens_Token");
     }

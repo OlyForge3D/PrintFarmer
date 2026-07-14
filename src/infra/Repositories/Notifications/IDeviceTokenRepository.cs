@@ -49,15 +49,18 @@ public interface IDeviceTokenRepository
     Task RecordSuccessAsync(Guid deviceTokenId, DateTime nowUtc, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Records a transient failure: bumps <c>LastFailureAt</c> and the consecutive-failure
-    /// counter, and soft-deactivates the row when the counter reaches <paramref name="failureThreshold"/>.
+    /// Records an explicitly device-token-attributed terminal failure: bumps
+    /// <c>LastFailureAt</c> and the consecutive-failure counter, and soft-deactivates the row
+    /// when the counter reaches <paramref name="failureThreshold"/>. Provider-wide transient
+    /// failures never call this method.
     /// </summary>
     Task RecordFailureAsync(Guid deviceTokenId, DateTime nowUtc, int failureThreshold, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Hard-deletes every row whose <c>Token</c> matches the given provider-invalidated
-    /// value (raised by APNs <c>410 Gone</c> / <c>BadDeviceToken</c> / <c>Unregistered</c>).
-    /// Returns the number of rows removed.
+    /// Hard-deletes the exact registration identified by <paramref name="deviceTokenId"/>
+    /// after APNs reports <c>410 Gone</c>, <c>BadDeviceToken</c>, or <c>Unregistered</c>.
+    /// Provider token text is not an identity: the same value can legitimately exist in
+    /// another APNs environment, topic, installation, or user registration.
     /// </summary>
-    Task<int> InvalidateByTokenAsync(string providerToken, CancellationToken cancellationToken = default);
+    Task<bool> InvalidateAsync(Guid deviceTokenId, CancellationToken cancellationToken = default);
 }

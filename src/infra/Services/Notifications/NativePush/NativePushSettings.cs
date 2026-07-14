@@ -29,8 +29,9 @@ public sealed class NativePushSettings
     public NativePushMode Mode { get; set; } = NativePushMode.Disabled;
 
     /// <summary>
-    /// Sender attempts before a give-up (must be ≥ 1). Retries only apply to transient
-    /// failures (5xx / network); 4xx responses are terminal.
+    /// Sender attempts before a give-up (must be ≥ 1). Retries apply only to typed
+    /// transient outcomes (timeouts, network failures, 408/429/5xx, provider-JWT refresh);
+    /// other 4xx responses are terminal.
     /// </summary>
     public int MaxAttempts { get; set; } = 3;
 

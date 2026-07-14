@@ -35,6 +35,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // replay safe even when a later opt-in changes.
     private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionSnapshot> _snapshots = new();
     private static readonly TimeSpan AttentionSnapshotTtl = TimeSpan.FromDays(7);
+    private static readonly TimeSpan InformationalAlertTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ActionableAlertTtl = TimeSpan.FromMinutes(30);
 
     private long _lastPruneAtTicks;
 
@@ -43,6 +45,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly IOptionsMonitor<NativePushSettings> _optionsMonitor;
     private readonly NativePushMetrics _metrics;
     private readonly ILogger<NativePushDispatcher> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Constructs the dispatcher.</summary>
     public NativePushDispatcher(
@@ -50,14 +53,18 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         INativePushSender sender,
         IOptionsMonitor<NativePushSettings> optionsMonitor,
         NativePushMetrics metrics,
-        ILogger<NativePushDispatcher> logger)
+        ILogger<NativePushDispatcher> logger,
+        TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
+
+    private DateTime UtcNow => _timeProvider.GetUtcNow().UtcDateTime;
 
     /// <inheritdoc />
     public async Task DispatchAsync(
@@ -82,7 +89,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        PruneCaches(DateTime.UtcNow, settings);
+        PruneCaches(UtcNow, settings);
 
         try
         {
@@ -132,13 +139,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 // lookup, preferences read, token list) would abort every
                 // remaining owner in the current dispatch.
                 //
-                // Hicks #1: rethrow ANY OperationCanceledException — not just
-                // ones whose Token matches the caller's — because an inner
-                // linked/timeout cancellation still means "stop this
-                // pipeline". A guarded catch (when caller.IsCancellationRequested)
-                // would let a linked-CTS OCE fall through into the generic
-                // Exception isolator below, which would swallow it and keep
-                // dispatching. Unconditional rethrow closes that gap.
+                // Cancellation is control flow and is never isolated as an
+                // owner failure. Named-client HttpClient timeouts have already
+                // been converted by the sender into typed transient results;
+                // any OCE that reaches this boundary must stop fan-out.
                 try
                 {
                     await DispatchForOwnerAsync(
@@ -169,11 +173,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         catch (OperationCanceledException)
         {
-            // Hicks #1: unconditional rethrow. A cancellation surfaced from
-            // any inner token — caller, linked, or per-attempt timeout — must
-            // propagate out of DispatchAsync so the caller (broadcaster)
-            // observes it and can shut down cleanly. Guarding on the caller
-            // token alone would swallow legitimate internal cancellations.
+            // Caller/shutdown and unexpected linked cancellation propagate
+            // out of DispatchAsync. HttpClient.Timeout is represented as a
+            // transient result by the concrete sender and never reaches here.
             throw;
         }
         catch (Exception ex)
@@ -253,7 +255,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         string dedupeKey = string.Create(
             CultureInfo.InvariantCulture,
             $"{userId:D}|{attentionItemId}|{changeKind}");
-        if (!ShouldEmit(dedupeKey, settings, DateTime.UtcNow))
+        if (!ShouldEmit(dedupeKey, settings, UtcNow))
         {
             _metrics.SkippedDedupe.Add(1);
             return;
@@ -266,7 +268,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (changeKind != AttentionChangeKind.Resolved)
         {
             var rateKey = new RateLimitKey(userId, printerId, kind);
-            if (!TryConsumeRate(rateKey, settings, DateTime.UtcNow))
+            if (!TryConsumeRate(rateKey, settings, UtcNow))
             {
                 _metrics.SkippedRateLimit.Add(1);
                 return;
@@ -279,7 +281,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 PrinterId: item.PrinterId,
                 JobId: item.JobId,
                 ToolheadIndex: item.ToolheadIndex,
-                CapturedAtUtc: DateTime.UtcNow);
+                CapturedAtUtc: UtcNow);
         }
 
         foreach (DeviceToken deviceToken in userTokens)
@@ -302,7 +304,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     resolvedSnapshot,
                     deviceToken,
                     settings,
-                    tokens,
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -332,7 +333,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionSnapshot? resolvedSnapshot,
         DeviceToken deviceToken,
         NativePushSettings settings,
-        IDeviceTokenRepository tokens,
         CancellationToken cancellationToken)
     {
         // Rate limit consumption has moved to DispatchForOwnerAsync so it
@@ -350,9 +350,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         catch (OperationCanceledException)
         {
-            // Hicks #1: any OCE — caller, linked, or internal timeout —
-            // stops the pipeline. Never re-shape cancellation into a
-            // "sender_exception" transient result.
+            // Caller/shutdown or unexpected linked cancellation stops the
+            // pipeline. Concrete senders return HttpClient.Timeout as a typed
+            // transient result, so it remains retryable and isolated.
             throw;
         }
         catch (Exception ex)
@@ -361,14 +361,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             result = NativePushDispatchResult.Transient("sender_exception");
         }
 
-        // Vasquez v6 B1: persistence of the send outcome must not be able to
-        // abort the outer fan-out. A transient DB error while recording
-        // success/failure for one token is a per-token concern, not a
-        // pipeline-wide one, so we scope it here with a cancellation-
-        // preserving catch. Hicks #1: any OCE propagates unconditionally.
+        // Every mutating outcome opens its own DI scope/AppDbContext. A failed
+        // SaveChanges can leave an EF tracker poisoned; isolating that tracker
+        // prevents token A's persistence race from contaminating token B or a
+        // later owner. Non-cancellation failures remain per-device concerns.
         try
         {
-            await ApplyResultAsync(tokens, deviceToken, result, settings, cancellationToken);
+            await ApplyResultAsync(deviceToken, result, settings, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -412,7 +411,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             if (i + 1 < attempts)
             {
                 // Small linear backoff — the outbound HttpClient enforces the hard timeout.
-                await Task.Delay(TimeSpan.FromMilliseconds(200 * (i + 1)), cancellationToken);
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(200 * (i + 1)),
+                    _timeProvider,
+                    cancellationToken);
             }
         }
 
@@ -420,24 +422,30 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     }
 
     private async Task ApplyResultAsync(
-        IDeviceTokenRepository tokens,
         DeviceToken deviceToken,
         NativePushDispatchResult result,
         NativePushSettings settings,
         CancellationToken cancellationToken)
     {
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = UtcNow;
         if (result.Success)
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
-            await tokens.RecordSuccessAsync(deviceToken.Id, nowUtc, cancellationToken);
+            await PersistOutcomeInFreshScopeAsync(
+                (tokens, ct) => tokens.RecordSuccessAsync(deviceToken.Id, nowUtc, ct),
+                cancellationToken);
             return;
         }
 
         if (result.TokenInvalidated)
         {
             _metrics.TokensInvalidated.Add(1);
-            _ = await tokens.InvalidateByTokenAsync(deviceToken.Token, cancellationToken);
+            await PersistOutcomeInFreshScopeAsync(
+                async (tokens, ct) =>
+                {
+                    _ = await tokens.InvalidateAsync(deviceToken.Id, ct);
+                },
+                cancellationToken);
             return;
         }
 
@@ -479,7 +487,22 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        await tokens.RecordFailureAsync(deviceToken.Id, nowUtc, settings.FailureDeactivationThreshold, cancellationToken);
+        await PersistOutcomeInFreshScopeAsync(
+            (tokens, ct) => tokens.RecordFailureAsync(
+                deviceToken.Id,
+                nowUtc,
+                settings.FailureDeactivationThreshold,
+                ct),
+            cancellationToken);
+    }
+
+    private async Task PersistOutcomeInFreshScopeAsync(
+        Func<IDeviceTokenRepository, CancellationToken, Task> persist,
+        CancellationToken cancellationToken)
+    {
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
+        await persist(tokens, cancellationToken);
     }
 
     private static async Task<bool> IsFarmAdminAsync(AppDbContext db, Guid userId, CancellationToken cancellationToken)
@@ -489,7 +512,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             .AnyAsync(u => u.Id == userId && u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), cancellationToken);
     }
 
-    private static NativePushEnvelope BuildEnvelope(
+    private NativePushEnvelope BuildEnvelope(
         AttentionItemDto item,
         AttentionChangeKind changeKind,
         DeviceToken deviceToken)
@@ -508,9 +531,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             item.ToolheadIndex,
             item.JobId);
 
+        DateTime nowUtc = UtcNow;
+        TimeSpan alertTtl = item.Severity == AttentionSeverity.Info
+            ? InformationalAlertTtl
+            : ActionableAlertTtl;
+        DateTime ttlExpiration = nowUtc.Add(alertTtl);
         DateTime expiresAt = isResolved
-            ? DateTime.UtcNow.AddMinutes(5)
-            : item.DeadlineAt ?? DateTime.UtcNow.AddMinutes(30);
+            ? nowUtc.Add(InformationalAlertTtl)
+            : item.DeadlineAt is DateTime deadline && deadline < ttlExpiration
+                ? deadline
+                : ttlExpiration;
         IReadOnlyList<string> actionIds = isResolved
             ? Array.Empty<string>()
             : AttentionPushCategories.ActionsFor(item.Kind);
@@ -538,7 +568,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ActionIds: actionIds);
     }
 
-    private static NativePushEnvelope BuildSilentEnvelopeFromSnapshot(
+    private NativePushEnvelope BuildSilentEnvelopeFromSnapshot(
         string attentionItemId,
         AttentionSnapshot snapshot,
         DeviceToken deviceToken)
@@ -575,7 +605,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ToolheadIndex: snapshot.ToolheadIndex,
             DeepLink: deepLink,
             Priority: NativePushPriority.Background,
-            ExpiresAtUtc: DateTime.UtcNow.AddMinutes(5),
+            ExpiresAtUtc: UtcNow.Add(InformationalAlertTtl),
             ActionIds: Array.Empty<string>());
     }
 

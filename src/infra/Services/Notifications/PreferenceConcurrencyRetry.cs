@@ -41,8 +41,7 @@ public static class PreferenceConcurrencyRetry
         AppDbContext? fallbackContext,
         Func<AppDbContext, CancellationToken, Task<T>> operation,
         ILogger logger,
-        CancellationToken cancellationToken,
-        Func<Exception, ClassifierDecision>? classifier = null)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
         ArgumentNullException.ThrowIfNull(logger);
@@ -58,7 +57,6 @@ public static class PreferenceConcurrencyRetry
             return await operation(fallbackContext, cancellationToken).ConfigureAwait(false);
         }
 
-        Func<Exception, ClassifierDecision> classify = classifier ?? Classify;
         Exception? lastConflict = null;
         for (int attempt = 1; attempt <= MaxAttempts; attempt++)
         {
@@ -79,7 +77,7 @@ public static class PreferenceConcurrencyRetry
                 }
                 catch (Exception exception)
                 {
-                    ClassifierDecision decision = classify(exception);
+                    ClassifierDecision decision = Classify(exception);
                     if (decision == ClassifierDecision.Rethrow)
                     {
                         throw;

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using FluentAssertions;
@@ -137,19 +138,46 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task InvalidateByToken_RemovesAllMatchingRows()
+    public async Task Invalidate_ExactRegistration_PreservesDuplicateTokenAcrossProviderScopes()
     {
         Guid userA = Guid.NewGuid();
         Guid userB = Guid.NewGuid();
-        await _repo.UpsertAsync(userA, "install-a", "shared-token", "ios", "production", null);
-        await _repo.UpsertAsync(userB, "install-b", "shared-token", "ios", "production", null);
-        await _repo.UpsertAsync(userB, "install-c", "other-token", "ios", "production", null);
+        DeviceToken sandbox = await _repo.UpsertAsync(
+            userA,
+            "install-sandbox",
+            "shared-token",
+            "ios",
+            "development",
+            "com.example.sandbox");
+        DeviceToken production = await _repo.UpsertAsync(
+            userA,
+            "install-production",
+            "shared-token",
+            "ios",
+            "production",
+            "com.example.production");
+        DeviceToken otherUser = await _repo.UpsertAsync(
+            userB,
+            "install-other-user",
+            "shared-token",
+            "ios",
+            "development",
+            "com.example.sandbox");
+        DeviceToken otherToken = await _repo.UpsertAsync(
+            userB,
+            "install-other-token",
+            "other-token",
+            "ios",
+            "production",
+            "com.example.production");
 
-        int removed = await _repo.InvalidateByTokenAsync("shared-token");
+        bool removed = await _repo.InvalidateAsync(sandbox.Id);
 
-        removed.Should().Be(2);
-        (await _db.DeviceTokens.CountAsync()).Should().Be(1);
-        (await _db.DeviceTokens.SingleAsync()).Token.Should().Be("other-token");
+        removed.Should().BeTrue();
+        DeviceToken[] remaining = await _db.DeviceTokens.AsNoTracking().ToArrayAsync();
+        remaining.Select(token => token.Id).Should().BeEquivalentTo(
+            new[] { production.Id, otherUser.Id, otherToken.Id });
+        remaining.Count(token => token.Token == "shared-token").Should().Be(2);
     }
 
     [Fact]
@@ -167,58 +195,83 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task Upsert_UniqueInstallationCollision_RetriesAsIdempotentUpdate()
+    public async Task Upsert_ConcurrentFirstCreate_RealUniqueViolationRetriesExactlyOnce()
     {
-        const string connectionString = "Data Source=file:device-token-unique-race?mode=memory&cache=shared";
-        await using SqliteConnection keepAlive = new(connectionString);
-        await keepAlive.OpenAsync();
-
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"device-token-race-{Guid.NewGuid():N}.db");
+        string connectionString = $"Data Source={databasePath};Pooling=False;Default Timeout=5";
         DbContextOptions<AppDbContext> plainOptions = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(connectionString)
             .Options;
-        Guid userId = Guid.NewGuid();
-        await using (AppDbContext seed = new(plainOptions))
-        {
-            await seed.Database.EnsureCreatedAsync();
-            seed.Users.Add(new Farm.Infrastructure.Domain.User
-            {
-                Id = userId,
-                Username = "device-token-race",
-                Email = "device-token-race@example.com",
-                PasswordHash = "x",
-            });
-            await seed.SaveChangesAsync();
-        }
-
-        var interceptor = new CollisionInterceptor(
-            plainOptions,
-            userId,
-            new DbUpdateException(
-                "unique collision",
-                new SqliteException(
-                    "UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId",
-                    errorCode: 19,
-                    extendedErrorCode: 2067)));
+        var interceptor = new ConcurrentInsertBarrierInterceptor();
         DbContextOptions<AppDbContext> racingOptions = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(connectionString)
             .AddInterceptors(interceptor)
             .Options;
+        Guid userId = Guid.NewGuid();
 
-        await using AppDbContext racingContext = new(racingOptions);
-        var repository = new EfDeviceTokenRepository(racingContext);
+        try
+        {
+            await using (AppDbContext seed = new(plainOptions))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.Add(new Farm.Infrastructure.Domain.User
+                {
+                    Id = userId,
+                    Username = $"device-token-race-{userId:N}",
+                    Email = $"device-token-race-{userId:N}@example.com",
+                    PasswordHash = "x",
+                });
+                await seed.SaveChangesAsync();
+            }
 
-        DeviceToken result = await repository.UpsertAsync(
-            userId,
-            "installation-race",
-            new string('b', 64),
-            "ios",
-            "production",
-            "com.example.app");
+            await using AppDbContext contextA = new(racingOptions);
+            await using AppDbContext contextB = new(racingOptions);
+            var repositoryA = new EfDeviceTokenRepository(contextA);
+            var repositoryB = new EfDeviceTokenRepository(contextB);
 
-        result.Token.Should().Be(new string('b', 64));
-        await using AppDbContext verify = new(plainOptions);
-        (await verify.DeviceTokens.CountAsync()).Should().Be(1);
-        (await verify.DeviceTokens.SingleAsync()).Token.Should().Be(new string('b', 64));
+            Task<DeviceToken> writeA = repositoryA.UpsertAsync(
+                userId,
+                "installation-race",
+                new string('a', 64),
+                "ios",
+                "production",
+                "com.example.app");
+            Task<DeviceToken> writeB = repositoryB.UpsertAsync(
+                userId,
+                "installation-race",
+                new string('b', 64),
+                "ios",
+                "production",
+                "com.example.app");
+
+            await interceptor.BothInitialInsertsReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            DeviceToken[] results = await Task.WhenAll(writeA, writeB).WaitAsync(TimeSpan.FromSeconds(10));
+
+            results.Should().HaveCount(2);
+            interceptor.SaveAttemptsByContext.Should().HaveCount(2);
+            interceptor.SaveAttemptsByContext.Values.Order().Should().Equal(1, 2);
+            interceptor.Failures.Should().ContainSingle();
+            DbUpdateException conflict = interceptor.Failures.Single().Should().BeOfType<DbUpdateException>().Subject;
+            SqliteException provider = conflict.InnerException.Should().BeOfType<SqliteException>().Subject;
+            provider.SqliteErrorCode.Should().Be(19);
+            provider.SqliteExtendedErrorCode.Should().Be(2067);
+            provider.Message.Should().Contain(
+                "UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId");
+
+            await using AppDbContext verify = new(plainOptions);
+            DeviceToken persisted = await verify.DeviceTokens.AsNoTracking().SingleAsync();
+            persisted.UserId.Should().Be(userId);
+            persisted.InstallationId.Should().Be("installation-race");
+            persisted.Token.Should().BeOneOf(new string('a', 64), new string('b', 64));
+        }
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
     }
 
     [Fact]
@@ -282,35 +335,81 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         EfDeviceTokenRepository.IsUniqueDeviceTokenConflict(exception).Should().Be(expected);
     }
 
-    private sealed class CollisionInterceptor(
-        DbContextOptions<AppDbContext> plainOptions,
-        Guid userId,
-        DbUpdateException exception) : SaveChangesInterceptor
+    private sealed class ConcurrentInsertBarrierInterceptor : SaveChangesInterceptor
     {
-        private int _invocationCount;
+        private readonly TaskCompletionSource _winnerSaved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _initialInsertArrivals;
+        private DbContextId? _winnerContextId;
+
+        public TaskCompletionSource BothInitialInsertsReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ConcurrentDictionary<DbContextId, int> SaveAttemptsByContext { get; } = new();
+
+        public ConcurrentQueue<Exception> Failures { get; } = new();
 
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
             DbContextEventData eventData,
             InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
         {
-            if (Interlocked.Increment(ref _invocationCount) == 1)
+            AppDbContext context = (AppDbContext)eventData.Context!;
+            bool writesDeviceToken = context.ChangeTracker.Entries<DeviceToken>()
+                .Any(entry => entry.State is EntityState.Added or EntityState.Modified);
+            if (!writesDeviceToken)
             {
-                await using var winner = new AppDbContext(plainOptions);
-                winner.DeviceTokens.Add(new DeviceToken
-                {
-                    UserId = userId,
-                    InstallationId = "installation-race",
-                    Token = new string('a', 64),
-                    Platform = "ios",
-                    Environment = "production",
-                    AppBundleId = "com.example.app",
-                });
-                await winner.SaveChangesAsync(cancellationToken);
-                throw exception;
+                return result;
+            }
+
+            SaveAttemptsByContext.AddOrUpdate(context.ContextId, 1, (_, count) => count + 1);
+            bool initialInsert = context.ChangeTracker.Entries<DeviceToken>()
+                .Any(entry => entry.State == EntityState.Added);
+            if (!initialInsert)
+            {
+                return result;
+            }
+
+            int arrival = Interlocked.Increment(ref _initialInsertArrivals);
+            if (arrival == 1)
+            {
+                _winnerContextId = context.ContextId;
+                await BothInitialInsertsReached.Task.WaitAsync(
+                    TimeSpan.FromSeconds(10),
+                    cancellationToken);
+            }
+            else if (arrival == 2)
+            {
+                BothInitialInsertsReached.TrySetResult();
+                await _winnerSaved.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+            else
+            {
+                throw new InvalidOperationException("Only two initial insert attempts are expected.");
             }
 
             return result;
+        }
+
+        public override ValueTask<int> SavedChangesAsync(
+            SaveChangesCompletedEventData eventData,
+            int result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_winnerContextId == eventData.Context!.ContextId)
+            {
+                _winnerSaved.TrySetResult();
+            }
+
+            return ValueTask.FromResult(result);
+        }
+
+        public override Task SaveChangesFailedAsync(
+            DbContextErrorEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            Failures.Enqueue(eventData.Exception);
+            return Task.CompletedTask;
         }
     }
 

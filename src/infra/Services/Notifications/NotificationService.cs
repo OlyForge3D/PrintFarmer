@@ -231,8 +231,6 @@ public class NotificationService(
     /// </summary>
     internal Func<AppDbContext, CancellationToken, Task>? OnAfterPreferenceReadForTestsAsync { get; set; }
 
-    internal Func<Exception, PreferenceConcurrencyRetry.ClassifierDecision>? PreferenceConflictClassifierForTests { get; set; }
-
     private static readonly string[] KnownPushServiceHosts =
     {
         "fcm.googleapis.com",
@@ -548,8 +546,7 @@ public class NotificationService(
                     return 0;
                 },
                 logger,
-                cancellationToken,
-                PreferenceConflictClassifierForTests);
+                cancellationToken);
             return;
         }
 
@@ -692,8 +689,7 @@ public class NotificationService(
                     return persistedInner;
                 },
                 logger,
-                cancellationToken,
-                PreferenceConflictClassifierForTests);
+                cancellationToken);
         }
 
         if (dbContext.Database.IsRelational())
@@ -1035,8 +1031,7 @@ public class NotificationService(
                 return result;
             },
             logger,
-            cancellationToken,
-            PreferenceConflictClassifierForTests);
+            cancellationToken);
     }
 
     private async Task<AttentionCategoryUpdateResult> ApplyAttentionCategoryUpdateOnContextAsync(

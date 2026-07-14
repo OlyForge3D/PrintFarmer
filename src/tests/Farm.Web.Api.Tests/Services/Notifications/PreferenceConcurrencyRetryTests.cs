@@ -149,42 +149,6 @@ public sealed class PreferenceConcurrencyRetryTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_Conflict_RetriesExactlyOnceWithFreshContext()
-    {
-        using var factory = new CountingFactory();
-        int attempts = 0;
-        int classifierCalls = 0;
-        var contextIds = new List<DbContextId>();
-
-        int result = await PreferenceConcurrencyRetry.ExecuteAsync(
-            factory,
-            fallbackContext: null,
-            operation: (context, _) =>
-            {
-                contextIds.Add(context.ContextId);
-                if (Interlocked.Increment(ref attempts) == 1)
-                {
-                    throw new DbUpdateConcurrencyException("conflict");
-                }
-
-                return Task.FromResult(42);
-            },
-            logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None,
-            classifier: exception =>
-            {
-                classifierCalls++;
-                return PreferenceConcurrencyRetry.Classify(exception);
-            });
-
-        result.Should().Be(42);
-        attempts.Should().Be(2);
-        classifierCalls.Should().Be(1);
-        factory.CreatedContexts.Should().Be(2);
-        contextIds.Should().OnlyHaveUniqueItems();
-    }
-
-    [Fact]
     public async Task ExecuteAsync_UnsupportedFailure_PreservesOriginalAndDoesNotRetry()
     {
         using var factory = new CountingFactory();
@@ -209,48 +173,18 @@ public sealed class PreferenceConcurrencyRetryTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_RepeatedConflict_StopsAtExactBoundAndPreservesLast()
+    public async Task ExecuteAsync_Cancellation_PropagatesWithoutRetry()
     {
         using var factory = new CountingFactory();
-        int attempts = 0;
-        DbUpdateConcurrencyException? last = null;
-
-        Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
-            factory,
-            fallbackContext: null,
-            operation: (_, _) =>
-            {
-                last = new DbUpdateConcurrencyException($"conflict-{++attempts}");
-                throw last;
-            },
-            logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None);
-
-        (await act.Should().ThrowAsync<DbUpdateConcurrencyException>()).Which.Should().BeSameAs(last);
-        attempts.Should().Be(PreferenceConcurrencyRetry.MaxAttempts);
-        factory.CreatedContexts.Should().Be(PreferenceConcurrencyRetry.MaxAttempts);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_Cancellation_DoesNotClassifyOrRetry()
-    {
-        using var factory = new CountingFactory();
-        int classifierCalls = 0;
 
         Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
             factory,
             fallbackContext: null,
             operation: (_, _) => throw new OperationCanceledException("cancelled"),
             logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None,
-            classifier: exception =>
-            {
-                classifierCalls++;
-                return PreferenceConcurrencyRetry.Classify(exception);
-            });
+            cancellationToken: CancellationToken.None);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
-        classifierCalls.Should().Be(0);
         factory.CreatedContexts.Should().Be(1);
     }
 

@@ -76,14 +76,11 @@ public sealed class RelayNativePushSender(
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", relay.ApiKey);
         request.Content = new StringContent(JsonSerializer.Serialize(body, PayloadOptions), Encoding.UTF8, "application/json");
 
-        // Hicks #1: no OperationCanceledException catch here. TaskCanceledException
-        // is an OperationCanceledException subclass — HttpClient uses it for both
-        // caller-token cancellation AND its own internal per-request timer. A
-        // previous version filtered on `cancellationToken.IsCancellationRequested`
-        // and mapped the internal-timer OCE into a Transient("timeout") result,
-        // which silently swallowed cancellation when the caller passed
-        // CancellationToken.None. Cancellation is a first-class control-flow
-        // signal; letting every OCE propagate unchanged is the mandated behaviour.
+        // HttpClient.Timeout and caller/shutdown cancellation both surface as
+        // OperationCanceledException. The caller token is authoritative: when it
+        // is signaled, cancellation propagates unchanged. An OCE with an
+        // unsignaled caller token is the named client's internal timeout and is a
+        // transient provider failure eligible for dispatcher retry.
         try
         {
             using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
@@ -115,6 +112,14 @@ public sealed class RelayNativePushSender(
             }
 
             return NativePushDispatchResult.Transient($"http_{status}");
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                ex,
+                "[NativePush/relay] HTTP request timed out for attentionItemId={AttentionItemId}.",
+                envelope.AttentionItemId);
+            return NativePushDispatchResult.Transient("timeout");
         }
         catch (HttpRequestException ex)
         {

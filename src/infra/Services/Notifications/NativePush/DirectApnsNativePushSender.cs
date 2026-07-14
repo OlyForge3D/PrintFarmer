@@ -158,15 +158,11 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
                 unix.ToString(CultureInfo.InvariantCulture));
         }
 
-        // Hicks #1: no OperationCanceledException catch here. TaskCanceledException
-        // is an OperationCanceledException subclass — HttpClient uses it for both
-        // caller-token cancellation AND its own internal per-request timer. A
-        // previous version filtered on `cancellationToken.IsCancellationRequested`
-        // and mapped the internal-timer OCE into a Transient("timeout") result,
-        // which silently swallowed cancellation when the caller passed
-        // CancellationToken.None. Cancellation is a first-class control-flow
-        // signal, not a transient wire condition; letting every OCE propagate
-        // unchanged is the mandated behaviour.
+        // HttpClient.Timeout and caller/shutdown cancellation both surface as
+        // OperationCanceledException. The caller token is authoritative: when it
+        // is signaled, cancellation propagates unchanged. An OCE with an
+        // unsignaled caller token is the named client's internal timeout and is a
+        // transient provider failure eligible for dispatcher retry.
         try
         {
             using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
@@ -207,6 +203,14 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             }
 
             return NativePushDispatchResult.Terminal(apnsReason ?? $"http_{status}");
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                ex,
+                "[NativePush/direct] HTTP request timed out for attentionItemId={AttentionItemId}.",
+                envelope.AttentionItemId);
+            return NativePushDispatchResult.Transient("timeout");
         }
         catch (HttpRequestException ex)
         {
@@ -268,6 +272,8 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             ? new ApsBackground(ContentAvailable: 1)
             : new ApsAlertRoot(
                 new ApsAlert(envelope.Title, envelope.Subtitle, envelope.Body),
+                Sound: "default",
+                Badge: 1,
                 envelope.Category,
                 envelope.ThreadId,
                 MutableContent: 1);
@@ -411,6 +417,8 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
 
     private sealed record ApsAlertRoot(
         [property: JsonPropertyName("alert")] ApsAlert Alert,
+        [property: JsonPropertyName("sound")] string Sound,
+        [property: JsonPropertyName("badge")] int Badge,
         [property: JsonPropertyName("category")] string Category,
         [property: JsonPropertyName("thread-id")] string ThreadId,
         [property: JsonPropertyName("mutable-content")] int MutableContent);
