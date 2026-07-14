@@ -424,7 +424,11 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
       upcoming: [
         {
           id: 'u-1',
-          scheduleId: 's-1',
+          // Wire-boundary alignment: backend `UpcomingMaintenanceTaskDto`
+          // exposes the global maintenance-task catalog id as `taskId`
+          // (never `scheduleId`). See `useUpcomingMaintenance.ts` and
+          // `src/api/Controllers/Responses/UpcomingMaintenanceTaskDto.cs`.
+          taskId: 't-1',
           printerId,
           printerName: 'Voron 2.4',
           toolheadId: 'th-1',

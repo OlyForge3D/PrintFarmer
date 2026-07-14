@@ -10,7 +10,18 @@ import { maintenanceService } from '@/services/maintenanceService';
 
 export interface UpcomingMaintenanceTask {
   id: string;
-  scheduleId: string;
+  /**
+   * Global maintenance-task catalog id (a Guid on the wire). Named `taskId`
+   * to match the backend record `UpcomingMaintenanceTaskDto.TaskId`
+   * (`src/api/Controllers/Responses/UpcomingMaintenanceTaskDto.cs`) and the
+   * wire type `UpcomingMaintenanceTaskDto.taskId` in
+   * `src/Web/ReactApp/src/services/maintenanceService.ts`. This is NOT a
+   * `PrinterMaintenanceSchedule` id — the upcoming feed keys upcoming work
+   * to the global task catalog, not to a per-printer schedule deployment,
+   * so a `scheduleId` alias would misrepresent the contract and produced a
+   * silently-`undefined` field at runtime prior to this fix.
+   */
+  taskId: string;
   printerId: string;
   printerName: string;
   /**
@@ -104,7 +115,12 @@ export function useUpcomingMaintenance(
 
       return data.map((t) => ({
         id: t.id,
-        scheduleId: t.scheduleId,
+        // Wire boundary: backend `UpcomingMaintenanceTaskDto` uses `taskId`
+        // (a Guid keyed to the global `MaintenanceTask` catalog). The prior
+        // `t.scheduleId` mapping produced `undefined` at runtime because no
+        // such field exists on the DTO. Regression test at
+        // `__tests__/useUpcomingMaintenance.test.tsx`.
+        taskId: t.taskId,
         printerId: t.printerId,
         printerName: t.printerName,
         // Toolhead scope is a plain GUID pass-through from the #711 wire
