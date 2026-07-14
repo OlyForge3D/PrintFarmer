@@ -193,6 +193,17 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         return printers;
     }
 
+    public async Task<List<Printer>> GetByBackendWithToolheadsAsync(PrinterBackend backend, CancellationToken ct)
+    {
+        List<Printer> printers = await _db.Printers
+            .AsNoTracking()
+            .Include(p => p.Toolheads)
+            .Where(p => p.Backend == (int)backend)
+            .ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
+    }
+
     /// <summary>
     /// Finds a printer by its ServerUrl efficiently using a direct database query.
     /// This is much more efficient than loading all printers into memory.

@@ -19,6 +19,7 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.Property(j => j.ModelFileUrl).IsRequired().HasMaxLength(2048);
         _ = builder.Property(j => j.ModelFileName).IsRequired().HasMaxLength(512);
         _ = builder.Property(j => j.SlicerEngine).IsRequired();
+        _ = builder.Property(j => j.SlicerEngineVersion).HasMaxLength(32);
         _ = builder.Property(j => j.SlicerProfileJson).HasColumnType("TEXT");
         _ = builder.Property(j => j.SlicerProfileId);
         _ = builder.Property(j => j.RequiredCapabilitiesJson).HasColumnType("TEXT");

@@ -15,11 +15,13 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using FluentValidation;
@@ -30,6 +32,7 @@ using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
+using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -366,10 +369,10 @@ public class PrintersController(
                         : $"Successfully connected to Moonraker printer on port {resolution.BackendPort}"
                 }
                 : new TestConnectionResponse
-            {
-                Success = false,
-                Message = "Moonraker did not respond on the standard 7125 endpoint or Snapmaker U1 port 80 endpoint"
-            };
+                {
+                    Success = false,
+                    Message = "Moonraker did not respond on the standard 7125 endpoint or Snapmaker U1 port 80 endpoint"
+                };
         }
         catch (TaskCanceledException)
         {
@@ -873,15 +876,21 @@ public class PrintersController(
     /// Gets detailed information about a specific printer including manufacturer, model, and configuration.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="fallbackGroupService">Injected fallback-group service used to include per-printer fallback chains in the details payload.</param>
+    /// <param name="featureGate">Operator feature gate consulted to decide whether multi-slot fallback chains are exposed (issue #711, FIX E).</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Detailed printer information including manufacturer, model, purchase information, and settings.</returns>
+    /// <returns>Detailed printer information including manufacturer, model, purchase information, settings, and configured fallback groups.</returns>
     /// <response code="200">Returns detailed printer information.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpGet("{id:guid}/details")]
     [ProducesResponseType(typeof(PrinterDetailsDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(
+        Guid id,
+        [FromServices] Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService fallbackGroupService,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
+        CancellationToken ct)
     {
         Printer? p = await _printersService.FindByIdWithIncludesAsync(id, ct);
         if (p is null)
@@ -891,6 +900,15 @@ public class PrintersController(
 
         // Get primary toolhead for capabilities DTO (backward compatibility)
         Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
+
+        // Only expose per-tool attribution surface (SupportsPerToolAttribution flag and
+        // per-toolhead CumulativePrintHours) when the multi-slot-fallback operator feature
+        // is on AND the printer's persisted domain capability flag is true (issue #711, F6
+        // backend). When either condition fails, both the capability flag and the odometer
+        // values collapse to their unset defaults (false / null) so #719 UI consumers see a
+        // deterministic "not applicable" shape rather than stale or fabricated wear.
+        bool multiSlotFallbackEnabled = featureGate.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback);
+        bool perToolAttributionActive = multiSlotFallbackEnabled && p.SupportsPerToolAttribution;
 
         // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
         // This provides backward compatibility while we transition to using Toolheads directly
@@ -940,7 +958,21 @@ public class PrintersController(
             t.ToolheadType,
             t.CurrentSpoolId,
             t.CurrentMaterial,
-            t.CurrentFilamentColor)).ToArray();
+            t.CurrentFilamentColor,
+
+            // Only project the per-toolhead odometer when the capability is active for this
+            // printer; otherwise emit explicit null so consumers can distinguish "no
+            // attribution available" from "zero hours accrued" (a supported printer with a
+            // fresh baseline still returns 0.0 here).
+            perToolAttributionActive ? t.CumulativePrintHours : null)).ToArray();
+
+        // Only expose fallback chains when the multi-slot-fallback operator feature is on
+        // (issue #711, FIX E); otherwise return an empty list so gated-off clients never
+        // see fallback config.
+        IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto> fallbackGroups =
+            multiSlotFallbackEnabled
+                ? await fallbackGroupService.ListForPrinterAsync(id, ct)
+                : [];
 
         return new PrinterDetailsDto(
             p.Id,
@@ -977,7 +1009,9 @@ public class PrintersController(
             p.UseModelDispatchDefaults,
             p.BuddyCameraIp,
             p.NozzleDiameter,
-            p.HasMmu);
+            p.HasMmu,
+            fallbackGroups,
+            perToolAttributionActive);
     }
 
     /// <summary>
@@ -1645,7 +1679,7 @@ public class PrintersController(
 
         if (wasMultiMaterial != p.MultiMaterial)
         {
-            _printersService.SyncMmuToolheadsOnEntity(p, wasMultiMaterial);
+            await _printersService.SyncMmuToolheadsOnEntityAsync(p, wasMultiMaterial, ct: ct);
         }
 
         if (dto.SupportsAutoLeveling.HasValue && dto.SupportsAutoLeveling.Value != p.SupportsAutoLeveling)
@@ -1867,6 +1901,10 @@ public class PrintersController(
                 await _printersService.SyncBuddyCameraAsync(p, ip, ct);
             }
         }
+
+        // Backend, multi-material, and topology edits all converge on one equality-guarded
+        // capability derivation before the unit of work commits.
+        _ = PerToolAttributionCapability.Refresh(p);
 
         // Save all changes (printer + toolhead updates) with concurrency retry.
         // Background polling services may update the same printer row (e.g. status, temps),
@@ -2775,6 +2813,7 @@ public class PrintersController(
     /// assignment (no pre-flight validation 409, no override log/telemetry).
     /// </remarks>
     [HttpPut("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
+    [Idempotent(IdempotencyRouteKeys.PrinterToolheadSpoolBind)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]

@@ -19,7 +19,17 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 
 ## Recent
 
-_Last 5 most-recent learnings preserved from full history. Older entries are in `history-archive.md` (archived 2026-05-21 by Scribe)._
+_Last 5 most-recent learnings preserved from full history. Entries before 2026-05-26 archived to history-archive.md._
+
+**Summary of detailed entries 2026-05-26 to 2026-07-13:**
+- **2026-05-29 through 2026-06-03:** Delivered control-gate pattern for home endpoints (PR #316), camera integration (go2rtc sidecar, event snapshots, RTSP health), speed multiplier SignalR, Buddy camera support, OrcaSlicer import endpoint, external-reference adoption research, notification provider pattern, filament cost tracking (Spoolman), and artifact metadata endpoint.
+- **2026-05-31:** External-reference-app feature sweep produced three adoption candidates: notification providers (8-provider backend, Phase 3), electricity cost tracking (smart plugs), and Printables.com import.
+- **2026-06-01 through 2026-06-03:** System info API pattern, Printables selected-file import, Refit certificate upgrade, WebAuthn/FIDO2 passkey ceremony endpoints (Fido2 v4 package, challenge cache, verification patterns).
+- **2026-06-03 through 2026-07-13:** Heading typography scope, settings IA query model, triple-model review consensus, slicer profile depth learnings.
+
+**Current Assignment:** Issue #708 Backend v3 revision (Hicks REQUEST_CHANGES handoff). Five blockers: APNs token redaction, JWT invalidation test, rate-bucket race, attention prefs, capabilities JSON casing. Previous OrcaSlicer work paused.
+
+### Recent Detailed Entries
 
 - **2026-05-29 — PR #316 Merged (Bishop, SHA 8becf256).** Control-gate pattern applied to `/home`, `/homexy`, `/homez` endpoints. Conflict resolved (test union merge). Next: extend pattern consistency across remaining endpoints (backlog priority).
 - **2026-05-12 — go2rtc Sidecar Implementation (PFarm1-lzf0).** Added go2rtc service container to docker-compose, `PrinterStreamRegistry` for transcode URL resolution, `/api/rtc/*` route handlers, and `transcodeStreamUrl` on `UpdatePrinterDto`. Bridges Buddy/Prusa RTSP cameras to frontend WebRTC viewers.
@@ -159,3 +169,18 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+### 2026-07-13 — Issue #708 Backend v3 Revision (Hicks REQUEST_CHANGES Handoff)
+
+**Context:** Hicks completed immutable review (gpt-5.6-sol/max) on detached worktree at exact SHA `1d803b930c797aec69ade5d9a98d9635c0cdabb4`. Verdict: REQUEST_CHANGES (5 blockers).
+
+**Blockers for this revision:**
+1. APNs token redaction incomplete — slash/query chars escape masking patterns
+2. JWT invalidation regression test missing — second signing not proven to invalidate prior token
+3. Rate-bucket prune race + hard-coded 5m expiry — concurrent scenarios unvetted; duration not configurable
+4. Attention preferences inconsistency — partial reset + toggle mismatch indicates incomplete persistence
+5. Capabilities JSON casing mismatch — non-production serializer options cause camelCase/PascalCase divergence
+
+**Verified:** B3 auth ✓, migrations ✓, build ✓, 75 focused tests ✓, full suite 3251/3253 (2 unrelated).
+
+**Next Steps:** Fix above blockers on this branch. Jeff Papiez locked out for this revision cycle. Hicks will re-review after fixes.

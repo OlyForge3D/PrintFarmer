@@ -98,6 +98,14 @@ public interface IPrintersRepository
     Task<List<Printer>> GetByBackendAsync(PrinterBackend backend, CancellationToken ct);
 
     /// <summary>
+    /// Gets all printers with a specific backend type and their toolhead topology.
+    /// </summary>
+    /// <param name="backend">The backend type to filter by.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of printers with the specified backend and toolheads included.</returns>
+    Task<List<Printer>> GetByBackendWithToolheadsAsync(PrinterBackend backend, CancellationToken ct);
+
+    /// <summary>
     /// Finds a printer by its server URL/IP address.
     /// </summary>
     /// <param name="serverUrl">The server URL to search for.</param>

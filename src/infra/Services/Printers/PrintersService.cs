@@ -72,6 +72,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
 /// <param name="spoolResolver">Resolves guided spool ids from each printer's owning source</param>
 /// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
+/// <param name="activityAccumulator">Optional per-tool active-time accumulator (issue #711, round-14) consulted when wiring the per-tool attribution capability flag and reset on printer removal</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -91,7 +92,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
     IStoragePathService storagePathService,
     IFilamentCoverageSpoolResolver spoolResolver,
-    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IPrintersService
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -114,6 +116,11 @@ public class PrintersService(
     // that build PrintersService directly do not need to supply a mock.
     private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver ?? throw new ArgumentNullException(nameof(spoolResolver));
     private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+
+    // Optional (issue #711, round-14): shared in-memory per-tool activity accumulator. Nullable so
+    // unit tests that build PrintersService directly need not supply it. Used to discard a printer's
+    // accumulated telemetry when it is deleted.
+    private readonly Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -483,6 +490,10 @@ public class PrintersService(
     public async Task RemoveAsync(Printer p, CancellationToken ct)
     {
         await _unitOfWork.Printers.RemoveAsync(p, ct);
+
+        // Discard any accumulated per-tool activity so a deleted printer's buckets do not linger
+        // (issue #711, round-14). Best-effort: the accumulator is a shared in-memory singleton.
+        _activityAccumulator?.Reset(p.Id);
     }
 
     /// <summary>
@@ -1641,6 +1652,11 @@ public class PrintersService(
             HasEnclosure = modelTemplate?.HasEnclosure ?? false,
             MultiMaterial = modelTemplate?.MultiMaterial ?? false,
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
+
+            // SupportsPerToolAttribution is derived after the toolheads are built (see
+            // PerToolAttributionCapability.Refresh before AddAsync below): it is true only for a
+            // Moonraker printer with two or more physical hotends, the case where interval-aware
+            // active-tool telemetry can genuinely differentiate per-head wear (issue #711, round-14).
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
@@ -1736,6 +1752,11 @@ public class PrintersService(
                 _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", dto.LocationName, p.Name);
             }
         }
+
+        // Derive per-tool attribution capability now that the physical toolheads exist (issue #711,
+        // round-14). True only for a Moonraker printer with ≥2 physical hotends, where interval-aware
+        // active-tool telemetry can genuinely differentiate per-head wear.
+        _ = PerToolAttributionCapability.Refresh(p);
 
         await AddAsync(p, ct);
 
@@ -1883,6 +1904,8 @@ public class PrintersService(
                 }
             }
         }
+
+        updated = PerToolAttributionCapability.Refresh(printer) || updated;
 
         // Always mark the sync as complete so HasCatalogUpdate clears,
         // even when the printer already has all template values.
@@ -3042,6 +3065,27 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
+        // H-3: natural idempotency backstop. Re-binding the SAME spool to the SAME
+        // (printer, toolhead) slot is a no-op, so short-circuit BEFORE any spool
+        // re-resolution, UpdatedAt churn, override-audit staging, SaveChanges, or
+        // coverage broadcast. This gives spool-bind the same durable natural-idempotency
+        // backstop that adjust (OperationKey) and harvest (HarvestedAt + snapshot) already
+        // own, so a re-delivered bind — an Idempotency-Key retry while the replay flag is
+        // off or transitioning, or a staleness-reclaimed retry — cannot produce a duplicate
+        // FilamentSwapOverride audit row or a spurious state change. Returns 200
+        // (CommandResult success) with the existing binding unchanged.
+        bool alreadyBoundToRequestedSpool = toolhead is null && toolheadIndex == 0
+            ? p.CurrentSpoolId == spoolId
+            : toolhead is not null && toolhead.CurrentSpoolId == spoolId;
+
+        if (alreadyBoundToRequestedSpool)
+        {
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: spool {SpoolId} already bound to toolhead T{Index} on printer {PName} ({Id}); returning existing binding unchanged (idempotent no-op re-bind)",
+                spoolId, toolheadIndex, p.Name, id);
+            return new CommandResult(true, $"Spool {spoolId} already assigned to toolhead T{toolheadIndex}");
+        }
+
         // B3: legacy single-tool T0 with no materialized Toolhead row → bind via the Printer
         // scalar (Printer.CurrentSpoolId). Never fabricate a fake MMU gate at index 0.
         if (toolhead is null && toolheadIndex == 0)
@@ -3135,6 +3179,7 @@ public class PrintersService(
                         "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
                         p.Name, id, toolheadIndex);
                     p.MultiMaterial = true;
+                    _ = PerToolAttributionCapability.Refresh(p);
                 }
 
                 if (p.MultiMaterial)
@@ -3296,6 +3341,7 @@ public class PrintersService(
         }
 
         printer.MultiMaterial = previousMultiMaterial;
+        _ = PerToolAttributionCapability.Refresh(printer);
         _db.Entry(printer).Property(p => p.MultiMaterial).IsModified = false;
 
         if (existingToolhead is not null && previousUpdatedAt.HasValue)
@@ -3428,6 +3474,7 @@ public class PrintersService(
                     "ClearToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
                     p.Name, id, toolheadIndex);
                 p.MultiMaterial = true;
+                _ = PerToolAttributionCapability.Refresh(p);
             }
 
             if (p.MultiMaterial)
@@ -3520,7 +3567,11 @@ public class PrintersService(
     }
 
     /// <inheritdoc />
-    public void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4)
+    public async Task SyncMmuToolheadsOnEntityAsync(
+        Printer printer,
+        bool wasMultiMaterial,
+        int mmuGateCount = 4,
+        CancellationToken ct = default)
     {
         if (!wasMultiMaterial && printer.MultiMaterial)
         {
@@ -3534,18 +3585,61 @@ public class PrintersService(
                 .Where(t => t.ToolheadType == ToolheadType.MmuGate)
                 .ToList();
 
+            HashSet<Guid> gateIds = [.. gatesToRemove.Select(gate => gate.Id)];
+            List<FilamentFallbackGroup> affectedGroups = gateIds.Count == 0
+                ? []
+                : await _db.FilamentFallbackGroups
+                    .Include(group => group.Members)
+                    .Where(group => group.Members.Any(member => gateIds.Contains(member.ToolheadId)))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+            int removedMemberships = 0;
+            int removedGroups = 0;
+            foreach (FilamentFallbackGroup group in affectedGroups)
+            {
+                List<FilamentFallbackGroupMember> membershipsToRemove = group.Members
+                    .Where(member => gateIds.Contains(member.ToolheadId))
+                    .ToList();
+
+                _db.FilamentFallbackGroupMembers.RemoveRange(membershipsToRemove);
+                foreach (FilamentFallbackGroupMember membership in membershipsToRemove)
+                {
+                    _ = group.Members.Remove(membership);
+                }
+
+                removedMemberships += membershipsToRemove.Count;
+                if (group.Members.Count < 2)
+                {
+                    _ = _db.FilamentFallbackGroups.Remove(group);
+                    removedGroups++;
+                }
+            }
+
             foreach (Toolhead gate in gatesToRemove)
             {
-                printer.Toolheads.Remove(gate);
+                _ = printer.Toolheads.Remove(gate);
+            }
+
+            if (removedMemberships > 0)
+            {
+                _logger.LogInformation(
+                    "SyncMmuToolheadsOnEntityAsync: Removed {MembershipCount} fallback membership(s) and {GroupCount} under-populated group(s) for printer {PName} ({Id})",
+                    removedMemberships,
+                    removedGroups,
+                    printer.Name,
+                    printer.Id);
             }
 
             if (gatesToRemove.Count > 0)
             {
                 _logger.LogInformation(
-                    "SyncMmuToolheadsOnEntity: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
+                    "SyncMmuToolheadsOnEntityAsync: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
                     gatesToRemove.Count, printer.Name, printer.Id);
             }
         }
+
+        _ = PerToolAttributionCapability.Refresh(printer);
     }
 
     /// <summary>

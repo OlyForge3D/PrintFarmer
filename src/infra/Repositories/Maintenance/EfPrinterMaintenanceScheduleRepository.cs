@@ -16,7 +16,8 @@ public class EfPrinterMaintenanceScheduleRepository(AppDbContext context) : IPri
         IQueryable<PrinterMaintenanceSchedule> query = _context.PrinterMaintenanceSchedules
             .AsNoTracking()
             .Include(s => s.MaintenancePlan)
-            .Include(s => s.Printer);
+            .Include(s => s.Printer)
+            .Include(s => s.Toolhead);
 
         if (printerId.HasValue)
         {
@@ -70,6 +71,7 @@ public class EfPrinterMaintenanceScheduleRepository(AppDbContext context) : IPri
         return await _context.PrinterMaintenanceSchedules
             .Include(s => s.MaintenancePlan)
             .Include(s => s.Printer)
+            .Include(s => s.Toolhead)
             .FirstOrDefaultAsync(s => s.Id == id, ct);
     }
 
@@ -77,6 +79,16 @@ public class EfPrinterMaintenanceScheduleRepository(AppDbContext context) : IPri
     {
         return await _context.PrinterMaintenanceSchedules
             .AnyAsync(s => s.MaintenancePlanId == planId && s.PrinterId == printerId, ct);
+    }
+
+    public async Task<bool> ExistsAsync(Guid planId, Guid printerId, Guid? toolheadId, CancellationToken ct = default)
+    {
+        return await _context.PrinterMaintenanceSchedules
+            .AnyAsync(
+                s => s.MaintenancePlanId == planId
+                    && s.PrinterId == printerId
+                    && s.ToolheadId == toolheadId,
+                ct);
     }
 
     public async Task AddAsync(PrinterMaintenanceSchedule schedule, CancellationToken ct = default)

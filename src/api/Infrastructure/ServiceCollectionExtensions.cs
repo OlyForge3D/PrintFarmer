@@ -550,6 +550,11 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
 
+        // Register the per-tool activity accumulator (issue #711, round-14). Singleton so the
+        // backend plugin that samples active-tool telemetry and the statistics sync service that
+        // drains it share one in-memory rolling window.
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator, Farm.Infrastructure.Services.Maintenance.ToolheadActivityAccumulator>();
+
         // Register runtime diagnostic channel service (singleton - toggleable verbose logging per subsystem)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Diagnostics.IDiagnosticChannelService, Farm.Infrastructure.Services.Diagnostics.DiagnosticChannelService>();
 
@@ -726,6 +731,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageAttentionSource>(sp =>
             sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Attention.Sources.IFilamentRunoutSwitchEvaluator,
+            Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutSwitchEvaluator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
             Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutAttentionSource>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster, Farm.Infrastructure.Services.Spoolman.FilamentCoverageBroadcaster>();

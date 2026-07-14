@@ -233,11 +233,18 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         SliceJob? job;
         if (capabilities != null && capabilities.Length > 0)
         {
-            // Materialize a small candidate set then perform capability matching client-side
-            List<SliceJob> candidates = await baseQuery.Take(50).ToListAsync(ct);
-            job = candidates.FirstOrDefault(j =>
-                string.IsNullOrEmpty(j.RequiredCapabilitiesJson) || j.RequiredCapabilitiesJson == "[]" ||
-                capabilities.Any(cap => j.RequiredCapabilitiesJson.Contains($"\"{cap}\"", StringComparison.OrdinalIgnoreCase)));
+            // Issue #578 dual-engine: push the capability match to the database so
+            // a worker for engine version X is never starved by 50 head-of-queue
+            // jobs pinned to version Y. Job matches when its capability list is
+            // empty/legacy (null/[]) OR when any advertised worker capability tag
+            // appears as a quoted JSON string token in RequiredCapabilitiesJson.
+            IQueryable<SliceJob> compatible = baseQuery.Where(j =>
+                j.RequiredCapabilitiesJson == null ||
+                j.RequiredCapabilitiesJson == string.Empty ||
+                j.RequiredCapabilitiesJson == "[]" ||
+                capabilities.Any(cap => EF.Functions.Like(j.RequiredCapabilitiesJson!, "%\"" + cap + "\"%")));
+
+            job = await compatible.FirstOrDefaultAsync(ct);
             if (job == null)
             {
                 return null;

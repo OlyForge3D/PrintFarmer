@@ -2,9 +2,11 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.PartsInventory;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -207,7 +209,15 @@ public class PartsInventoryController(
     /// harvest, qc-reject, or manual. An idempotency
     /// key on the request avoids double-application under client retries.
     /// </summary>
-    [HttpPost("{sku}/adjust")]
+    /// <remarks>
+    /// The persistent <c>Idempotency-Key</c> header (see #715) is layered on top
+    /// of the existing <c>operationKey</c> body field. The header guarantees an
+    /// identical response replay for retries; the body field prevents
+    /// double-application at the ledger level even when the general 7-day
+    /// window has elapsed.
+    /// </remarks>
+    [HttpPost("{sku:minlength(1):maxlength(64)}/adjust")]
+    [Idempotent(IdempotencyRouteKeys.PartsInventoryAdjust)]
     [ProducesResponseType(typeof(PartAdjustmentResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -227,6 +237,22 @@ public class PartsInventoryController(
             return BadRequest(new { message = "Request body is required." });
         }
 
+        // Idempotency backstop (issue #715, Hicks r2 blocker 2 + r3 blocker 2): when the client
+        // omits the body operationKey, the idempotency filter stashes a deterministic synthesized
+        // key for this route in HttpContext.Items. We forward it on the DEDICATED
+        // SynthesizedOperationKey channel — never merged into the client OperationKey field — so
+        // the service can (a) reject any client value in the reserved "idem:" namespace while
+        // (b) still honoring the trusted synthesized backstop, guaranteeing the domain's natural
+        // (PartInventoryId, OperationKey) dedup applies even if a post-mutation flush failure
+        // leaves the Processing row to be reclaimed and the same Idempotency-Key is retried.
+        string? synthesizedOperationKey = null;
+        if (HttpContext.Items.TryGetValue(IdempotencyFilter.SynthesizedOperationKeyItemKey, out object? synthesized)
+            && synthesized is string synthesizedKey
+            && !string.IsNullOrWhiteSpace(synthesizedKey))
+        {
+            synthesizedOperationKey = synthesizedKey;
+        }
+
         AdjustResult result = await partInventoryService.AdjustAsync(
             sku,
             new AdjustCommand(
@@ -236,7 +262,8 @@ public class PartsInventoryController(
                 request.BinCode,
                 request.Notes,
                 request.OperationKey,
-                GetActorId()),
+                GetActorId(),
+                synthesizedOperationKey),
             ct);
 
         return result.Outcome switch

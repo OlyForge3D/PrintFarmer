@@ -3781,18 +3781,24 @@ export class ApiClient {
   }
 
   /**
-   * Get all profile schemas (process, machine, filament)
+   * Get all profile schemas (process, machine, filament).
+   *
+   * When `engineVersion` is provided (e.g. `"2.3.1"`, `"2.4.1"`), the backend
+   * filters fields to those applicable to that OrcaSlicer engine and renames
+   * fields to that engine's key convention where needed (issue #578).
    */
-  async getProfileSchemas(): Promise<ProfileSchemasResponse> {
-    const response = await this.client.get<ProfileSchemasResponse>('/slicer/profiles/schemas');
+  async getProfileSchemas(engineVersion?: string): Promise<ProfileSchemasResponse> {
+    const params = engineVersion ? { engineVersion } : undefined;
+    const response = await this.client.get<ProfileSchemasResponse>('/slicer/profiles/schemas', { params });
     return response.data;
   }
 
   /**
-   * Get process profile schema
+   * Get process profile schema, optionally scoped to an OrcaSlicer engine version.
    */
-  async getProcessProfileSchema(): Promise<ProfileTypeSchema> {
-    const response = await this.client.get<ProfileTypeSchema>('/slicer/profiles/schema/process');
+  async getProcessProfileSchema(engineVersion?: string): Promise<ProfileTypeSchema> {
+    const params = engineVersion ? { engineVersion } : undefined;
+    const response = await this.client.get<ProfileTypeSchema>('/slicer/profiles/schema/process', { params });
     return response.data;
   }
 

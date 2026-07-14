@@ -333,7 +333,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
 
         // Toggle MultiMaterial off and sync
         reloaded.MultiMaterial = false;
-        _printersService.SyncMmuToolheadsOnEntity(reloaded, wasMultiMaterial: true);
+        await _printersService.SyncMmuToolheadsOnEntityAsync(reloaded, wasMultiMaterial: true);
         await _dbContext.SaveChangesAsync();
 
         // Verify gates removed
@@ -343,6 +343,95 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
 
         afterToolheads.Should().HaveCount(1, "only the physical T0 should remain after toggling MultiMaterial off");
         afterToolheads[0].ToolheadType.Should().Be(ToolheadType.Physical);
+    }
+
+    [Fact]
+    public async Task SyncMmuToolheadsOnEntityAsync_FallbackGroupReferencesGates_RemovesGroupAndGates()
+    {
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "MMU Fallback Toggle Printer",
+            ServerUrl = $"http://192.168.2.{Interlocked.Increment(ref _portCounter) % 240 + 2}",
+            BackendPort = 7125,
+            Backend = (int)PrinterBackend.Moonraker,
+            MultiMaterial = true,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId
+        };
+        Toolhead physical = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "Extruder",
+            Index = 0,
+            ToolheadType = ToolheadType.Physical,
+            IsPrimary = true
+        };
+        Toolhead gate1 = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "Gate 1",
+            Index = 1,
+            ToolheadType = ToolheadType.MmuGate
+        };
+        Toolhead gate2 = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "Gate 2",
+            Index = 2,
+            ToolheadType = ToolheadType.MmuGate
+        };
+        var group = new FilamentFallbackGroup
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "MMU fallback",
+            NameNormalized = "mmu fallback",
+            MaterialType = "PLA",
+            Members =
+            [
+                new FilamentFallbackGroupMember
+                {
+                    Id = Guid.NewGuid(),
+                    ToolheadId = gate1.Id,
+                    Position = 0
+                },
+                new FilamentFallbackGroupMember
+                {
+                    Id = Guid.NewGuid(),
+                    ToolheadId = gate2.Id,
+                    Position = 1
+                }
+            ]
+        };
+
+        _dbContext.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "MMU Cascade Mfg" });
+        _dbContext.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = manufacturerId, Name = "MMU Cascade Model" });
+        _dbContext.Printers.Add(printer);
+        _dbContext.Toolheads.AddRange(physical, gate1, gate2);
+        _dbContext.FilamentFallbackGroups.Add(group);
+        await _dbContext.SaveChangesAsync();
+        _dbContext.ChangeTracker.Clear();
+
+        Printer reloaded = await _dbContext.Printers
+            .Include(candidate => candidate.Toolheads)
+            .SingleAsync(candidate => candidate.Id == printer.Id);
+        reloaded.MultiMaterial = false;
+
+        await _printersService.SyncMmuToolheadsOnEntityAsync(reloaded, wasMultiMaterial: true);
+        await _dbContext.SaveChangesAsync();
+
+        (await _dbContext.Toolheads.CountAsync(toolhead => toolhead.PrinterId == printer.Id))
+            .Should().Be(1);
+        (await _dbContext.FilamentFallbackGroups.CountAsync(candidate => candidate.PrinterId == printer.Id))
+            .Should().Be(0);
+        (await _dbContext.FilamentFallbackGroupMembers.CountAsync())
+            .Should().Be(0);
     }
 
     [Fact]
@@ -458,7 +547,10 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             .FirstAsync(p => p.Id == printerId);
 
         reloaded.MultiMaterial = true;
-        _printersService.SyncMmuToolheadsOnEntity(reloaded, wasMultiMaterial: false, mmuGateCount: mmuGateCount);
+        await _printersService.SyncMmuToolheadsOnEntityAsync(
+            reloaded,
+            wasMultiMaterial: false,
+            mmuGateCount: mmuGateCount);
         await _dbContext.SaveChangesAsync();
 
         List<int> mmuIndices = await _dbContext.Toolheads
@@ -515,7 +607,10 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             .FirstAsync(p => p.Id == printerId);
 
         reloaded.MultiMaterial = true;
-        _printersService.SyncMmuToolheadsOnEntity(reloaded, wasMultiMaterial: false, mmuGateCount: 0);
+        await _printersService.SyncMmuToolheadsOnEntityAsync(
+            reloaded,
+            wasMultiMaterial: false,
+            mmuGateCount: 0);
         await _dbContext.SaveChangesAsync();
 
         int mmuCount = await _dbContext.Toolheads

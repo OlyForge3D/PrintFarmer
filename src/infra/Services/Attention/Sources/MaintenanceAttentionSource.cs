@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.OperatorFeatures;
 
 namespace Farm.Infrastructure.Services.Attention.Sources;
 
@@ -16,10 +17,15 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// maps 4 → <see cref="AttentionSeverity.Critical"/>, 3 → <see cref="AttentionSeverity.Warning"/>,
 /// and 1..2 → <see cref="AttentionSeverity.Info"/>.
 /// </remarks>
-public sealed class MaintenanceAttentionSource(IMaintenanceAlertRepository alertRepository) : IAttentionSource
+public sealed class MaintenanceAttentionSource(
+    IMaintenanceAlertRepository alertRepository,
+    IOperatorFeatureGate featureGate) : IAttentionSource
 {
     private readonly IMaintenanceAlertRepository _alerts =
         alertRepository ?? throw new ArgumentNullException(nameof(alertRepository));
+
+    private readonly IOperatorFeatureGate _featureGate =
+        featureGate ?? throw new ArgumentNullException(nameof(featureGate));
 
     /// <inheritdoc />
     public string SourceName => "maintenance";
@@ -29,9 +35,15 @@ public sealed class MaintenanceAttentionSource(IMaintenanceAlertRepository alert
     {
         List<MaintenanceAlert> alerts = await _alerts.GetAllActiveAlertsAsync(cancellationToken);
         List<AttentionItemDto> items = new(alerts.Count);
+        bool includeToolheadScope = _featureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
 
         foreach (MaintenanceAlert alert in alerts)
         {
+            if (!includeToolheadScope && alert.ToolheadId.HasValue)
+            {
+                continue;
+            }
+
             AttentionSeverity severity = alert.Severity switch
             {
                 >= 4 => AttentionSeverity.Critical,

@@ -18,4 +18,5 @@ public record UpcomingMaintenanceTaskDto(
     double? HoursUntilDue,
     bool IsOverdue,
     bool IsDueToday,
-    DateTime? LastPerformedAt);
+    DateTime? LastPerformedAt,
+    Guid? ToolheadId = null);

@@ -12,7 +12,8 @@ public class OrcaSlicerUIProvider_v2_4_0 : ISlicerUIProvider
 {
     public string SlicerName => "OrcaSlicer";
 
-    public string SlicerVersion => "2.4.0";
+    // Aligned with OrcaSlicerLibrary_v2_4_0.SlicerVersion (routing/binary version).
+    public string SlicerVersion => "2.4.1";
 
     // OrcaSlicer has bundle import/export
     public bool HasBundleSupport => true;

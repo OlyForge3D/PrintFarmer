@@ -87,6 +87,7 @@ public static class FeatureServicesStartup
 
         // Maintenance Module - Repositories
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IToolheadStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfToolheadStatisticsRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceAlertRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceAlertRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceLogRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceLogRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenancePlanRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenancePlanRepository>();
@@ -97,6 +98,25 @@ public static class FeatureServicesStartup
         // Maintenance Module - Services
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceResolutionNotifier,
+            Farm.Web.Api.Services.Maintenance.MaintenanceResolutionNotifier>();
+
+        // Atomic resolve-with-log to close the resolve TOCTOU (issue #711, round-7 Finding 5).
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertResolutionService, Farm.Infrastructure.Services.Maintenance.MaintenanceAlertResolutionService>();
+
+        // Filament fallback groups (issue #711, F6)
+        services.AddScoped<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService,
+            Farm.Infrastructure.Services.Printers.FilamentFallbackGroupService>();
+
+        // Persistent Idempotency-Key store and cleanup (issue #715). Store is
+        // registered scoped because it uses IDbContextFactory internally and is
+        // resolved per-request from the filter (and per-sweep from the cleanup
+        // hosted service via its own scope). See docs/OFFLINE_WRITE_REPLAY.md.
+        services.AddSingleton(Farm.Infrastructure.Services.Idempotency.IdempotencyOptions.Default);
+        services.AddScoped<Farm.Infrastructure.Services.Idempotency.IIdempotencyStore,
+            Farm.Infrastructure.Services.Idempotency.IdempotencyStore>();
+        services.AddScoped<Farm.Web.Api.Infrastructure.Idempotency.IdempotencyFilter>();
+        services.AddHostedService<Farm.Infrastructure.Services.Idempotency.IdempotencyRecordCleanupService>();
 
         // Printed-part inventory (see #714). Distinct from MaintenanceComponents
         // (replacement parts) — this module tracks parts produced by prints.
@@ -133,6 +153,87 @@ public static class FeatureServicesStartup
             Farm.Infrastructure.Services.Attention.AttentionService>();
         services.AddSingleton<Farm.Infrastructure.Services.Attention.IAttentionBroadcaster,
             Farm.Infrastructure.Services.Attention.AttentionBroadcaster>();
+
+        // Native push (issue #708) — device-token registration, per-user category
+        // preferences, and the dispatcher hooked from AttentionBroadcaster after the
+        // SignalR broadcast. See docs/OPERATOR_NATIVE_PUSH.md.
+        //
+        // Hicks #6: fail-fast startup validation for credentials. The
+        // validator enforces mode-specific requirements (Relay: absolute
+        // HTTPS endpoint + api key; Direct: TeamId/KeyId/BundleId + a
+        // readable .p8 file OR inline PEM). Disabled mode requires nothing.
+        // Diagnostics NEVER echo the secret path, api key, PEM contents, or
+        // full URI — only high-level shape errors surface so ops logs stay
+        // safe.
+        services.AddOptions<Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings>,
+            Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettingsValidator>();
+
+        services.AddScoped<Farm.Infrastructure.Repositories.Notifications.IDeviceTokenRepository,
+            Farm.Infrastructure.Repositories.Notifications.EfDeviceTokenRepository>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics>();
+        Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode nativePushMode =
+            configuration.GetSection(Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings.SectionName)
+                .GetValue<Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode>("Mode");
+        switch (nativePushMode)
+        {
+            case Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode.Relay:
+                services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushSender,
+                    Farm.Infrastructure.Services.Notifications.NativePush.RelayNativePushSender>();
+                break;
+            case Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode.Direct:
+                services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushSender,
+                    Farm.Infrastructure.Services.Notifications.NativePush.DirectApnsNativePushSender>();
+                break;
+            default:
+                services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushSender,
+                    Farm.Infrastructure.Services.Notifications.NativePush.DisabledNativePushSender>();
+                break;
+        }
+
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushDispatcher,
+            Farm.Infrastructure.Services.Notifications.NativePush.NativePushDispatcher>();
+        services.AddHttpClient(
+            Farm.Infrastructure.Services.Notifications.NativePush.RelayNativePushSender.HttpClientName,
+            client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-NativePush/1.0");
+            })
+
+            // Silence the default IHttpClientFactory request-logger for this
+            // named client. It writes the outbound URI at Information — a raw
+            // device token would end up in stdout logs (Bishop v3 B1). We still
+            // get the OTel span with a redacted url.full via TelemetryStartup's
+            // AddHttpClientInstrumentation enrich callbacks; that's the sole
+            // audit trail for these requests.
+            .RemoveAllLoggers();
+        services.AddHttpClient(
+            Farm.Infrastructure.Services.Notifications.NativePush.DirectApnsNativePushSender.HttpClientName,
+            client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-NativePush/1.0");
+
+                // APNs REQUIRES HTTP/2. Default at the client level so a stray
+                // request that forgets to set Version still negotiates HTTP/2.
+                client.DefaultRequestVersion = System.Net.HttpVersion.Version20;
+                client.DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrHigher;
+            })
+
+            // Same reasoning as the Relay client above: the token is embedded
+            // in the APNs path `/3/device/<token>` and the default logger
+            // writes it verbatim. Redaction on the OTel span alone is not
+            // enough — the ILogger sink is a separate output.
+            .RemoveAllLoggers();
+
+        // NOTE: URL redaction of `/3/device/<token>` for OpenTelemetry spans is
+        // handled in TelemetryStartup via `AddHttpClientInstrumentation(o =>
+        // o.EnrichWithHttpRequestMessage = ...)`. A DelegatingHandler cannot
+        // scrub the tag because the runtime creates the HTTP client Activity
+        // in the primary handler, below every DelegatingHandler.
 
         // SPA services (only for monolithic deployments)
         bool isMonolithicDeployment = configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";

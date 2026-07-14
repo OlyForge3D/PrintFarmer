@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -51,6 +51,19 @@ public class MaintenanceLog
     public MaintenanceTask? MaintenanceTask { get; set; }
 
     /// <summary>
+    /// Optional physical toolhead scope. When null, the log is printer-wide (legacy behavior).
+    /// When set, ties the maintenance activity to a specific physical toolhead so per-tool
+    /// history can be queried (issue #711, F6). Service layer enforces
+    /// <see cref="ToolheadType.Physical"/>.
+    /// </summary>
+    public Guid? ToolheadId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the scoped toolhead. Null when the log is printer-wide.
+    /// </summary>
+    public Toolhead? Toolhead { get; set; }
+
+    /// <summary>
     /// Name/title of the maintenance performed
     /// </summary>
     [MaxLength(128)]
@@ -99,6 +112,15 @@ public class MaintenanceLog
     /// Printer hours at time of maintenance (for tracking intervals)
     /// </summary>
     public double? PrinterHoursAtMaintenance { get; set; }
+
+    /// <summary>
+    /// The scoped toolhead's cumulative print-hours at time of maintenance. Null for
+    /// printer-wide logs (<see cref="ToolheadId"/> is null) or for legacy logs recorded
+    /// before per-toolhead accrual existed. When set, the alert engine uses this as the
+    /// per-tool baseline instead of <see cref="PrinterHoursAtMaintenance"/> so a per-tool
+    /// schedule accrues independently of printer-wide hours (issue #711, F6, FIX B).
+    /// </summary>
+    public double? ToolheadHoursAtMaintenance { get; set; }
 
     /// <summary>
     /// When this record was created

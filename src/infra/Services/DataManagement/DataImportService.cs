@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.DataManagement;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -634,6 +635,7 @@ public class DataImportService : IDataImportService
                 }
 
                 Printer? existing = await _context.Printers
+                    .Include(printer => printer.Toolheads)
                     .FirstOrDefaultAsync(p => p.Name == dto.Name, ct);
 
                 string? apiKey = dto.ApiKey;
@@ -658,7 +660,7 @@ public class DataImportService : IDataImportService
                     Guid manufacturerId = model?.ManufacturerId ?? Guid.Empty;
                     Guid modelId = model?.Id ?? Guid.Empty;
 
-                    _context.Printers.Add(new Printer
+                    var importedPrinter = new Printer
                     {
                         Id = Guid.NewGuid(),
                         Name = dto.Name,
@@ -674,7 +676,9 @@ public class DataImportService : IDataImportService
                         ApiKey = ProtectIfNeeded(apiKey),
                         Username = username,
                         Password = ProtectIfNeeded(password)
-                    });
+                    };
+                    _ = PerToolAttributionCapability.Refresh(importedPrinter);
+                    _context.Printers.Add(importedPrinter);
                     imported++;
                 }
                 else if (mode == ImportMode.Replace)
@@ -695,6 +699,7 @@ public class DataImportService : IDataImportService
                     existing.ApiKey = ProtectIfNeeded(apiKey);
                     existing.Username = username;
                     existing.Password = ProtectIfNeeded(password);
+                    _ = PerToolAttributionCapability.Refresh(existing);
                     imported++;
                 }
             }
