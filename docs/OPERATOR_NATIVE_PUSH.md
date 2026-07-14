@@ -23,6 +23,14 @@ The default is **disabled**. The recommended production topology is **relay**;
 `direct` exists so an operator who signs their own build can bring their own
 provider key without a code change.
 
+> **`NativePush__Mode` is startup-selected — a process restart is required to
+> change it.** The sender that backs `INativePushSender` is bound once at
+> composition time from `NativePush__Mode`; there is no supported way to hot-swap
+> senders mid-process. If you edit `NativePush__Mode` in config, `.env`, or a
+> Kubernetes secret, cycle the API pod / container so the new value takes effect.
+> `OperatorFeatures__nativePushEnabled` and the DB-backed feature flag remain
+> hot-reloadable and are the correct tools for runtime enable/disable.
+
 `INativePushSender` accepts a typed `NativePushEnvelope` and returns a typed
 `NativePushDispatchResult`. There is exactly one production sender wired at any
 time (chosen by `Mode`); the disabled sender is a no-op that returns
@@ -277,6 +285,18 @@ Meter name: `Farm.Infrastructure.Services.Notifications.NativePush`.
 | `native_push_rate_limited`       | counter   | `attentionKind`                            |
 | `native_push_deduplicated`       | counter   | `attentionKind`                            |
 | `native_push_send_ms`            | histogram | `mode`, `platform`                         |
+| `native_push.isolated_device_failure` | counter | `stage` (`send` \| `persist`)            |
+| `native_push.isolated_owner_failure`  | counter | (none)                                    |
+
+The two `native_push.isolated_*_failure` counters (added under Vasquez v6 B1
+remediation) surface fan-out isolation activity in the dispatcher. Each
+increment is a **non-cancellation** exception that was safely attributable to a
+single owner or a single device and therefore isolated so the remaining
+owners/devices continued dispatching. Cancellations propagate and are never
+counted here. An operator seeing `isolated_device_failure{stage="persist"}`
+climb should investigate the `NotificationService.MarkTokenInvalidatedAsync`
+persistence path — one device's persist step is failing but the send itself
+already succeeded.
 
 Structured logs use `attentionItemId`, `changeKind`, `installationId`,
 `deviceTokenId`. Raw provider tokens are never logged.

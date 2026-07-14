@@ -1093,4 +1093,144 @@ public sealed class NotificationPreferencesContractTests
         await dbContext.SaveChangesAsync();
         return (dbContext, userId);
     }
+
+    // -------------------------------------------------------------------------
+    // BH bounded-JSON hardening: attention category keys are attacker-controlled
+    // free-form strings persisted verbatim into a JSON column. Without a bound
+    // the payload can grow unbounded per request or over time. The controller
+    // enforces both a cardinality bound (32 keys per request) and a key-length
+    // bound (64 characters) before persisting, returning 400 ProblemDetails on
+    // overflow. The tests below exercise each rejection path plus the
+    // just-inside-limit acceptance path.
+    // -------------------------------------------------------------------------
+
+    private static async System.Threading.Tasks.Task<(
+        Farm.Web.Api.Controllers.NotificationsController controller,
+        Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
+        Farm.Infrastructure.Data.AppDbContext dbContext,
+        System.Guid userId)>
+        BuildAttentionEndpointFixture()
+    {
+        (Farm.Infrastructure.Data.AppDbContext dbContext, System.Guid userId) = await BuildInMemoryDbWithUserAsync();
+        Farm.Web.Api.Controllers.NotificationsController controller = BuildController(dbContext, userId);
+        var gate = new Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate>(Moq.MockBehavior.Strict);
+        gate.Setup(value => value.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.NativePush)).Returns(true);
+        return (controller, gate, dbContext, userId);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdateAttentionPushPreferences_TooManyCategoryKeys_Returns400ProblemDetails()
+    {
+        (Farm.Web.Api.Controllers.NotificationsController controller,
+         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
+         Farm.Infrastructure.Data.AppDbContext dbContext,
+         _) = await BuildAttentionEndpointFixture();
+        await using AppDbContextGuard guard = new(dbContext);
+
+        var payload = new AttentionPushPreferencesDto();
+        for (int i = 0; i < 33; i++)
+        {
+            payload.Categories[$"category-key-{i}"] = true;
+        }
+
+        Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+
+        var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
+        objectResult.Should().NotBeNull();
+        objectResult!.StatusCode.Should().Be(400);
+        var problem = objectResult.Value as Microsoft.AspNetCore.Mvc.ProblemDetails;
+        problem.Should().NotBeNull();
+        problem!.Title.Should().Contain("batch");
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdateAttentionPushPreferences_CategoryKeyTooLong_Returns400ProblemDetails()
+    {
+        (Farm.Web.Api.Controllers.NotificationsController controller,
+         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
+         Farm.Infrastructure.Data.AppDbContext dbContext,
+         _) = await BuildAttentionEndpointFixture();
+        await using AppDbContextGuard guard = new(dbContext);
+
+        var payload = new AttentionPushPreferencesDto();
+        payload.Categories[new string('k', 65)] = true;
+
+        Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+
+        var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
+        objectResult.Should().NotBeNull();
+        objectResult!.StatusCode.Should().Be(400);
+        var problem = objectResult.Value as Microsoft.AspNetCore.Mvc.ProblemDetails;
+        problem.Should().NotBeNull();
+        problem!.Title.Should().Contain("Invalid attention category key");
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdateAttentionPushPreferences_EmptyCategoryKey_Returns400ProblemDetails()
+    {
+        (Farm.Web.Api.Controllers.NotificationsController controller,
+         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
+         Farm.Infrastructure.Data.AppDbContext dbContext,
+         _) = await BuildAttentionEndpointFixture();
+        await using AppDbContextGuard guard = new(dbContext);
+
+        var payload = new AttentionPushPreferencesDto();
+        payload.Categories[string.Empty] = true;
+
+        Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+
+        var objectResult = result.Result as Microsoft.AspNetCore.Mvc.ObjectResult;
+        objectResult.Should().NotBeNull();
+        objectResult!.StatusCode.Should().Be(400);
+        var problem = objectResult.Value as Microsoft.AspNetCore.Mvc.ProblemDetails;
+        problem.Should().NotBeNull();
+        problem!.Title.Should().Contain("Invalid attention category key");
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task
+        UpdateAttentionPushPreferences_AtCardinalityAndKeyLengthLimits_Returns200OK()
+    {
+        (Farm.Web.Api.Controllers.NotificationsController controller,
+         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
+         Farm.Infrastructure.Data.AppDbContext dbContext,
+         _) = await BuildAttentionEndpointFixture();
+        await using AppDbContextGuard guard = new(dbContext);
+
+        var payload = new AttentionPushPreferencesDto();
+        // 32 keys exactly, each 64 characters exactly — the just-inside-limit case.
+        for (int i = 0; i < 32; i++)
+        {
+            string key = $"k{i:D2}-".PadRight(64, 'x');
+            payload.Categories[key] = i % 2 == 0;
+        }
+
+        Microsoft.AspNetCore.Mvc.ActionResult<AttentionPushPreferencesDto> result =
+            await controller.UpdateAttentionPushPreferencesAsync(payload, gate.Object, dbContext, System.Threading.CancellationToken.None);
+
+        Microsoft.AspNetCore.Mvc.OkObjectResult? ok = result.Result as Microsoft.AspNetCore.Mvc.OkObjectResult;
+        ok.Should().NotBeNull();
+        ok!.StatusCode.Should().Be(200);
+    }
+
+    /// <summary>
+    /// Small holder ensuring the shared DbContext is disposed at the end of each
+    /// bounded-JSON test. Existing tests in this file rely on garbage collection
+    /// for the same purpose; adding an explicit guard keeps the new tests robust
+    /// under parallel test execution.
+    /// </summary>
+    private readonly struct AppDbContextGuard : System.IAsyncDisposable
+    {
+        private readonly Farm.Infrastructure.Data.AppDbContext _db;
+
+        public AppDbContextGuard(Farm.Infrastructure.Data.AppDbContext db) => _db = db;
+
+        public System.Threading.Tasks.ValueTask DisposeAsync() => _db.DisposeAsync();
+    }
 }

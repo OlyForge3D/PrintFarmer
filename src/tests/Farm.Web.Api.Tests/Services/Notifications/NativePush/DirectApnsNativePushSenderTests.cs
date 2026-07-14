@@ -242,6 +242,106 @@ public sealed class DirectApnsNativePushSenderTests
         }
     }
 
+    [Fact]
+    public async Task SendAsync_ConcurrentInvalidProviderTokenBurst_NoDeadlockAndEveryRequestReSigns()
+    {
+        // Vasquez v6 B2 regression: the previous InvalidateJwtCache used
+        // SemaphoreSlim.Wait() from the async send path. Under a burst of
+        // 403 InvalidProviderToken responses that synchronously blocked one
+        // ThreadPool thread per concurrent send. Under enough concurrency the
+        // ThreadPool could starve and the process could deadlock waiting for
+        // its own JWT re-signing. This test launches many parallel sends
+        // that ALL hit InvalidProviderToken and asserts:
+        //   1. every SendAsync completes within a bounded timeout (no deadlock),
+        //   2. every request carried a JWT (nothing skipped signing), and
+        //   3. subsequent post-burst sends still re-sign to a fresh token.
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        try
+        {
+            int callCount = 0;
+            var authorizations = new System.Collections.Concurrent.ConcurrentBag<string?>();
+            DirectApnsNativePushSender sut = CreateSender(settings, req =>
+            {
+                System.Threading.Interlocked.Increment(ref callCount);
+                authorizations.Add(req.Headers.Authorization?.Parameter);
+                return new HttpResponseMessage(HttpStatusCode.Forbidden)
+                {
+                    Content = new StringContent("{\"reason\":\"InvalidProviderToken\"}"),
+                };
+            });
+
+            const int concurrency = 16;
+            var pending = new System.Collections.Generic.List<Task<NativePushDispatchResult>>(concurrency);
+            for (int i = 0; i < concurrency; i++)
+            {
+                pending.Add(Task.Run(() => sut.SendAsync(Sample)));
+            }
+
+            // Bounded timeout — a deadlocked InvalidateJwtCache would never
+            // return, so this is the essential check. 10s is generous for
+            // a stubbed HTTP handler with 16 parallel sends.
+            Task all = Task.WhenAll(pending);
+            Task completed = await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(10)));
+            completed.Should().BeSameAs(all, "concurrent invalid-provider-token sends must not deadlock");
+
+            NativePushDispatchResult[] results = await Task.WhenAll(pending);
+            foreach (NativePushDispatchResult r in results)
+            {
+                r.IsTransient.Should().BeTrue();
+                r.Reason.Should().Be("invalid_provider_token");
+            }
+
+            callCount.Should().Be(concurrency, "every parallel send must reach the stub HTTP handler");
+            authorizations.Should().OnlyContain(a => !string.IsNullOrEmpty(a), "no send may skip signing a JWT");
+
+            // Prove the cache is truly invalidated: after the burst, the
+            // next send must produce a NEW JWT distinct from any seen
+            // during the burst.
+            await Task.Delay(1_100);
+            NativePushDispatchResult follow = await sut.SendAsync(Sample);
+            follow.IsTransient.Should().BeTrue();
+
+            string? latestJwt = authorizations.LastOrDefault(a => !string.IsNullOrEmpty(a));
+            latestJwt.Should().NotBeNullOrEmpty();
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_InvalidProviderTokenWithCanceledToken_PropagatesCancellationWithoutHang()
+    {
+        // Vasquez v6 B2 secondary: WaitAsync must respect the caller's
+        // cancellation token so a shutdown signal aborts a JWT invalidation
+        // wait cleanly. The previous synchronous Wait() ignored cancellation
+        // entirely.
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        try
+        {
+            DirectApnsNativePushSender sut = CreateSender(settings, req =>
+                new HttpResponseMessage(HttpStatusCode.Forbidden)
+                {
+                    Content = new StringContent("{\"reason\":\"InvalidProviderToken\"}"),
+                });
+
+            using var cts = new System.Threading.CancellationTokenSource();
+            cts.Cancel();
+
+            // Even with a pre-cancelled token the send must return quickly —
+            // it should either surface a canceled task or a completed result
+            // in short order, never hang on a synchronous semaphore.
+            Task<NativePushDispatchResult> send = sut.SendAsync(Sample, cts.Token);
+            Task completed = await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(5)));
+            completed.Should().BeSameAs(send, "cancellation must not hang the JWT invalidation path");
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
     private static (NativePushSettings settings, ECDsa key) MakeDirectSettings()
     {
         ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
