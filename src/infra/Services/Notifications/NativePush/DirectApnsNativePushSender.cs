@@ -36,6 +36,7 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptionsMonitor<NativePushSettings> _optionsMonitor;
     private readonly ILogger<DirectApnsNativePushSender> _logger;
+    private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _jwtLock = new(1, 1);
 
     private string? _cachedJwt;
@@ -44,15 +45,51 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
     private string? _cachedKeyId;
 
     /// <summary>Constructs the sender.</summary>
+    /// <param name="httpClientFactory">Named-client factory used to resolve the direct APNs channel.</param>
+    /// <param name="optionsMonitor">Runtime settings snapshot for direct mode (team, key, bundle, .p8).</param>
+    /// <param name="logger">Sink for non-fatal diagnostics; PEM material and endpoints are never logged.</param>
+    /// <param name="timeProvider">Clock abstraction for JWT <c>iat</c> and expiry math. Optional; defaults to <see cref="TimeProvider.System"/>. Tests inject a fake to force deterministic signing timestamps without wall-clock waits.</param>
     public DirectApnsNativePushSender(
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<NativePushSettings> optionsMonitor,
-        ILogger<DirectApnsNativePushSender> logger)
+        ILogger<DirectApnsNativePushSender> logger,
+        TimeProvider? timeProvider = null)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
+
+    // -----------------------------------------------------------------------
+    // Internal test seams (Hicks #7 deterministic APNs concurrency proofs).
+    //
+    // These are gated behind `InternalsVisibleTo("Farm.Web.Api.Tests")` and are
+    // never touched by production DI. They exist so tests can:
+    //   (a) hold the JWT semaphore externally to force a deterministic wait on
+    //       InvalidateJwtCacheAsync's WaitAsync (proving cancellation-safety
+    //       and no synchronous-Wait / ThreadPool starvation), and
+    //   (b) observe the moment just before WaitAsync starts so a bounded
+    //       cancellation window can be established without timing-only sleeps
+    //       or reflection.
+    // No public API is affected.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Test-only view of the JWT critical-section semaphore. Set by tests to
+    /// deterministically hold the lock while a concurrent send races into
+    /// <see cref="InvalidateJwtCacheAsync"/>'s <see cref="SemaphoreSlim.WaitAsync(CancellationToken)"/>.
+    /// </summary>
+    internal SemaphoreSlim JwtLockForTests => _jwtLock;
+
+    /// <summary>
+    /// Test-only hook fired inside <see cref="InvalidateJwtCacheAsync"/>
+    /// immediately before <c>_jwtLock.WaitAsync(cancellationToken)</c>. Tests
+    /// use it to signal "about to acquire" so they can drive cancellation
+    /// deterministically without wall-clock sleeps. Always <c>null</c> in
+    /// production.
+    /// </summary>
+    internal Func<CancellationToken, Task>? OnBeforeInvalidateWaitAsyncForTests { get; set; }
 
     /// <inheritdoc />
     public string ModeName => "direct";
@@ -259,7 +296,7 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
 
     private async Task<string> GetOrRefreshJwtAsync(NativePushApnsSettings apns, CancellationToken cancellationToken)
     {
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         if (_cachedJwt is not null && nowUtc < _cachedJwtExpiresAt && string.Equals(_cachedKeyId, apns.KeyId, StringComparison.Ordinal))
         {
             return _cachedJwt;
@@ -320,7 +357,18 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         // cancellation token, so a shutdown signal aborts the wait cleanly
         // without leaving the semaphore leaked (semaphore is not entered on
         // cancellation).
-        await _jwtLock.WaitAsync(cancellationToken);
+
+        // Hicks #7 seam: invoke the pre-wait hook if a test has installed one.
+        // Fires BEFORE WaitAsync so a test can deterministically observe "about
+        // to enter the wait" and drive cancellation. The hook must not itself
+        // deadlock; production hook is always null.
+        Func<CancellationToken, Task>? hook = OnBeforeInvalidateWaitAsyncForTests;
+        if (hook is not null)
+        {
+            await hook(cancellationToken).ConfigureAwait(false);
+        }
+
+        await _jwtLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             // Compare-and-clear: only invalidate if the still-cached JWT is the one
