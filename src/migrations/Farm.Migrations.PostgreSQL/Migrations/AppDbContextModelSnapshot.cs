@@ -2649,6 +2649,70 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("NfcTagBindings");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.DeviceToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AppBundleId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("ConsecutiveFailureCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("InstallationId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime?>("LastFailureAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Token")
+                        .HasDatabaseName("IX_DeviceTokens_Token");
+
+                    b.HasIndex("UserId", "InstallationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_DeviceTokens_UserId_InstallationId");
+
+                    b.ToTable("DeviceTokens");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.Property<string>("Id")
@@ -2712,25 +2776,53 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("text");
 
+                    b.Property<string>("AttentionPushCategoryPreferencesJson")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("EmailOnFilamentRunout")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("EmailOnHarvestReady")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobCompleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobFailed")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobPaused")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("EmailOnJobStarted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("EmailOnMaintenanceDue")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("EmailOnPrinterFailure")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("EmailOnPrinterOffline")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
@@ -2752,6 +2844,16 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<bool>("InAppOnFilamentRunout")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("InAppOnHarvestReady")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<bool>("InAppOnJobCompleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -2772,6 +2874,21 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
+                    b.Property<bool>("InAppOnMaintenanceDue")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("InAppOnPrinterFailure")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("InAppOnPrinterOffline")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<bool>("NotifyOnCompletion")
                         .HasColumnType("boolean");
 
@@ -2783,6 +2900,16 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<bool>("NotifyOnStart")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("PushOnFilamentRunout")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("PushOnHarvestReady")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("PushOnJobCompleted")
                         .ValueGeneratedOnAdd()
@@ -2804,10 +2931,35 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
+                    b.Property<bool>("PushOnMaintenanceDue")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("PushOnPrinterFailure")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("PushOnPrinterOffline")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<int>("RetentionDays")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(30);
+
+                    b.Property<bool>("TelegramOnFilamentRunout")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("TelegramOnHarvestReady")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("TelegramOnJobCompleted")
                         .HasColumnType("boolean");
@@ -2820,6 +2972,21 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<bool>("TelegramOnJobStarted")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("TelegramOnMaintenanceDue")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("TelegramOnPrinterFailure")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("TelegramOnPrinterOffline")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -6369,6 +6536,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.DeviceToken", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>

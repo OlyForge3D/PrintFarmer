@@ -1,3 +1,4 @@
+﻿using System.Text.Json;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Contracts.Libraries;
@@ -8,7 +9,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using System.Text.Json;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Slicing;
