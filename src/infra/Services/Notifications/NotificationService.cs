@@ -227,7 +227,9 @@ public class NotificationService(
     /// race a concurrent writer's commit, driving the serializable / retry
     /// path deterministically instead of relying on OS-level scheduling.
     /// </summary>
-    internal Func<CancellationToken, Task>? OnAfterPreferenceReadForTestsAsync { get; set; }
+    internal Func<AppDbContext, CancellationToken, Task>? OnAfterPreferenceReadForTestsAsync { get; set; }
+
+    internal Func<Exception, PreferenceConcurrencyRetry.ClassifierDecision>? PreferenceConflictClassifierForTests { get; set; }
 
     private static readonly string[] KnownPushServiceHosts =
     {
@@ -544,7 +546,8 @@ public class NotificationService(
                     return 0;
                 },
                 logger,
-                cancellationToken);
+                cancellationToken,
+                PreferenceConflictClassifierForTests);
             return;
         }
 
@@ -689,7 +692,8 @@ public class NotificationService(
                     return persistedInner;
                 },
                 logger,
-                cancellationToken);
+                cancellationToken,
+                PreferenceConflictClassifierForTests);
         }
 
         if (dbContext.Database.IsRelational())
@@ -719,7 +723,7 @@ public class NotificationService(
         // concurrent writer's commit lands first, driving the retry path.
         if (OnAfterPreferenceReadForTestsAsync is { } hook)
         {
-            await hook(cancellationToken);
+            await hook(ctx, cancellationToken);
         }
 
         bool isNew = tracked is null;

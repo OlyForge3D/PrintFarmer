@@ -32,7 +32,7 @@ public static class PreferenceConcurrencyRetry
     /// Diagnostic classification of a caught exception. Public so the tests can
     /// assert the classifier directly without staging a database.
     /// </summary>
-    internal enum ClassifierDecision
+    public enum ClassifierDecision
     {
         /// <summary>Not a recognised transient — do not retry, rethrow verbatim.</summary>
         Rethrow,
@@ -81,6 +81,10 @@ public static class PreferenceConcurrencyRetry
     /// </param>
     /// <param name="logger">Structured logger used to warn on retries.</param>
     /// <param name="cancellationToken">Caller cancellation token; propagates immediately.</param>
+    /// <param name="classifier">
+    /// Optional classifier override used by deterministic concurrency tests; production uses
+    /// the provider-aware <see cref="Classify(Exception)"/> implementation.
+    /// </param>
     /// <exception cref="OperationCanceledException">
     /// Rethrown unconditionally when the caller cancels or an inner OCE (linked/timeout)
     /// surfaces (Hicks #1 parity: no swallowed cancellation).
@@ -90,7 +94,8 @@ public static class PreferenceConcurrencyRetry
         AppDbContext? fallbackContext,
         Func<AppDbContext, CancellationToken, Task<T>> operation,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<Exception, ClassifierDecision>? classifier = null)
     {
         ArgumentNullException.ThrowIfNull(operation);
         ArgumentNullException.ThrowIfNull(logger);
@@ -110,6 +115,7 @@ public static class PreferenceConcurrencyRetry
             return await operation(fallbackContext, cancellationToken).ConfigureAwait(false);
         }
 
+        Func<Exception, ClassifierDecision> classify = classifier ?? Classify;
         Exception? lastTransient = null;
         for (int attempt = 1; attempt <= MaxAttempts; attempt++)
         {
@@ -131,9 +137,14 @@ public static class PreferenceConcurrencyRetry
                     // consumes no retry budget and never counts as a transient.
                     throw;
                 }
-                catch (Exception ex) when (Classify(ex) != ClassifierDecision.Rethrow)
+                catch (Exception ex)
                 {
-                    ClassifierDecision decision = Classify(ex);
+                    ClassifierDecision decision = classify(ex);
+                    if (decision == ClassifierDecision.Rethrow)
+                    {
+                        throw;
+                    }
+
                     string reason = decision == ClassifierDecision.UserIdUniqueConflict
                         ? "userid-unique"
                         : "provider-conflict";
