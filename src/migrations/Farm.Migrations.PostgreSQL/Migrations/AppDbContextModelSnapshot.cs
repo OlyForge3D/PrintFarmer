@@ -2656,8 +2656,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("AppBundleId")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<int>("ConsecutiveFailureCount")
                         .ValueGeneratedOnAdd()
@@ -2674,8 +2674,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("InstallationId")
                         .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
@@ -2695,8 +2695,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("Token")
                         .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");

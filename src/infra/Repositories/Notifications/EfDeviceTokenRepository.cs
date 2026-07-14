@@ -1,6 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
+using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Farm.Infrastructure.Repositories.Notifications;
 
@@ -58,7 +61,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                     await _dbContext.SaveChangesAsync(cancellationToken);
                     return created;
                 }
-                catch (DbUpdateException) when (attempt < 2)
+                catch (DbUpdateException ex) when (attempt < 2 && IsUniqueDeviceTokenConflict(ex))
                 {
                     // Concurrent registration won the race — detach the tracked
                     // ghost entity and retry as an update.
@@ -88,6 +91,47 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
 
         throw new InvalidOperationException(
             $"DeviceToken upsert failed after retries for userId={userId} installationId={installationId}.");
+    }
+
+    internal static bool IsUniqueDeviceTokenConflict(DbUpdateException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception.InnerException switch
+        {
+            SqliteException sqlite =>
+                sqlite.SqliteErrorCode == 19
+                && sqlite.SqliteExtendedErrorCode == 2067
+                && IsDeviceTokenUniqueConstraint(sqlite.Message),
+            PostgresException postgres =>
+                postgres.SqlState == PostgresErrorCodes.UniqueViolation
+                && IsDeviceTokenUniqueConstraint(postgres.ConstraintName),
+            SqlException sqlServer =>
+                sqlServer.Number is 2601 or 2627
+                && IsDeviceTokenUniqueConstraint(sqlServer.Message),
+            _ => false,
+        };
+    }
+
+    private static bool IsDeviceTokenUniqueConstraint(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.Contains(
+                "IX_DeviceTokens_UserId_InstallationId",
+                StringComparison.OrdinalIgnoreCase)
+            || value.Contains(
+                "DeviceTokens.UserId, DeviceTokens.InstallationId",
+                StringComparison.OrdinalIgnoreCase)
+            || value.Contains(
+                "IX_DeviceTokens_Token",
+                StringComparison.OrdinalIgnoreCase)
+            || value.Contains(
+                "DeviceTokens.Token",
+                StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />

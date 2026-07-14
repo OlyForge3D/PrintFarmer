@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1102,18 +1103,31 @@ public class UnsubscribePushRequest
 public class DeviceTokenRegistrationRequest
 {
     /// <summary>Per-server installation identifier supplied by the mobile app.</summary>
+    [Required]
+    [StringLength(128)]
     public string InstallationId { get; set; } = string.Empty;
 
     /// <summary>Provider-issued device token (APNs hex).</summary>
+    [Required]
+    [StringLength(4096)]
+    [RegularExpression("^[0-9a-f]+$", ErrorMessage = "Token must be lowercase hexadecimal.")]
     public string Token { get; set; } = string.Empty;
 
     /// <summary>Client platform: <c>ios</c> today; <c>android</c> reserved.</summary>
+    [Required]
+    [StringLength(16)]
     public string Platform { get; set; } = "ios";
 
     /// <summary>APNs environment: <c>development</c> or <c>production</c>.</summary>
+    [Required]
+    [StringLength(16)]
     public string Environment { get; set; } = "production";
 
     /// <summary>App bundle identifier reported by the mobile app (diagnostics only).</summary>
+    [StringLength(256)]
+    [RegularExpression(
+        "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+        ErrorMessage = "AppBundleId must use canonical lowercase bundle-id syntax.")]
     public string? AppBundleId { get; set; }
 }
 
@@ -1121,6 +1135,8 @@ public class DeviceTokenRegistrationRequest
 public class DeviceTokenUnregistrationRequest
 {
     /// <summary>Per-server installation identifier to remove.</summary>
+    [Required]
+    [StringLength(128)]
     public string InstallationId { get; set; } = string.Empty;
 }
 

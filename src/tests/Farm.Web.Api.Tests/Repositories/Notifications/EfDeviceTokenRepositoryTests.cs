@@ -2,7 +2,9 @@
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Repositories.Notifications;
@@ -161,5 +163,133 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         IReadOnlyList<Guid> owners = await _repo.GetActiveTokenOwnersAsync();
 
         owners.Should().BeEquivalentTo(new[] { userA, userB });
+    }
+
+    [Fact]
+    public async Task Upsert_UniqueInstallationCollision_RetriesAsIdempotentUpdate()
+    {
+        const string connectionString = "Data Source=file:device-token-unique-race?mode=memory&cache=shared";
+        await using SqliteConnection keepAlive = new(connectionString);
+        await keepAlive.OpenAsync();
+
+        DbContextOptions<AppDbContext> plainOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        Guid userId = Guid.NewGuid();
+        await using (AppDbContext seed = new(plainOptions))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.Users.Add(new Farm.Infrastructure.Domain.User
+            {
+                Id = userId,
+                Username = "device-token-race",
+                Email = "device-token-race@example.com",
+                PasswordHash = "x",
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var interceptor = new CollisionInterceptor(
+            plainOptions,
+            userId,
+            new DbUpdateException(
+                "unique collision",
+                new SqliteException(
+                    "UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId",
+                    errorCode: 19,
+                    extendedErrorCode: 2067)));
+        DbContextOptions<AppDbContext> racingOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using AppDbContext racingContext = new(racingOptions);
+        var repository = new EfDeviceTokenRepository(racingContext);
+
+        DeviceToken result = await repository.UpsertAsync(
+            userId,
+            "installation-race",
+            new string('b', 64),
+            "ios",
+            "production",
+            "com.example.app");
+
+        result.Token.Should().Be(new string('b', 64));
+        await using AppDbContext verify = new(plainOptions);
+        (await verify.DeviceTokens.CountAsync()).Should().Be(1);
+        (await verify.DeviceTokens.SingleAsync()).Token.Should().Be(new string('b', 64));
+    }
+
+    [Fact]
+    public async Task Upsert_NonUniqueDbUpdateException_IsNotRetried()
+    {
+        var interceptor = new ThrowingSaveInterceptor(
+            new DbUpdateException(
+                "foreign key violation",
+                new SqliteException("FOREIGN KEY constraint failed", errorCode: 19, extendedErrorCode: 787)));
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(interceptor)
+            .Options;
+        await using AppDbContext context = new(options);
+        var repository = new EfDeviceTokenRepository(context);
+
+        Func<Task> act = () => repository.UpsertAsync(
+            Guid.NewGuid(),
+            "installation-fk",
+            new string('c', 64),
+            "ios",
+            "production",
+            "com.example.app");
+
+        await act.Should().ThrowAsync<DbUpdateException>()
+            .WithMessage("foreign key violation");
+        interceptor.InvocationCount.Should().Be(1, "non-unique failures must not consume the retry budget");
+    }
+
+    private sealed class CollisionInterceptor(
+        DbContextOptions<AppDbContext> plainOptions,
+        Guid userId,
+        DbUpdateException exception) : SaveChangesInterceptor
+    {
+        private int _invocationCount;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _invocationCount) == 1)
+            {
+                await using var winner = new AppDbContext(plainOptions);
+                winner.DeviceTokens.Add(new DeviceToken
+                {
+                    UserId = userId,
+                    InstallationId = "installation-race",
+                    Token = new string('a', 64),
+                    Platform = "ios",
+                    Environment = "production",
+                    AppBundleId = "com.example.app",
+                });
+                await winner.SaveChangesAsync(cancellationToken);
+                throw exception;
+            }
+
+            return result;
+        }
+    }
+
+    private sealed class ThrowingSaveInterceptor(DbUpdateException exception) : SaveChangesInterceptor
+    {
+        public int InvocationCount { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            InvocationCount++;
+            throw exception;
+        }
     }
 }
