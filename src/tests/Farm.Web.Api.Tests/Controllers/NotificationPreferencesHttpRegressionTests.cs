@@ -72,6 +72,59 @@ public sealed class NotificationPreferencesHttpRegressionTests
         persisted.RetentionDays.Should().Be(body == "{}" ? 14 : 30);
     }
 
+    [Theory]
+    [InlineData("JobStarted", "jobstarted", true)]
+    [InlineData("jobstarted", "JobStarted", false)]
+    public async Task UpdatePreferencesAsync_CaseVariantDuplicateRows_LastWriteWins(
+        string firstToken,
+        string secondToken,
+        bool secondValue)
+    {
+        await using var factory = new CustomWebApplicationFactory();
+        string username = $"preference-duplicates-{Guid.NewGuid():N}";
+        HttpClient client = await factory.CreateAuthenticatedClientAsync(
+            username,
+            $"{username}@example.com");
+        Guid userId = await GetUserIdAsync(factory, username);
+        string firstValue = (!secondValue).ToString().ToLowerInvariant();
+        string finalValue = secondValue.ToString().ToLowerInvariant();
+        string body =
+            $$"""
+            {
+              "eventChannelPreferences": [
+                {
+                  "eventType": "{{firstToken}}",
+                  "inApp": {{firstValue}},
+                  "email": {{firstValue}},
+                  "push": {{firstValue}},
+                  "telegram": {{firstValue}}
+                },
+                {
+                  "eventType": "{{secondToken}}",
+                  "inApp": {{finalValue}},
+                  "email": {{finalValue}},
+                  "push": {{finalValue}},
+                  "telegram": {{finalValue}}
+                }
+              ]
+            }
+            """;
+
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        HttpResponseMessage response = await client.PutAsync("/api/notifications/preferences", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using AsyncServiceScope verifyScope = factory.Services.CreateAsyncScope();
+        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        NotificationPreferences persisted = await verifyDb.NotificationPreferences
+            .AsNoTracking()
+            .SingleAsync(preferences => preferences.UserId == userId);
+        persisted.InAppOnJobStarted.Should().Be(secondValue);
+        persisted.EmailOnJobStarted.Should().Be(secondValue);
+        persisted.PushOnJobStarted.Should().Be(secondValue);
+        persisted.TelegramOnJobStarted.Should().Be(secondValue);
+    }
+
     private static Dictionary<string, bool> Snapshot(NotificationPreferences preferences)
         => AttentionProperties.ToDictionary(
             property => property.Name,
