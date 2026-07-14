@@ -62,6 +62,32 @@ export function PrinterMaintenancePage() {
   const [modalInitialToolheadId, setModalInitialToolheadId] = useState<string | null>(null);
   const [scope, setScope] = useState<ToolheadScopeValue>(PRINTER_WIDE_SCOPE);
 
+  // Reset scope whenever the route param changes. React Router keeps this
+  // component mounted when navigating between `/printers/:id/maintenance`
+  // paths (the element type is stable across route matches), so the
+  // `scope` state would otherwise leak from the previous printer into the
+  // new one. A stale `toolheadId` from the previous printer's tool set
+  // would then either filter the new printer's records incorrectly (if
+  // the id happened to collide) or, more subtly, preseed the log-
+  // maintenance modal with a foreign `toolheadId` value that does not
+  // exist on the current printer.
+  //
+  // We use the React-endorsed "adjust state during rendering" pattern
+  // (see https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+  // rather than `useEffect`: a `setState` during render triggers a
+  // synchronous re-render before commit, avoiding the cascading-render
+  // penalty of an effect-based reset and eliminating a visible frame
+  // where a foreign scope could leak into any child render.
+  //
+  // We deliberately do NOT reset on `printerDetails` changes — the scope
+  // is a user-facing filter and should only clear when the underlying
+  // printer identity changes, not on every refetch of the same printer.
+  const [scopeResetOwner, setScopeResetOwner] = useState<string | undefined>(printerId);
+  if (scopeResetOwner !== printerId) {
+    setScopeResetOwner(printerId);
+    setScope(PRINTER_WIDE_SCOPE);
+  }
+
   // Fetch printer details
   const { data: printer, isLoading: printerLoading } = useQuery({
     queryKey: ['printer', printerId],
@@ -199,6 +225,44 @@ export function PrinterMaintenancePage() {
       };
     });
   }, [perToolAllowed, eligibleToolheadsRaw, upcomingTasks, dueStateResolved]);
+
+  // Single aggregate live-region summary of per-toolhead due state
+  // (Hicks #4 + Bishop non-blocking). N cards × N `role="status"` nodes
+  // would fire N simultaneous announcements every time the schedule feed
+  // refreshes; also, when each card renders as an interactive <button>
+  // any nested live region is flattened into the button's accessible name
+  // and is effectively silent to assistive tech.
+  //
+  // The one live region below sits as a sibling to the odometer grid
+  // (never inside a button) and is `role="status"` (implicit
+  // `aria-live="polite"`, `aria-atomic="true"`). Its plain-text child
+  // updates only when the *aggregate* verdict changes, so a screen
+  // reader announces a meaningful summary — e.g. "2 toolheads overdue,
+  // 1 due today" — instead of the same string per card.
+  const dueStateSummary = useMemo(() => {
+    if (odometers.length === 0) {
+      return '';
+    }
+    const overdue = odometers.filter(o => o.dueState === 'overdue').length;
+    const dueToday = odometers.filter(o => o.dueState === 'due-today').length;
+    const unknown = odometers.filter(o => o.dueState === 'unknown').length;
+    const ok = odometers.filter(o => o.dueState === 'ok').length;
+
+    if (unknown === odometers.length) {
+      return 'Maintenance due state unavailable — schedule feed is loading or unreachable.';
+    }
+
+    const parts: string[] = [];
+    const toolheadWord = (n: number) => (n === 1 ? 'toolhead' : 'toolheads');
+    if (overdue > 0) parts.push(`${overdue} ${toolheadWord(overdue)} overdue`);
+    if (dueToday > 0) parts.push(`${dueToday} due today`);
+    if (unknown > 0) parts.push(`${unknown} with unknown state`);
+    if (ok > 0) parts.push(`${ok} OK`);
+    if (parts.length === 0) {
+      return 'All toolheads OK.';
+    }
+    return `Maintenance status: ${parts.join(', ')}.`;
+  }, [odometers]);
 
   const toolheadLabel = (toolheadId: string | null | undefined): string => {
     if (!toolheadId) return 'Printer-wide';
@@ -354,19 +418,35 @@ export function PrinterMaintenancePage() {
           {/* Per-toolhead odometer row (#711/#719). Hidden entirely when the
               printer has no eligible physical toolheads or no odometer data. */}
           {eligibleToolheads.length > 0 && odometers.length > 0 && (
-            <section
-              aria-label="Per-toolhead odometers"
-              className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"
-            >
-              {odometers.map(o => (
-                <ToolheadOdometerCard
-                  key={o.toolheadId}
-                  odometer={o}
-                  isActive={scope === o.toolheadId}
-                  onActivate={id => setScope(id)}
-                />
-              ))}
-            </section>
+            <>
+              {/* Aggregate live-region summary of per-toolhead due state.
+                  Sibling to the interactive card grid, never inside any
+                  <button>, so screen readers observe the announcement and
+                  the "N simultaneous announcements" problem cannot occur.
+                  A single stable node with `role="status"` (implicit
+                  `aria-live="polite"`, `aria-atomic="true"`) whose text
+                  changes only when the aggregate verdict changes. */}
+              <p
+                role="status"
+                className="sr-only"
+                data-testid="toolhead-due-state-summary"
+              >
+                {dueStateSummary}
+              </p>
+              <section
+                aria-label="Per-toolhead odometers"
+                className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"
+              >
+                {odometers.map(o => (
+                  <ToolheadOdometerCard
+                    key={o.toolheadId}
+                    odometer={o}
+                    isActive={scope === o.toolheadId}
+                    onActivate={id => setScope(id)}
+                  />
+                ))}
+              </section>
+            </>
           )}
 
           {/* Scope filter — only for multi-toolhead printers. */}

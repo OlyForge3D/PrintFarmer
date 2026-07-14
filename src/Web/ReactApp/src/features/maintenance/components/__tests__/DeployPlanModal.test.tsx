@@ -336,4 +336,109 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
     );
     expect(screen.getByLabelText('Printer-wide')).toBeChecked();
   });
+
+  // ---------------------------------------------------------------------------
+  // Stale cached capabilities during background refetch (Hicks #1).
+  //
+  // React Query keeps stale cached data visible while a background refetch is
+  // in flight — `isLoading` is false but `isFetching` is true. If the
+  // Deploy-enable gate looks only at `isLoading`, the modal will surface the
+  // stale `supportsPerToolAttribution: false` verdict and permit the
+  // operator to send `toolheadId: null` for a printer whose authoritative
+  // value is `true`. The fix gates BOTH `canDeploy` and `handleDeploy` on
+  // `!isFetching` (which includes refetches), and shows a distinct
+  // "Verifying printer capabilities…" indicator during the window.
+  // ---------------------------------------------------------------------------
+
+  it('blocks Deploy during a background refetch when stale cached details say per-tool is off, then allows Deploy once authoritative fresh data arrives (Hicks #1)', async () => {
+    const stale: PrinterDetails = {
+      id: 'printer-1',
+      name: 'Voron 2.4',
+      serverUrl: 'http://x',
+      toolheads: [t0, t1],
+      // Stale cached value — pre-fix, this would let the modal disable the
+      // scope picker (perToolAllowed=false) and render Deploy enabled with
+      // `toolheadId: null` while the refetch was still in flight.
+      supportsPerToolAttribution: false,
+    } as PrinterDetails;
+    const fresh: PrinterDetails = {
+      id: 'printer-1',
+      name: 'Voron 2.4',
+      serverUrl: 'http://x',
+      toolheads: [t0, t1],
+      // Authoritative refreshed value — per-tool is actually enabled, so
+      // the modal MUST require an explicit scope choice.
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+
+    // Only ONE network call is expected: the background refetch driven by
+    // observing a stale-in-cache query. We return a controlled promise so
+    // the test can hold the `isFetching=true, data=stale` window open.
+    let resolveFresh: (v: PrinterDetails) => void = () => {};
+    const freshPromise = new Promise<PrinterDetails>(r => {
+      resolveFresh = r;
+    });
+    const getDetailsSpy = apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>;
+    getDetailsSpy.mockReturnValue(freshPromise);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Prime the cache with the stale value but stamp `updatedAt` in the
+    // past so the observer treats it as stale immediately on subscription
+    // (the modal's useQuery uses `staleTime: 60_000`). This is the exact
+    // production scenario: a previous mount populated cache with an old
+    // capability verdict, and now something (mutation, invalidation,
+    // reconnect) demands a re-verification.
+    qc.setQueryData(['printerDetails', 'printer-1'], stale, {
+      updatedAt: Date.now() - 5 * 60_000,
+    });
+
+    render(
+      <QueryClientProvider client={qc}>
+        <DeployPlanModal isOpen plan={plan} onClose={() => {}} />
+      </QueryClientProvider>
+    );
+
+    const user = userEvent.setup();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /select printer/i }),
+      'printer-1'
+    );
+
+    // Observer subscribes with existing stale data → react-query triggers
+    // a background refetch. The controlled mock holds `isFetching=true`
+    // until we release it.
+    await waitFor(() => expect(getDetailsSpy).toHaveBeenCalledTimes(1));
+
+    // A visible "Updating…" indicator is present so the operator knows the
+    // current picker verdict is being re-verified — same aria-live surface
+    // as the initial "Loading…" indicator, giving screen reader users
+    // equivalent feedback.
+    expect(screen.getByTestId('printer-details-updating')).toBeInTheDocument();
+    expect(screen.getByTestId('printer-details-updating')).toHaveAttribute('role', 'status');
+    // The stale picker verdict is NOT rendered (perToolAllowed=false in
+    // cache), but Deploy MUST also stay disabled — the refetch is in
+    // flight, so we cannot yet trust the current verdict.
+    expect(
+      screen.queryByRole('radiogroup', { name: /maintenance scope/i })
+    ).not.toBeInTheDocument();
+
+    // Deploy MUST be disabled while the refetch is in flight, AND a
+    // programmatic click must not fire the mutation — that is the
+    // defence-in-depth check inside `handleDeploy`.
+    const deployBtn = screen.getByRole('button', { name: /^Deploy$/ });
+    expect(deployBtn).toBeDisabled();
+    await user.click(deployBtn);
+    expect(maintenancePlanService.deployPlan).not.toHaveBeenCalled();
+
+    // Authoritative fresh data arrives — the picker appears because
+    // per-tool is enabled with two toolheads, and Deploy re-enables.
+    resolveFresh(fresh);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('radiogroup', { name: /maintenance scope/i })
+      ).toBeInTheDocument()
+    );
+    expect(screen.getByRole('button', { name: /^Deploy$/ })).not.toBeDisabled();
+    expect(screen.queryByTestId('printer-details-updating')).not.toBeInTheDocument();
+  });
 });

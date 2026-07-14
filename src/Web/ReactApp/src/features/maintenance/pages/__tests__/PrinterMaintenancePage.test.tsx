@@ -529,4 +529,197 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     expect(t0Card.querySelector('[data-testid="due-state-ok"]')).not.toBeNull();
     expect(t0Card.querySelector('[data-testid="due-state-unknown"]')).toBeNull();
   });
+
+  // ---------------------------------------------------------------------------
+  // Aggregate due-state live region (Hicks #4, Bishop non-blocking).
+  //
+  // Per-card `role="status"` inside a native <button> is flattened into the
+  // button's accessible name and never fires a live-region announcement.
+  // Additionally, N cards × N live regions would announce N times on every
+  // feed refresh. The remediation moves the announcement to a single stable
+  // aggregate node OUTSIDE every button, and the DueStateChip inside each
+  // button is a plain visual element (no live-region role).
+  // ---------------------------------------------------------------------------
+
+  it('renders a single aggregate live region OUTSIDE every button and summarises per-toolhead state (Hicks #4)', async () => {
+    // Two toolheads, both OK, but with a specific mix in later assertions
+    // to prove the aggregate content is meaningful.
+    seedDefaults({
+      upcoming: [
+        {
+          id: 'u-1',
+          taskId: 't-1',
+          printerId,
+          printerName: 'Voron 2.4',
+          toolheadId: 'th-1',
+          taskName: 'Nozzle change',
+          priority: 1,
+          intervalType: 'days',
+          intervalValue: 30,
+          isOverdue: true,
+          isDueToday: false,
+          daysUntilDue: -3,
+        },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+
+    // Exactly one aggregate live region; not one per card.
+    const summaries = screen.getAllByTestId('toolhead-due-state-summary');
+    expect(summaries).toHaveLength(1);
+    const summary = summaries[0];
+    expect(summary).toHaveAttribute('role', 'status');
+    // Live region must never be a descendant of any interactive control;
+    // that is the primary a11y regression this test locks in.
+    expect(summary.closest('button')).toBeNull();
+    // Meaningful aggregate content — not "OK" per card, not empty.
+    expect(summary).toHaveTextContent(/1 toolhead overdue/i);
+    expect(summary).toHaveTextContent(/1 OK/i);
+
+    // Individual chips must NOT carry role="status" any more — nested
+    // live regions inside <button> ancestors are flattened. Anchor the
+    // regex so it matches ONLY the per-state chips
+    // (`due-state-ok|overdue|due-today|unknown`), NOT the aggregate
+    // summary node whose testid also contains "due-state-".
+    const chips = screen.getAllByTestId(/^due-state-(ok|overdue|due-today|unknown)$/);
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) {
+      expect(chip).not.toHaveAttribute('role', 'status');
+      // Sanity check: the chip is inside a card button (rendered
+      // interactive when `onActivate` is wired by the page).
+      expect(chip.closest('button')).not.toBeNull();
+    }
+  });
+
+  it('announces "unknown state" in the aggregate summary while the upcoming feed is loading, never "OK"', async () => {
+    seedDefaults();
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise(() => { /* never resolves */ })
+    );
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: /per-toolhead odometers/i })).toBeInTheDocument()
+    );
+
+    const summary = screen.getByTestId('toolhead-due-state-summary');
+    expect(summary).toHaveTextContent(/unavailable/i);
+    expect(summary).not.toHaveTextContent(/all toolheads ok/i);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scope reset on route-param change (Bishop non-blocking).
+  //
+  // The component is kept mounted across `/printers/:id/maintenance` route
+  // matches, so a scope like `th-1` selected for printer A would otherwise
+  // leak into printer B — silently filtering B's records by a foreign
+  // toolhead id and preseeding B's log modal with a toolhead that does
+  // not exist on B. The fix resets scope to printer-wide whenever the
+  // route-param `printerId` changes.
+  // ---------------------------------------------------------------------------
+
+  it('resets scope to printer-wide when the :printerId route-param changes on the same mounted component (Bishop)', async () => {
+    // Distinct toolhead sets so a leaked selection would be observable.
+    const p1Details = {
+      id: 'printer-1',
+      name: 'Printer One',
+      serverUrl: 'http://p1',
+      toolheads: [physicalT0, physicalT1],
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+    const p2Details = {
+      id: 'printer-2',
+      name: 'Printer Two',
+      serverUrl: 'http://p2',
+      toolheads: [
+        { id: 'th-2a', index: 0, name: 'T0-P2', isPrimary: true, toolheadType: ToolheadType.Physical, cumulativePrintHours: 5 } as ToolheadDto,
+        { id: 'th-2b', index: 1, name: 'T1-P2', isPrimary: false, toolheadType: ToolheadType.Physical, cumulativePrintHours: 6 } as ToolheadDto,
+      ],
+      supportsPerToolAttribution: true,
+    } as PrinterDetails;
+
+    (apiClient.getPrinters as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'printer-1', name: 'Printer One' },
+      { id: 'printer-2', name: 'Printer Two' },
+    ]);
+    (apiClient.getPrinterDetails as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: string) => (id === 'printer-1' ? p1Details : p2Details)
+    );
+    (maintenanceService.getPrinterStatistics as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      printerId: 'x',
+      totalMaintenanceCount: 0,
+      totalMaintenanceCost: 0,
+      averageMaintenanceHours: 0,
+    });
+    (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    // Deliberately use a MemoryRouter with a starting entry and change
+    // the URL via history.pushState-equivalent navigation — we want the
+    // same component instance to survive the transition. That is the
+    // exact production scenario: React Router v7 keeps the element
+    // stable across route matches when the element type is identical.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const { MemoryRouter, Routes, Route, useNavigate } = await import('react-router');
+
+    function Harness() {
+      const nav = useNavigate();
+      return (
+        <>
+          <button data-testid="go-p2" onClick={() => nav('/printers/printer-2/maintenance')}>
+            go P2
+          </button>
+          <Routes>
+            <Route
+              path="/printers/:printerId/maintenance"
+              element={<PrinterMaintenancePage />}
+            />
+          </Routes>
+        </>
+      );
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/printers/printer-1/maintenance']}>
+          <Harness />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const user = userEvent.setup();
+
+    // On printer-1, select the T1 scope.
+    await waitFor(() =>
+      expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument()
+    );
+    await user.click(screen.getByLabelText(/T1 · T1/));
+    // Sanity: the T1 radio should be selected.
+    expect(screen.getByLabelText(/T1 · T1/)).toBeChecked();
+
+    // Now navigate to printer-2 without unmounting the outer tree. The
+    // fix's useEffect on [printerId] must reset scope back to
+    // printer-wide on the next render — otherwise the T1 selection
+    // (a printer-1 toolhead id) would leak into the printer-2 view.
+    await user.click(screen.getByTestId('go-p2'));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/T0-P2/)).toBeInTheDocument()
+    );
+    // Scope is back to Printer-wide, not the stale foreign T1 id. The
+    // P2 picker exposes "T0 · T0-P2" and "T1 · T1-P2", both of which
+    // contain "T1"; anchoring the assertion on the exact P1 label
+    // (`^T1 · T1$`) proves the leaked selection is gone without a
+    // false positive from P2's own T1-P2 radio.
+    expect(screen.getByLabelText('Printer-wide')).toBeChecked();
+    expect(screen.queryByLabelText(/^T1 · T1$/)).not.toBeInTheDocument();
+  });
 });

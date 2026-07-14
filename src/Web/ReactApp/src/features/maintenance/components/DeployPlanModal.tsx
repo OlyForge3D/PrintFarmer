@@ -55,15 +55,26 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
   // Fetch per-tool capability + toolhead list for the printer under the
   // picker. Only run when a printer is chosen and the modal is open.
   //
-  // Consuming `status`/`isLoading`/`isError` alongside `data` is critical: a
-  // per-tool-capable printer will start with `printerDetails === undefined`
-  // during the first fetch, and without a load gate on Deploy the modal
-  // would silently send `toolheadId: null` for a printer whose scope picker
-  // simply hadn't rendered yet. `refetch` powers the accessible Retry
-  // button below.
+  // Consuming `status`/`isLoading`/`isFetching`/`isError` alongside `data`
+  // is critical:
+  //  1. A per-tool-capable printer starts with `printerDetails === undefined`
+  //     during the first fetch — without a load gate on Deploy the modal
+  //     would silently send `toolheadId: null` for a printer whose scope
+  //     picker simply hadn't rendered yet.
+  //  2. React Query keeps stale cached data visible while a background
+  //     refetch is in flight (`isLoading === false`, `isFetching === true`).
+  //     If the stale cache reported `supportsPerToolAttribution: false` but
+  //     the authoritative refreshed value is `true`, a gate on `isLoading`
+  //     alone would leave Deploy enabled during that refetch window and
+  //     let the operator send `toolheadId: null` for a printer that now
+  //     requires per-tool attribution. Gating on `isFetching` covers the
+  //     refetch window as well, matching the "authoritative capability
+  //     resolved" contract the server expects.
+  // `refetch` powers the accessible Retry button below.
   const {
     data: printerDetails,
     isLoading: printerDetailsLoading,
+    isFetching: printerDetailsFetching,
     isError: printerDetailsIsError,
     error: printerDetailsError,
     refetch: refetchPrinterDetails,
@@ -74,14 +85,30 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
     staleTime: 60_000,
   });
 
-  // Explicit three-state gate over the details query. Each state has a
-  // matching UI (loading indicator / retry banner / picker or hidden) and
-  // `canDeploy` requires `detailsReady`.
+  // Explicit four-state gate over the details query. Each state has a
+  // matching UI (loading indicator / updating indicator / retry banner /
+  // picker or hidden) and `canDeploy` requires `detailsReady`.
+  //
+  // `detailsPending` (no cached data yet) → shows a role="status" label.
+  // `detailsUpdating` (cached data present but background refetch in flight)
+  //   → shows a distinct role="status" label so the operator understands
+  //   the current picker/hidden-picker verdict is being re-verified.
+  // `detailsFailed` (query is in the error state) → role="alert" banner.
+  // `detailsReady` requires the query to be settled (`!isFetching`) with
+  // fresh, non-error data — this is the ONLY state that permits Deploy.
   const hasPrinterSelected = !!selectedPrinterId;
   const detailsPending = hasPrinterSelected && printerDetailsLoading;
+  const detailsUpdating =
+    hasPrinterSelected &&
+    !printerDetailsLoading &&
+    printerDetailsFetching &&
+    !printerDetailsIsError;
   const detailsFailed = hasPrinterSelected && printerDetailsIsError;
   const detailsReady =
-    hasPrinterSelected && !printerDetailsLoading && !printerDetailsIsError && !!printerDetails;
+    hasPrinterSelected &&
+    !printerDetailsFetching &&
+    !printerDetailsIsError &&
+    !!printerDetails;
 
   const perToolAllowed = detailsReady && printerDetails?.supportsPerToolAttribution === true;
   const eligibleToolheads = useMemo(
@@ -159,8 +186,12 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
     // Defence in depth. Even though `canDeploy` disables the button while
     // `detailsReady` is false, an assistive-tech or programmatic click on a
     // disabled control must not send a stale `toolheadId: null` for a
-    // printer whose capability we haven't confirmed yet.
+    // printer whose capability we haven't confirmed yet. `detailsReady`
+    // already includes `!printerDetailsFetching`, but we check it directly
+    // here as well so any future edit that widens the button's enabled
+    // condition still cannot bypass the fetch gate.
     if (!detailsReady) return;
+    if (printerDetailsFetching) return;
     const toolheadId = showScopePicker ? toolheadIdFromScope(scope) : null;
     try {
       await deployMutation.mutateAsync({
@@ -239,11 +270,18 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </Select>
-            {/* Details query — three states.
+            {/* Details query — four states.
                 Loading: role="status" gives the visible text an implicit
                 aria-live="polite" and aria-atomic="true" so screen readers
                 announce the pending capability check without stealing
                 focus.
+                Updating: role="status" for a stale-cache refetch race —
+                the picker below may reflect a stale value until this
+                refetch settles, so Deploy is disabled while it is in
+                flight. This is the guard that closes the Hicks #1 window
+                where a cached `supportsPerToolAttribution: false` could
+                otherwise let the operator deploy `toolheadId: null`
+                against a printer whose authoritative value is `true`.
                 Error: role="alert" for assertive announcement plus a Retry
                 action wired to the query's own `refetch` (same key, so
                 react-query re-uses the mutation-observer wiring).
@@ -256,6 +294,15 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
                 data-testid="printer-details-loading"
               >
                 Loading printer capabilities…
+              </p>
+            )}
+            {detailsUpdating && (
+              <p
+                role="status"
+                className="text-xs text-pf-text-tertiary"
+                data-testid="printer-details-updating"
+              >
+                Verifying printer capabilities…
               </p>
             )}
             {detailsFailed && (

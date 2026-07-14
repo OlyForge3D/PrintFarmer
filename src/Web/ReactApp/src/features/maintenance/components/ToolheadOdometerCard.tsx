@@ -94,11 +94,20 @@ function DueStateChip({ state }: { state: ToolheadDueState }) {
         meta.className
       )}
       data-testid={`due-state-${state}`}
-      // The chip is the accessible name for the tooth-scoped due state; it
-      // stands alone alongside the toolhead label so screen readers announce
-      // the state without needing to read the whole card.
+      // The chip is a visual affordance. Its text ("Overdue" / "Due today" /
+      // "OK" / "No data") contributes to the interactive card's accessible
+      // name so screen readers announce state when the operator focuses the
+      // card. We deliberately do NOT set `role="status"` here: the card is
+      // rendered as a native <button>, and ARIA descendants of a button are
+      // flattened into the button's accessible name and treated as
+      // presentational — a nested live region is effectively silent AND, if
+      // each card were an independent live region, N cards would fire N
+      // simultaneous announcements every time the schedule feed refreshes.
+      // A single stable aggregate live region is rendered by the parent
+      // page instead; see `PrinterMaintenancePage` for the sibling
+      // `role="status"` node that lives outside every button and
+      // announces state changes meaningfully.
       aria-label={`Maintenance due state: ${meta.label}`}
-      role="status"
     >
       <Icon className="h-3.5 w-3.5" aria-hidden />
       <span>{meta.label}</span>
