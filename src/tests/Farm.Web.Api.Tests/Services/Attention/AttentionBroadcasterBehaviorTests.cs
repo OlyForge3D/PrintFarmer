@@ -7,6 +7,7 @@ using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -94,6 +95,8 @@ public class AttentionBroadcasterBehaviorTests
         Mock<IServiceScopeFactory> scopeFactory = new();
         scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
 
-        return new AttentionBroadcaster(hub.Object, scopeFactory.Object, NullLogger<AttentionBroadcaster>.Instance);
+        var lifetime = new Mock<IHostApplicationLifetime>();
+        lifetime.SetupGet(l => l.ApplicationStopping).Returns(CancellationToken.None);
+        return new AttentionBroadcaster(hub.Object, scopeFactory.Object, lifetime.Object, NullLogger<AttentionBroadcaster>.Instance);
     }
 }

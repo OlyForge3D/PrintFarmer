@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Email;
+using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
@@ -127,12 +128,56 @@ public interface INotificationService
     Task<NotificationPreferences?> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Update user notification preferences
+    /// Update user notification preferences.
     /// </summary>
     /// <param name="userId">The unique identifier of the user.</param>
     /// <param name="preferences">The notification preferences to update.</param>
+    /// <param name="preserveAttentionFields">
+    /// When <c>true</c>, the 20 attention-row columns on the persisted entity are left
+    /// untouched (issue #708 H2-v5). Legacy PUTs that carry only the four job rows set
+    /// this so a concurrent newer-client attention update cannot be clobbered by a stale
+    /// snapshot. When <c>false</c>, all 20 attention fields on <paramref name="preferences"/>
+    /// are written through. Master flag columns (<c>EnablePushNotifications</c>, …) are
+    /// derived from the final nine-row state either way and mirrored onto
+    /// <paramref name="preferences"/> so callers building a response DTO see the actual
+    /// persisted values.
+    /// </param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, CancellationToken cancellationToken = default);
+    Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Authoritative preference-patch update. Applies <paramref name="patch"/> as a
+    /// diff over the persisted preferences row: supplied matrix rows overwrite the
+    /// corresponding four columns on the tracked entity, every omitted job/attention
+    /// row is preserved, and the four master <c>Enable{Channel}Notifications</c> flags
+    /// are derived from the final nine-row state (Vasquez v6 B3). The read/mutate/save
+    /// runs under a serializable transaction on relational providers so a concurrent
+    /// legacy PUT cannot leave the master flags in a stale-derived state (Bishop v6
+    /// hardening). Returns the persisted entity so controllers can build a response DTO
+    /// that matches the row on disk rather than the caller's transient request view.
+    /// </summary>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="patch">The preference patch to apply.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<NotificationPreferences> UpdatePreferencesAsync(Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hicks #6: authoritative attention-category preference upsert. Under a
+    /// serializable transaction with fresh-context bounded retry the service
+    /// reads the persisted map, merges <paramref name="updates"/> using
+    /// <see cref="StringComparer.OrdinalIgnoreCase"/>, enforces cumulative
+    /// cardinality / UTF-8 byte bounds, and saves atomically. Concurrent
+    /// first-creates converge on a single row; concurrent disjoint-key updates
+    /// both persist. Rejection cases (bounds exceeded) return the typed
+    /// <see cref="AttentionCategoryUpdateResult"/> without touching the row.
+    /// </summary>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="updates">Category-key → opt-in map to merge. May be empty.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<AttentionCategoryUpdateResult> UpdateAttentionCategoryPreferencesAsync(
+        Guid userId,
+        IReadOnlyDictionary<string, bool> updates,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Cleanup old notifications based on retention policy
@@ -161,8 +206,29 @@ public class NotificationService(
     IEmailService? emailService = null,
     IWebPushNotificationSender? webPushNotificationSender = null,
     Func<string, CancellationToken, Task<bool>>? pushEndpointValidatorOverride = null,
-    IEnumerable<INotificationChannel>? notificationChannels = null) : INotificationService
+    IEnumerable<INotificationChannel>? notificationChannels = null,
+    IDbContextFactory<AppDbContext>? preferencesContextFactory = null) : INotificationService
 {
+    // Hicks #2: retries use a FRESH DbContext per attempt via the factory so
+    // stale change-tracker snapshots from a losing serializable transaction
+    // never leak into the retried attempt. When absent (tests wire a bespoke
+    // in-memory context directly), the retry helper falls back to a single
+    // attempt on the injected context. Production wiring always supplies the
+    // factory via DI.
+    private readonly IDbContextFactory<AppDbContext>? _preferencesContextFactory = preferencesContextFactory;
+
+    /// <summary>
+    /// Bishop #12 / Hicks #3 deterministic test seam. Fires ONCE per
+    /// preference-patch attempt, AFTER the tracked row has been read but
+    /// BEFORE mutations are applied and <see cref="AppDbContext.SaveChangesAsync"/>
+    /// is invoked. Production default is <see langword="null"/> — no-op — and
+    /// this property is not surfaced through <see cref="INotificationService"/>.
+    /// Race tests use it to inject a barrier that forces one writer's save to
+    /// race a concurrent writer's commit, driving the serializable / retry
+    /// path deterministically instead of relying on OS-level scheduling.
+    /// </summary>
+    internal Func<CancellationToken, Task>? OnAfterPreferenceReadForTestsAsync { get; set; }
+
     private static readonly string[] KnownPushServiceHosts =
     {
         "fcm.googleapis.com",
@@ -450,9 +516,57 @@ public class NotificationService(
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
     }
 
-    public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, CancellationToken cancellationToken = default)
+    public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default)
     {
-        var existing = await dbContext.NotificationPreferences
+        // Hicks #2 hardening: the entire read/mutate/derive/save unit runs under a
+        // serializable transaction on relational providers so a concurrent legacy
+        // PUT cannot land between this request's read and save. Provider
+        // serialization / deadlock / unique-index conflicts are shed via a
+        // bounded whole-operation retry over a FRESH DbContext per attempt so
+        // the change-tracker never carries losing-attempt snapshots forward.
+        // Non-relational providers (InMemory used only in unit tests) fall
+        // through without a transaction and without retry — no cross-context
+        // race can arise there.
+        //
+        // Explicitly NOT retried: any exception thrown by
+        // <see cref="UpdatePreferencesCoreAsync"/> that isn't a recognised
+        // transient. A malformed patch surfaces on the first attempt.
+        if (dbContext.Database.IsRelational() && _preferencesContextFactory is not null)
+        {
+            await PreferenceConcurrencyRetry.ExecuteAsync<int>(
+                _preferencesContextFactory,
+                dbContext,
+                async (freshContext, ct) =>
+                {
+                    await using var transaction = await freshContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+                    await UpdatePreferencesCoreOnContextAsync(freshContext, userId, preferences, preserveAttentionFields, ct);
+                    await transaction.CommitAsync(ct);
+                    return 0;
+                },
+                logger,
+                cancellationToken);
+            return;
+        }
+
+        if (dbContext.Database.IsRelational())
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            await UpdatePreferencesCoreAsync(userId, preferences, preserveAttentionFields, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        await UpdatePreferencesCoreAsync(userId, preferences, preserveAttentionFields, cancellationToken);
+    }
+
+    private async Task UpdatePreferencesCoreAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields, CancellationToken cancellationToken)
+    {
+        await UpdatePreferencesCoreOnContextAsync(dbContext, userId, preferences, preserveAttentionFields, cancellationToken);
+    }
+
+    private async Task UpdatePreferencesCoreOnContextAsync(AppDbContext ctx, Guid userId, NotificationPreferences preferences, bool preserveAttentionFields, CancellationToken cancellationToken)
+    {
+        var existing = await ctx.NotificationPreferences
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
 
         if (existing is null)
@@ -462,14 +576,15 @@ public class NotificationService(
             preferences.InAppOnJobFailed = true;
             preferences.CreatedAt = DateTime.UtcNow;
             preferences.UpdatedAt = DateTime.UtcNow;
-            dbContext.NotificationPreferences.Add(preferences);
+
+            // Derive master flags from the final nine-row state. For a new
+            // row the caller-supplied `preferences` IS the final state, so we
+            // derive directly onto it.
+            ApplyMasterFlagsFromMatrix(preferences);
+            ctx.NotificationPreferences.Add(preferences);
         }
         else
         {
-            existing.EnableEmailNotifications = preferences.EnableEmailNotifications;
-            existing.EnablePushNotifications = preferences.EnablePushNotifications;
-            existing.EnableInAppNotifications = preferences.EnableInAppNotifications;
-            existing.EnableTelegramNotifications = preferences.EnableTelegramNotifications;
             existing.NotifyOnCompletion = preferences.NotifyOnCompletion;
             existing.NotifyOnFailure = preferences.NotifyOnFailure;
             existing.NotifyOnStart = preferences.NotifyOnStart;
@@ -492,11 +607,565 @@ public class NotificationService(
             existing.TelegramOnJobPaused = preferences.TelegramOnJobPaused;
             existing.Frequency = preferences.Frequency;
             existing.RetentionDays = preferences.RetentionDays;
+
+            // Issue #708 H2-v5: attention-row preservation lives here — the
+            // single tracked read is authoritative. Legacy PUTs that omit
+            // attention rows must set `preserveAttentionFields=true` so a
+            // concurrent newer-client attention update cannot be overwritten
+            // by a stale controller snapshot. Modern requests that address
+            // attention rows leave the flag `false` and all 20 columns are
+            // written through, preserving pre-fix modern-client semantics.
+            if (!preserveAttentionFields)
+            {
+                existing.InAppOnPrinterFailure = preferences.InAppOnPrinterFailure;
+                existing.EmailOnPrinterFailure = preferences.EmailOnPrinterFailure;
+                existing.PushOnPrinterFailure = preferences.PushOnPrinterFailure;
+                existing.TelegramOnPrinterFailure = preferences.TelegramOnPrinterFailure;
+                existing.InAppOnFilamentRunout = preferences.InAppOnFilamentRunout;
+                existing.EmailOnFilamentRunout = preferences.EmailOnFilamentRunout;
+                existing.PushOnFilamentRunout = preferences.PushOnFilamentRunout;
+                existing.TelegramOnFilamentRunout = preferences.TelegramOnFilamentRunout;
+                existing.InAppOnHarvestReady = preferences.InAppOnHarvestReady;
+                existing.EmailOnHarvestReady = preferences.EmailOnHarvestReady;
+                existing.PushOnHarvestReady = preferences.PushOnHarvestReady;
+                existing.TelegramOnHarvestReady = preferences.TelegramOnHarvestReady;
+                existing.InAppOnMaintenanceDue = preferences.InAppOnMaintenanceDue;
+                existing.EmailOnMaintenanceDue = preferences.EmailOnMaintenanceDue;
+                existing.PushOnMaintenanceDue = preferences.PushOnMaintenanceDue;
+                existing.TelegramOnMaintenanceDue = preferences.TelegramOnMaintenanceDue;
+                existing.InAppOnPrinterOffline = preferences.InAppOnPrinterOffline;
+                existing.EmailOnPrinterOffline = preferences.EmailOnPrinterOffline;
+                existing.PushOnPrinterOffline = preferences.PushOnPrinterOffline;
+                existing.TelegramOnPrinterOffline = preferences.TelegramOnPrinterOffline;
+            }
+
+            // Issue #708 H1-v5: master flags are derived data — the OR of the
+            // final nine event×channel rows on the tracked entity, computed
+            // AFTER attention-row preservation. Deriving here (rather than in
+            // the controller) is the single source of truth so a legacy PUT
+            // whose caller doesn't know the persisted attention state still
+            // ends up with an accurate master flag.
+            ApplyMasterFlagsFromMatrix(existing);
             existing.UpdatedAt = DateTime.UtcNow;
+
+            // Mirror the final persisted state back onto the caller's DTO so
+            // the controller's response body reflects reality (all 20 attention
+            // fields + the four master flags) instead of the pre-service
+            // snapshot the controller assembled from the request.
+            MirrorAttentionAndMasterFlags(existing, preferences);
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await ctx.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Updated notification preferences for user {UserId}", userId);
+    }
+
+    public async Task<NotificationPreferences> UpdatePreferencesAsync(Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+
+        // Vasquez v6 B3 + Bishop v6 master-flag stale-order race + Hicks #2:
+        // the entire read/mutate/derive-master-flags/save sequence is one
+        // atomic step. Under a serializable transaction plus a bounded
+        // whole-operation retry over a fresh DbContext, a concurrent legacy
+        // PUT that loses the serialization contest is retried until it
+        // observes the winner's state (or the retry budget is exhausted, at
+        // which point the transient surfaces to the caller). Only recognised
+        // transient signals trigger retry; validation errors and cancellation
+        // propagate immediately.
+        //
+        // Non-relational providers (InMemory in unit tests) fall through
+        // without transaction and without retry — mutation is single-context
+        // and no cross-context race exists.
+        if (dbContext.Database.IsRelational() && _preferencesContextFactory is not null)
+        {
+            return await PreferenceConcurrencyRetry.ExecuteAsync(
+                _preferencesContextFactory,
+                dbContext,
+                async (freshContext, ct) =>
+                {
+                    await using var transaction = await freshContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+                    NotificationPreferences persistedInner = await ApplyPatchOnContextAsync(freshContext, userId, patch, ct);
+                    await transaction.CommitAsync(ct);
+                    return persistedInner;
+                },
+                logger,
+                cancellationToken);
+        }
+
+        if (dbContext.Database.IsRelational())
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            var persisted = await ApplyPatchAsync(userId, patch, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return persisted;
+        }
+
+        return await ApplyPatchAsync(userId, patch, cancellationToken);
+    }
+
+    private async Task<NotificationPreferences> ApplyPatchAsync(Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken)
+    {
+        return await ApplyPatchOnContextAsync(dbContext, userId, patch, cancellationToken);
+    }
+
+    private async Task<NotificationPreferences> ApplyPatchOnContextAsync(AppDbContext ctx, Guid userId, NotificationPreferencesUpdate patch, CancellationToken cancellationToken)
+    {
+        var tracked = await ctx.NotificationPreferences
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+
+        // Bishop #12 / Hicks #3: deterministic race barrier. In production the
+        // hook is null and this call is a JIT-nop; in tests the injected
+        // delegate lets the fixture pause this attempt after the read so a
+        // concurrent writer's commit lands first, driving the retry path.
+        if (OnAfterPreferenceReadForTestsAsync is { } hook)
+        {
+            await hook(cancellationToken);
+        }
+
+        bool isNew = tracked is null;
+        if (tracked is null)
+        {
+            // Hicks #3: new-user persistence MUST use the same canonical
+            // defaults the GET returns for a user with no persisted row, so a
+            // first partial modern PUT never mutates omitted rows. Delegating
+            // to the shared helper keeps both paths in sync.
+            tracked = NotificationPreferencesDefaults.Create(userId);
+            tracked.Id = Guid.NewGuid().ToString();
+            tracked.CreatedAt = DateTime.UtcNow;
+            ctx.NotificationPreferences.Add(tracked);
+        }
+
+        // Scalars only apply when present in the patch (Hicks #5 — a bare
+        // `{}` PUT must not clobber persisted Frequency / RetentionDays with
+        // model-binder defaults). Every nullable field carries the same
+        // "null = omitted, preserve" semantics throughout the legacy branch.
+        if (patch.Frequency.HasValue)
+        {
+            tracked.Frequency = patch.Frequency.Value;
+        }
+
+        if (patch.RetentionDays.HasValue)
+        {
+            tracked.RetentionDays = patch.RetentionDays.Value;
+        }
+
+        if (patch.MatrixRows is null)
+        {
+            // Legacy branch. Only the four job rows are addressed, derived
+            // from the top-level per-event toggles crossed with the four
+            // top-level per-channel toggles. Attention rows on the tracked
+            // entity are preserved untouched — this is Vasquez H2-v5's core
+            // invariant: a stale legacy PUT never clobbers a concurrent modern
+            // attention update.
+            //
+            // Hicks #5: every scalar is a nullable "patch". When the caller
+            // omitted it (`null`) we resolve against the persisted value on
+            // `tracked` — preserving pre-fix defaults for a bare `{}` PUT
+            // instead of the previous behaviour that silently bound
+            // `EnableEmailNotifications=true` and enabled email rows nobody
+            // requested. We resolve every scalar ONCE up front so the derived
+            // rows below use a consistent snapshot.
+            bool enableInApp = patch.EnableInAppNotifications ?? tracked.EnableInAppNotifications;
+            bool enableEmail = patch.EnableEmailNotifications ?? tracked.EnableEmailNotifications;
+            bool enablePush = patch.EnablePushNotifications ?? tracked.EnablePushNotifications;
+            bool enableTelegram = patch.EnableTelegramNotifications ?? tracked.EnableTelegramNotifications;
+            bool notifyStart = patch.NotifyOnStart ?? tracked.NotifyOnStart;
+            bool notifyComplete = patch.NotifyOnCompletion ?? tracked.NotifyOnCompletion;
+            bool notifyFail = patch.NotifyOnFailure ?? tracked.NotifyOnFailure;
+            bool notifyPause = patch.NotifyOnPause ?? tracked.NotifyOnPause;
+
+            tracked.NotifyOnStart = notifyStart;
+            tracked.NotifyOnCompletion = notifyComplete;
+            tracked.NotifyOnFailure = notifyFail;
+            tracked.NotifyOnPause = notifyPause;
+
+            tracked.InAppOnJobStarted = enableInApp && notifyStart;
+            tracked.InAppOnJobCompleted = enableInApp && notifyComplete;
+
+            // Legacy contract: job-failed always stays in-app so a user can
+            // never accidentally silence critical failure surfaces.
+            tracked.InAppOnJobFailed = true;
+            tracked.InAppOnJobPaused = enableInApp && notifyPause;
+
+            tracked.EmailOnJobStarted = enableEmail && notifyStart;
+            tracked.EmailOnJobCompleted = enableEmail && notifyComplete;
+            tracked.EmailOnJobFailed = enableEmail && notifyFail;
+            tracked.EmailOnJobPaused = enableEmail && notifyPause;
+
+            tracked.PushOnJobStarted = enablePush && notifyStart;
+            tracked.PushOnJobCompleted = enablePush && notifyComplete;
+            tracked.PushOnJobFailed = enablePush && notifyFail;
+            tracked.PushOnJobPaused = enablePush && notifyPause;
+
+            tracked.TelegramOnJobStarted = enableTelegram && notifyStart;
+            tracked.TelegramOnJobCompleted = enableTelegram && notifyComplete;
+            tracked.TelegramOnJobFailed = enableTelegram && notifyFail;
+            tracked.TelegramOnJobPaused = enableTelegram && notifyPause;
+
+            // Hicks H1-v5-final + Hicks #5: a legacy PUT that EXPLICITLY flips
+            // a global channel OFF must also drop that channel's attention
+            // rows. When the caller did NOT send a channel scalar (null), we
+            // preserve everything — including the attention rows. Only an
+            // explicit `false` from the caller triggers the zeroing.
+            if (patch.EnableInAppNotifications == false)
+            {
+                tracked.InAppOnPrinterFailure = false;
+                tracked.InAppOnFilamentRunout = false;
+                tracked.InAppOnHarvestReady = false;
+                tracked.InAppOnMaintenanceDue = false;
+                tracked.InAppOnPrinterOffline = false;
+            }
+
+            if (patch.EnableEmailNotifications == false)
+            {
+                tracked.EmailOnPrinterFailure = false;
+                tracked.EmailOnFilamentRunout = false;
+                tracked.EmailOnHarvestReady = false;
+                tracked.EmailOnMaintenanceDue = false;
+                tracked.EmailOnPrinterOffline = false;
+            }
+
+            if (patch.EnablePushNotifications == false)
+            {
+                tracked.PushOnPrinterFailure = false;
+                tracked.PushOnFilamentRunout = false;
+                tracked.PushOnHarvestReady = false;
+                tracked.PushOnMaintenanceDue = false;
+                tracked.PushOnPrinterOffline = false;
+            }
+
+            if (patch.EnableTelegramNotifications == false)
+            {
+                tracked.TelegramOnPrinterFailure = false;
+                tracked.TelegramOnFilamentRunout = false;
+                tracked.TelegramOnHarvestReady = false;
+                tracked.TelegramOnMaintenanceDue = false;
+                tracked.TelegramOnPrinterOffline = false;
+            }
+        }
+        else
+        {
+            // Modern branch. Each supplied row overwrites the four columns for
+            // that event on the tracked entity. Rows omitted from the request
+            // are simply not visited, so their persisted value is preserved.
+            // Duplicate rows for the same event are last-write-wins within
+            // this request (mirrors previous controller behavior).
+            //
+            // Hicks #3: an empty modern matrix (list with zero rows) reaches
+            // this branch too so every row is treated as "omitted" and the
+            // caller's request cannot silently reshape rows via the legacy
+            // scalar derivation.
+            foreach (var row in patch.MatrixRows)
+            {
+                ApplyRow(tracked, row);
+            }
+
+            // Derive the four legacy per-event toggles from the tracked job
+            // rows so downstream consumers reading NotifyOn* still see a
+            // consistent view. A job row is considered "on" if any of its
+            // four channels is enabled.
+            tracked.NotifyOnStart = tracked.InAppOnJobStarted || tracked.EmailOnJobStarted || tracked.PushOnJobStarted || tracked.TelegramOnJobStarted;
+            tracked.NotifyOnCompletion = tracked.InAppOnJobCompleted || tracked.EmailOnJobCompleted || tracked.PushOnJobCompleted || tracked.TelegramOnJobCompleted;
+            tracked.NotifyOnFailure = tracked.InAppOnJobFailed || tracked.EmailOnJobFailed || tracked.PushOnJobFailed || tracked.TelegramOnJobFailed;
+            tracked.NotifyOnPause = tracked.InAppOnJobPaused || tracked.EmailOnJobPaused || tracked.PushOnJobPaused || tracked.TelegramOnJobPaused;
+
+            // Legacy contract preservation: in-app job-failed never turns off.
+            tracked.InAppOnJobFailed = true;
+        }
+
+        // Master flags are always derived from the final nine-row tracked
+        // state — the ONLY authoritative source. Whether this call came from
+        // a legacy PUT or a modern matrix PUT, the flags describe what's
+        // actually persisted, not what the caller asked for.
+        ApplyMasterFlagsFromMatrix(tracked);
+        tracked.UpdatedAt = DateTime.UtcNow;
+
+        await ctx.SaveChangesAsync(cancellationToken);
+        logger.LogInformation(
+            "Updated notification preferences for user {UserId} (matrix rows: {RowCount}, new row: {IsNew})",
+            userId,
+            patch.MatrixRows?.Count ?? 0,
+            isNew);
+
+        return tracked;
+    }
+
+    private static void ApplyRow(NotificationPreferences tracked, NotificationPreferencesRowPatch row)
+    {
+        switch (row.EventType)
+        {
+            case NotificationPreferenceEvent.JobStarted:
+                tracked.InAppOnJobStarted = row.InApp;
+                tracked.EmailOnJobStarted = row.Email;
+                tracked.PushOnJobStarted = row.Push;
+                tracked.TelegramOnJobStarted = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.JobCompleted:
+                tracked.InAppOnJobCompleted = row.InApp;
+                tracked.EmailOnJobCompleted = row.Email;
+                tracked.PushOnJobCompleted = row.Push;
+                tracked.TelegramOnJobCompleted = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.JobFailed:
+                // Legacy contract: in-app for job-failed is pinned true. All
+                // three other channels are freely toggled.
+                tracked.InAppOnJobFailed = true;
+                tracked.EmailOnJobFailed = row.Email;
+                tracked.PushOnJobFailed = row.Push;
+                tracked.TelegramOnJobFailed = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.JobPaused:
+                tracked.InAppOnJobPaused = row.InApp;
+                tracked.EmailOnJobPaused = row.Email;
+                tracked.PushOnJobPaused = row.Push;
+                tracked.TelegramOnJobPaused = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.PrinterFailure:
+                tracked.InAppOnPrinterFailure = row.InApp;
+                tracked.EmailOnPrinterFailure = row.Email;
+                tracked.PushOnPrinterFailure = row.Push;
+                tracked.TelegramOnPrinterFailure = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.FilamentRunout:
+                tracked.InAppOnFilamentRunout = row.InApp;
+                tracked.EmailOnFilamentRunout = row.Email;
+                tracked.PushOnFilamentRunout = row.Push;
+                tracked.TelegramOnFilamentRunout = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.HarvestReady:
+                tracked.InAppOnHarvestReady = row.InApp;
+                tracked.EmailOnHarvestReady = row.Email;
+                tracked.PushOnHarvestReady = row.Push;
+                tracked.TelegramOnHarvestReady = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.MaintenanceDue:
+                tracked.InAppOnMaintenanceDue = row.InApp;
+                tracked.EmailOnMaintenanceDue = row.Email;
+                tracked.PushOnMaintenanceDue = row.Push;
+                tracked.TelegramOnMaintenanceDue = row.Telegram;
+                break;
+            case NotificationPreferenceEvent.PrinterOffline:
+                tracked.InAppOnPrinterOffline = row.InApp;
+                tracked.EmailOnPrinterOffline = row.Email;
+                tracked.PushOnPrinterOffline = row.Push;
+                tracked.TelegramOnPrinterOffline = row.Telegram;
+                break;
+            default:
+                // Unknown enum values cannot reach here — the controller-side
+                // JSON binder rejects them with 400 before the service is
+                // called. Defensive throw keeps future contract changes noisy.
+                throw new ArgumentOutOfRangeException(nameof(row), row.EventType, "Unknown notification preference event.");
+        }
+    }
+
+    /// <summary>
+    /// Hicks #6: attention-category upsert. Wraps the merge/save under a
+    /// serializable transaction with fresh-context bounded retry via
+    /// <see cref="PreferenceConcurrencyRetry"/>. Every attempt rereads the
+    /// persisted map, merges the update using case-insensitive comparison,
+    /// enforces cumulative cardinality / UTF-8 byte bounds, and saves
+    /// atomically. Concurrent first-creates converge on a single row (loser
+    /// retries, rereads the winner's row, merges its own updates on top);
+    /// concurrent disjoint-key updates both persist.
+    /// </summary>
+    public async Task<AttentionCategoryUpdateResult> UpdateAttentionCategoryPreferencesAsync(
+        Guid userId,
+        IReadOnlyDictionary<string, bool> updates,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(updates);
+
+        // Non-relational (InMemory unit tests): single attempt on the injected
+        // context — same semantics minus the retry loop.
+        if (!dbContext.Database.IsRelational() || _preferencesContextFactory is null)
+        {
+            return await ApplyAttentionCategoryUpdateOnContextAsync(dbContext, userId, updates, cancellationToken);
+        }
+
+        return await PreferenceConcurrencyRetry.ExecuteAsync(
+            _preferencesContextFactory,
+            dbContext,
+            async (freshContext, ct) =>
+            {
+                await using var transaction = await freshContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+                var result = await ApplyAttentionCategoryUpdateOnContextAsync(freshContext, userId, updates, ct);
+                if (result.Status == AttentionCategoryUpdateStatus.Success)
+                {
+                    await transaction.CommitAsync(ct);
+                }
+                else
+                {
+                    // A rejection MUST NOT persist. Rolling back the fresh
+                    // context leaves the persisted row byte-for-byte unchanged
+                    // even if the (never-mutated) tracked entity is discarded.
+                    await transaction.RollbackAsync(ct);
+                }
+
+                return result;
+            },
+            logger,
+            cancellationToken);
+    }
+
+    private static async Task<AttentionCategoryUpdateResult> ApplyAttentionCategoryUpdateOnContextAsync(
+        AppDbContext ctx,
+        Guid userId,
+        IReadOnlyDictionary<string, bool> updates,
+        CancellationToken cancellationToken)
+    {
+        var tracked = await ctx.NotificationPreferences
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+
+        string? preExistingJson = tracked?.AttentionPushCategoryPreferencesJson;
+
+        if (tracked is null)
+        {
+            // Hicks #5 + #6: first-create MUST use the canonical factory so
+            // omitted job/attention rows and email defaults match the
+            // fresh-GET contract. The previous inline `new { UserId = ... }`
+            // bypass produced a row whose CLR defaults (email = true) then
+            // silently enabled email delivery.
+            tracked = NotificationPreferencesDefaults.Create(userId);
+            tracked.Id = Guid.NewGuid().ToString();
+            tracked.CreatedAt = DateTime.UtcNow;
+            ctx.NotificationPreferences.Add(tracked);
+        }
+
+        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(preExistingJson);
+
+        // Merge the caller-supplied updates onto the prospective map.
+        // AttentionPushCategoryPreferences uses OrdinalIgnoreCase keys, so
+        // "PrinterFailure" and "printerfailure" collapse into a single entry
+        // and duplicate-case last-write-wins is honoured within a single
+        // request.
+        foreach (KeyValuePair<string, bool> kv in updates)
+        {
+            catPrefs.Categories[kv.Key] = kv.Value;
+        }
+
+        // Cumulative bounds — enforced inside the transaction after the
+        // merge, so a concurrent request cannot slip a bulk update past a
+        // per-request bound applied elsewhere.
+        if (catPrefs.Categories.Count > AttentionCategoryCumulativeKeyLimit)
+        {
+            if (preExistingJson is null && ctx.Entry(tracked).State == EntityState.Added)
+            {
+                // Detach so a rejection does not accidentally persist an
+                // empty first-create row when the caller's update was
+                // rejected outright.
+                ctx.Entry(tracked).State = EntityState.Detached;
+            }
+
+            return AttentionCategoryUpdateResult.FromRejection(AttentionCategoryUpdateRejection.CumulativeKeyLimitExceeded);
+        }
+
+        string prospectiveJson = catPrefs.ToJson();
+        int prospectiveBytes = System.Text.Encoding.UTF8.GetByteCount(prospectiveJson);
+        if (prospectiveBytes > AttentionCategoryCumulativeJsonBytes)
+        {
+            if (preExistingJson is null && ctx.Entry(tracked).State == EntityState.Added)
+            {
+                ctx.Entry(tracked).State = EntityState.Detached;
+            }
+
+            return AttentionCategoryUpdateResult.FromRejection(AttentionCategoryUpdateRejection.JsonByteLimitExceeded);
+        }
+
+        tracked.AttentionPushCategoryPreferencesJson = prospectiveJson;
+        tracked.UpdatedAt = DateTime.UtcNow;
+        await ctx.SaveChangesAsync(cancellationToken);
+
+        // Return a copy of the persisted map (defensive; the caller must not
+        // mutate our internal state) preserving case-insensitive key semantics.
+        return AttentionCategoryUpdateResult.FromSuccess(
+            new Dictionary<string, bool>(catPrefs.Categories, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Cumulative cardinality cap (Hicks #4 / #6). Kept identical to the
+    /// controller-side <c>MaxAttentionCategoryKeysPersisted</c> so both
+    /// enforcement points agree on the bound; the service is the
+    /// authoritative one under concurrent load because it observes the merged
+    /// prospective map inside the transaction.
+    /// </summary>
+    internal const int AttentionCategoryCumulativeKeyLimit = 128;
+
+    /// <summary>
+    /// Cumulative UTF-8 byte cap (Hicks #4 / #6). Matches
+    /// <c>MaxAttentionCategoryJsonBytes</c> in the controller.
+    /// </summary>
+    internal const int AttentionCategoryCumulativeJsonBytes = 8 * 1024;
+
+    private static void ApplyMasterFlagsFromMatrix(NotificationPreferences prefs)
+    {
+        prefs.EnableInAppNotifications =
+            prefs.InAppOnJobStarted
+            || prefs.InAppOnJobCompleted
+            || prefs.InAppOnJobFailed
+            || prefs.InAppOnJobPaused
+            || prefs.InAppOnPrinterFailure
+            || prefs.InAppOnFilamentRunout
+            || prefs.InAppOnHarvestReady
+            || prefs.InAppOnMaintenanceDue
+            || prefs.InAppOnPrinterOffline;
+        prefs.EnableEmailNotifications =
+            prefs.EmailOnJobStarted
+            || prefs.EmailOnJobCompleted
+            || prefs.EmailOnJobFailed
+            || prefs.EmailOnJobPaused
+            || prefs.EmailOnPrinterFailure
+            || prefs.EmailOnFilamentRunout
+            || prefs.EmailOnHarvestReady
+            || prefs.EmailOnMaintenanceDue
+            || prefs.EmailOnPrinterOffline;
+        prefs.EnablePushNotifications =
+            prefs.PushOnJobStarted
+            || prefs.PushOnJobCompleted
+            || prefs.PushOnJobFailed
+            || prefs.PushOnJobPaused
+            || prefs.PushOnPrinterFailure
+            || prefs.PushOnFilamentRunout
+            || prefs.PushOnHarvestReady
+            || prefs.PushOnMaintenanceDue
+            || prefs.PushOnPrinterOffline;
+        prefs.EnableTelegramNotifications =
+            prefs.TelegramOnJobStarted
+            || prefs.TelegramOnJobCompleted
+            || prefs.TelegramOnJobFailed
+            || prefs.TelegramOnJobPaused
+            || prefs.TelegramOnPrinterFailure
+            || prefs.TelegramOnFilamentRunout
+            || prefs.TelegramOnHarvestReady
+            || prefs.TelegramOnMaintenanceDue
+            || prefs.TelegramOnPrinterOffline;
+    }
+
+    private static void MirrorAttentionAndMasterFlags(NotificationPreferences source, NotificationPreferences target)
+    {
+        target.EnableInAppNotifications = source.EnableInAppNotifications;
+        target.EnableEmailNotifications = source.EnableEmailNotifications;
+        target.EnablePushNotifications = source.EnablePushNotifications;
+        target.EnableTelegramNotifications = source.EnableTelegramNotifications;
+        target.InAppOnPrinterFailure = source.InAppOnPrinterFailure;
+        target.EmailOnPrinterFailure = source.EmailOnPrinterFailure;
+        target.PushOnPrinterFailure = source.PushOnPrinterFailure;
+        target.TelegramOnPrinterFailure = source.TelegramOnPrinterFailure;
+        target.InAppOnFilamentRunout = source.InAppOnFilamentRunout;
+        target.EmailOnFilamentRunout = source.EmailOnFilamentRunout;
+        target.PushOnFilamentRunout = source.PushOnFilamentRunout;
+        target.TelegramOnFilamentRunout = source.TelegramOnFilamentRunout;
+        target.InAppOnHarvestReady = source.InAppOnHarvestReady;
+        target.EmailOnHarvestReady = source.EmailOnHarvestReady;
+        target.PushOnHarvestReady = source.PushOnHarvestReady;
+        target.TelegramOnHarvestReady = source.TelegramOnHarvestReady;
+        target.InAppOnMaintenanceDue = source.InAppOnMaintenanceDue;
+        target.EmailOnMaintenanceDue = source.EmailOnMaintenanceDue;
+        target.PushOnMaintenanceDue = source.PushOnMaintenanceDue;
+        target.TelegramOnMaintenanceDue = source.TelegramOnMaintenanceDue;
+        target.InAppOnPrinterOffline = source.InAppOnPrinterOffline;
+        target.EmailOnPrinterOffline = source.EmailOnPrinterOffline;
+        target.PushOnPrinterOffline = source.PushOnPrinterOffline;
+        target.TelegramOnPrinterOffline = source.TelegramOnPrinterOffline;
     }
 
     public async Task CleanupOldNotificationsAsync(CancellationToken cancellationToken = default)
@@ -520,36 +1189,12 @@ public class NotificationService(
 
     private static NotificationPreferences BuildDefaultPreferences(Guid userId)
     {
-        return new NotificationPreferences
-        {
-            UserId = userId,
-            EnableEmailNotifications = true,
-            EnablePushNotifications = true,
-            EnableInAppNotifications = true,
-            EnableTelegramNotifications = false,
-            NotifyOnCompletion = true,
-            NotifyOnFailure = true,
-            NotifyOnStart = false,
-            NotifyOnPause = true,
-            InAppOnJobStarted = false,
-            InAppOnJobCompleted = true,
-            InAppOnJobFailed = true,
-            InAppOnJobPaused = true,
-            EmailOnJobStarted = false,
-            EmailOnJobCompleted = true,
-            EmailOnJobFailed = true,
-            EmailOnJobPaused = true,
-            PushOnJobStarted = false,
-            PushOnJobCompleted = true,
-            PushOnJobFailed = true,
-            PushOnJobPaused = true,
-            TelegramOnJobStarted = false,
-            TelegramOnJobCompleted = false,
-            TelegramOnJobFailed = false,
-            TelegramOnJobPaused = false,
-            Frequency = NotificationFrequency.RealTime,
-            RetentionDays = 30
-        };
+        // Hicks #3: this legacy helper now delegates to the canonical shared
+        // defaults so any future default-shape change lands in exactly one
+        // place. Kept for backward compatibility with callers outside this
+        // file; new code should call NotificationPreferencesDefaults.Create
+        // directly.
+        return NotificationPreferencesDefaults.Create(userId);
     }
 
     private static bool ShouldDeliverToChannel(NotificationPreferences preferences, NotificationType type, NotificationDeliveryChannel channel)
