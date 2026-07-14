@@ -133,12 +133,22 @@ public sealed class PreferenceConcurrencyRetryTests
     /// mirrors Npgsql's <c>PostgresException.SqlState</c>. Uses the reflection
     /// surface so the test project does not pull in Npgsql.
     /// </summary>
+    /// <remarks>
+    /// After Hicks post-merge #2, the outer <see cref="PreferenceConcurrencyRetry.Classify"/>
+    /// gates provider dispatch on <see cref="System.Data.Common.DbException"/> +
+    /// exact allow-listed <c>FullName</c>. The provider-specific test doubles
+    /// intentionally do not spoof either signal, so the SQLSTATE / error-code
+    /// behaviour is asserted directly against the sub-classifier
+    /// (<see cref="PreferenceConcurrencyRetry.ClassifyNpgsql"/> etc.). The outer
+    /// <see cref="PreferenceConcurrencyRetry.Classify"/> gate is verified
+    /// separately by the <c>Classify_LookAlike*</c> tests further down.
+    /// </remarks>
     [Fact]
     public void Classify_PostgresSerializationFailure_IsTransient()
     {
         var pg = new PostgresException(sqlState: "40001", constraintName: null, tableName: null, columnName: null);
 
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(pg);
+        PreferenceConcurrencyRetry.ClassifierDecision? decision = PreferenceConcurrencyRetry.ClassifyNpgsql(pg);
 
         decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
     }
@@ -156,7 +166,7 @@ public sealed class PreferenceConcurrencyRetryTests
             tableName: "NotificationPreferences",
             columnName: "UserId");
 
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(pg);
+        PreferenceConcurrencyRetry.ClassifierDecision? decision = PreferenceConcurrencyRetry.ClassifyNpgsql(pg);
 
         decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
     }
@@ -174,9 +184,12 @@ public sealed class PreferenceConcurrencyRetryTests
             tableName: "SomeOther",
             columnName: "SomeColumn");
 
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(pg);
+        PreferenceConcurrencyRetry.ClassifierDecision? decision = PreferenceConcurrencyRetry.ClassifyNpgsql(pg);
 
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+        // Sub-classifier returns null when the constraint does not reference
+        // the UserId unique index; the outer Classify would then fall through
+        // to Rethrow for the whole exception chain.
+        decision.Should().BeNull();
     }
 
     /// <summary>
@@ -191,7 +204,8 @@ public sealed class PreferenceConcurrencyRetryTests
     {
         var ex = new SqlException(number, "conflict");
 
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(ex);
+        PreferenceConcurrencyRetry.ClassifierDecision? decision =
+            PreferenceConcurrencyRetry.ClassifySqlServer(ex, ex.Message);
 
         decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
     }
@@ -205,7 +219,8 @@ public sealed class PreferenceConcurrencyRetryTests
     {
         var ex = new SqlException(2627, "Violation of UNIQUE KEY constraint IX_NotificationPreferences_UserId.");
 
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(ex);
+        PreferenceConcurrencyRetry.ClassifierDecision? decision =
+            PreferenceConcurrencyRetry.ClassifySqlServer(ex, ex.Message);
 
         decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
     }
@@ -218,16 +233,71 @@ public sealed class PreferenceConcurrencyRetryTests
     public void Classify_MySqlDeadlockAndUniqueOnUserId()
     {
         var deadlock = new MySqlException(1213, "Deadlock found");
-        PreferenceConcurrencyRetry.Classify(deadlock)
+        PreferenceConcurrencyRetry.ClassifyMySql(deadlock, deadlock.Message)
             .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
 
         var uniqueUserId = new MySqlException(1062, "Duplicate entry for key 'IX_NotificationPreferences_UserId'");
-        PreferenceConcurrencyRetry.Classify(uniqueUserId)
+        PreferenceConcurrencyRetry.ClassifyMySql(uniqueUserId, uniqueUserId.Message)
             .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
 
         var uniqueUnrelated = new MySqlException(1062, "Duplicate entry for key 'ix_something_else'");
-        PreferenceConcurrencyRetry.Classify(uniqueUnrelated)
-            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+        PreferenceConcurrencyRetry.ClassifyMySql(uniqueUnrelated, uniqueUnrelated.Message)
+            .Should().BeNull();
+    }
+
+    /// <summary>
+    /// Hicks post-merge #2: an arbitrary <see cref="Exception"/> subclass whose
+    /// short name happens to be <c>SqliteException</c> — but which does NOT
+    /// derive from <see cref="System.Data.Common.DbException"/> — MUST NOT be
+    /// treated as a provider signal by the outer classifier. The prior
+    /// short-name switch would have matched it; the tightened classifier
+    /// gates on both <c>DbException</c> and the exact allow-listed
+    /// <c>FullName</c>.
+    /// </summary>
+    [Fact]
+    public void Classify_LookAlikeSqliteException_NotDbException_Rethrows()
+    {
+        var spoof = new LookAlikeSqliteException("UNIQUE constraint failed: NotificationPreferences.UserId");
+
+        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(spoof);
+
+        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+    }
+
+    /// <summary>
+    /// Hicks post-merge #2: a <see cref="System.Data.Common.DbException"/>-
+    /// derived class whose full name is NOT on the provider allow-list must
+    /// also be rejected. The short name alone is not enough — the outer
+    /// classifier compares <c>GetType().FullName</c> against the exact
+    /// namespaced allow-list.
+    /// </summary>
+    [Fact]
+    public void Classify_LookAlikeDbException_WrongFullName_Rethrows()
+    {
+        // FullName = "Farm.Web.Api.Tests.Services.Notifications.PreferenceConcurrencyRetryTests+LookAlikeDbException"
+        var spoof = new LookAlikeDbException("UNIQUE constraint failed: NotificationPreferences.UserId");
+
+        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(spoof);
+
+        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+    }
+
+    /// <summary>
+    /// Hicks post-merge #2: a genuine EF <see cref="DbUpdateConcurrencyException"/>
+    /// wrapped inside an arbitrary custom exception must still classify as
+    /// transient — the classifier walks the entire <see cref="Exception.InnerException"/>
+    /// chain, so the tightened family gate MUST NOT reject legitimate signals
+    /// that arrive nested inside third-party wrappers.
+    /// </summary>
+    [Fact]
+    public void Classify_ArbitraryWrapperAroundDbUpdateConcurrency_StillTransient()
+    {
+        var inner = new DbUpdateConcurrencyException("concurrency conflict");
+        var wrapper = new ArbitraryWrapperException("wrapped by third-party middleware", inner);
+
+        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(wrapper);
+
+        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
     }
 
     /// <summary>
@@ -507,6 +577,49 @@ public sealed class PreferenceConcurrencyRetryTests
         }
 
         public int Number { get; }
+    }
+
+    /// <summary>
+    /// Hicks post-merge #2: an arbitrary <see cref="Exception"/> subclass whose
+    /// short name happens to be <c>SqliteException</c> — used to prove the
+    /// tightened outer classifier rejects short-name spoofing. Deliberately
+    /// does NOT derive from <see cref="System.Data.Common.DbException"/> and
+    /// its <c>FullName</c> is a Farm namespace, so both gate conditions fail.
+    /// </summary>
+    private sealed class LookAlikeSqliteException : Exception
+    {
+        public LookAlikeSqliteException(string message)
+            : base(message)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Hicks post-merge #2: derives from <see cref="System.Data.Common.DbException"/>
+    /// so the base-type gate passes, but the <c>FullName</c> is a Farm test
+    /// namespace and therefore NOT on the provider allow-list. Proves the
+    /// classifier still rejects it.
+    /// </summary>
+    private sealed class LookAlikeDbException : System.Data.Common.DbException
+    {
+        public LookAlikeDbException(string message)
+            : base(message)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Hicks post-merge #2: an arbitrary non-provider wrapper that carries
+    /// a legitimate inner exception. Used to prove the classifier still
+    /// walks the whole <see cref="Exception.InnerException"/> chain after
+    /// the family gate tightened.
+    /// </summary>
+    private sealed class ArbitraryWrapperException : Exception
+    {
+        public ArbitraryWrapperException(string message, Exception inner)
+            : base(message, inner)
+        {
+        }
     }
 
     /// <summary>

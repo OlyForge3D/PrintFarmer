@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -207,6 +209,85 @@ public static class PreferenceConcurrencyRetry
     /// unique failures fall through to <see cref="ClassifierDecision.Rethrow"/>
     /// so a genuine schema fault is surfaced, not masked by a retry loop.
     /// </summary>
+    /// <summary>
+    /// Provider-exception type identity map. We MUST NOT rely on the short
+    /// type name (<c>GetType().Name</c>) alone — a hostile or misnamed third-
+    /// party assembly could ship an unrelated <c>SqliteException</c>-named
+    /// class and be silently treated as a transient conflict. Every branch
+    /// below verifies the exception is an exact allow-listed provider type by
+    /// its full namespace-qualified name AND that the runtime type derives
+    /// from <see cref="DbException"/> (every real provider exception does).
+    /// </summary>
+    private static readonly HashSet<string> AllowedSqliteTypeNames = new(StringComparer.Ordinal)
+    {
+        "Microsoft.Data.Sqlite.SqliteException",
+    };
+
+    private static readonly HashSet<string> AllowedPostgresTypeNames = new(StringComparer.Ordinal)
+    {
+        "Npgsql.PostgresException",
+    };
+
+    private static readonly HashSet<string> AllowedSqlServerTypeNames = new(StringComparer.Ordinal)
+    {
+        "Microsoft.Data.SqlClient.SqlException",
+        "System.Data.SqlClient.SqlException",
+    };
+
+    private static readonly HashSet<string> AllowedMySqlTypeNames = new(StringComparer.Ordinal)
+    {
+        "MySqlConnector.MySqlException",
+        "MySql.Data.MySqlClient.MySqlException",
+    };
+
+    private enum ProviderFamily
+    {
+        None,
+        Sqlite,
+        Postgres,
+        SqlServer,
+        MySql,
+    }
+
+    private static ProviderFamily ClassifyProviderType(Exception ex)
+    {
+        // Reject anything that isn't a real DbException — this alone stops
+        // arbitrary Exception subclasses named "SqliteException" from being
+        // treated as provider signals.
+        if (ex is not DbException)
+        {
+            return ProviderFamily.None;
+        }
+
+        string? fullName = ex.GetType().FullName;
+        if (fullName is null)
+        {
+            return ProviderFamily.None;
+        }
+
+        if (AllowedSqliteTypeNames.Contains(fullName))
+        {
+            return ProviderFamily.Sqlite;
+        }
+
+        if (AllowedPostgresTypeNames.Contains(fullName))
+        {
+            return ProviderFamily.Postgres;
+        }
+
+        if (AllowedSqlServerTypeNames.Contains(fullName))
+        {
+            return ProviderFamily.SqlServer;
+        }
+
+        if (AllowedMySqlTypeNames.Contains(fullName))
+        {
+            return ProviderFamily.MySql;
+        }
+
+        return ProviderFamily.None;
+    }
+
     internal static ClassifierDecision Classify(Exception exception)
     {
         Exception? current = exception;
@@ -217,12 +298,11 @@ public static class PreferenceConcurrencyRetry
                 return ClassifierDecision.TransientProviderConflict;
             }
 
-            string typeName = current.GetType().Name;
             string message = current.Message ?? string.Empty;
 
-            switch (typeName)
+            switch (ClassifyProviderType(current))
             {
-                case "SqliteException":
+                case ProviderFamily.Sqlite:
                 {
                     ClassifierDecision? decision = ClassifySqlite(current, message);
                     if (decision.HasValue)
@@ -233,7 +313,7 @@ public static class PreferenceConcurrencyRetry
                     break;
                 }
 
-                case "PostgresException":
+                case ProviderFamily.Postgres:
                 {
                     ClassifierDecision? decision = ClassifyNpgsql(current);
                     if (decision.HasValue)
@@ -244,7 +324,7 @@ public static class PreferenceConcurrencyRetry
                     break;
                 }
 
-                case "SqlException":
+                case ProviderFamily.SqlServer:
                 {
                     ClassifierDecision? decision = ClassifySqlServer(current, message);
                     if (decision.HasValue)
@@ -255,7 +335,7 @@ public static class PreferenceConcurrencyRetry
                     break;
                 }
 
-                case "MySqlException":
+                case ProviderFamily.MySql:
                 {
                     ClassifierDecision? decision = ClassifyMySql(current, message);
                     if (decision.HasValue)
@@ -289,7 +369,7 @@ public static class PreferenceConcurrencyRetry
     /// names <c>NotificationPreferences.UserId</c> → UserId unique conflict.
     /// Anything else → not our conflict.
     /// </summary>
-    private static ClassifierDecision? ClassifySqlite(Exception ex, string message)
+    internal static ClassifierDecision? ClassifySqlite(Exception ex, string message)
     {
         if (TryGetSqliteErrorCode(ex, out int sqliteCode))
         {
@@ -328,7 +408,7 @@ public static class PreferenceConcurrencyRetry
     /// on the exception references the <c>NotificationPreferences.UserId</c>
     /// index, otherwise rethrow.
     /// </summary>
-    private static ClassifierDecision? ClassifyNpgsql(Exception ex)
+    internal static ClassifierDecision? ClassifyNpgsql(Exception ex)
     {
         if (!TryGetNpgsqlSqlState(ex, out string? state))
         {
@@ -364,7 +444,7 @@ public static class PreferenceConcurrencyRetry
     /// (unique constraint violation) → UserId conflict only when the message
     /// references the <c>IX_NotificationPreferences_UserId</c> index.
     /// </summary>
-    private static ClassifierDecision? ClassifySqlServer(Exception ex, string message)
+    internal static ClassifierDecision? ClassifySqlServer(Exception ex, string message)
     {
         if (!TryGetIntProperty(ex, "Number", out int number))
         {
@@ -390,7 +470,7 @@ public static class PreferenceConcurrencyRetry
     /// 1062 duplicate entry → UserId conflict only when the offending index
     /// message references the <c>NotificationPreferences.UserId</c> index.
     /// </summary>
-    private static ClassifierDecision? ClassifyMySql(Exception ex, string message)
+    internal static ClassifierDecision? ClassifyMySql(Exception ex, string message)
     {
         if (!TryGetIntProperty(ex, "Number", out int number))
         {
