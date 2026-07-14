@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
 using System.Xml.Linq;
@@ -26,7 +26,9 @@ public class ThreeMfProjectBuilderTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, true); } catch { /* best effort */ }
+        try
+        { Directory.Delete(_tempDir, true); }
+        catch { /* best effort */ }
         GC.SuppressFinalize(this);
     }
 
@@ -50,11 +52,19 @@ public class ThreeMfProjectBuilderTests : IDisposable
         // Triangle count
         bw.Write((uint)1);
         // Normal
-        bw.Write(0f); bw.Write(0f); bw.Write(1f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(1f);
         // Vertices
-        bw.Write(x1); bw.Write(y1); bw.Write(z1);
-        bw.Write(x2); bw.Write(y2); bw.Write(z2);
-        bw.Write(x3); bw.Write(y3); bw.Write(z3);
+        bw.Write(x1);
+        bw.Write(y1);
+        bw.Write(z1);
+        bw.Write(x2);
+        bw.Write(y2);
+        bw.Write(z2);
+        bw.Write(x3);
+        bw.Write(y3);
+        bw.Write(z3);
         // Attribute byte count
         bw.Write((ushort)0);
 
@@ -75,17 +85,33 @@ public class ThreeMfProjectBuilderTests : IDisposable
         bw.Write((uint)2);
 
         // Triangle 1: (0,0,0), (1,0,0), (1,1,0)
-        bw.Write(0f); bw.Write(0f); bw.Write(1f); // normal
-        bw.Write(0f); bw.Write(0f); bw.Write(0f);
-        bw.Write(1f); bw.Write(0f); bw.Write(0f);
-        bw.Write(1f); bw.Write(1f); bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(1f); // normal
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(1f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(1f);
+        bw.Write(1f);
+        bw.Write(0f);
         bw.Write((ushort)0);
 
         // Triangle 2: (0,0,0), (1,1,0), (0,1,0) — shares edge (0,0,0)-(1,1,0)
-        bw.Write(0f); bw.Write(0f); bw.Write(1f);
-        bw.Write(0f); bw.Write(0f); bw.Write(0f);
-        bw.Write(1f); bw.Write(1f); bw.Write(0f);
-        bw.Write(0f); bw.Write(1f); bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(1f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(1f);
+        bw.Write(1f);
+        bw.Write(0f);
+        bw.Write(0f);
+        bw.Write(1f);
+        bw.Write(0f);
         bw.Write((ushort)0);
 
         return path;
