@@ -336,7 +336,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
+                        .HasColumnType("nvarchar(128)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -1634,6 +1635,68 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Name");
 
                     b.ToTable("HotendModelDefinitions");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.IdempotencyRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .UseCollation("Latin1_General_100_BIN2");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<byte[]>("ResponseBody")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("ResponseContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("ResponseStatusCode")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RouteKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .UseCollation("Latin1_General_100_BIN2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)")
+                        .UseCollation("Latin1_General_100_BIN2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_IdempotencyRecords_CreatedAt");
+
+                    b.HasIndex("UserId", "RouteKey", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_IdempotencyRecords_User_Route_Key");
+
+                    b.ToTable("IdempotencyRecords");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.JobExecution", b =>
@@ -3025,7 +3088,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Sku")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
+                        .HasColumnType("nvarchar(64)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -3070,7 +3134,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("OperationKey")
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
+                        .HasColumnType("nvarchar(128)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<Guid>("PartInventoryId")
                         .HasColumnType("uniqueidentifier");
@@ -3466,7 +3531,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("HarvestOperationKey")
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
+                        .HasColumnType("nvarchar(128)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<DateTime?>("HarvestedAt")
                         .HasColumnType("datetime2");

@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Tasks;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
@@ -124,6 +126,7 @@ public class TasksController(
     /// Marks a task as complete.
     /// </summary>
     [HttpPost("{id:guid}/complete")]
+    [Idempotent(IdempotencyRouteKeys.TaskComplete)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
