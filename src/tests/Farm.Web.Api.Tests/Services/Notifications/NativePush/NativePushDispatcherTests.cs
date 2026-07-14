@@ -728,6 +728,91 @@ public sealed class NativePushDispatcherTests
         sendCount.Should().Be(2, "a different kind (failure) has its own rate bucket and must not be silenced");
     }
 
+    [Fact]
+    public async Task DispatchAsync_DeduplicatedEvent_DoesNotConsumeRateLimitCapacity()
+    {
+        var userId = Guid.NewGuid();
+        AttentionItemDto first = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto third = BuildAttentionItem(AttentionKind.Offline) with
+        {
+            PrinterId = first.PrinterId,
+        };
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens
+            .Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var attention = new Mock<IAttentionService>();
+        attention
+            .Setup(service => service.FindItemAsync(
+                userId,
+                first.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(first);
+        attention
+            .Setup(service => service.FindItemAsync(
+                userId,
+                third.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(third);
+
+        int sendCount = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender
+            .Setup(value => value.SendAsync(
+                It.IsAny<NativePushEnvelope>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                Interlocked.Increment(ref sendCount);
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton<IAttentionService>(attention.Object);
+        services.AddSingleton(db);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        var monitor = new StaticOptionsMonitor(new NativePushSettings
+        {
+            Mode = NativePushMode.Relay,
+            DedupeWindow = TimeSpan.FromMinutes(5),
+            RateLimitPerUser = 2,
+            RateLimitWindow = TimeSpan.FromMinutes(5),
+        });
+        using var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            sender.Object,
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+
+        await sut.DispatchAsync(first.Id, AttentionChangeKind.Created, targetUserId: null);
+        await sut.DispatchAsync(first.Id, AttentionChangeKind.Created, targetUserId: null);
+        await sut.DispatchAsync(third.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        sendCount.Should().Be(
+            2,
+            "the duplicate must be discarded before rate capacity is consumed, leaving room for the distinct third event");
+    }
+
     private static DeviceToken MakeToken(Guid userId, string installationId)
     {
         return new DeviceToken

@@ -259,6 +259,15 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
+        string dedupeKey = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{userId:D}|{attentionItemId}|{changeKind}");
+        if (!ShouldEmit(dedupeKey, settings, DateTime.UtcNow))
+        {
+            _metrics.SkippedDedupe.Add(1);
+            return;
+        }
+
         // Hicks H2-v5-final: rate-limit ONCE per logical event before device
         // fan-out. Scope is (userId, printerId, kind) so:
         //   * a noisy printer/kind cannot suppress unrelated critical alerts
@@ -337,19 +346,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         IDeviceTokenRepository tokens,
         CancellationToken cancellationToken)
     {
-        string dedupeKey = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{userId:D}|{deviceToken.Id:D}|{attentionItemId}|{changeKind}");
-        if (!ShouldEmit(dedupeKey, settings, DateTime.UtcNow))
-        {
-            _metrics.SkippedDedupe.Add(1);
-            return;
-        }
-
         // Rate limit consumption has moved to DispatchForOwnerAsync so it
-        // scopes per (userId, printerId, kind) and is charged exactly once
-        // per envelope regardless of how many devices this user has. See
-        // Hicks H2-v5-final.
+        // runs after logical-event dedupe and is charged exactly once per
+        // envelope regardless of how many devices this user has.
         NativePushEnvelope envelope = BuildEnvelope(item, changeKind, deviceToken);
         _metrics.Attempted.Add(1);
 
