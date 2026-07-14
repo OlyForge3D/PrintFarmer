@@ -262,15 +262,16 @@ public class AutoDispatchConcurrencyTests : IDisposable
                 lock (_dispatchLock)
                 {
                     _dispatchedPairs.Add((jId, pId));
-                }
 
-                // Simulate what the real dispatch does: assign the job so the next cycle won't re-dispatch it
-                PrintJob? job = _db.PrintJobs.FirstOrDefault(j => j.Id == jId);
-                if (job is not null)
-                {
-                    job.AssignedPrinterId = pId;
-                    job.Status = PrintJobStatus.Starting;
-                    _db.SaveChanges();
+                    // This shared fixture context is not thread-safe. Serialize the mock's
+                    // durable assignment so it accurately models the real scoped dispatch service.
+                    PrintJob? job = _db.PrintJobs.FirstOrDefault(j => j.Id == jId);
+                    if (job is not null)
+                    {
+                        job.AssignedPrinterId = pId;
+                        job.Status = PrintJobStatus.Starting;
+                        _db.SaveChanges();
+                    }
                 }
 
                 dispatchObserved.TrySetResult((jId, pId));
@@ -364,12 +365,15 @@ public class AutoDispatchConcurrencyTests : IDisposable
                 lock (_dispatchLock)
                 {
                     _dispatchedPairs.Add((jobId, printerId));
+
+                    // The production service uses one scoped DbContext per dispatch. This
+                    // lock gives the shared test fixture context the equivalent safety.
+                    PrintJob job = _db.PrintJobs.Single(value => value.Id == jobId);
+                    job.AssignedPrinterId = printerId;
+                    job.Status = PrintJobStatus.Starting;
+                    _db.SaveChanges();
                 }
 
-                PrintJob job = _db.PrintJobs.Single(value => value.Id == jobId);
-                job.AssignedPrinterId = printerId;
-                job.Status = PrintJobStatus.Starting;
-                _db.SaveChanges();
                 return Task.FromResult(new QueuedPrintJobDto());
             });
 
