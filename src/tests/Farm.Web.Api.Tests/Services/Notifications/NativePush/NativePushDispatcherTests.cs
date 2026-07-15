@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Diagnostics.Metrics;
+using System.Reflection;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
@@ -384,6 +385,354 @@ public sealed class NativePushDispatcherTests
         captured.Should().OnlyContain(envelope => envelope.Token == authorizedToken.Token);
         captured.Select(envelope => envelope.ChangeKind)
             .Should().Equal(AttentionChangeKind.Created, AttentionChangeKind.Resolved);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_AllTransientDeliveryFailureThenResolved_SkipsDismissalAsBenignNoOp()
+    {
+        // #756: every attempt for this recipient's alert generation exhausts
+        // as Transient — the device never actually received the Created
+        // alert. A later Resolved must treat the dismissal as a benign no-op
+        // rather than send a silent push clearing something never shown.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(BuildPushPreferences(userId));
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken deviceToken = MakeToken(userId, "always-transient-device");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([userId]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([deviceToken]);
+
+        var attention = new Mock<IAttentionService>();
+        int findCount = 0;
+        attention.Setup(service => service.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref findCount) == 1 ? item : null);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => captured.Add(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Transient("timeout"));
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 3,
+            },
+            new ImmediateTimeProvider(new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc)));
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        captured.Should().HaveCount(
+            3,
+            "MaxAttempts exhausts all 3 transient retries for the Created alert and no Resolved dismissal is ever sent");
+        captured.Should().OnlyContain(envelope => envelope.ChangeKind == AttentionChangeKind.Created);
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        tokens.Verify(repository => repository.RecordFailureAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        tokens.Verify(repository => repository.InvalidateAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MixedSuccessfulAndNeverDeliveredRecipients_ResolvedOnlyDismissesDeliveredRecipient()
+    {
+        // #756: per-recipient partial success must be preserved. ownerDelivered
+        // got a successful device delivery and is owed a dismissal;
+        // ownerNeverDelivered exhausts every attempt as Transient across its
+        // own device and must not receive a synthetic dismissal for an alert
+        // it never received. One owner's outcome must not affect the other's.
+        Guid ownerDelivered = Guid.NewGuid();
+        Guid ownerNeverDelivered = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.AddRange(
+            BuildPushPreferences(ownerDelivered),
+            BuildPushPreferences(ownerNeverDelivered));
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken deliveredToken = MakeToken(ownerDelivered, "delivered-device");
+        DeviceToken neverDeliveredToken = MakeToken(ownerNeverDelivered, "never-delivered-device");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([ownerDelivered, ownerNeverDelivered]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(ownerDelivered, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([deliveredToken]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(ownerNeverDelivered, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([neverDeliveredToken]);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        int deliveredReads = 0;
+        int neverDeliveredReads = 0;
+        attention.Setup(service => service.FindItemAsync(ownerDelivered, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref deliveredReads) == 1 ? item : null);
+        attention.Setup(service => service.FindItemAsync(ownerNeverDelivered, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref neverDeliveredReads) == 1 ? item : null);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                captured.Add(envelope);
+                return Task.FromResult(envelope.Token == neverDeliveredToken.Token
+                    ? NativePushDispatchResult.Transient("timeout")
+                    : NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 2,
+            },
+            new ImmediateTimeProvider(new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc)));
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+        captured.Clear();
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        captured.Should().ContainSingle(
+            "only the recipient with at least one successful delivery is owed a dismissal");
+        NativePushEnvelope resolved = captured.Single();
+        resolved.ChangeKind.Should().Be(AttentionChangeKind.Resolved);
+        resolved.Token.Should().Be(deliveredToken.Token);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_CreatedDeliveredThenUpdatedNeverDelivered_ResolvedStillDismisses()
+    {
+        // #756 follow-up: a later Updated generation for the same recipient may
+        // fail every retry, but it must inherit the earlier Created delivery
+        // state so Resolved still clears the alert the client already saw.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(BuildPushPreferences(userId));
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken deviceToken = MakeToken(userId, "created-delivered-then-updated-transient");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([userId]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([deviceToken]);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        int findCount = 0;
+        attention.Setup(service => service.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref findCount) <= 2 ? item : null);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                captured.Add(envelope);
+                return Task.FromResult(envelope.ChangeKind == AttentionChangeKind.Updated
+                    ? NativePushDispatchResult.Transient("timeout")
+                    : NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 2,
+            },
+            new ImmediateTimeProvider(new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc)));
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+        captured.Clear();
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Updated, targetUserId: null);
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        captured.Select(envelope => envelope.ChangeKind).Should().Equal(
+            AttentionChangeKind.Updated,
+            AttentionChangeKind.Updated,
+            AttentionChangeKind.Resolved);
+        NativePushEnvelope resolved = captured.Last();
+        resolved.ChangeKind.Should().Be(AttentionChangeKind.Resolved);
+        resolved.Token.Should().Be(deviceToken.Token);
+    }
+
+    [Fact]
+    public async Task ReplaceSnapshot_ConsumedBetweenReadAndTryUpdate_DoesNotLeakDeliveryFlagToRetriedReplacement()
+    {
+        // Hicks round-3 #756 regression: if ReplaceSnapshot reads a delivered
+        // snapshot, then a concurrent consume removes that snapshot before the
+        // compare-and-swap executes, the retried replacement must NOT carry a
+        // stale inherited delivery bit into its later TryAdd.
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+        var scopes = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        using NativePushDispatcher sut = Build(sender.Object, scopes.Object, NativePushMode.Disabled);
+
+        Type dispatcherType = typeof(NativePushDispatcher);
+        Type snapshotKeyType = dispatcherType.GetNestedType("AttentionSnapshotKey", BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("AttentionSnapshotKey reflection lookup failed.");
+        Type snapshotType = dispatcherType.GetNestedType("AttentionSnapshot", BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("AttentionSnapshot reflection lookup failed.");
+        MethodInfo replaceSnapshot = dispatcherType.GetMethod(
+                "ReplaceSnapshot",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReplaceSnapshot reflection lookup failed.");
+        MethodInfo tryConsumeSnapshot = dispatcherType.GetMethod(
+                "TryConsumeSnapshot",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("TryConsumeSnapshot reflection lookup failed.");
+        PropertyInfo syncProperty = snapshotType.GetProperty("Sync")
+            ?? throw new InvalidOperationException("AttentionSnapshot.Sync reflection lookup failed.");
+        PropertyInfo deliveredProperty = snapshotType.GetProperty("HasSuccessfulDelivery")
+            ?? throw new InvalidOperationException("AttentionSnapshot.HasSuccessfulDelivery reflection lookup failed.");
+        MethodInfo markDelivered = snapshotType.GetMethod("MarkDelivered")
+            ?? throw new InvalidOperationException("AttentionSnapshot.MarkDelivered reflection lookup failed.");
+
+        object key = Activator.CreateInstance(
+                snapshotKeyType,
+                Guid.NewGuid(),
+                "attention:replace-snapshot-race")
+            ?? throw new InvalidOperationException("AttentionSnapshotKey construction failed.");
+        object deliveredSnapshot = Activator.CreateInstance(
+                snapshotType,
+                AttentionKind.Offline,
+                Guid.NewGuid(),
+                null,
+                null,
+                new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc))
+            ?? throw new InvalidOperationException("Delivered AttentionSnapshot construction failed.");
+        markDelivered.Invoke(deliveredSnapshot, null);
+        replaceSnapshot.Invoke(sut, new[] { key, deliveredSnapshot });
+
+        object replacement = Activator.CreateInstance(
+                snapshotType,
+                AttentionKind.Offline,
+                Guid.NewGuid(),
+                null,
+                null,
+                new DateTime(2026, 7, 14, 12, 0, 1, DateTimeKind.Utc))
+            ?? throw new InvalidOperationException("Replacement AttentionSnapshot construction failed.");
+        object sync = syncProperty.GetValue(deliveredSnapshot)
+            ?? throw new InvalidOperationException("Delivered snapshot sync lock was null.");
+
+        var replaceCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Thread replaceThread = new(() =>
+        {
+            try
+            {
+                replaceSnapshot.Invoke(sut, new[] { key, replacement });
+                replaceCompleted.TrySetResult();
+            }
+            catch (TargetInvocationException exception) when (exception.InnerException is not null)
+            {
+                replaceCompleted.TrySetException(exception.InnerException);
+            }
+            catch (Exception exception)
+            {
+                replaceCompleted.TrySetException(exception);
+            }
+        });
+        replaceThread.IsBackground = true;
+
+        bool replaceThreadBlockedOnStaleSnapshot;
+        object? consumedDeliveredSnapshot;
+        lock (sync)
+        {
+            replaceThread.Start();
+            replaceThreadBlockedOnStaleSnapshot = SpinWait.SpinUntil(
+                () => (replaceThread.ThreadState & ThreadState.WaitSleepJoin) != 0,
+                TimeSpan.FromSeconds(10));
+            if (replaceThreadBlockedOnStaleSnapshot)
+            {
+                object?[] consumeArgs = { key, null };
+                bool consumed = (bool)(tryConsumeSnapshot.Invoke(sut, consumeArgs)
+                    ?? throw new InvalidOperationException("TryConsumeSnapshot returned null."));
+                consumed.Should().BeTrue("the stale delivered snapshot must be consumed before ReplaceSnapshot retries");
+                consumedDeliveredSnapshot = consumeArgs[1];
+            }
+            else
+            {
+                consumedDeliveredSnapshot = null;
+            }
+        }
+
+        replaceThreadBlockedOnStaleSnapshot.Should().BeTrue(
+            "the regression harness must block ReplaceSnapshot after its unguarded read but before it can swap");
+        consumedDeliveredSnapshot.Should().BeSameAs(
+            deliveredSnapshot,
+            "the race harness must remove the originally delivered resident snapshot");
+
+        await replaceCompleted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        object?[] consumeReplacementArgs = { key, null };
+        bool consumedReplacement = (bool)(tryConsumeSnapshot.Invoke(sut, consumeReplacementArgs)
+            ?? throw new InvalidOperationException("TryConsumeSnapshot returned null."));
+        consumedReplacement.Should().BeTrue("ReplaceSnapshot should retry and publish the replacement snapshot");
+        consumeReplacementArgs[1].Should().BeSameAs(
+            replacement,
+            "the retried replacement should be the snapshot later consumed by Resolved");
+        ((bool)(deliveredProperty.GetValue(replacement)
+            ?? throw new InvalidOperationException("Replacement delivery flag was null.")))
+            .Should().BeFalse("a failed compare-and-swap must not leave the retried replacement permanently marked as delivered");
+        ((bool)(deliveredProperty.GetValue(consumeReplacementArgs[1]!)
+            ?? throw new InvalidOperationException("Consumed replacement delivery flag was null.")))
+            .Should().BeFalse("Resolved must observe the retried replacement as never delivered and skip the silent dismissal");
     }
 
     [Fact]
@@ -1979,24 +2328,30 @@ public sealed class NativePushDispatcherTests
                     occurredAtUtc: updatedAt.AddSeconds(1))
                 .WaitAsync(TimeSpan.FromSeconds(10));
 
-            sent.Should().Equal(AttentionChangeKind.Updated, AttentionChangeKind.Resolved);
+            // #756: the only attempt so far for this generation returned
+            // Transient("timeout") and the pending retry that could still
+            // succeed is fenced by this same resolution consuming the
+            // snapshot below — this recipient has zero successful
+            // deliveries for this generation, so the dismissal is a benign
+            // no-op and must NOT be sent.
+            sent.Should().Equal(AttentionChangeKind.Updated);
 
             clock.ReleaseRetry();
             await updated.WaitAsync(TimeSpan.FromSeconds(10));
 
             sent.Should().Equal(
-                new[] { AttentionChangeKind.Updated, AttentionChangeKind.Resolved },
-                "the consumed snapshot makes the pending targeted retry obsolete");
+                new[] { AttentionChangeKind.Updated },
+                "the consumed snapshot makes the pending targeted retry obsolete and the never-delivered generation suppresses the dismissal");
             sender.Verify(value => value.SendAsync(
                     It.IsAny<NativePushEnvelope>(),
                     It.IsAny<CancellationToken>()),
-                Times.Exactly(2));
+                Times.Exactly(1));
             tokens.Verify(repository => repository.RecordSuccessAsync(
                     It.IsAny<Guid>(),
                     It.IsAny<long>(),
                     It.IsAny<DateTime>(),
                     It.IsAny<CancellationToken>()),
-                Times.Once);
+                Times.Never);
             tokens.Verify(repository => repository.RecordFailureAsync(
                     It.IsAny<Guid>(),
                     It.IsAny<long>(),
