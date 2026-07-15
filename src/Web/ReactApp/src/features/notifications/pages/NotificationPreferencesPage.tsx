@@ -3,46 +3,29 @@ import { useNavigate } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Card, Toggle, Select, Alert, Button, Spinner } from '@/common/components/ui';
 import { BellIcon } from '@/common/components/icons/MdiIcons';
-import { useNotificationPreferences, useUpdateNotificationPreferences } from '@/features/notifications/hooks/useNotificationPreferences';
+import {
+  useNotificationCapabilities,
+  useNotificationPreferences,
+  useUpdateNotificationPreferences,
+} from '@/features/notifications/hooks/useNotificationPreferences';
 import { usePushSubscription } from '@/features/notifications/hooks/usePushSubscription';
 import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { NotificationFrequency, NotificationPreferenceEventType } from '@/types/api';
-import type { NotificationEventChannelPreferenceDto, UpdateNotificationPreferencesRequest } from '@/types/api';
+import type { UpdateNotificationPreferencesRequest } from '@/types/api';
+import {
+  buildSavePayload,
+  defaultEventChannelPreferences,
+  hasAnyEnrolledPush,
+  hydratePreferences,
+  resolveSupportedEventTypes,
+  withDerivedLegacyFlags,
+} from '@/features/notifications/preferencesAdapter';
+import {
+  JOB_EVENT_ROWS,
+  OPERATOR_EVENT_ROWS,
+  type EventRowMeta,
+} from '@/features/notifications/operatorCategories';
 import { toast } from 'sonner';
-
-const DEFAULT_EVENT_CHANNEL_PREFERENCES: NotificationEventChannelPreferenceDto[] = [
-  { eventType: NotificationPreferenceEventType.JobStarted, inApp: false, email: false, push: false, telegram: false },
-  { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: true, push: true, telegram: false },
-  { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: true, push: true, telegram: false },
-  { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: true, push: true, telegram: false },
-];
-
-const DEFAULT_PREFERENCES: UpdateNotificationPreferencesRequest = {
-  enableEmailNotifications: true,
-  enablePushNotifications: true,
-  enableInAppNotifications: true,
-  enableTelegramNotifications: false,
-  notifyOnCompletion: true,
-  notifyOnFailure: true,
-  notifyOnStart: false,
-  notifyOnPause: true,
-  eventChannelPreferences: DEFAULT_EVENT_CHANNEL_PREFERENCES,
-  frequency: NotificationFrequency.RealTime,
-  retentionDays: 30,
-};
-
-interface EventRow {
-  eventType: NotificationPreferenceEventType;
-  label: string;
-  description: string;
-}
-
-const EVENT_ROWS: EventRow[] = [
-  { eventType: NotificationPreferenceEventType.JobStarted, label: 'Print Started', description: 'When a print job begins printing' },
-  { eventType: NotificationPreferenceEventType.JobCompleted, label: 'Print Complete', description: 'When a print job finishes successfully' },
-  { eventType: NotificationPreferenceEventType.JobFailed, label: 'Print Failed', description: 'When a print job fails or encounters errors' },
-  { eventType: NotificationPreferenceEventType.JobPaused, label: 'Print Paused/Resumed', description: 'When a print job is paused or resumed' },
-];
 
 const FREQUENCY_OPTIONS = [
   { value: NotificationFrequency.RealTime, label: 'Real-time' },
@@ -52,89 +35,93 @@ const FREQUENCY_OPTIONS = [
   { value: NotificationFrequency.Never, label: 'Disabled' },
 ];
 
-function withDerivedLegacyFlags(request: UpdateNotificationPreferencesRequest): UpdateNotificationPreferencesRequest {
-  const matrix = request.eventChannelPreferences ?? DEFAULT_EVENT_CHANNEL_PREFERENCES;
-  const byEvent = (eventType: NotificationPreferenceEventType) => matrix.find(x => x.eventType === eventType);
-  const started = byEvent(NotificationPreferenceEventType.JobStarted);
-  const completed = byEvent(NotificationPreferenceEventType.JobCompleted);
-  const paused = byEvent(NotificationPreferenceEventType.JobPaused);
-
-  return {
-    ...request,
-    enableEmailNotifications: matrix.some(x => x.email),
-    enablePushNotifications: matrix.some(x => x.push),
-    enableInAppNotifications: matrix.some(x => x.inApp),
-    enableTelegramNotifications: matrix.some(x => x.telegram),
-    notifyOnStart: !!started && (started.inApp || started.email || started.push || started.telegram),
-    notifyOnCompletion: !!completed && (completed.inApp || completed.email || completed.push || completed.telegram),
-    notifyOnFailure: true,
-    notifyOnPause: !!paused && (paused.inApp || paused.email || paused.push || paused.telegram),
-    eventChannelPreferences: matrix.map(item => (
-      item.eventType === NotificationPreferenceEventType.JobFailed
-        ? { ...item, inApp: true }
-        : item
-    )),
-  };
-}
-
 export function NotificationPreferencesPage({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
-  const { data: preferences, isLoading, error } = useNotificationPreferences();
+  const { data: preferences, isLoading: isPrefsLoading, error: prefsError } = useNotificationPreferences();
+  const {
+    data: capabilities,
+    isLoading: isCapsLoading,
+    error: capsError,
+  } = useNotificationCapabilities();
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
 
   const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest | null>(null);
+  const [serverSupportsOperatorCategories, setServerSupportsOperatorCategories] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
+
+  // The capability probe explicitly resolves to `null` on legacy servers
+  // (endpoint 404). Any other unresolved state — still loading, or a
+  // non-404 network/server error — must NOT be interpreted as legacy or the
+  // save path silently strips operator edits. `capabilitiesResolved` is
+  // the single source of truth for "safe to build a save payload".
+  const capabilitiesResolved =
+    hasResolvedQueryData(capabilities) && !isCapsLoading && capsError == null;
+  const capabilitiesPending =
+    !hasResolvedQueryData(capabilities) && capsError == null;
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
 
   useEffect(() => {
-    if (isDirtyRef.current || !hasResolvedQueryData(preferences)) {
-      return;
-    }
+    if (!hasResolvedQueryData(preferences)) return;
 
-    if (preferences === null) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync server preferences into local form state
-      setFormState(DEFAULT_PREFERENCES);
-      setIsDirty(false);
-      return;
-    }
+    const { form, serverSupportsOperatorCategories: supports } = hydratePreferences(
+      preferences,
+      capabilities ?? null,
+    );
+    // The banner-visibility flag must sync independently of form dirtiness
+    // so a background capabilities refetch on a capable server (after
+    // preferences hydrated first) always clears the stale legacy banner.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync server capability visibility into local UI state
+    setServerSupportsOperatorCategories(supports);
+    if (isDirtyRef.current) return;
 
-    const nextState = withDerivedLegacyFlags({
-      enableEmailNotifications: preferences.enableEmailNotifications,
-      enablePushNotifications: preferences.enablePushNotifications,
-      enableInAppNotifications: preferences.enableInAppNotifications,
-      enableTelegramNotifications: preferences.enableTelegramNotifications,
-      notifyOnCompletion: preferences.notifyOnCompletion,
-      notifyOnFailure: preferences.notifyOnFailure,
-      notifyOnStart: preferences.notifyOnStart,
-      notifyOnPause: preferences.notifyOnPause,
-      eventChannelPreferences: preferences.eventChannelPreferences?.length
-        ? preferences.eventChannelPreferences
-        : DEFAULT_EVENT_CHANNEL_PREFERENCES,
-      frequency: preferences.frequency,
-      retentionDays: preferences.retentionDays,
-    });
-
-    setFormState(nextState);
+    setFormState(withDerivedLegacyFlags(form));
     setIsDirty(false);
-  }, [preferences]);
+  }, [preferences, capabilities]);
 
+  // Per-row capability gate for the operator block. `serverSupportsOperatorCategories`
+  // only tells us the server advertised AT LEAST ONE operator token — during a
+  // partial rollout it can advertise some operator tokens but not others, and
+  // enabling edits on a row whose token isn't in `supportedEventTypes` would let
+  // the user toggle a row that `buildSavePayload` then silently strips on save.
+  const supportedEventTypes = useMemo(
+    () => resolveSupportedEventTypes(capabilities ?? null),
+    [capabilities],
+  );
+  // Browser-push enrollment should only key off rows that are both visible and
+  // supported. Otherwise unsupported visible rows from an anticipatory matrix
+  // can keep the prompt stuck on even when every supported push row is off.
+  const visibleEventTypes = useMemo(
+    () => new Set<NotificationPreferenceEventType>([
+      ...JOB_EVENT_ROWS.map(r => r.eventType),
+      ...OPERATOR_EVENT_ROWS.map(r => r.eventType),
+    ]),
+    [],
+  );
   const isAnyPushEnabled = useMemo(
-    () => (formState?.eventChannelPreferences ?? []).some(item => item.push),
-    [formState?.eventChannelPreferences],
+    () => hasAnyEnrolledPush(
+      formState?.eventChannelPreferences,
+      visibleEventTypes,
+      supportedEventTypes,
+    ),
+    [formState?.eventChannelPreferences, visibleEventTypes, supportedEventTypes],
   );
 
-  const updateMatrixField = (eventType: NotificationPreferenceEventType, key: 'inApp' | 'email' | 'push' | 'telegram', value: boolean) => {
+  const updateMatrixField = (
+    eventType: NotificationPreferenceEventType,
+    key: 'inApp' | 'email' | 'push' | 'telegram',
+    value: boolean,
+  ) => {
     if (formState === null) {
       toast.error('Notification preferences are still loading');
       return;
     }
 
-    const current = formState.eventChannelPreferences ?? DEFAULT_EVENT_CHANNEL_PREFERENCES;
+    const current = formState.eventChannelPreferences ?? defaultEventChannelPreferences();
     const nextMatrix = current.map(item => {
       if (item.eventType !== eventType) return item;
       if (eventType === NotificationPreferenceEventType.JobFailed && key === 'inApp') {
@@ -169,8 +156,16 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
       return;
     }
 
+    // Refuse to build a save payload from unresolved capability state.
+    // `buildSavePayload(request, undefined)` would treat the server as legacy
+    // and permanently strip operator-row edits, reporting success to the
+    // user — a silent data-loss bug. Guarded by `capabilitiesResolved`.
+    if (!capabilitiesResolved) {
+      toast.error('Still checking notification capabilities — please retry in a moment');
+      return;
+    }
     try {
-      await updateMutation.mutateAsync(withDerivedLegacyFlags(formState));
+      await updateMutation.mutateAsync(buildSavePayload(formState, capabilities ?? null));
       setIsDirty(false);
       toast.success('Notification preferences saved');
     } catch {
@@ -187,7 +182,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     }
   };
 
-  if (error) {
+  if (prefsError) {
     const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
     if (embedded) return errorContent;
     return (
@@ -197,7 +192,13 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     );
   }
 
-  if (isLoading || !hasResolvedQueryData(preferences) || formState === null) {
+  if (
+    isPrefsLoading ||
+    !hasResolvedQueryData(preferences) ||
+    isCapsLoading ||
+    capabilitiesPending ||
+    formState === null
+  ) {
     const loadingContent = (
       <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
         <Spinner size="lg" />
@@ -215,10 +216,71 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     <Button
       variant="primary"
       onClick={handleSave}
-      disabled={!isDirty || updateMutation.isPending}
+      disabled={!isDirty || updateMutation.isPending || !capabilitiesResolved}
     >
       {updateMutation.isPending ? 'Saving...' : 'Save Preferences'}
     </Button>
+  );
+
+  const renderRow = (row: EventRowMeta, disabledChannels = false) => {
+    const pref = getEventPreference(row.eventType);
+    const alwaysOnInApp = !!row.alwaysOnInApp;
+    return (
+      <div
+        key={row.eventType}
+        className="grid grid-cols-[2fr,1fr,1fr,1fr,1fr] gap-3 items-center py-2 border-b border-pf-border last:border-b-0"
+      >
+        <div>
+          <p className="text-sm font-medium text-pf-text-primary">{row.label}</p>
+          <p className="text-xs text-pf-text-secondary">{row.description}</p>
+        </div>
+        <div>
+          <Toggle
+            checked={alwaysOnInApp ? true : !!pref?.inApp}
+            disabled={alwaysOnInApp || disabledChannels}
+            onChange={(e) => updateMatrixField(row.eventType, 'inApp', e.target.checked)}
+            aria-label={`${row.label} in-app`}
+          />
+          {alwaysOnInApp && (
+            <p className="text-[11px] text-pf-text-secondary mt-1">Always on</p>
+          )}
+        </div>
+        <div>
+          <Toggle
+            checked={!!pref?.email}
+            disabled={disabledChannels}
+            onChange={(e) => updateMatrixField(row.eventType, 'email', e.target.checked)}
+            aria-label={`${row.label} email`}
+          />
+        </div>
+        <div>
+          <Toggle
+            checked={!!pref?.push}
+            disabled={disabledChannels}
+            onChange={(e) => updateMatrixField(row.eventType, 'push', e.target.checked)}
+            aria-label={`${row.label} push`}
+          />
+        </div>
+        <div>
+          <Toggle
+            checked={!!pref?.telegram}
+            disabled={disabledChannels}
+            onChange={(e) => updateMatrixField(row.eventType, 'telegram', e.target.checked)}
+            aria-label={`${row.label} Telegram`}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const matrixHeader = (
+    <div className="grid grid-cols-[2fr,1fr,1fr,1fr,1fr] gap-3 items-center text-xs uppercase tracking-wide text-pf-text-secondary mb-2">
+      <div>Event</div>
+      <div>In-App</div>
+      <div>Email</div>
+      <div>Browser Push</div>
+      <div>Telegram</div>
+    </div>
   );
 
   const content = (
@@ -229,57 +291,37 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
           <p className="text-sm text-pf-text-secondary mt-1">Choose which channels each print event should use</p>
         </div>
         <div className="p-4">
-          <div className="grid grid-cols-[2fr,1fr,1fr,1fr,1fr] gap-3 items-center text-xs uppercase tracking-wide text-pf-text-secondary mb-2">
-            <div>Event</div>
-            <div>In-App</div>
-            <div>Email</div>
-            <div>Browser Push</div>
-            <div>Telegram</div>
-          </div>
+          {matrixHeader}
           <div className="space-y-3">
-            {EVENT_ROWS.map(row => {
-              const pref = getEventPreference(row.eventType);
-              return (
-                <div key={row.eventType} className="grid grid-cols-[2fr,1fr,1fr,1fr,1fr] gap-3 items-center py-2 border-b border-pf-border last:border-b-0">
-                  <div>
-                    <p className="text-sm font-medium text-pf-text-primary">{row.label}</p>
-                    <p className="text-xs text-pf-text-secondary">{row.description}</p>
-                  </div>
-                  <div>
-                    <Toggle
-                      checked={row.eventType === NotificationPreferenceEventType.JobFailed ? true : !!pref?.inApp}
-                      disabled={row.eventType === NotificationPreferenceEventType.JobFailed}
-                      onChange={(e) => updateMatrixField(row.eventType, 'inApp', e.target.checked)}
-                      aria-label={`${row.label} in-app`}
-                    />
-                    {row.eventType === NotificationPreferenceEventType.JobFailed && (
-                      <p className="text-[11px] text-pf-text-secondary mt-1">Always on</p>
-                    )}
-                  </div>
-                  <div>
-                    <Toggle
-                      checked={!!pref?.email}
-                      onChange={(e) => updateMatrixField(row.eventType, 'email', e.target.checked)}
-                      aria-label={`${row.label} email`}
-                    />
-                  </div>
-                  <div>
-                    <Toggle
-                      checked={!!pref?.push}
-                      onChange={(e) => updateMatrixField(row.eventType, 'push', e.target.checked)}
-                      aria-label={`${row.label} push`}
-                    />
-                  </div>
-                  <div>
-                    <Toggle
-                      checked={!!pref?.telegram}
-                      onChange={(e) => updateMatrixField(row.eventType, 'telegram', e.target.checked)}
-                      aria-label={`${row.label} Telegram`}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+            {JOB_EVENT_ROWS.map(row => renderRow(row))}
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="p-4 border-b border-pf-border">
+          <h2 className="text-lg font-semibold text-pf-text-primary">Operator Alerts</h2>
+          <p className="text-sm text-pf-text-secondary mt-1">
+            Farm-wide alerts that need operator attention beyond a single print
+          </p>
+        </div>
+        <div className="p-4">
+          {capsError ? (
+            <Alert type="warning" className="mb-4">
+              Could not verify notification capabilities. Operator alert changes are disabled
+              until this server responds.
+            </Alert>
+          ) : !serverSupportsOperatorCategories ? (
+            <Alert type="info" className="mb-4">
+              This server does not yet expose operator alert categories. Toggles are disabled
+              until the server is updated; existing print event preferences are unaffected.
+            </Alert>
+          ) : null}
+          {matrixHeader}
+          <div className="space-y-3">
+            {OPERATOR_EVENT_ROWS.map(row =>
+              renderRow(row, !supportedEventTypes.has(row.eventType) || !!capsError),
+            )}
           </div>
         </div>
       </Card>
