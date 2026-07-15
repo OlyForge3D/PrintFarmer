@@ -2851,53 +2851,157 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ResolvedFullyCompletesBeforeNewerCreatedReservation_NewerCreatedEmitsUnderAtomicResetInterleavingA()
+    public async Task DispatchAsync_RateLimitedVersionlessDedupeSurvivesStalledGlobalResolutionAtomicReset_NewerTargetedCreatedMustEmitInterleavingA()
     {
         // #755 Kane cycle 3 deterministic coverage — dedupe-reset race
-        // interleaving (a): "Resolution completes BEFORE the newer same-kind
-        // reservation is established."
+        // interleaving (a): "Resolution is INVOKED before the newer same-kind
+        // reservation, but its atomic reset is asynchronously stalled BEFORE
+        // it can fire, so the reset is stale/late by the time the newer
+        // reservation attempts its dedupe check."
         //
-        // Sequential awaits establish observable ordering without timing
-        // sleeps: each DispatchAsync is fully complete (including transport,
-        // result persistence, and lifecycle Complete) before the next
-        // DispatchAsync begins. That ordering is what "resolution completes
-        // before" means — Resolved's TryObserve has fired the atomic dedupe
-        // reset AND its silent-dismissal transport is fully done before the
-        // newer Created enters TryObserveLifecycle.
+        // Concretely:
+        //   1. The (user, printer, kind) rate bucket is pre-filled by a
+        //      prior delivered dispatch of a DIFFERENT attention item (a
+        //      "rate filler") that shares the rate key. v1 targeted
+        //      Created for the item under test then hits the rate limit
+        //      and takes the "rate-limited/no-transport, versionless-
+        //      reservation" path: TryBeginSend.shouldEmit commits the
+        //      (user, item, Created) dedupe entry via AddOrUpdate,
+        //      tryConsumeRate returns false, and TryBeginSend sets
+        //      _latestCommitted=true and returns LifecycleSendBlockReason.
+        //      RateLimit. No envelope is sent for v1; _snapshot stays
+        //      null; the dedupe entry is intentionally retained per the
+        //      current rate-limit branch's comment.
+        //   2. A global v2 Resolved for the same item is dispatched
+        //      (targetUserId=null). It stalls inside GetActiveTokenOwners
+        //      Async via an explicit TaskCompletionSource barrier — BEFORE
+        //      it can reach any DispatchForOwnerAsync's TryObserveLifecycle,
+        //      and therefore BEFORE the onResolvedObserved callback can
+        //      fire the atomic dedupe reset for the item's per-user
+        //      lifecycle. Global Resolved is the ONLY caller of
+        //      GetActiveTokenOwnersAsync in the dispatch pipeline;
+        //      targeted dispatches take the explicit-owner path at
+        //      DispatchCoreAsync's `owners = new[] { explicitUser }`
+        //      branch and never enter that method.
+        //   3. While v2 is stalled, a newer targeted v3 Created for user A
+        //      on the same item is dispatched. Targeted runs on
+        //      lane_(A, item), which is a DIFFERENT AttentionDispatchLane
+        //      than v2's lane_(null, item), so v3 is not serialised behind
+        //      v2's stalled semaphore. v3's TryObserve accepts (v3 > v1),
+        //      bumps _latest to v3 AND resets _latestCommitted=false on
+        //      the version bump, but Created does NOT fire the atomic
+        //      dedupe reset (only Resolved does). v3 then reaches
+        //      TryBeginSend.shouldEmit, which examines the versionless
+        //      (user, item, Created) dedupe entry.
+        //   4. On the rejected candidate 2c3771cd, v1's still-valid entry
+        //      blocks v3: shouldEmit returns false → TryBeginSend sets
+        //      _latestCommitted=true and returns LifecycleSendBlockReason.
+        //      Dedupe → v3 NOT sent. When v2's gate finally releases, v2
+        //      fetches its owner list, unions with lifecycle owners (A is
+        //      present via v1's lifecycle), and DispatchForOwnerAsync(A)'s
+        //      TryObserveLifecycle observes _latest=v3 > v2 → Stale, so
+        //      onResolvedObserved does NOT fire (the reset is now
+        //      stale/too late for v3). No envelope is ever emitted for
+        //      this item — the rate-filler's envelope for the DIFFERENT
+        //      item is not what the invariant protects.
+        //   5. On a fixed candidate v3 emits despite v1's older versionless
+        //      dedupe entry. Every viable fix — clearing prior-version
+        //      dedupe when the lifecycle version bumps, making shouldEmit
+        //      version-aware, or rolling back the rate-limit dedupe
+        //      reservation — converges on v3 being sent because none of
+        //      them let an older-version versionless entry suppress a
+        //      strictly-newer legitimate occurrence.
         //
-        // Invariant: a delivered same-kind generation's versionless dedupe
-        // entry cannot suppress a legitimate newer occurrence when
-        // Resolution has already cleared it atomically under the lifecycle
-        // sync lock. This complements the existing "resolved-blocked"
-        // atomicity test by exercising the fully-completed path.
+        // This is GENUINELY DISTINCT from interleaving B in call ordering,
+        // stall mechanism, and prior-generation state:
+        //   - B invokes the newer Created BEFORE Resolution is dispatched,
+        //     so v3 races ahead of a not-yet-invoked reset in a purely
+        //     sequential-await ordering. A invokes Resolution FIRST and
+        //     relies on Resolution being asynchronously stalled BEFORE its
+        //     already-invoked reset can fire — a global-vs-targeted lane
+        //     split plus an explicit async gate, not a serial call swap.
+        //   - B's v1 is DELIVERED (has both dedupe entry AND committed
+        //     snapshot). A's v1 is RATE-LIMITED (has dedupe entry, NO
+        //     snapshot). Any fix must handle both prior states.
+        // Both cover the same underlying versionless-dedupe suppression
+        // invariant from complementary failure modes.
+        //
+        // Determinism: ordering is enforced by TaskCompletionSource
+        // barriers — no timing sleeps. The rate bucket is pre-primed to
+        // force v1's rate-limit branch deterministically. The lane
+        // separation (targeted vs global) is what lets v3 execute while
+        // v2 is stalled without contending on a shared semaphore.
         Guid userId = Guid.NewGuid();
-        AttentionItemDto initial = BuildAttentionItem(AttentionKind.Offline);
+        Guid sharedPrinterId = Guid.NewGuid();
+        AttentionItemDto rateFiller = BuildAttentionItem(AttentionKind.Offline) with
+        {
+            PrinterId = sharedPrinterId,
+            PrinterName = "Kane A rate-filler printer",
+        };
+        AttentionItemDto initial = BuildAttentionItem(AttentionKind.Offline) with
+        {
+            PrinterId = sharedPrinterId,
+            PrinterName = "Kane A initial printer",
+        };
         AttentionItemDto recurrence = initial with
         {
             PrinterId = Guid.NewGuid(),
-            PrinterName = "Kane recurrence printer",
+            PrinterName = "Kane A recurrence printer",
         };
+
         await using AppDbContext db = BuildDbContext();
         Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
-        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    InstallationId = "test-install",
+                    Token = "AA".PadRight(64, 'A'),
+                    Platform = "ios",
+                    Environment = "development",
+                    IsActive = true,
+                },
+            });
         tokens.Setup(r => r.RecordSuccessAsync(
                 It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        int lookupCount = 0;
+        // GetActiveTokenOwnersAsync is called ONLY by the global Resolved
+        // dispatch inside DispatchCoreAsync (targeted dispatches skip it
+        // via the explicit-owner branch). We gate v2's single call to this
+        // method via a TaskCompletionSource barrier so v2 stalls BEFORE
+        // any DispatchForOwnerAsync (and thus BEFORE any onResolvedObserved
+        // reset for A) can fire.
+        var globalOwnersGateEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseGlobalOwnersGate = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        tokens.Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(async ct =>
+            {
+                globalOwnersGateEntered.TrySetResult();
+                await releaseGlobalOwnersGate.Task.WaitAsync(ct);
+                return (IReadOnlyList<Guid>)new List<Guid> { userId };
+            });
+
+        int initialLookupCount = 0;
         var attention = new Mock<IAttentionService>();
-        attention.Setup(service => service.FindItemAsync(
-                userId,
-                initial.Id,
-                It.IsAny<CancellationToken>()))
+        attention.Setup(s => s.FindItemAsync(userId, rateFiller.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rateFiller);
+        attention.Setup(s => s.FindItemAsync(userId, initial.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
-                int call = Interlocked.Increment(ref lookupCount);
+                int call = Interlocked.Increment(ref initialLookupCount);
                 return call switch
                 {
-                    1 => initial,                    // v1 Created
-                    2 => null,                       // v2 Resolved: source dropped item
-                    _ => recurrence,                 // v3 Created (newer): fresh occurrence
+                    1 => initial,       // v1 targeted Created (about to be rate-limited)
+                    2 => recurrence,    // v3 targeted newer Created (must emit)
+                    _ => null,          // v2 never reaches FindItemAsync — TryObserveLifecycle returns Stale first
                 };
             });
 
@@ -2908,53 +3012,111 @@ public sealed class NativePushDispatcherTests
             .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => sent.Enqueue(envelope))
             .ReturnsAsync(NativePushDispatchResult.Delivered());
 
+        // RateLimitPerUser=1 lets a single prior same-(user, printer, kind)
+        // dispatch pre-fill the bucket so v1 targeted Created is
+        // deterministically rate-limited. DedupeWindow is generous
+        // relative to the inter-dispatch spacing so v1's versionless entry
+        // cannot wall-clock expire before v3's TryBeginSend examines it —
+        // shouldEmit uses TimeProvider.UtcNow (real time in this test) and
+        // the whole scenario executes in well under a second.
         NativePushDispatcher sut = BuildWithScope(
             sender, gate.Object, tokens.Object, attention.Object, db,
             new NativePushSettings
             {
                 Mode = NativePushMode.Relay,
                 DedupeWindow = TimeSpan.FromMinutes(10),
-                RateLimitPerUser = 50,
+                RateLimitPerUser = 1,
                 RateLimitWindow = TimeSpan.FromMinutes(10),
             });
-        DateTime t1 = new(2026, 7, 14, 22, 35, 0, DateTimeKind.Utc);
+        DateTime t0 = new(2026, 7, 14, 22, 45, 0, DateTimeKind.Utc);
 
-        // Step 1: v1 Created at t1. Sequential await ensures v1's entire
-        // dispatch (including sender transport and lifecycle Complete) is
-        // finished before the next line. A versionless (user, item, Created)
-        // dedupe entry is committed for v1 with expiry (t1 + DedupeWindow).
-        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1);
+        // Step 0: pre-fill the (userId, sharedPrinterId, Offline) rate
+        // bucket by delivering a targeted Created for a DIFFERENT attention
+        // item that shares the rate key. Its dedupe key is per-item, so it
+        // does not interfere with v1's dedupe reservation on `initial.Id`.
+        await sut.DispatchAsync(rateFiller.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t0);
 
-        // Step 2: v2 Resolved at t2 > t1. Sequential await ensures v2 is
-        // fully complete. The invariant "Resolution completes" is satisfied
-        // by this await returning. Inside v2's dispatch:
-        //   - TryObserveLifecycle fires ResetActiveLifecycleDedupe under the
-        //     lifecycle sync lock, atomically clearing (user, item, Created).
-        //   - resolvedSnapshot is the v1 activeSnapshot, so a silent
-        //     dismissal is transported and delivered.
-        //   - Lifecycle commit: _snapshot=null, _consumedResolutionVersion=v2.
-        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Resolved, userId, occurredAtUtc: t1.AddSeconds(1));
+        // Step 1: v1 targeted Created for `initial` at t1 > t0. The rate
+        // bucket now holds one timestamp (from Step 0), so TryBeginSend
+        // commits the versionless (userId, initial.Id, Created) dedupe
+        // entry via shouldEmit, then tryConsumeRate returns false and
+        // TryBeginSend returns LifecycleSendBlockReason.RateLimit. No
+        // envelope is sent for v1; the lifecycle records _latest=v1,
+        // _latestCommitted=true, _snapshot stays null, and the dedupe
+        // entry is intentionally retained per the rate-limit branch's
+        // stated invariant.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t0.AddSeconds(1));
 
-        // Step 3: v3 newer Created at t3 > t2. Because Resolution has fully
-        // completed, the versionless dedupe entry from v1 is already gone.
-        // v3's TryBeginSend.shouldEmit sees a clean dedupe key and emits.
-        // The recurrence printer id proves this is the newer occurrence, not
-        // a stale resend of v1's envelope.
-        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1.AddSeconds(2));
-
-        NativePushEnvelope[] captured = sent.ToArray();
-        captured.Select(e => e.ChangeKind).Should().Equal(
-            AttentionChangeKind.Created,
+        // Step 2: v2 global Resolved for `initial` at t2 > t1. Do NOT
+        // await — it will stall inside the mocked GetActiveTokenOwnersAsync
+        // BEFORE it can reach DispatchForOwnerAsync's TryObserveLifecycle,
+        // so onResolvedObserved has NOT fired yet when the barrier
+        // completes. Explicit TCS awaits sequence the ordering without
+        // any timing sleep.
+        Task resolvedTask = sut.DispatchAsync(
+            initial.Id,
             AttentionChangeKind.Resolved,
-            AttentionChangeKind.Created);
-        captured[0].PrinterId.Should().Be(initial.PrinterId);
-        captured[0].Priority.Should().Be(NativePushPriority.Alert);
-        captured[1].AttentionItemId.Should().Be(initial.Id);
-        captured[1].Priority.Should().Be(NativePushPriority.Background,
-            "the resolved silent dismissal must be a background push, proving Resolution's transport truly completed before v3");
-        captured[2].PrinterId.Should().Be(recurrence.PrinterId,
-            "v3 must emit as a NEW occurrence with the recurrence printer id; a stale resend of v1 would carry the initial printer id");
-        captured[2].ChangeKind.Should().Be(AttentionChangeKind.Created);
+            targetUserId: null,
+            occurredAtUtc: t0.AddSeconds(2));
+        await globalOwnersGateEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Step 3: v3 newer targeted Created for user A on `initial` at
+        // t3 > t2 > t1. Targeted takes the explicit-owner path (never
+        // enters GetActiveTokenOwnersAsync) and runs on lane_(A, initial),
+        // which is different from v2's lane_(null, initial). v3's
+        // TryObserve accepts and bumps _latest to v3 while resetting
+        // _latestCommitted to false, but Created does NOT fire the atomic
+        // dedupe reset (only Resolved does). v3 then reaches
+        // TryBeginSend.shouldEmit and examines the versionless
+        // (userId, initial.Id, Created) dedupe entry.
+        //
+        // On the rejected candidate 2c3771cd, v1's still-valid entry
+        // causes shouldEmit to return false → LifecycleSendBlockReason.
+        // Dedupe → v3 is suppressed and NO envelope is sent for v3.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t0.AddSeconds(3));
+
+        // Step 4: capture the state BEFORE v2's gate is released. This
+        // is the crucial observation window: on the rejected candidate,
+        // v3 has already been dropped because v2's atomic reset has not
+        // yet fired. The rate-filler envelope is filtered out; only
+        // envelopes for the item under test matter for the invariant.
+        NativePushEnvelope[] initialEnvelopesBeforeRelease = sent
+            .Where(e => e.AttentionItemId == initial.Id)
+            .ToArray();
+
+        // Step 5: release v2 and let it complete. On BOTH rejected and
+        // fixed candidates, v2's TryObserveLifecycle observes _latest=v3
+        // > v2 and returns Stale (v2's timestamp precedes v3's), so
+        // onResolvedObserved does NOT fire and no silent dismissal is
+        // emitted. This step drains the outstanding task cleanly; it is
+        // not what the invariant asserts.
+        releaseGlobalOwnersGate.TrySetResult();
+        await resolvedTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        NativePushEnvelope[] initialEnvelopesFinal = sent
+            .Where(e => e.AttentionItemId == initial.Id)
+            .ToArray();
+
+        // Invariant: v3's newer Created MUST have emitted during Step 3,
+        // despite v1's rate-limited versionless dedupe reservation and
+        // v2's asynchronously-stalled atomic reset. On the rejected
+        // candidate this assertion fails because v3 was suppressed
+        // before v2's reset could catch up.
+        initialEnvelopesBeforeRelease.Should().ContainSingle(
+            "v3's newer Created must not be suppressed by v1's stale versionless dedupe entry when v2's atomic reset is asynchronously stalled — the reset arrived too late to unblock v3")
+            .Which.PrinterId.Should().Be(recurrence.PrinterId,
+                "the recurrence printer id proves v3 emitted (not a duplicate replay of v1's initial-printer envelope)");
+        initialEnvelopesBeforeRelease[0].ChangeKind.Should().Be(AttentionChangeKind.Created);
+        initialEnvelopesBeforeRelease[0].Priority.Should().Be(NativePushPriority.Alert);
+
+        // v2 becomes Stale after release (v2 < v3 by lifecycle version),
+        // so no additional envelope is added for `initial`. The final
+        // state matches the pre-release state on both rejected and fixed
+        // candidates; the rate-filler envelope for the DIFFERENT attention
+        // item is unrelated to this invariant.
+        initialEnvelopesFinal.Should().Equal(
+            initialEnvelopesBeforeRelease,
+            "v2 was stalled long enough to observe a superseded lifecycle version and become Stale; no silent dismissal must be emitted for `initial` after release");
     }
 
     [Fact]
