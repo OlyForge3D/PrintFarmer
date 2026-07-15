@@ -8,7 +8,8 @@ public sealed class SnapmakerU1CameraMonitorManager(
     TimeSpan? startRateLimit = null,
     TimeSpan? idleStopDelay = null,
     TimeSpan? stopRetryBackoff = null,
-    int maxStopRetries = 3) : ISnapmakerU1CameraMonitorManager
+    int maxStopRetries = 3,
+    TimeProvider? timeProvider = null) : ISnapmakerU1CameraMonitorManager
 {
     private readonly IMoonrakerJsonRpcClient _jsonRpcClient = jsonRpcClient ?? throw new ArgumentNullException(nameof(jsonRpcClient));
     private readonly TimeSpan _startRateLimit = startRateLimit ?? TimeSpan.FromSeconds(5);
@@ -16,6 +17,7 @@ public sealed class SnapmakerU1CameraMonitorManager(
     private readonly TimeSpan _stopRetryBackoff = stopRetryBackoff ?? TimeSpan.FromSeconds(2);
     private readonly TimeSpan _stopMonitorTimeout = TimeSpan.FromSeconds(3);
     private readonly int _maxStopRetries = Math.Max(0, maxStopRetries);
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly ConcurrentDictionary<string, MonitorState> _states = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<bool> EnsureMonitorStartedAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
@@ -27,7 +29,7 @@ public sealed class SnapmakerU1CameraMonitorManager(
         await state.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset now = _timeProvider.GetUtcNow();
             state.LastAccessUtc = now;
             state.Credential = credential;
 
@@ -48,7 +50,7 @@ public sealed class SnapmakerU1CameraMonitorManager(
         }
         catch (MoonrakerJsonRpcException ex) when (ex.RequestSent)
         {
-            state.LastStartUtc ??= DateTimeOffset.UtcNow;
+            state.LastStartUtc ??= _timeProvider.GetUtcNow();
             state.IsRunning = true;
             ScheduleIdleStop(key, baseUri, state, credential);
             return false;
@@ -85,7 +87,7 @@ public sealed class SnapmakerU1CameraMonitorManager(
 
     private async Task StopAfterDelayAsync(string key, Uri baseUri, MonitorState state, PrinterCredential? credential, TimeSpan delay, CancellationToken ct)
     {
-        await Task.Delay(delay, ct).ConfigureAwait(false);
+        await Task.Delay(delay, _timeProvider, ct).ConfigureAwait(false);
         await state.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {

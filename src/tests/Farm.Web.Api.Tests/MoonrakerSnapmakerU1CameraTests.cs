@@ -121,14 +121,20 @@ public class MoonrakerSnapmakerU1CameraTests
     public async Task EnsureMonitorStartedAsync_WhenStopFails_RetriesBeforeClearingState()
     {
         RecordingJsonRpcClient rpc = new() { StopFailuresBeforeSuccess = 1 };
+        ControlledTimeProvider clock = new(new DateTime(2026, 7, 14, 18, 0, 0, DateTimeKind.Utc));
         SnapmakerU1CameraMonitorManager manager = new(
             rpc,
             TimeSpan.FromSeconds(5),
             TimeSpan.FromMilliseconds(10),
             TimeSpan.FromMilliseconds(10),
-            maxStopRetries: 2);
+            maxStopRetries: 2,
+            timeProvider: clock);
 
         bool started = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
+        await clock.FirstTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
+        clock.ReleaseLatestTimer();
+        await clock.SecondTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
+        clock.ReleaseLatestTimer();
         await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
 
         started.Should().BeTrue();
@@ -218,6 +224,80 @@ public class MoonrakerSnapmakerU1CameraTests
             if (FailStartAfterSend)
             {
                 throw new MoonrakerJsonRpcException("reply failed", requestSent: true);
+            }
+        }
+    }
+
+    private sealed class ControlledTimeProvider(DateTime nowUtc) : TimeProvider
+    {
+        private readonly object _sync = new();
+        private readonly List<ControlledTimer> _timers = [];
+        private readonly DateTimeOffset _now = new(nowUtc, TimeSpan.Zero);
+        private readonly TaskCompletionSource _firstTimerCreated =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondTimerCreated =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task FirstTimerCreated => _firstTimerCreated.Task;
+
+        public Task SecondTimerCreated => _secondTimerCreated.Task;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            ControlledTimer timer = new(callback, state);
+            lock (_sync)
+            {
+                _timers.Add(timer);
+                if (_timers.Count == 1)
+                {
+                    _firstTimerCreated.TrySetResult();
+                }
+                else if (_timers.Count == 2)
+                {
+                    _secondTimerCreated.TrySetResult();
+                }
+            }
+
+            return timer;
+        }
+
+        public void ReleaseLatestTimer()
+        {
+            ControlledTimer? timer;
+            lock (_sync)
+            {
+                timer = _timers.LastOrDefault();
+            }
+
+            timer?.Fire();
+        }
+
+        private sealed class ControlledTimer(TimerCallback callback, object? state) : ITimer
+        {
+            private int _completed;
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => Volatile.Read(ref _completed) == 0;
+
+            public void Dispose() => Interlocked.Exchange(ref _completed, 1);
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+
+            public void Fire()
+            {
+                if (Interlocked.Exchange(ref _completed, 1) == 0)
+                {
+                    callback(state);
+                }
             }
         }
     }
