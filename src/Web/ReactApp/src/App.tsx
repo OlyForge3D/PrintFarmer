@@ -55,8 +55,9 @@ import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
 import { PrintablesOAuthCallbackPage } from '@/features/models3d/pages/PrintablesOAuthCallbackPage';
 
 // External packages
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { queryClient } from '@/services/queryClient';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router';
 import { Toaster, toast } from 'sonner';
@@ -163,29 +164,6 @@ function FeatureGate({ feature, children }: { feature: 'modelFiles' | 'slicing';
 
   return <>{children}</>;
 }
-
-// Create a query client for React Query
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: (failureCount, error: unknown) => {
-        // Don't retry client (4xx) errors
-        const statusCode = typeof error === 'object' && error && 'statusCode' in error
-          ? (error as { statusCode?: number }).statusCode
-          : undefined;
-        if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
-          return false;
-        }
-        return failureCount < 3; // retry other errors up to 3 times
-      },
-      staleTime: 30000, // 30 seconds
-      gcTime: 300000, // 5 minutes
-    },
-    mutations: {
-      retry: false, // Don't retry mutations by default
-    },
-  },
-});
 
 function AuthenticatedAppRoutes() {
   // Custom global ProtectedRoute logic for redirecting guests and unapproved users
