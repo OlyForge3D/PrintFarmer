@@ -10,6 +10,7 @@ import {
 import {
   buildSavePayload,
   defaultEventChannelPreferences,
+  hasAnyEnrolledPush,
   hydratePreferences,
   resolveSupportedEventTypes,
   serverAdvertisesOperatorCategories,
@@ -67,6 +68,26 @@ const CAPABLE_CAPABILITIES: NotificationCapabilitiesResponse = {
   ],
 };
 
+const VISIBLE_EVENT_TYPES = new Set<NotificationPreferenceEventType>([
+  NotificationPreferenceEventType.JobStarted,
+  NotificationPreferenceEventType.JobCompleted,
+  NotificationPreferenceEventType.JobFailed,
+  NotificationPreferenceEventType.JobPaused,
+  NotificationPreferenceEventType.FilamentRunout,
+  NotificationPreferenceEventType.HarvestReady,
+  NotificationPreferenceEventType.MaintenanceDue,
+  NotificationPreferenceEventType.PrinterOffline,
+]);
+
+function matrixWithPushEnabled(
+  enabledEventTypes: readonly NotificationPreferenceEventType[],
+): NotificationEventChannelPreferenceDto[] {
+  return defaultEventChannelPreferences().map(item => ({
+    ...item,
+    push: enabledEventTypes.includes(item.eventType),
+  }));
+}
+
 describe('preferencesAdapter.resolveSupportedEventTypes', () => {
   it('falls back to the classic four job tokens on 404 (null capabilities)', () => {
     const set = resolveSupportedEventTypes(null);
@@ -92,6 +113,35 @@ describe('preferencesAdapter.resolveSupportedEventTypes', () => {
     expect(set.has(NotificationPreferenceEventType.FilamentRunout)).toBe(true);
     expect(set.has('SomeFutureToken')).toBe(true);
     expect(set.has(NotificationPreferenceEventType.HarvestReady)).toBe(false);
+  });
+});
+
+describe('preferencesAdapter.hasAnyEnrolledPush', () => {
+  it('returns false when only an unsupported visible operator row has push=true', () => {
+    const matrix = matrixWithPushEnabled([NotificationPreferenceEventType.MaintenanceDue]);
+    const supportedEventTypes = new Set<string>([
+      NotificationPreferenceEventType.JobStarted,
+      NotificationPreferenceEventType.JobCompleted,
+      NotificationPreferenceEventType.JobFailed,
+      NotificationPreferenceEventType.JobPaused,
+      NotificationPreferenceEventType.HarvestReady,
+    ]);
+
+    expect(hasAnyEnrolledPush(matrix, VISIBLE_EVENT_TYPES, supportedEventTypes)).toBe(false);
+  });
+
+  it('returns true when a supported visible operator row has push=true', () => {
+    const matrix = matrixWithPushEnabled([NotificationPreferenceEventType.HarvestReady]);
+    const supportedEventTypes = resolveSupportedEventTypes(CAPABLE_CAPABILITIES);
+
+    expect(hasAnyEnrolledPush(matrix, VISIBLE_EVENT_TYPES, supportedEventTypes)).toBe(true);
+  });
+
+  it('returns true when a supported visible job row has push=true', () => {
+    const matrix = matrixWithPushEnabled([NotificationPreferenceEventType.JobFailed]);
+    const supportedEventTypes = resolveSupportedEventTypes(CAPABLE_CAPABILITIES);
+
+    expect(hasAnyEnrolledPush(matrix, VISIBLE_EVENT_TYPES, supportedEventTypes)).toBe(true);
   });
 });
 

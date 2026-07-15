@@ -14,6 +14,7 @@ import type { UpdateNotificationPreferencesRequest } from '@/types/api';
 import {
   buildSavePayload,
   defaultEventChannelPreferences,
+  hasAnyEnrolledPush,
   hydratePreferences,
   resolveSupportedEventTypes,
   withDerivedLegacyFlags,
@@ -90,24 +91,6 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     setIsDirty(false);
   }, [preferences, capabilities]);
 
-  // Only rows the UI actually renders should participate in the "any push
-  // enabled?" heuristic that drives the browser-push enrollment prompt.
-  // Otherwise the hidden `PrinterFailure` row (which defaults push=true) or
-  // any opaque server-returned unknown row could permanently show a prompt
-  // the user cannot dismiss by unchecking a visible toggle.
-  const visibleEventTypes = useMemo(
-    () => new Set<NotificationPreferenceEventType>([
-      ...JOB_EVENT_ROWS.map(r => r.eventType),
-      ...OPERATOR_EVENT_ROWS.map(r => r.eventType),
-    ]),
-    [],
-  );
-  const isAnyPushEnabled = useMemo(
-    () => (formState.eventChannelPreferences ?? [])
-      .some(item => visibleEventTypes.has(item.eventType) && item.push),
-    [formState.eventChannelPreferences, visibleEventTypes],
-  );
-
   // Per-row capability gate for the operator block. `serverSupportsOperatorCategories`
   // only tells us the server advertised AT LEAST ONE operator token — during a
   // partial rollout it can advertise some operator tokens but not others, and
@@ -116,6 +99,20 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const supportedEventTypes = useMemo(
     () => resolveSupportedEventTypes(capabilities ?? null),
     [capabilities],
+  );
+  // Browser-push enrollment should only key off rows that are both visible and
+  // supported. Otherwise unsupported visible rows from an anticipatory matrix
+  // can keep the prompt stuck on even when every supported push row is off.
+  const visibleEventTypes = useMemo(
+    () => new Set<NotificationPreferenceEventType>([
+      ...JOB_EVENT_ROWS.map(r => r.eventType),
+      ...OPERATOR_EVENT_ROWS.map(r => r.eventType),
+    ]),
+    [],
+  );
+  const isAnyPushEnabled = useMemo(
+    () => hasAnyEnrolledPush(formState.eventChannelPreferences, visibleEventTypes, supportedEventTypes),
+    [formState.eventChannelPreferences, visibleEventTypes, supportedEventTypes],
   );
 
   const updateMatrixField = (

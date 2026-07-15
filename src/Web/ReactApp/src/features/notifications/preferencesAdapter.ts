@@ -109,6 +109,20 @@ export function resolveSupportedEventTypes(
 }
 
 /**
+ * Returns `true` when the matrix has at least one push-enabled row that is
+ * both visible in the current UI and supported by the current server.
+ */
+export function hasAnyEnrolledPush(
+  matrix: readonly NotificationEventChannelPreferenceDto[] | null | undefined,
+  visibleEventTypes: ReadonlySet<NotificationPreferenceEventType>,
+  supportedEventTypes: ReadonlySet<string>,
+): boolean {
+  return (matrix ?? []).some(
+    row => row.push && visibleEventTypes.has(row.eventType) && supportedEventTypes.has(row.eventType as string),
+  );
+}
+
+/**
  * True when the capabilities probe advertises at least one operator token.
  * Used to drive the legacy-server info banner in the UI.
  */
