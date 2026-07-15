@@ -35,6 +35,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // transition, coalesces queued transitions to the newest authoritative timestamp,
     // and retains a tombstone so delayed Created work cannot follow Resolved.
     private readonly ConcurrentDictionary<AttentionDispatchKey, AttentionDispatchLane> _attentionDispatchLanes = new();
+
+    // Global-resolution item tombstone. When a Resolved with targetUserId=null
+    // is observed, we record the resolved item's version even if no owner
+    // currently holds a targeted lifecycle (temporarily tokenless recipients,
+    // never-dispatched recipients). Any strictly-older subsequent dispatch —
+    // targeted or global — for the same item is fenced here before it can
+    // install a fresh per-user lifecycle at a stale version. This closes the
+    // tokenless-recipient re-registration gap without globally serialising
+    // unrelated (recipient, item) keys: the tombstone is item-scoped only,
+    // authorization is unchanged, and per-recipient lifecycles still manage
+    // their own version ordering for non-stale work.
+    private readonly ConcurrentDictionary<string, AttentionDispatchVersion> _resolvedItemVersions
+        = new(StringComparer.Ordinal);
+
     private static readonly TimeSpan AttentionSnapshotTtl = TimeSpan.FromDays(7);
     private static readonly TimeSpan InformationalAlertTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ActionableAlertTtl = TimeSpan.FromMinutes(30);
@@ -84,6 +98,35 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         var version = new AttentionDispatchVersion(
             NormalizeOccurredAt(occurredAtUtc ?? UtcNow),
             LifecycleOrder(changeKind));
+
+        // Global-resolution item tombstone check. If a strictly-newer global
+        // Resolved has already been observed for this item, reject any older
+        // subsequent dispatch here — even for recipients whose per-user
+        // lifecycles have not yet been installed (temporarily tokenless
+        // recipients that later re-register). This must happen BEFORE the
+        // dispatch lane / lifecycle observers, otherwise a stale targeted
+        // Created would install a brand-new per-user lifecycle at the stale
+        // version and deliver the alert on the re-registered device.
+        if (_resolvedItemVersions.TryGetValue(attentionItemId, out AttentionDispatchVersion resolvedVersion)
+            && version.CompareTo(resolvedVersion) < 0)
+        {
+            return;
+        }
+
+        // Record the tombstone for a global Resolved observation BEFORE any
+        // per-owner work. The tombstone is item-scoped, so recording it
+        // early makes the version fence visible to concurrent stale
+        // dispatches even while owner enumeration or targeted fan-out is
+        // still in flight. Targeted resolutions install per-user lifecycle
+        // tombstones and do not need to broadcast an item-wide fence.
+        if (changeKind == AttentionChangeKind.Resolved && targetUserId is null)
+        {
+            _resolvedItemVersions.AddOrUpdate(
+                attentionItemId,
+                version,
+                (_, existing) => version.CompareTo(existing) > 0 ? version : existing);
+        }
+
         if (!TryObserveDispatch(dispatchKey, version, out AttentionDispatchLane lane))
         {
             return;
@@ -466,12 +509,43 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         catch (Exception ex)
         {
+            // A strictly-newer lifecycle observation supersedes this fan-out
+            // entirely — stop the whole owner's dispatch so the newer
+            // generation owns the send order. Only actual supersession
+            // (a later version has taken over) qualifies here.
+            if (lifecycle.IsSupersededBy(version))
+            {
+                return DeviceDispatchOutcome.DispatchStopped;
+            }
+
+            // Pre-transport synchronous sender failure. TryBeginSend caught
+            // the sync throw before committing _snapshot/_consumedResolutionVersion
+            // and rolled back dedupe/rate reservations. IsCurrent therefore
+            // returns false (no snapshot commit at THIS version), but the
+            // lifecycle has NOT advanced past our version. This is a
+            // per-device pre-transport failure, not a supersession: the
+            // outer fan-out must continue to sibling devices in the same
+            // dispatch, and a subsequent exact-version DispatchAsync must
+            // be able to retry every synchronously-failed device.
+            //
+            // Distinguish that state from the post-transport-start
+            // fenced-current case, which routes through the sender_exception
+            // transient result and follows normal token attribution.
             if (!lifecycle.IsCurrent(
                     version,
                     lifecycleSnapshot,
                     changeKind == AttentionChangeKind.Resolved))
             {
-                return DeviceDispatchOutcome.DispatchStopped;
+                _metrics.IsolatedDeviceFailure.Add(
+                    1,
+                    new KeyValuePair<string, object?>("stage", "pre_transport"));
+                _logger.LogWarning(
+                    ex,
+                    "[NativePush] Isolated pre-transport sender failure for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; sibling devices continue and this device remains eligible for exact-version retry.",
+                    deviceToken.Id,
+                    userId,
+                    attentionItemId);
+                return DeviceDispatchOutcome.Completed;
             }
 
             _logger.LogWarning(ex, "[NativePush] Sender threw for deviceTokenId={DeviceTokenId}.", deviceToken.Id);
@@ -549,15 +623,23 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         out AttentionLifecycle lifecycle,
         out AttentionSnapshot? resolvedSnapshot)
     {
-        // Resolved observations must clear stale Created/Updated dedupe entries
-        // atomically with the lifecycle version bump. Running the reset here
-        // (under the lifecycle sync lock via TryObserve) prevents a delayed
-        // reset from wiping a newer occurrence's freshly-added dedupe state and
-        // prevents an in-flight newer Created from being suppressed by a stale
-        // dedupe entry that resolution had not yet cleared.
-        Action? onResolvedObserved = changeKind == AttentionChangeKind.Resolved
-            ? () => ResetActiveLifecycleDedupe(key.UserId, key.AttentionItemId)
-            : null;
+        // Any strictly-newer lifecycle observation (Created / Updated /
+        // Resolved) must clear the prior generation's versionless
+        // (user, item, kind) dedupe reservations atomically with the
+        // version bump. A rate-limited or no-transport v_prev otherwise
+        // retains a same-kind entry that would suppress a legitimate
+        // strictly-newer v_next before its own reservation runs — the
+        // deterministic Kane cycle-3 A/B interleavings.
+        //
+        // The reset is invoked under the lifecycle sync lock via
+        // TryObserve, so it is atomic with the version bump and with any
+        // concurrent Resolved observation's onResolvedObserved-derived
+        // reset. Running it here (rather than lazily inside shouldEmit)
+        // preserves the existing invariant that same-version repeats
+        // are still de-duplicated.
+        Action onLifecycleAdvancedOrResolved = () => ResetActiveLifecycleDedupe(
+            key.UserId,
+            key.AttentionItemId);
 
         while (true)
         {
@@ -568,7 +650,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 version,
                 changeKind,
                 UtcNow,
-                onResolvedObserved,
+                onLifecycleAdvancedOrResolved,
                 out resolvedSnapshot);
             if (result == AttentionLifecycleObserveResult.Accepted)
             {
@@ -1153,7 +1235,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             AttentionDispatchVersion version,
             AttentionChangeKind changeKind,
             DateTime observedAtUtc,
-            Action? onResolvedObserved,
+            Action? onLifecycleAdvancedOrResolved,
             out AttentionSnapshot? resolvedSnapshot)
         {
             lock (_sync)
@@ -1183,14 +1265,29 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 if (changeKind == AttentionChangeKind.Resolved)
                 {
                     resolvedSnapshot = _snapshot;
+                }
 
-                    // Fire under the sync lock so any concurrent newer occurrence's
-                    // TryBeginSend on this same lifecycle either observes an empty
-                    // dedupe window (legitimate recurrence emits) or is serialised
-                    // behind us. This eliminates the pre-fix race where a delayed
-                    // reset erased newer dedupe state or suppressed a legitimate
-                    // recurrence.
-                    onResolvedObserved?.Invoke();
+                // Fire under the sync lock so any concurrent newer occurrence's
+                // TryBeginSend on this same lifecycle either observes an empty
+                // dedupe window (legitimate recurrence emits) or is serialised
+                // behind us. Two independent conditions invoke the reset:
+                //   (1) versionOrder > 0 — a strictly-newer legitimate
+                //       occurrence supersedes any prior generation's
+                //       versionless (user, item, kind) dedupe reservation,
+                //       including the rate-limited/no-transport branch that
+                //       intentionally retains its entry. Without this, Kane
+                //       cycle-3 A/B interleavings suppress the newer
+                //       occurrence before Resolution can catch up.
+                //   (2) changeKind == Resolved — a Resolved observation
+                //       clears any surviving Created/Updated entries even
+                //       when it lands at the same version (a peer left a
+                //       reservation but never emitted). This eliminates
+                //       the pre-fix race where a delayed reset erased
+                //       newer dedupe state or suppressed a legitimate
+                //       recurrence.
+                if (versionOrder > 0 || changeKind == AttentionChangeKind.Resolved)
+                {
+                    onLifecycleAdvancedOrResolved?.Invoke();
                 }
 
                 return AttentionLifecycleObserveResult.Accepted;
@@ -1301,6 +1398,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             lock (_sync)
             {
                 return IsCurrentUnderLock(version, expectedSnapshot, isResolution);
+            }
+        }
+
+        /// <summary>
+        /// Returns true if a strictly-newer version has been observed on this
+        /// lifecycle since the caller's version. Used by the per-device sync
+        /// sender-exception catch to distinguish "lifecycle superseded" (real
+        /// supersession — the entire fan-out must stop) from "pre-transport
+        /// failure" (no snapshot was ever committed, no supersession — the
+        /// sibling devices in the same fan-out must still be attempted).
+        /// A retired lifecycle is treated as not superseded so the caller
+        /// falls through to its normal not-current handling.
+        /// </summary>
+        public bool IsSupersededBy(AttentionDispatchVersion version)
+        {
+            lock (_sync)
+            {
+                return !_retired
+                    && _hasVersion
+                    && version.CompareTo(_latest) < 0;
             }
         }
 
@@ -1512,6 +1629,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             if (kv.Value.TryRetire(snapshotCutoff))
             {
                 _ = ((ICollection<KeyValuePair<AttentionDispatchKey, AttentionDispatchLane>>)_attentionDispatchLanes)
+                    .Remove(kv);
+            }
+        }
+
+        // Global-resolution item tombstones use the same seven-day retention
+        // as snapshots/lanes so a stale targeted dispatch delayed by up to
+        // that window is still rejected. Value-comparing Remove prevents a
+        // race with a concurrent AddOrUpdate that bumped the tombstone to a
+        // newer version between snapshot and remove.
+        foreach (KeyValuePair<string, AttentionDispatchVersion> kv in _resolvedItemVersions)
+        {
+            if (kv.Value.OccurredAtUtc < snapshotCutoff)
+            {
+                _ = ((ICollection<KeyValuePair<string, AttentionDispatchVersion>>)_resolvedItemVersions)
                     .Remove(kv);
             }
         }
