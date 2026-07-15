@@ -163,6 +163,20 @@ describe('LogMaintenanceModal — toolhead scope', () => {
     expect(onSubmit.mock.calls[0][0].toolheadId).toBe('th-2');
   });
 
+  it('submits a non-null initialToolheadId unchanged when the scope picker is hidden', async () => {
+    const { onSubmit } = renderModal({
+      toolheads: [],
+      initialToolheadId: 'th-2',
+    });
+    const user = await fillRequired();
+
+    expect(screen.queryByTestId('log-maintenance-scope')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Log Maintenance$/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].toolheadId).toBe('th-2');
+  });
+
   it('prefers a deployment scoped to the selected toolhead', async () => {
     const printerWide = makeDeployment({ id: 'sched-wide', toolheadId: null });
     const scoped = makeDeployment({ id: 'sched-th2', toolheadId: 'th-2', planName: 'Plan T1' });

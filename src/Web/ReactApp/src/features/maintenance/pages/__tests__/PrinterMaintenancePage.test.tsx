@@ -498,6 +498,38 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     );
   });
 
+  it('submits the backend-scoped toolheadId from a scoped deployment even when printerDetails fails and the modal scope picker is suppressed', async () => {
+    seedDefaults({ detailsError: new Error('details offline') });
+    (maintenanceService.createMaintenanceLog as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'log-new' });
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByText('Deployment for T1')).toBeInTheDocument());
+
+    const deploymentRow = screen.getByText('Deployment for T1').closest('div.p-4') as HTMLElement;
+    expect(deploymentRow).not.toBeNull();
+    await user.click(within(deploymentRow).getByRole('button', { name: /^Log$/ }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /log maintenance/i })).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('log-maintenance-scope')).not.toBeInTheDocument();
+
+    await user.type(
+      screen.getByPlaceholderText(/nozzle replacement/i),
+      'Scoped deployment maintenance'
+    );
+
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^Log Maintenance$/i }));
+
+    await waitFor(() =>
+      expect(maintenanceService.createMaintenanceLog).toHaveBeenCalledWith(
+        expect.objectContaining({ toolheadId: 'th-1' })
+      )
+    );
+  });
+
   // ---------------------------------------------------------------------------
   // Odometer must never render "OK" while the schedule feed is unavailable
   // (Hicks rejection: loading/errored upcoming feed must NOT imply all-clear).

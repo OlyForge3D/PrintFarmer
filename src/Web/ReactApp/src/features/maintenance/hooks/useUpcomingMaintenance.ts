@@ -7,6 +7,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { maintenanceService } from '@/services/maintenanceService';
+import { maintenanceQueryKeys } from '../queryKeys';
 
 export interface UpcomingMaintenanceTask {
   id: string;
@@ -84,8 +85,6 @@ export interface UseUpcomingMaintenanceResult {
   refetch: () => void;
 }
 
-const QUERY_KEY = 'upcoming-maintenance';
-
 /**
  * Hook for calculating upcoming maintenance tasks
  */
@@ -105,7 +104,7 @@ export function useUpcomingMaintenance(
     error,
     refetch,
   } = useQuery<UpcomingMaintenanceTask[], Error>({
-    queryKey: [QUERY_KEY, { lookaheadDays, includeOverdue, printerId }],
+    queryKey: maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays, includeOverdue, printerId }),
     queryFn: async () => {
       const data = await maintenanceService.getUpcomingMaintenance({
         lookaheadDays,

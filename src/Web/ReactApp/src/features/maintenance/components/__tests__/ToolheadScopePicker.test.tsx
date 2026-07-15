@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { ToolheadScopePicker } from '../ToolheadScopePicker';
 import {
@@ -118,7 +119,7 @@ describe('ToolheadScopePicker', () => {
     expect(screen.getAllByRole('radio')).toHaveLength(3);
   });
 
-  it('emits the toolhead id when a specific toolhead is selected', () => {
+  it('emits the toolhead id when a specific toolhead is selected', async () => {
     const onChange = vi.fn();
     render(
       <ToolheadScopePicker
@@ -127,12 +128,13 @@ describe('ToolheadScopePicker', () => {
         onChange={onChange}
       />
     );
-    fireEvent.click(screen.getByLabelText(/T1 · Right/));
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText(/T1 · Right/));
     expect(onChange).toHaveBeenCalledWith('t-1');
     expect(toolheadIdFromScope(onChange.mock.calls[0][0])).toBe('t-1');
   });
 
-  it('emits the printer-wide sentinel when Printer-wide is chosen', () => {
+  it('emits the printer-wide sentinel when Printer-wide is chosen', async () => {
     const onChange = vi.fn();
     render(
       <ToolheadScopePicker
@@ -141,7 +143,8 @@ describe('ToolheadScopePicker', () => {
         onChange={onChange}
       />
     );
-    fireEvent.click(screen.getByLabelText('Printer-wide'));
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('Printer-wide'));
     expect(onChange).toHaveBeenCalledWith(PRINTER_WIDE_SCOPE);
     expect(toolheadIdFromScope(onChange.mock.calls[0][0])).toBeNull();
   });

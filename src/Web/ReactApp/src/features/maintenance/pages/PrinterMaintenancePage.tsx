@@ -34,6 +34,7 @@ import {
 import { selectMaintenanceEligibleToolheads } from '@/features/printers/utils/isEligibleMaintenanceToolhead';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 import { queryKeys } from '@/common/hooks/useApi';
+import { maintenanceQueryKeys } from '../queryKeys';
 
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
@@ -354,13 +355,18 @@ export function PrinterMaintenancePage() {
     // the fallback.
     const raw =
       toolheadId === undefined ? toolheadIdFromScope(scope) : toolheadId;
+    const canVerifyScope = printerDetails != null && !printerDetailsError;
     // Validate the resolved id against the CURRENT printer's eligible
     // toolheads. `raw` may be a stale id if a previous mount cached it
     // from another printer, or the fallback chain might have produced an
     // id that no longer maps to a physical, maintenance-eligible tool on
     // this printer. `null` (printer-wide) is always valid.
     const validated =
-      raw == null || logEligibleToolheads.some(t => t.id === raw) ? raw : null;
+      !canVerifyScope
+        ? raw
+        : raw == null || logEligibleToolheads.some(t => t.id === raw)
+          ? raw
+          : null;
     setModalInitialToolheadId(validated);
     setShowLogModal(true);
   };
@@ -380,7 +386,7 @@ export function PrinterMaintenancePage() {
     queryClient.invalidateQueries({ queryKey: ['printerAlerts', printerId] });
     queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId!) });
     queryClient.invalidateQueries({ queryKey: ['scheduleDeployments', printerId] });
-    queryClient.invalidateQueries({ queryKey: ['upcoming-maintenance'] });
+    queryClient.invalidateQueries({ queryKey: maintenanceQueryKeys.upcomingMaintenance() });
     setShowLogModal(false);
   };
 

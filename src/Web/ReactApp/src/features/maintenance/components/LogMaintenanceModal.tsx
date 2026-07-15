@@ -106,6 +106,11 @@ export function LogMaintenanceModal({
     if (!result.includes('Other')) result.push('Other');
     return result;
   }, [catalogTasks]);
+  const eligibleToolheads = useMemo(
+    () => (toolheads ?? []).filter(isEligibleMaintenanceToolhead),
+    [toolheads],
+  );
+  const showScopePicker = eligibleToolheads.length >= 2;
 
   // When task selection changes, update form fields
   const handleTaskChange = (value: string) => {
@@ -136,6 +141,10 @@ export function LogMaintenanceModal({
 
     try {
       const scopedToolheadId = toolheadIdFromScope(scope);
+      const effectiveToolheadId =
+        !showScopePicker && initialToolheadId != null
+          ? initialToolheadId
+          : scopedToolheadId;
 
       // Only link to a deployment whose scope EXACTLY matches this log's
       // scope (both printer-wide or both scoped to the same toolhead). Any
@@ -145,12 +154,12 @@ export function LogMaintenanceModal({
       // When no exact match exists, submit with a null deploymentId and let
       // the backend / server-side alert engine resolve.
       const matchingDeployment = deployments.find(
-        d => d.isActive && (d.toolheadId ?? null) === scopedToolheadId
+        d => d.isActive && (d.toolheadId ?? null) === effectiveToolheadId
       );
 
       const request: CreateMaintenanceLogRequest = {
         printerId,
-        toolheadId: scopedToolheadId,
+        toolheadId: effectiveToolheadId,
         deploymentId: matchingDeployment?.id ?? null,
         taskId: selectedTaskId || null,
         taskName: taskName.trim(),
@@ -213,21 +222,17 @@ export function LogMaintenanceModal({
         )}
 
         {/* Toolhead scope picker (#711/#719). Collapses for single-toolhead printers. */}
-        {(() => {
-          const eligible = (toolheads ?? []).filter(isEligibleMaintenanceToolhead);
-          if (eligible.length < 2) return null;
-          return (
-            <ToolheadScopePicker
-              toolheads={toolheads ?? []}
-              value={scope}
-              onChange={setScope}
-              label="Maintenance scope"
-              helperText="Choose whether this record applies to the whole printer or a specific toolhead."
-              disabled={isSubmitting}
-              data-testid="log-maintenance-scope"
-            />
-          );
-        })()}
+        {showScopePicker && (
+          <ToolheadScopePicker
+            toolheads={toolheads ?? []}
+            value={scope}
+            onChange={setScope}
+            label="Maintenance scope"
+            helperText="Choose whether this record applies to the whole printer or a specific toolhead."
+            disabled={isSubmitting}
+            data-testid="log-maintenance-scope"
+          />
+        )}
 
         {/* Maintenance Type Selection */}
         <div>

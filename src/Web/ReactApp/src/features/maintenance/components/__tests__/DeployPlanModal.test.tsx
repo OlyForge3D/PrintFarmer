@@ -748,9 +748,9 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
     await waitFor(() => expect(getDetailsSpy).toHaveBeenCalledTimes(2));
     const deployBtn = screen.getByRole('button', { name: /^Deploy$/ });
     expect(deployBtn).toBeDisabled();
-    // Clicking a disabled native <button> does not fire onClick in jsdom,
-    // matching every other guard test in this suite — the assertion that
-    // matters is that the mutation never fires despite the click attempt.
+    // Simulate a programmatic/UI bug that leaves the element enabled even
+    // though the internal stale-verification guard should still block submit.
+    deployBtn.removeAttribute('disabled');
     await user.click(deployBtn);
     expect(maintenancePlanService.deployPlan).not.toHaveBeenCalled();
   });
