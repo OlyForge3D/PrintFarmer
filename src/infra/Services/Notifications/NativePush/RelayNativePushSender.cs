@@ -94,6 +94,16 @@ public sealed class RelayNativePushSender(
         // Serialization and request construction are pre-transport work. The
         // dispatcher can still veto this exact lifecycle immediately before the
         // relay HTTP request starts.
+        //
+        // Hicks blocker 2: check cancellation explicitly, immediately before
+        // crossing the transport-start boundary. Without this, a token that
+        // was already cancelled after preparation completed (but before this
+        // call) would still reach TryStart() and could commit dispatcher-owned
+        // lifecycle/dedupe/rate state and increment Attempted for an attempt
+        // that will never actually reach the network. The dispatcher's own
+        // TryStart() implementation also guards against this independently
+        // (defense in depth) but must never be the ONLY check.
+        cancellationToken.ThrowIfCancellationRequested();
         if (!transportStart.TryStart().IsPermitted)
         {
             return NativePushDispatchResult.TransportStartVetoed();

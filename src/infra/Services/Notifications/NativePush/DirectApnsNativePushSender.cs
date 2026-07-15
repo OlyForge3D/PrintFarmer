@@ -191,6 +191,17 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
         // JWT acquisition and request construction are pre-transport work. The
         // dispatcher decides whether this still-current lifecycle may cross into
         // APNs only at the final boundary immediately below.
+        //
+        // Hicks blocker 2: the cached-JWT fast path in GetOrRefreshJwtAsync
+        // returns without ever awaiting the JWT lock or observing
+        // cancellationToken, so a token cancelled after that return (but
+        // before this call) would otherwise reach TryStart() unchecked and
+        // could commit dispatcher-owned lifecycle/dedupe/rate state and
+        // increment Attempted for an attempt that never reaches APNs. The
+        // dispatcher's own TryStart() implementation also guards against
+        // this independently (defense in depth) but must never be the ONLY
+        // check.
+        cancellationToken.ThrowIfCancellationRequested();
         if (!transportStart.TryStart().IsPermitted)
         {
             return NativePushDispatchResult.TransportStartVetoed();

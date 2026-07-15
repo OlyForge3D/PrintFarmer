@@ -43,7 +43,18 @@ public interface INativePushTransportSender : INativePushSender
 /// </summary>
 public interface INativePushTransportStart
 {
-    /// <summary>Signals an imminent provider call and returns whether it may proceed.</summary>
+    /// <summary>
+    /// Signals an imminent provider call and returns whether it may proceed.
+    /// Implementations MUST veto (return a non-permitted decision) when the
+    /// caller's cancellation token is already signaled at the moment of this
+    /// call — a pre-cancelled attempt must never commit dispatcher-owned
+    /// lifecycle ownership, dedupe/rate reservations, or attempt metrics.
+    /// This is a defense-in-depth backstop: senders MUST ALSO check
+    /// cancellation themselves immediately before calling this method, but
+    /// the dispatcher's implementation never assumes a sender did so.
+    /// Cancellation observed strictly AFTER a permitted decision is a
+    /// genuine, already-committed attempt and is never retroactively vetoed.
+    /// </summary>
     NativePushTransportStartDecision TryStart();
 }
 

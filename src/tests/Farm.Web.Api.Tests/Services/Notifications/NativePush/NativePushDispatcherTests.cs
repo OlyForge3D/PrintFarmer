@@ -4275,6 +4275,364 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_ResolvedWaitsAcrossSupersededGeneration_LateSuccessFromOlderPendingGenerationStillDismissesExactlyOnce()
+    {
+        // Hicks blocker 1: S1 (targeted Created) starts a real transport and
+        // pauses — still pending. A newer global Updated (S2) then supersedes
+        // S1's snapshot on the SAME AttentionLifecycle and its OWN transport
+        // fails fast, completing entirely before the global Resolved is even
+        // dispatched. On the rejected design, Resolved's ResolutionCapture
+        // would only ever see S2 (the snapshot active when Resolved was
+        // observed) — which has nothing pending and never delivered — so it
+        // would skip the dismissal immediately without waiting at all. With
+        // the shared-lineage fix, S1's still-pending attempt remains
+        // reachable (TryStartTransport reuses the SAME AttentionDeliveryLineage
+        // across the S1->S2 snapshot replacement instead of copying a
+        // point-in-time bool), so Resolved must still block until S1
+        // settles. S1 then succeeds late and the dismissal must still fire —
+        // exactly once.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var firstTransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstTransport = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            int callIndex = Interlocked.Increment(ref sendCount);
+            sent.Enqueue(envelope);
+            if (callIndex == 1)
+            {
+                // S1: the stale Created generation. Pauses here — still
+                // "pending" from the lineage's perspective — until released
+                // further below, well after S2 has already superseded and
+                // failed.
+                firstTransportStarted.TrySetResult(envelope);
+                return await releaseFirstTransport.Task.WaitAsync(cancellationToken);
+            }
+
+            if (callIndex == 2)
+            {
+                // S2: the Updated generation that supersedes S1's snapshot.
+                // Fails fast and completes entirely before Resolved is even
+                // dispatched.
+                return NativePushDispatchResult.Transient("provider_unavailable");
+            }
+
+            // The Resolved dismissal itself.
+            return NativePushDispatchResult.Delivered();
+        });
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        var settlementWaitStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        sut.OnResolutionSettlementWaitStartedForTests =
+            () => settlementWaitStarted.TrySetResult();
+
+        DateTime createdAt = new(2026, 7, 15, 3, 0, 0, DateTimeKind.Utc);
+        DateTime updatedAt = createdAt.AddSeconds(1);
+        DateTime resolvedAt = updatedAt.AddSeconds(1);
+
+        // S1: targeted Created (v1) — starts real transport and pauses.
+        Task created = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await firstTransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // S2: GLOBAL Updated (v2) — a different dispatch lane than S1's
+        // targeted lane, so it can run concurrently while S1 is still
+        // paused. Supersedes S1's snapshot on the shared AttentionLifecycle;
+        // its own transport fails and the whole dispatch completes here,
+        // strictly before Resolved is dispatched.
+        await sut.DispatchAsync(
+                item.Id,
+                AttentionChangeKind.Updated,
+                targetUserId: null,
+                occurredAtUtc: updatedAt)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+            AttentionChangeKind.Created,
+            AttentionChangeKind.Updated);
+
+        // Resolved (v3, global): must still WAIT — not for S2 (already
+        // finished, nothing left pending) but for S1's still-in-flight
+        // attempt, inherited through the shared lineage across the S1->S2
+        // snapshot replacement.
+        Task resolved = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+
+        try
+        {
+            await settlementWaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            resolved.IsCompleted.Should().BeFalse(
+                "the resolution must still be waiting on S1's still-pending transport even though S2 — the snapshot active when Resolved was observed — already failed with nothing left pending");
+
+            // S1 succeeds late — after being superseded by S2 and after S2
+            // itself already failed and completed.
+            releaseFirstTransport.TrySetResult(NativePushDispatchResult.Delivered());
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+                AttentionChangeKind.Created,
+                AttentionChangeKind.Updated,
+                AttentionChangeKind.Resolved);
+            sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Resolved)
+                .Should().Be(1,
+                    "S1's late success must still be attributed to the occurrence and produce exactly one dismissal");
+        }
+        finally
+        {
+            releaseFirstTransport.TrySetResult(NativePushDispatchResult.Transient("test-cleanup"));
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResolvedWaitsAcrossSupersededGeneration_AllGenerationsFailingSkipsDismissal()
+    {
+        // Complement of the success case above: every generation across the
+        // whole lineage (S1 AND S2) fails, so the resolution must still wait
+        // for S1 (proving it is tracked) but must skip the dismissal as a
+        // benign no-op once S1's late failure settles.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var firstTransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstTransport = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            int callIndex = Interlocked.Increment(ref sendCount);
+            sent.Enqueue(envelope);
+            if (callIndex == 1)
+            {
+                firstTransportStarted.TrySetResult(envelope);
+                return await releaseFirstTransport.Task.WaitAsync(cancellationToken);
+            }
+
+            return NativePushDispatchResult.Transient("provider_unavailable");
+        });
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        var settlementWaitStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        sut.OnResolutionSettlementWaitStartedForTests =
+            () => settlementWaitStarted.TrySetResult();
+
+        DateTime createdAt = new(2026, 7, 15, 3, 10, 0, DateTimeKind.Utc);
+        DateTime updatedAt = createdAt.AddSeconds(1);
+        DateTime resolvedAt = updatedAt.AddSeconds(1);
+
+        Task created = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await firstTransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await sut.DispatchAsync(
+                item.Id,
+                AttentionChangeKind.Updated,
+                targetUserId: null,
+                occurredAtUtc: updatedAt)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        Task resolved = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+
+        await settlementWaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        resolved.IsCompleted.Should().BeFalse(
+            "the resolution must still wait on S1 even though it will ultimately fail too");
+
+        releaseFirstTransport.TrySetResult(NativePushDispatchResult.Transient("provider_unavailable"));
+        await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Resolved)
+            .Should().Be(0,
+                "no device across the whole lineage ever delivered, so the dismissal must be a benign no-op");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MultipleSimultaneouslyPendingGenerations_OldestLateSuccessStillDismissesExactlyOnce()
+    {
+        // Extends the two-generation race to prove the shared lineage's
+        // pending set correctly tracks MORE THAN ONE concurrently in-flight
+        // generation at once (S1 and S2 are BOTH paused/pending at the same
+        // time here, on the two independent dispatch lanes available for a
+        // single recipient — targeted and global) rather than only ever
+        // holding a single attempt. S2 settles (fails) first, freeing its
+        // lane; only then is Resolved dispatched, and it must still wait on
+        // the oldest surviving pending generation, S1.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var firstStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecond = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            int callIndex = Interlocked.Increment(ref sendCount);
+            sent.Enqueue(envelope);
+            if (callIndex == 1)
+            {
+                firstStarted.TrySetResult(envelope);
+                return await releaseFirst.Task.WaitAsync(cancellationToken);
+            }
+
+            if (callIndex == 2)
+            {
+                secondStarted.TrySetResult(envelope);
+                return await releaseSecond.Task.WaitAsync(cancellationToken);
+            }
+
+            return NativePushDispatchResult.Delivered();
+        });
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        var settlementWaitStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        sut.OnResolutionSettlementWaitStartedForTests =
+            () => settlementWaitStarted.TrySetResult();
+
+        DateTime createdAt = new(2026, 7, 15, 3, 20, 0, DateTimeKind.Utc);
+        DateTime updatedAt = createdAt.AddSeconds(1);
+        DateTime resolvedAt = updatedAt.AddSeconds(1);
+
+        // S1: targeted Created (v1) — pauses.
+        Task created = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // S2: global Updated (v2) — a different lane, so it can start and
+        // ALSO pause while S1 is still pending. Both S1 and S2 are now
+        // simultaneously tracked as pending on the SAME shared lineage.
+        Task updated = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Updated,
+            targetUserId: null,
+            occurredAtUtc: updatedAt);
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        firstStarted.Task.IsCompleted.Should().BeTrue();
+        secondStarted.Task.IsCompleted.Should().BeTrue();
+        created.IsCompleted.Should().BeFalse("S1 is still paused, mid-transport");
+
+        // Settle S2 (fails) and let its dispatch fully finish, freeing the
+        // global lane. Only S1 remains pending afterward.
+        releaseSecond.TrySetResult(NativePushDispatchResult.Transient("provider_unavailable"));
+        await updated.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Resolved (v3, global): the lane is free now that S2 finished.
+        Task resolved = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+
+        try
+        {
+            await settlementWaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            resolved.IsCompleted.Should().BeFalse(
+                "S1 was pending simultaneously with S2 and remains pending after S2 settles — the resolution must still wait for it");
+
+            releaseFirst.TrySetResult(NativePushDispatchResult.Delivered());
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+                AttentionChangeKind.Created,
+                AttentionChangeKind.Updated,
+                AttentionChangeKind.Resolved);
+            sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Resolved)
+                .Should().Be(1);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult(NativePushDispatchResult.Transient("test-cleanup"));
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
     public async Task DispatchAsync_CancellationBeforeTransportStart_RollsBackDedupeRateAndAttemptMetricForExactRetry()
     {
         Guid userId = Guid.NewGuid();
@@ -4362,6 +4720,125 @@ public sealed class NativePushDispatcherTests
         Volatile.Read(ref startedTransports).Should().Be(1);
         Volatile.Read(ref attempted).Should().Be(1,
             "only the retry crossed the actual transport boundary");
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MisbehavingSenderCallsTryStartAfterCancellation_DispatcherGuardVetoesAndAllowsExactRetry()
+    {
+        // Hicks blocker 2 (dispatcher-side guard): the two real senders get
+        // their own tests proving THEY check cancellation before ever
+        // calling TryStart() (RelayNativePushSenderTests /
+        // DirectApnsNativePushSenderTests). This test proves the dispatcher
+        // does not rely solely on that — a sender that forgets or misorders
+        // its own pre-transport cancellation check and calls TryStart()
+        // anyway, after the caller's token has already been cancelled, must
+        // still be vetoed by DispatcherTransportStart's own token-aware
+        // handshake: no provider call, no Attempted increment, reservations
+        // rolled back, and the exact version remains retryable.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var readyToCancel = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSender = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int tryStartCalls = 0;
+        int providerCalls = 0;
+        var sender = new DelegateTransportSender(async (_, transportStart, _) =>
+        {
+            // Deliberately does NOT check cancellationToken itself — this is
+            // exactly the "misbehaving sender" the dispatcher-side guard
+            // must defend against. It waits on a plain (non-cancellation-
+            // aware) signal so the test can force the token to already be
+            // cancelled before this call reaches TryStart().
+            readyToCancel.TrySetResult();
+            await releaseSender.Task;
+            Interlocked.Increment(ref tryStartCalls);
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+        });
+        meterListener.Start();
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 },
+            metrics: metrics);
+        DateTime occurredAt = new(2026, 7, 15, 2, 0, 0, DateTimeKind.Utc);
+        using var cts = new CancellationTokenSource();
+
+        Task first = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt,
+            cts.Token);
+        await readyToCancel.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+        releaseSender.TrySetResult();
+
+        await first.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref tryStartCalls).Should().Be(1,
+            "the misbehaving sender still calls TryStart despite the already-cancelled token");
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "the dispatcher-side guard must veto a pre-cancelled attempt even when the sender forgot its own check");
+        Volatile.Read(ref attempted).Should().Be(0,
+            "Attempted must not increment for a vetoed, never-started transport");
+
+        // Exact-version retry with a fresh (non-cancelled) token must be
+        // free to reach the provider boundary — the vetoed attempt rolled
+        // back its reservations rather than leaving them committed.
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCalls).Should().Be(1);
+        Volatile.Read(ref attempted).Should().Be(1);
         tokens.Verify(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<long>(),

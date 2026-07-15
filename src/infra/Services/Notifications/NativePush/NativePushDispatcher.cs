@@ -401,7 +401,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     return;
                 }
 
-                if (!resolutionCapture.Snapshot.HasSuccessfulDelivery)
+                if (!resolutionCapture.HasSuccessfulDelivery)
                 {
                     _metrics.SkippedNeverDelivered.Add(1);
                     return;
@@ -1029,7 +1029,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             var transportStart = new DispatcherTransportStart(
                 lifecycle,
                 reservation,
-                lifecycleSnapshot,
                 () =>
                 {
                     if (changeKind != AttentionChangeKind.Resolved)
@@ -1043,7 +1042,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     }
 
                     _metrics.Attempted.Add(1);
-                });
+                },
+                cancellationToken);
 
             NativePushDispatchResult? result = null;
             try
@@ -1153,13 +1153,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private sealed class DispatcherTransportStart(
         AttentionLifecycle lifecycle,
         LifecycleSendReservation reservation,
-        AttentionSnapshot snapshot,
-        Action onStarted) : INativePushTransportStart
+        Action onStarted,
+        CancellationToken cancellationToken) : INativePushTransportStart
     {
         private readonly object _sync = new();
         private readonly PendingTransportAttempt _attempt = new();
         private TransportStartState _state;
         private bool _settled;
+        private AttentionDeliveryLineage? _registeredLineage;
 
         public bool WasStarted
         {
@@ -1181,13 +1182,35 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     return NativePushTransportStartDecision.Veto();
                 }
 
-                if (!lifecycle.TryStartTransport(reservation, _attempt))
+                // Hicks blocker 2 (dispatcher-side guard): a sender must never
+                // commit a real provider attempt once cancellation has
+                // already been requested, even if it forgot — or raced — its
+                // own pre-transport cancellation check. This is the last
+                // synchronous checkpoint before TryStartTransport would
+                // commit lifecycle ownership, dedupe/rate reservations, and
+                // Attempted, so it stays as close to the provider call as
+                // this handshake allows. Rolling back here is identical to a
+                // normal veto: the reservation remains valid for an
+                // exact-version retry and Attempted is left unchanged.
+                // Cancellation observed strictly AFTER this check returns
+                // Permit() is a genuine in-flight attempt — it keeps normal
+                // retry/attribution semantics and is never retroactively
+                // undone by this guard.
+                if (cancellationToken.IsCancellationRequested)
                 {
                     _state = TransportStartState.Closed;
                     lifecycle.RollbackReservation(reservation);
                     return NativePushTransportStartDecision.Veto();
                 }
 
+                if (!lifecycle.TryStartTransport(reservation, _attempt, out AttentionDeliveryLineage? lineage))
+                {
+                    _state = TransportStartState.Closed;
+                    lifecycle.RollbackReservation(reservation);
+                    return NativePushTransportStartDecision.Veto();
+                }
+
+                _registeredLineage = lineage;
                 _state = TransportStartState.Started;
                 onStarted();
                 return NativePushTransportStartDecision.Permit();
@@ -1222,7 +1245,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
             if (!reservation.IsResolution)
             {
-                snapshot.SettleStartedAttempt(_attempt, wasSuccessful);
+                _registeredLineage?.SettleStartedAttempt(_attempt, wasSuccessful);
             }
         }
 
@@ -1829,6 +1852,23 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         private AttentionDispatchVersion _latest;
         private AttentionDispatchVersion? _consumedResolutionVersion;
         private AttentionSnapshot? _snapshot;
+
+        // Shared pending-attempt/delivery state for the current unresolved
+        // occurrence (see AttentionDeliveryLineage). Created lazily by the
+        // first non-resolution generation and REUSED — never replaced — by
+        // every later Created/Updated generation for the SAME occurrence, so
+        // an older generation's still-in-flight attempt (or its eventual
+        // late success) remains visible even after a newer generation
+        // supersedes it. Detached (nulled) only once a resolution's own
+        // reservation actually commits in TryStartTransport — the same
+        // moment _snapshot is nulled there, NOT merely when a Resolved
+        // change is observed/accepted in TryObserve. This lets an
+        // exact-version retry of a resolution that was cancelled (or
+        // otherwise never reached that commit) still find and re-capture
+        // the SAME lineage. The next fresh occurrence lazily creates a
+        // brand-new instance in TryStartTransport and never inherits a
+        // truly-committed resolution's consumed one.
+        private AttentionDeliveryLineage? _lineage;
         private DateTime _lastObservedAtUtc;
         private int _participants;
         private bool _hasVersion;
@@ -1866,9 +1906,39 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 _lastObservedAtUtc = observedAtUtc;
                 _hasVersion = true;
                 _participants++;
-                if (changeKind == AttentionChangeKind.Resolved)
+                if (changeKind == AttentionChangeKind.Resolved && _lineage is AttentionDeliveryLineage activeLineage)
                 {
-                    resolutionCapture = _snapshot?.CaptureResolution();
+                    // Take a stable, point-in-time read of the active
+                    // lineage's currently-pending attempts (Hicks blocker 1).
+                    // Any older-version non-resolution TryStartTransport that
+                    // has not yet committed will fail its own
+                    // "reservation.Version != _latest" check the instant this
+                    // returns (that check runs under this same lock), so it
+                    // can never register a NEW attempt on this lineage after
+                    // this point — capturing now is race-free regardless of
+                    // whether _lineage itself is detached yet. _snapshot is
+                    // guaranteed non-null here because it is only ever set
+                    // together with _lineage (see TryStartTransport).
+                    //
+                    // Deliberately does NOT null _lineage here. A resolution
+                    // can be observed/accepted (this branch) without ever
+                    // reaching TryStartTransport's commit — e.g. cancelled
+                    // during the attention lookup, or skipped for other
+                    // reasons — and an exact-version retry of that SAME
+                    // resolution must still find the SAME lineage here and
+                    // re-capture, not silently see nothing pending/delivered
+                    // (see
+                    // DispatchAsync_CancelledResolutionBeforeTransport_PreservesSnapshotForNewerResolution).
+                    // _lineage is detached only once the resolution's own
+                    // reservation actually commits in TryStartTransport — the
+                    // exact same moment _snapshot is nulled there — so a
+                    // later, strictly-newer Created (a fresh recurrence)
+                    // still starts a lineage of its own instead of inheriting
+                    // a truly-consumed one's pending/delivered state.
+                    resolutionCapture = new ResolutionCapture(
+                        _snapshot!,
+                        activeLineage.CapturePendingSettlements(),
+                        activeLineage);
                 }
 
                 // Fire under the sync lock so any concurrent newer occurrence's
@@ -1966,14 +2036,21 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         /// <summary>
         /// Atomically verifies and commits a real provider boundary after the
         /// sender has completed its preparation. No awaited work runs while
-        /// this lock is held.
+        /// this lock is held. On success for a non-resolution reservation,
+        /// <paramref name="lineage"/> is the (lazily-created-or-reused)
+        /// shared <see cref="AttentionDeliveryLineage"/> the caller's
+        /// <see cref="PendingTransportAttempt"/> was registered against —
+        /// the caller must settle against THIS instance later, not whatever
+        /// <c>_lineage</c> may have become by then.
         /// </summary>
         public bool TryStartTransport(
             LifecycleSendReservation reservation,
-            PendingTransportAttempt attempt)
+            PendingTransportAttempt attempt,
+            out AttentionDeliveryLineage? lineage)
         {
             lock (_sync)
             {
+                lineage = null;
                 if (!reservation.IsPending
                     || _retired
                     || !_hasVersion
@@ -2011,22 +2088,45 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     {
                         _snapshot = null;
                         _consumedResolutionVersion = reservation.Version;
+
+                        // Detach the lineage here — the resolution's own
+                        // reservation just won the race to actually commit
+                        // (cross the transport-start boundary for the first
+                        // device), the same moment _snapshot above is
+                        // nulled. A later, strictly-newer Created (a fresh
+                        // recurrence) will lazily create its own lineage
+                        // below instead of inheriting this one's
+                        // pending/delivered state. Until this commit
+                        // happens, TryObserve's capture (above) keeps
+                        // re-reading this SAME instance on every accepted
+                        // Resolved observation — including an exact-version
+                        // retry after an earlier attempt was cancelled or
+                        // skipped before ever reaching this point.
+                        _lineage = null;
                     }
                     else
                     {
-                        if (_snapshot is not null && _snapshot.HasSuccessfulDelivery)
-                        {
-                            reservation.ExpectedSnapshot.MarkDelivered();
-                        }
-
                         _snapshot = reservation.ExpectedSnapshot;
                         _consumedResolutionVersion = null;
+
+                        // Reuse the SAME lineage across a snapshot
+                        // replacement (S1 -> S2) for this still-unresolved
+                        // occurrence — created only once, on the first
+                        // generation since the last consumed resolution (or
+                        // since this lifecycle's inception). This is the
+                        // Hicks blocker 1 fix: a still-pending older
+                        // generation's attempt (and its eventual late
+                        // success) stays reachable through this shared
+                        // instance instead of being silently dropped when a
+                        // newer generation becomes "current".
+                        _lineage ??= new AttentionDeliveryLineage();
                     }
                 }
 
                 if (!reservation.IsResolution)
                 {
-                    reservation.ExpectedSnapshot.RegisterStartedAttempt(attempt);
+                    lineage = _lineage;
+                    lineage!.RegisterStartedAttempt(attempt);
                 }
 
                 return true;
@@ -2153,15 +2253,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
     private sealed class ResolutionCapture(
         AttentionSnapshot snapshot,
-        IReadOnlyList<Task> pendingSettlements)
+        Task[] pendingSettlements,
+        AttentionDeliveryLineage lineage)
     {
         public AttentionSnapshot Snapshot { get; } = snapshot;
+
+        /// <summary>
+        /// True once ANY device attempt across every generation this
+        /// lineage ever spanned (not just the most recently active
+        /// snapshot) achieved a successful delivery. Must only be read
+        /// AFTER <see cref="WaitForPendingTransportsAsync"/> completes, so a
+        /// late success from an inherited, already-superseded generation is
+        /// visible before the resolution decides whether to dismiss.
+        /// </summary>
+        public bool HasSuccessfulDelivery => lineage.HasSuccessfulDelivery;
 
         public Task WaitForPendingTransportsAsync(
             Action? onWaitStarted,
             CancellationToken cancellationToken)
         {
-            if (pendingSettlements.Count == 0)
+            if (pendingSettlements.Length == 0)
             {
                 return Task.CompletedTask;
             }
@@ -2171,16 +2282,93 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
-    // Each snapshot owns only its currently pending provider attempts. A
-    // global resolution captures that bounded set while holding the lifecycle
-    // lock, then waits after releasing all locks. Completion removes the task
-    // immediately so old snapshots do not retain unbounded settled attempts.
-    private sealed class AttentionSnapshot
+    /// <summary>
+    /// Shared pending-attempt/delivery lineage for one unresolved attention
+    /// occurrence — every Created/Updated generation between the occurrence's
+    /// first dispatch and its next committed Resolved. <see
+    /// cref="AttentionLifecycle"/> creates exactly one instance per
+    /// occurrence (see <see cref="AttentionLifecycle.TryStartTransport"/>)
+    /// and REUSES it — never replaces it — across every later snapshot
+    /// generation for that same occurrence, so a still-pending older
+    /// generation's provider attempt (and its eventual late success) remains
+    /// reachable after a newer generation becomes "current" (Hicks blocker
+    /// 1). <see cref="AttentionLifecycle"/> detaches its reference to this
+    /// instance only once a resolution's own reservation actually commits in
+    /// <see cref="AttentionLifecycle.TryStartTransport"/> — the same moment
+    /// it nulls its snapshot pointer — so a resolution merely observed (and
+    /// then cancelled or otherwise never reaching that commit) leaves this
+    /// instance in place for an exact-version retry to find again, while a
+    /// subsequent fresh occurrence still starts with a brand-new instance
+    /// instead of inheriting stale delivered/pending state.
+    /// </summary>
+    private sealed class AttentionDeliveryLineage
     {
-        private readonly object _pendingSync = new();
+        private readonly object _sync = new();
         private readonly HashSet<PendingTransportAttempt> _pendingAttempts = [];
         private int _hasSuccessfulDelivery;
 
+        /// <summary>True once at least one device attempt anywhere in this lineage succeeded.</summary>
+        public bool HasSuccessfulDelivery => Volatile.Read(ref _hasSuccessfulDelivery) != 0;
+
+        public void MarkDelivered() => Interlocked.Exchange(ref _hasSuccessfulDelivery, 1);
+
+        public void RegisterStartedAttempt(PendingTransportAttempt attempt)
+        {
+            lock (_sync)
+            {
+                _ = _pendingAttempts.Add(attempt);
+            }
+        }
+
+        public void SettleStartedAttempt(
+            PendingTransportAttempt attempt,
+            bool wasSuccessful)
+        {
+            if (wasSuccessful)
+            {
+                MarkDelivered();
+            }
+
+            lock (_sync)
+            {
+                _ = _pendingAttempts.Remove(attempt);
+            }
+
+            attempt.Complete();
+        }
+
+        /// <summary>
+        /// Stable, point-in-time read of the settlement tasks for every
+        /// attempt currently pending across every generation this lineage
+        /// has ever spanned — not only the most recently active snapshot.
+        /// Has no fencing side effect and is safe to call more than once:
+        /// an exact-version retry of a resolution that was cancelled (or
+        /// otherwise never reached <see
+        /// cref="AttentionLifecycle.TryStartTransport"/>'s commit) before
+        /// this lineage was detached calls this again and must see a live,
+        /// still-accurate view.
+        /// </summary>
+        public Task[] CapturePendingSettlements()
+        {
+            lock (_sync)
+            {
+                return _pendingAttempts.Count == 0
+                    ? Array.Empty<Task>()
+                    : _pendingAttempts.Select(attempt => attempt.Settlement).ToArray();
+            }
+        }
+    }
+
+    // Immutable per-generation routing data (kind/printer/job/toolhead) plus
+    // the timestamp used for TTL pruning. Pending-attempt tracking and the
+    // cross-generation "has this occurrence ever delivered" flag live on
+    // AttentionDeliveryLineage, not here — a snapshot's identity is still
+    // used for per-device dedupe/staleness reference-equality checks
+    // (AttentionLifecycle.TryReserveSend / IsCurrentUnderLock), but a
+    // snapshot being superseded must never lose track of attempts that were
+    // already started against it (Hicks blocker 1).
+    private sealed class AttentionSnapshot
+    {
         public AttentionSnapshot(
             AttentionKind kind,
             Guid printerId,
@@ -2204,47 +2392,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         public int? ToolheadIndex { get; }
 
         public DateTime CapturedAtUtc { get; }
-
-        /// <summary>True once at least one device attempt for this alert generation succeeded.</summary>
-        public bool HasSuccessfulDelivery => Volatile.Read(ref _hasSuccessfulDelivery) != 0;
-
-        /// <summary>Marks this alert generation as having achieved at least one successful delivery.</summary>
-        public void MarkDelivered() => Interlocked.Exchange(ref _hasSuccessfulDelivery, 1);
-
-        public ResolutionCapture CaptureResolution()
-        {
-            lock (_pendingSync)
-            {
-                return new ResolutionCapture(
-                    this,
-                    _pendingAttempts.Select(attempt => attempt.Settlement).ToArray());
-            }
-        }
-
-        public void RegisterStartedAttempt(PendingTransportAttempt attempt)
-        {
-            lock (_pendingSync)
-            {
-                _ = _pendingAttempts.Add(attempt);
-            }
-        }
-
-        public void SettleStartedAttempt(
-            PendingTransportAttempt attempt,
-            bool wasSuccessful)
-        {
-            if (wasSuccessful)
-            {
-                MarkDelivered();
-            }
-
-            lock (_pendingSync)
-            {
-                _ = _pendingAttempts.Remove(attempt);
-            }
-
-            attempt.Complete();
-        }
     }
 
     private bool TryConsumeRate(RateLimitKey key, NativePushSettings settings, DateTime nowUtc)

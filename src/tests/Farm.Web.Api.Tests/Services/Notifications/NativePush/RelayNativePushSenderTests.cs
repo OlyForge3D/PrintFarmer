@@ -70,6 +70,33 @@ public sealed class RelayNativePushSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_CancellationAlreadyRequestedAfterPreparation_DoesNotCallTryStartOrRelay()
+    {
+        // Hicks blocker 2: preparation (envelope serialization, request
+        // construction) has no await point that observes cancellation, so
+        // without an explicit check the sender would reach TryStart()
+        // regardless of a token cancelled in the meantime — committing
+        // dispatcher-owned lifecycle/dedupe/rate state and Attempted for an
+        // attempt that will never reach the relay.
+        int requests = 0;
+        var transportStart = new RecordingTransportStart(permit: true);
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await sut.SendAsync(Sample, transportStart, cts.Token));
+
+        transportStart.Calls.Should().Be(0,
+            "a pre-cancelled attempt must never reach the transport-start boundary, even though preparation already completed");
+        Volatile.Read(ref requests).Should().Be(0);
+    }
+
+    [Fact]
     public async Task SendAsync_Http2xx_ReturnsDelivered_AndSendsBearerAuth()
     {
         var settings = MakeRelaySettings();

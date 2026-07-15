@@ -108,6 +108,51 @@ public sealed class DirectApnsNativePushSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_CancellationAlreadyRequestedWithCachedJwt_DoesNotCallTryStartOrApns()
+    {
+        // Hicks blocker 2: once a JWT is cached and still fresh,
+        // GetOrRefreshJwtAsync returns without ever acquiring the JWT lock
+        // or observing cancellationToken at all (see the early-return branch
+        // at the top of that method) — so, unlike the JWT-preparation-wait
+        // case above, there is NO await point between a caller's
+        // cancellation and TryStart() on this fast path. Without an explicit
+        // check immediately before TryStart(), a token cancelled after the
+        // cache hit would still commit dispatcher-owned lifecycle/dedupe/
+        // rate state and Attempted for an attempt that never reaches APNs.
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        int requests = 0;
+        using DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        try
+        {
+            // Prime the JWT cache via one successful, uncancelled send so the
+            // next attempt takes the fast "already cached" branch.
+            NativePushDispatchResult primed = await sut.SendAsync(Sample);
+            primed.Success.Should().BeTrue();
+            Volatile.Read(ref requests).Should().Be(1);
+
+            var transportStart = new RecordingTransportStart(permit: true);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await sut.SendAsync(Sample, transportStart, cts.Token));
+
+            transportStart.Calls.Should().Be(0,
+                "a pre-cancelled attempt on the cached-JWT fast path must never reach the transport-start boundary");
+            Volatile.Read(ref requests).Should().Be(1,
+                "no second APNs call may occur once cancellation was already requested");
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task SendAsync_Alert_EmitsExactHeadersPayloadAndValidProviderJwt()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
