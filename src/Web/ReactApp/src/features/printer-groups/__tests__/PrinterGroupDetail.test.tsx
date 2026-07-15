@@ -25,8 +25,8 @@ vi.mock('@/common/components/ui', () => ({
     },
   ),
   Spinner: ({ size }: { size?: string }) => <div data-testid="spinner" data-size={size}>Loading...</div>,
-  Button: ({ children, onClick, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; iconLeft?: React.ReactNode }) => (
-    <button onClick={onClick} {...rest}>{rest.iconLeft}{children}</button>
+  Button: ({ children, onClick, iconLeft, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; iconLeft?: React.ReactNode }) => (
+    <button onClick={onClick} {...rest}>{iconLeft}{children}</button>
   ),
   Badge: ({ children }: { children: React.ReactNode; variant?: string }) => (
     <span data-testid="badge">{children}</span>
