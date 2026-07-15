@@ -46,7 +46,7 @@ public sealed class SnapmakerU1CameraMonitorManager(
 
             state.StopRetryCount = 0;
             ScheduleIdleStop(key, baseUri, state, credential);
-            return true;
+            return state.IsRunning;
         }
         catch (MoonrakerJsonRpcException ex) when (ex.RequestSent)
         {
@@ -67,7 +67,10 @@ public sealed class SnapmakerU1CameraMonitorManager(
 
     private void ScheduleIdleStop(string key, Uri baseUri, MonitorState state, PrinterCredential? credential)
     {
-        state.IdleStopCts?.Cancel();
+        CancellationTokenSource? oldCts = state.IdleStopCts;
+        state.IdleStopCts = null;
+        oldCts?.Dispose();
+
         CancellationTokenSource cts = new();
         state.IdleStopCts = cts;
 
@@ -128,6 +131,10 @@ public sealed class SnapmakerU1CameraMonitorManager(
         }
 
         state.StopRetryCount++;
+        CancellationTokenSource? oldCts = state.IdleStopCts;
+        state.IdleStopCts = null;
+        oldCts?.Dispose();
+
         CancellationTokenSource cts = new();
         state.IdleStopCts = cts;
         _ = StopAfterDelayAsync(key, baseUri, state, credential, _stopRetryBackoff, cts.Token);

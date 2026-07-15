@@ -141,6 +141,49 @@ public class MoonrakerSnapmakerU1CameraTests
         rpc.Methods.Should().Equal("camera.start_monitor", "camera.stop_monitor", "camera.stop_monitor");
     }
 
+    [Fact]
+    public async Task EnsureMonitorStartedAsync_WhenRateLimitPreventsRestartWhileStopped_ReturnsFalse()
+    {
+        RecordingJsonRpcClient rpc = new();
+        ControlledTimeProvider clock = new(new DateTime(2026, 7, 14, 18, 0, 0, DateTimeKind.Utc));
+        SnapmakerU1CameraMonitorManager manager = new(
+            rpc,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(60),
+            timeProvider: clock);
+
+        bool firstStart = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
+        await clock.FirstTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
+        clock.ReleaseLatestTimer();
+        await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        bool secondStart = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
+
+        firstStart.Should().BeTrue();
+        secondStart.Should().BeFalse("rate limit prevents restart while stopped");
+        rpc.Methods.Should().Equal("camera.start_monitor", "camera.stop_monitor");
+    }
+
+    [Fact]
+    public async Task ScheduleIdleStop_WhenCalledRepeatedly_DisposesSupersededCancellationTokens()
+    {
+        RecordingJsonRpcClient rpc = new();
+        SnapmakerU1CameraMonitorManager manager = new(
+            rpc,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(50));
+
+        for (int i = 0; i < 10; i++)
+        {
+            _ = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
+            await Task.Delay(10);
+        }
+
+        await Task.Delay(100);
+        rpc.Count("camera.start_monitor").Should().Be(1);
+        rpc.Methods.Last().Should().Be("camera.stop_monitor");
+    }
+
     private static MoonrakerClient CreateClient(
         Func<HttpRequestMessage, HttpResponseMessage> responder,
         ISnapmakerU1CameraMonitorManager manager)
