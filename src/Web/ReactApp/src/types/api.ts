@@ -1247,6 +1247,14 @@ export interface ToolheadDto {
   supportedMaterials?: string[];
   isPrimary: boolean;
   lastUpdated?: Date;
+  /**
+   * Cumulative print hours accrued while this toolhead was the active tool,
+   * from `PrinterDetailsDto.toolheads[i].cumulativePrintHours` on the #711
+   * backend (`0bfa50343`). Null on older backends and on new toolheads that
+   * have not yet observed a print, or on printers with
+   * `supportsPerToolAttribution === false`.
+   */
+  cumulativePrintHours?: number | null;
   // Multi-toolhead filament tracking
   toolheadType?: ToolheadType | string;
   currentSpoolId?: number;
@@ -1297,6 +1305,15 @@ export interface PrinterDetails {
   buddyCameraIp?: string;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
+  /**
+   * True only for Moonraker printers with a supported multi-physical-tool
+   * topology (#711, `0bfa50343`). When false, the backend rejects hour-based
+   * maintenance schedules that carry a non-null `toolheadId` with HTTP 400,
+   * and per-tool odometers/scoped alerts are not populated. Omitted on
+   * older backends — the frontend defaults to treating omission as
+   * "unsupported" for the odometer surface but tolerant everywhere else.
+   */
+  supportsPerToolAttribution?: boolean;
 }
 
 // Temperature targets
@@ -3514,6 +3531,38 @@ export interface UpdateBedTypeRequest {
  * System platform capabilities — reports which features are available
  * on the current hardware (e.g. ARM/Raspberry Pi may disable slicing).
  */
+/**
+ * Operator feature flags returned by `GET /api/system/capabilities` under
+ * `operatorFeatures`. Backend contract (#725) is that clients MUST tolerate
+ * missing flags in older/newer server responses and fall back to the
+ * documented defaults, so every field here is optional. When a flag is
+ * omitted the frontend should behave as if the feature is enabled unless
+ * the feature-specific default says otherwise.
+ *
+ * The `multiSlotFallbackEnabled` flag is the gate #711 uses to hide
+ * per-toolhead maintenance data (scoped alerts, scoped deployments, and the
+ * per-tool analytics slice). When it is `false` the per-tool maintenance UI
+ * should collapse to a printer-wide view even for multi-hotend printers.
+ */
+export interface OperatorFeatureFlags {
+  /** Unified attention/exception feed and typed action endpoints (#707). Default true. */
+  attentionEnabled?: boolean;
+  /** APNs registration and delivery for operator alerts (#708). Default false. */
+  nativePushEnabled?: boolean;
+  /** Coverage/runout calculations exposed to clients (#709). Default true. */
+  filamentCoverageEnabled?: boolean;
+  /** Per-tool requirements, swap validation, and guided swap flow (#710). Default true. */
+  guidedSwapEnabled?: boolean;
+  /** Fallback groups, per-tool maintenance, and dispatch loadout (#711). Default true. */
+  multiSlotFallbackEnabled?: boolean;
+  /** Shift compiler and Tasks feed (#713). Default true. */
+  shiftPlanEnabled?: boolean;
+  /** Printed-part stock, bins, harvest, and scan/inventory API (#714). Default true. */
+  printedPartsInventoryEnabled?: boolean;
+  /** Idempotent write queue and offline replay (#715). Default true. */
+  offlineWriteReplayEnabled?: boolean;
+}
+
 export interface SystemCapabilities {
   architecture: string;
   slicingEnabled: boolean;
@@ -3521,6 +3570,12 @@ export interface SystemCapabilities {
   thumbnailGenerationEnabled: boolean;
   gcodeUploadEnabled: boolean;
   platformNote?: string;
+  /**
+   * Operator feature flags — populated once #711/#725 ship. Older API builds
+   * omit this field entirely; the frontend must tolerate the absence and use
+   * per-flag defaults (see {@link OperatorFeatureFlags}).
+   */
+  operatorFeatures?: OperatorFeatureFlags;
 }
 
 export enum SystemServiceHealth {
