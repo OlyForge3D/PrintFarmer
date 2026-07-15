@@ -31,6 +31,18 @@ vi.mock('@/hooks/useSlicer', () => ({
   }),
 }));
 
+vi.mock('@/common/hooks/useSystemCapabilities', () => ({
+  useSystemCapabilities: () => ({
+    data: {
+      architecture: 'x64',
+      slicingEnabled: true,
+      modelFilesEnabled: true,
+      thumbnailGenerationEnabled: true,
+      gcodeUploadEnabled: true,
+    },
+  }),
+}));
+
 vi.mock('@/contexts/ThemeContext', () => ({
   useTheme: () => ({
     theme: 'light',

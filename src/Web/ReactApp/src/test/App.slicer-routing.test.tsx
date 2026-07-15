@@ -3,6 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Outlet } from 'react-router';
 
+const mockUseSystemCapabilities = vi.fn();
+
 vi.mock('@/common/hooks/useUnifiedLogging', () => ({
   useUnifiedLogging: () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
 }));
@@ -81,14 +83,11 @@ vi.mock('@/common/components/Layout', () => ({
 }));
 
 vi.mock('@/common/hooks/useSystemCapabilities', () => ({
-  useSystemCapabilities: () => ({
-    data: {
-      slicingEnabled: true,
-      modelFilesEnabled: true,
-      architecture: 'x64',
-      platformNote: '',
-    },
-  }),
+  useSystemCapabilities: () => mockUseSystemCapabilities(),
+}));
+
+vi.mock('@/features/slicer/pages/NewSliceJobPage', () => ({
+  NewSliceJobPage: () => <div>NewSliceJobPageMock</div>,
 }));
 
 vi.mock('@/features/tasks', () => ({
@@ -109,6 +108,15 @@ import App from '../App';
 describe('App slicer route consolidation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseSystemCapabilities.mockReturnValue({
+      data: {
+        slicingEnabled: true,
+        modelFilesEnabled: true,
+        architecture: 'x64',
+        platformNote: '',
+      },
+      error: null,
+    });
   });
 
   it('redirects the old admin slicer profiles route to the settings slicing tab', async () => {
@@ -131,5 +139,51 @@ describe('App slicer route consolidation', () => {
     await waitFor(() => {
       expect(window.location.pathname).toBe('/profiles/import');
     });
+  });
+
+  it('does not render a capability-gated route until paused first-load data resolves', async () => {
+    mockUseSystemCapabilities.mockReturnValue({
+      data: undefined,
+      error: null,
+      isLoading: false,
+      fetchStatus: 'paused',
+    });
+    window.history.pushState({}, '', '/slicer');
+
+    const { rerender } = render(<App />);
+
+    expect(await screen.findByRole('status', { name: 'Loading platform capabilities' })).toBeInTheDocument();
+    expect(screen.queryByText('NewSliceJobPageMock')).not.toBeInTheDocument();
+
+    mockUseSystemCapabilities.mockReturnValue({
+      data: {
+        slicingEnabled: true,
+        modelFilesEnabled: true,
+        architecture: 'x64',
+        platformNote: '',
+      },
+      error: null,
+    });
+    rerender(<App />);
+
+    expect(await screen.findByText('NewSliceJobPageMock')).toBeInTheDocument();
+  });
+
+  it('keeps a resolved disabled capability distinct from unresolved data', async () => {
+    mockUseSystemCapabilities.mockReturnValue({
+      data: {
+        slicingEnabled: false,
+        modelFilesEnabled: true,
+        architecture: 'arm64',
+        platformNote: 'Slicing is disabled.',
+      },
+      error: null,
+    });
+    window.history.pushState({}, '', '/slicer');
+
+    render(<App />);
+
+    expect(await screen.findByText('Feature Not Available')).toBeInTheDocument();
+    expect(screen.queryByText('NewSliceJobPageMock')).not.toBeInTheDocument();
   });
 });
