@@ -26,8 +26,8 @@ vi.mock('@/common/components/ui', () => ({
   Input: ({ value, onChange, placeholder, className, ...rest }: React.InputHTMLAttributes<HTMLInputElement>) => (
     <input value={value} onChange={onChange} placeholder={placeholder} className={className} {...rest} />
   ),
-  Select: ({ value, onChange, children, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { containerClassName?: string }) => (
-    <select value={value} onChange={onChange} {...rest}>{children}</select>
+  Select: ({ value, onChange, children, containerClassName, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { containerClassName?: string }) => (
+    <select value={value} onChange={onChange} data-container-class-name={containerClassName} {...rest}>{children}</select>
   ),
   Badge: ({ children, variant, size, className }: { children: React.ReactNode; variant?: string; size?: string; className?: string }) => (
     <span data-testid="badge" data-variant={variant} data-size={size} className={className}>{children}</span>
