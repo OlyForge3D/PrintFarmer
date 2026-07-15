@@ -74,6 +74,38 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // and immediately before it awaits that set outside lifecycle locks.
     internal Action? OnResolutionSettlementWaitStartedForTests { get; set; }
 
+    // -----------------------------------------------------------------------
+    // Internal cache-count test seams (Hicks r2 blocker 1 leak-proofing).
+    //
+    // These accessors are visible to Farm.Web.Api.Tests only (via
+    // InternalsVisibleTo in AssemblyInfo.TestsVisible.cs). They exist so
+    // deterministic tests can prove that:
+    //   * disabled-mode Created/Updated traffic creates NO dispatch state, and
+    //   * disabled-mode Resolved traffic drives bounded retirement past the
+    //     retention TTL rather than accumulating unbounded.
+    // No production DI touches these members; they read the raw concurrent
+    // dictionary Count with no locking to avoid any observable side effect.
+    // -----------------------------------------------------------------------
+
+    /// <summary>Test-only: live count of AttentionDispatchLane entries.</summary>
+    internal int AttentionDispatchLaneCountForTests => _attentionDispatchLanes.Count;
+
+    /// <summary>Test-only: live count of AttentionItemFence entries.</summary>
+    internal int AttentionItemFenceCountForTests => _attentionItemFences.Count;
+
+    /// <summary>Test-only: live count of AttentionLifecycle entries.</summary>
+    internal int AttentionLifecycleCountForTests => _attentionLifecycles.Count;
+
+    /// <summary>
+    /// Test-only: drives <see cref="PruneCaches"/> with the current settings.
+    /// The internal 30-second rate limit is respected; tests advance the
+    /// injected <see cref="TimeProvider"/> to observe reclamation.
+    /// </summary>
+    internal void PruneCachesForTests()
+    {
+        PruneCaches(UtcNow, _optionsMonitor.CurrentValue);
+    }
+
     /// <summary>Constructs the dispatcher.</summary>
     public NativePushDispatcher(
         IServiceScopeFactory scopeFactory,
@@ -143,6 +175,33 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
+        // Hicks r2 blocker 1: a disabled-mode Created/Updated dispatch must
+        // NOT observe a dispatch lane. The prior implementation always ran
+        // TryObserveDispatch first and then early-returned at
+        // DispatchCoreAsync's mode check, so every unique attention item
+        // permanently created a fresh AttentionDispatchLane in the process
+        // cache (retired only after the seven-day retention TTL). Because
+        // Disabled is the default operator mode, unique attention items
+        // accumulated lanes without bound. Skipping TryObserveDispatch
+        // here is safe: no dispatcher-owned state (lane, lifecycle, or
+        // item fence) exists that a non-Resolved disabled dispatch could
+        // need to serialise against, and any subsequent Resolved on the
+        // same item still creates or advances the required fence.
+        //
+        // Resolved changes (both global and targeted) fall through so
+        // DispatchCoreAsync can perform the pre-exit fencing invariants
+        // even in disabled mode — the tombstone/lifecycle advancement is
+        // a correctness requirement that survives the operator toggle,
+        // and DispatchCoreAsync's own finally releases the fence's
+        // participant leases and drives bounded PruneCaches on the
+        // disabled early return so its own state cannot leak either.
+        NativePushSettings entrySettings = _optionsMonitor.CurrentValue;
+        if (entrySettings.Mode == NativePushMode.Disabled
+            && changeKind != AttentionChangeKind.Resolved)
+        {
+            return;
+        }
+
         if (!TryObserveDispatch(dispatchKey, version, out AttentionDispatchLane lane))
         {
             return;
@@ -197,14 +256,30 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ? PublishResolvedTombstoneAndFenceLifecycles(attentionItemId, version)
             : null;
 
+        // Hicks r2 blocker 3: a targeted resolution's ordering fence is
+        // symmetric to the global one. It must publish and advance the
+        // target user's lifecycle synchronously — under the same
+        // AttentionItemFence lock a concurrent global Resolved acquires
+        // — BEFORE any settings/gate/scope/owner-lookup or other
+        // optional/fallible early exit. Without this, a concurrent
+        // Created that has already admitted the target's lifecycle can
+        // resume after this dispatch returns and start transport for an
+        // older generation. The item-wide _resolvedVersion tombstone is
+        // NOT bumped here (that is a global-only invariant); only the
+        // target's per-user lifecycle is advanced to Resolved v_target.
+        GlobalResolvedFence? targetedResolvedFence = changeKind == AttentionChangeKind.Resolved
+            && targetUserId is Guid targetForFence
+            ? PublishTargetedResolvedFence(attentionItemId, targetForFence, version)
+            : null;
+
         // Snapshot the startup-bound settings for a consistent fan-out. The
         // NativePush section is validated with ValidateOnStart; configuration
         // changes require a process restart rather than taking effect mid-flight.
         // Resolved events consume a per-user pre-resolution snapshot and emit a
         // silent dismissal even after the source removes the live item.
+        NativePushSettings settings = _optionsMonitor.CurrentValue;
         try
         {
-            NativePushSettings settings = _optionsMonitor.CurrentValue;
             if (settings.Mode == NativePushMode.Disabled)
             {
                 return;
@@ -260,6 +335,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return;
             }
 
+            // Global and targeted Resolved share the same preObservedResolution
+            // plumbing: each participant carries the exact lifecycle and
+            // captured lineage the pre-exit fence installed, so
+            // DispatchForOwnerAsync consumes them uniformly. A resolution
+            // scoped to a single user only enrolls that user's participant;
+            // a global one enrolls every previously-tracked lifecycle. At
+            // most one fence is non-null per DispatchCoreAsync call.
+            GlobalResolvedFence? preObservedResolutionFence =
+                globalResolvedFence ?? targetedResolvedFence;
+
             foreach (Guid userId in owners)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -272,7 +357,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 }
 
                 GlobalResolvedParticipant? preObservedResolution =
-                    globalResolvedFence?.Take(userId);
+                    preObservedResolutionFence?.Take(userId);
 
                 // Vasquez v6 B1: isolate the entire per-owner resolution +
                 // fan-out under a scope that never swallows cancellation but
@@ -329,7 +414,27 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         finally
         {
+            // Release the version-specific participant leases FIRST so
+            // PruneCaches below can reclaim any past-retention entry that
+            // was still holding a lease before this dispatch. Complete()
+            // is exactly-once and idempotent: a Take'd participant that
+            // DispatchForOwnerAsync already Completed becomes a no-op.
             globalResolvedFence?.Complete();
+            targetedResolvedFence?.Complete();
+
+            // Hicks r2 blocker 1: bounded prune must actually run on every
+            // relevant disabled/no-op early return. PruneCaches inside the
+            // try (above) only runs when Mode != Disabled, so a disabled
+            // Resolved would otherwise leave its own fence + lane in the
+            // cache and never drive retirement of prior past-retention
+            // entries. Running it here (after lease release) makes disabled
+            // Resolved traffic drive the same bounded reclamation as normal
+            // traffic; the internal 30-second rate limit prevents redundant
+            // sweeps in bursty conditions.
+            if (settings.Mode == NativePushMode.Disabled)
+            {
+                PruneCaches(UtcNow, settings);
+            }
         }
     }
 
@@ -859,6 +964,108 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         return participants;
     }
 
+    /// <summary>
+    /// Publishes a targeted resolution's ordering fence: advances ONLY the
+    /// target user's per-item lifecycle to Resolved v_target under the
+    /// AttentionItemFence's lock, so a concurrent Created that already
+    /// admitted the same lifecycle is superseded before this dispatch
+    /// hits any optional/fallible early exit. Does NOT bump the item-wide
+    /// <c>_resolvedVersion</c> tombstone (that is a global-only invariant).
+    /// Returns a fence-shaped participant so the existing
+    /// <see cref="GlobalResolvedFence.Take"/>/Complete plumbing releases
+    /// the version-specific lease exactly once on every path (Hicks r2
+    /// blocker 3).
+    /// </summary>
+    private GlobalResolvedFence PublishTargetedResolvedFence(
+        string attentionItemId,
+        Guid targetUserId,
+        AttentionDispatchVersion version)
+    {
+        while (true)
+        {
+            AttentionItemFence fence = _attentionItemFences.GetOrAdd(
+                attentionItemId,
+                static _ => new AttentionItemFence());
+
+            List<GlobalResolvedParticipant>? participants = null;
+            AttentionItemFenceResult fenceResult = fence.TryFenceTargetedLifecycle(
+                version,
+                UtcNow,
+                () => participants = FenceTargetLifecycleForTargetedResolution(
+                    fence,
+                    attentionItemId,
+                    targetUserId,
+                    version));
+
+            if (fenceResult == AttentionItemFenceResult.Retired)
+            {
+                // A pruner retired this fence after GetOrAdd returned it.
+                // Retry against the replacement fence instead of fencing
+                // against an orphaned tombstone.
+                continue;
+            }
+
+            return new GlobalResolvedFence(participants ?? []);
+        }
+    }
+
+    private List<GlobalResolvedParticipant>? FenceTargetLifecycleForTargetedResolution(
+        AttentionItemFence fence,
+        string attentionItemId,
+        Guid targetUserId,
+        AttentionDispatchVersion version)
+    {
+        // Runs under the AttentionItemFence lock (via TryFenceTargetedLifecycle),
+        // so this install-and-observe happens atomically with any global
+        // resolution's tombstone publish + owner enumeration for the same
+        // item. Lock order is fence -> lifecycle, matching every other
+        // path so there is no deadlock potential.
+        while (true)
+        {
+            var key = new AttentionSnapshotKey(targetUserId, attentionItemId);
+            AttentionLifecycle lifecycle = _attentionLifecycles.GetOrAdd(
+                key,
+                static _ => new AttentionLifecycle());
+            fence.TrackLifecycle(targetUserId, lifecycle);
+
+            AttentionLifecycleObserveResult result = lifecycle.TryObserve(
+                version,
+                AttentionChangeKind.Resolved,
+                UtcNow,
+                () => ResetActiveLifecycleDedupe(targetUserId, attentionItemId),
+                out ResolutionCapture? resolutionCapture);
+            if (result == AttentionLifecycleObserveResult.Accepted)
+            {
+                return
+                [
+                    new GlobalResolvedParticipant(
+                        targetUserId,
+                        lifecycle,
+                        version,
+                        resolutionCapture),
+                ];
+            }
+
+            if (result == AttentionLifecycleObserveResult.Retired)
+            {
+                // A pruner retired this lifecycle instance after GetOrAdd
+                // returned it. Untrack the orphan and drop it from the
+                // dictionary so the loop's next GetOrAdd installs a fresh
+                // replacement, then retry the observation.
+                fence.UntrackLifecycle(targetUserId, lifecycle);
+                _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionLifecycle>>)_attentionLifecycles)
+                    .Remove(new KeyValuePair<AttentionSnapshotKey, AttentionLifecycle>(key, lifecycle));
+                continue;
+            }
+
+            // Stale: a strictly-newer lifecycle observation already
+            // superseded this generation. No participant to enrol; the
+            // caller returns an empty fence and the eventual owner
+            // enumeration will observe the same staleness.
+            return null;
+        }
+    }
+
     private static DateTime NormalizeOccurredAt(DateTime occurredAt)
     {
         return occurredAt.Kind switch
@@ -1044,6 +1251,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                     _metrics.Attempted.Add(1);
                 },
+                () => gate.IsEnabled(OperatorFeature.NativePush),
+                () => _metrics.SkippedFeatureDisabled.Add(1),
                 cancellationToken);
 
             NativePushDispatchResult? result = null;
@@ -1155,6 +1364,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionLifecycle lifecycle,
         LifecycleSendReservation reservation,
         Action onStarted,
+        Func<bool> isFeatureEnabled,
+        Action onFeatureDisabledVeto,
         CancellationToken cancellationToken) : INativePushTransportStart
     {
         private readonly object _sync = new();
@@ -1180,6 +1391,39 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             {
                 if (_state != TransportStartState.Pending)
                 {
+                    return NativePushTransportStartDecision.Veto();
+                }
+
+                // Hicks r2 blocker 2: re-evaluate the persisted feature gate
+                // at the actual transport-start boundary, AFTER the sender
+                // finished all pre-transport preparation (JWT signing, key
+                // I/O, payload build) and IMMEDIATELY before a real provider
+                // request would be accepted. The dispatcher's own gate check
+                // in SendWithRetriesAsync runs BEFORE preparation, so an
+                // administrator committing a persisted disable during a
+                // slow-preparation window would otherwise be observed only
+                // AFTER the provider call has already fired — a later gate
+                // check cannot undo an already-sent push. Reading the gate
+                // here re-queries persisted state at the last possible
+                // synchronous moment before <see cref="lifecycle.TryStartTransport"/>
+                // would commit lifecycle ownership, dedupe/rate reservations,
+                // and the <c>Attempted</c> metric. On disabled: veto and
+                // fully roll back — dedupe/rate are returned, the reservation
+                // reverts to <see cref="LifecycleSendReservation.TryBeginRollback"/>
+                // state, <c>Attempted</c> is not incremented, and an
+                // exact-version retry recovers once the gate is re-enabled.
+                //
+                // Reading the persisted gate is a bounded synchronous
+                // operation (documented in <see cref="OperatorFeatureGate.LoadSettings"/>
+                // as sync-over-async on a scoped repository). It never
+                // blocks on external I/O beyond a single indexed row read,
+                // and its broad exception handler ensures a false safe-default
+                // rather than a propagating throw.
+                if (!isFeatureEnabled())
+                {
+                    _state = TransportStartState.Closed;
+                    lifecycle.RollbackReservation(reservation);
+                    onFeatureDisabledVeto();
                     return NativePushTransportStartDecision.Veto();
                 }
 
@@ -1742,6 +1986,46 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                 participants = fenceLifecycles();
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// Runs <paramref name="fenceLifecycle"/> atomically under this
+        /// fence's lock so a targeted Resolved advances the target user's
+        /// lifecycle in the same P-A-D-R-S linearization point a global
+        /// Resolved uses. Unlike <see cref="TryPublishResolvedAndRun"/>,
+        /// this does NOT bump the item-wide <c>_resolvedVersion</c>
+        /// tombstone (that is a global-only invariant), but it DOES bump
+        /// <c>_lastTouchedAtUtc</c> so pruning honours the freshly-touched
+        /// fence. Returns <see cref="AttentionItemFenceResult.Stale"/> when
+        /// a strictly-newer global tombstone has already been published
+        /// and this targeted Resolved is superseded before it can fence.
+        /// Returns <see cref="AttentionItemFenceResult.Retired"/> when the
+        /// pruner retired this fence so the caller can retry against a
+        /// fresh replacement.
+        /// </summary>
+        public AttentionItemFenceResult TryFenceTargetedLifecycle(
+            AttentionDispatchVersion version,
+            DateTime observedAtUtc,
+            Action fenceLifecycle)
+        {
+            lock (_sync)
+            {
+                if (_retired)
+                {
+                    return AttentionItemFenceResult.Retired;
+                }
+
+                _lastTouchedAtUtc = observedAtUtc;
+
+                if (_resolvedVersion is AttentionDispatchVersion resolved
+                    && version.CompareTo(resolved) < 0)
+                {
+                    return AttentionItemFenceResult.Stale;
+                }
+
+                fenceLifecycle();
+                return AttentionItemFenceResult.Accepted;
             }
         }
 

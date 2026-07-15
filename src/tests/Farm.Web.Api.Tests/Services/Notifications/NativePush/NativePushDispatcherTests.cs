@@ -5026,6 +5026,662 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_HicksR2_B1_DisabledModeUniqueCreatedAndUpdatedItems_CreateNoDispatchState()
+    {
+        // #755 Hicks r2 blocker 1: disabled-mode Created / Updated
+        // dispatches MUST NOT create any dispatcher-owned state
+        // (AttentionDispatchLane, AttentionItemFence, or
+        // AttentionLifecycle). The pre-fix design always observed a
+        // lane on entry and only short-circuited at DispatchCoreAsync's
+        // settings check, so every unique attention item created a
+        // fresh AttentionDispatchLane permanently retained until the
+        // seven-day retention TTL. Because Disabled is the DEFAULT
+        // operator mode, unique attention items therefore accumulated
+        // lanes without bound.
+        //
+        // The fix short-circuits before TryObserveDispatch when the
+        // change kind is not Resolved. This test drives many unique
+        // ids through both non-Resolved change kinds and asserts every
+        // cache is empty AND that neither the sender nor the scope
+        // factory was touched.
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+        var scopes = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        NativePushDispatcher sut = Build(sender.Object, scopes.Object, NativePushMode.Disabled);
+
+        const int uniqueItems = 500;
+        for (int i = 0; i < uniqueItems; i++)
+        {
+            await sut.DispatchAsync($"att-b1-{i}", AttentionChangeKind.Created, targetUserId: null);
+            await sut.DispatchAsync($"att-b1-{i}", AttentionChangeKind.Updated, targetUserId: Guid.NewGuid());
+        }
+
+        sut.AttentionDispatchLaneCountForTests.Should().Be(0,
+            "disabled-mode non-Resolved dispatches must short-circuit BEFORE TryObserveDispatch — otherwise every unique attention item accumulates a lane retained for the seven-day retention TTL");
+        sut.AttentionItemFenceCountForTests.Should().Be(0,
+            "no item fence is required for a non-Resolved dispatch that never crosses the pre-exit fencing path");
+        sut.AttentionLifecycleCountForTests.Should().Be(0,
+            "no per-user lifecycle is installed before the disabled early return");
+        sender.VerifyNoOtherCalls();
+        scopes.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B1_DisabledModeUniqueGlobalResolvedItems_PruneRetiresPastRetentionEntries()
+    {
+        // #755 Hicks r2 blocker 1: disabled-mode global Resolved
+        // dispatches MUST still publish the item-wide tombstone
+        // (cross-lane ordering is a correctness invariant preserved
+        // across the operator toggle), but MUST NOT leak lanes or
+        // fences without bound. Every early return releases the
+        // participant lease first, THEN drives bounded PruneCaches, so
+        // past-retention entries are retired even when the dispatcher
+        // is disabled.
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+        var scopes = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        var timeProvider = new AdvancingTimeProvider(new DateTime(2026, 7, 15, 8, 0, 0, DateTimeKind.Utc));
+        IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(
+            new NativePushSettings { Mode = NativePushMode.Disabled });
+        var sut = new NativePushDispatcher(
+            scopes.Object,
+            AsTransportAwareForTests(sender.Object),
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance,
+            timeProvider);
+
+        const int uniqueItems = 200;
+        for (int i = 0; i < uniqueItems; i++)
+        {
+            await sut.DispatchAsync($"att-b1-global-{i}", AttentionChangeKind.Resolved, targetUserId: null);
+        }
+
+        sut.AttentionItemFenceCountForTests.Should().Be(uniqueItems,
+            "global Resolved MUST publish its item-wide tombstone even when disabled — the cross-lane ordering invariant survives the operator toggle");
+        sut.AttentionDispatchLaneCountForTests.Should().Be(uniqueItems,
+            "each unique lane was just observed and cannot yet be retired by the fresh-touch prune pass");
+        sut.AttentionLifecycleCountForTests.Should().Be(0,
+            "no Created was ever admitted for these items so no per-user lifecycle exists");
+
+        // Advance well past the seven-day AttentionSnapshotTtl and dispatch
+        // one final Resolved. The disabled early return releases its own
+        // (fresh) participant lease and then runs PruneCaches — the
+        // internal 30-second rate limit is unblocked by the time
+        // advancement, so the retire pass runs and retires the 200
+        // past-retention entries. Only the freshest entry survives.
+        timeProvider.Advance(TimeSpan.FromDays(8));
+        await sut.DispatchAsync("att-b1-global-post-retention", AttentionChangeKind.Resolved, targetUserId: null);
+
+        sut.AttentionItemFenceCountForTests.Should().Be(1,
+            "PruneCaches on the disabled early return must retire every past-retention fence, leaving only the freshly-touched one");
+        sut.AttentionDispatchLaneCountForTests.Should().Be(1,
+            "PruneCaches must also retire past-retention lanes even under disabled mode");
+        sut.AttentionLifecycleCountForTests.Should().Be(0);
+        sender.VerifyNoOtherCalls();
+        scopes.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B1_DisabledModeUniqueTargetedResolvedItems_PruneRetiresPastRetentionEntries()
+    {
+        // #755 Hicks r2 blockers 1 + 3: disabled-mode targeted Resolved
+        // dispatches MUST still perform pre-exit fencing (advance the
+        // target user's lifecycle to Resolved under the item fence
+        // lock) so a concurrent Created cannot start transport for an
+        // older generation after the disabled dispatch returns. This
+        // pre-exit fencing DOES install a fence + a lifecycle for the
+        // targeted user, so unbounded disabled traffic would otherwise
+        // leak lifecycles too. Prune runs on the disabled early return
+        // and retires all past-retention state.
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+        var scopes = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        var timeProvider = new AdvancingTimeProvider(new DateTime(2026, 7, 15, 8, 30, 0, DateTimeKind.Utc));
+        IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(
+            new NativePushSettings { Mode = NativePushMode.Disabled });
+        var sut = new NativePushDispatcher(
+            scopes.Object,
+            AsTransportAwareForTests(sender.Object),
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance,
+            timeProvider);
+
+        const int uniqueItems = 200;
+        for (int i = 0; i < uniqueItems; i++)
+        {
+            await sut.DispatchAsync(
+                $"att-b1-tgt-{i}",
+                AttentionChangeKind.Resolved,
+                targetUserId: Guid.NewGuid());
+        }
+
+        sut.AttentionItemFenceCountForTests.Should().Be(uniqueItems,
+            "targeted Resolved pre-exit fencing (Hicks r2 B3) installs the item fence even when disabled");
+        sut.AttentionLifecycleCountForTests.Should().Be(uniqueItems,
+            "each targeted Resolved advances its own target's lifecycle to Resolved under the fence lock");
+        sut.AttentionDispatchLaneCountForTests.Should().Be(uniqueItems);
+
+        timeProvider.Advance(TimeSpan.FromDays(8));
+        await sut.DispatchAsync(
+            "att-b1-tgt-post-retention",
+            AttentionChangeKind.Resolved,
+            targetUserId: Guid.NewGuid());
+
+        sut.AttentionItemFenceCountForTests.Should().Be(1,
+            "PruneCaches on the disabled early return must retire past-retention item fences under targeted-mode traffic too");
+        sut.AttentionLifecycleCountForTests.Should().Be(1,
+            "PruneCaches must retire past-retention lifecycles even when the dispatcher is disabled");
+        sut.AttentionDispatchLaneCountForTests.Should().Be(1);
+        sender.VerifyNoOtherCalls();
+        scopes.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B2_KillSwitchFlipsDuringSenderPreparation_TransportStartBoundaryVetoesWithFullRollback()
+    {
+        // #755 Hicks r2 blocker 2: an administrator's persisted kill
+        // switch committed DURING a sender's preparation window (JWT
+        // signing, key I/O, payload build) MUST veto the transport
+        // start immediately BEFORE the provider request is accepted.
+        // The dispatcher-level gate check in SendWithRetriesAsync
+        // runs BEFORE preparation and cannot undo an already-sent
+        // push; a later gate check runs AFTER the provider call and
+        // also cannot undo it. Only re-evaluating the persisted gate
+        // at the actual transport-start boundary (inside
+        // DispatcherTransportStart.TryStart) closes this window.
+        //
+        // Interleaving:
+        //   * gate.IsEnabled starts true
+        //   * S1: targeted Created v1. Sender pauses AFTER
+        //     preparation, BEFORE calling TryStart.
+        //   * Test flips gate.IsEnabled => false.
+        //   * Sender resumes and calls TryStart. The B2 gate re-check
+        //     inside TryStart observes disabled and vetoes with full
+        //     rollback: reservation reverts to pending state,
+        //     dedupe/rate are returned, Attempted is NOT incremented,
+        //     no provider call is made.
+        //   * Test flips gate.IsEnabled => true and dispatches the
+        //     EXACT same version. This new dispatch admits, reaches
+        //     the sender (now running its normal path), calls
+        //     TryStart, permits, and delivers exactly once. Attempted
+        //     goes to 1 (retry only).
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        int gateEnabled = 1;
+        var gate = new Mock<IOperatorFeatureGate>();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush))
+            .Returns(() => Volatile.Read(ref gateEnabled) == 1);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var preparationEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePreparation = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int senderCalls = 0;
+        int providerCalls = 0;
+        int startVetoed = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            int index = Interlocked.Increment(ref senderCalls);
+            if (index == 1)
+            {
+                // First attempt: pause AFTER preparation so the test can
+                // flip the persisted gate during this window.
+                preparationEntered.TrySetResult();
+                await releasePreparation.Task.WaitAsync(cancellationToken);
+
+                // Sender does its normal pre-transport cancellation
+                // check (it is not cancelled here) then hands off to
+                // the dispatcher's transport-start boundary. The B2
+                // gate re-check inside TryStart is what must veto.
+                cancellationToken.ThrowIfCancellationRequested();
+                NativePushTransportStartDecision decision = transportStart.TryStart();
+                if (!decision.IsPermitted)
+                {
+                    Interlocked.Increment(ref startVetoed);
+                    return NativePushDispatchResult.TransportStartVetoed();
+                }
+
+                Interlocked.Increment(ref providerCalls);
+                return NativePushDispatchResult.Delivered();
+            }
+
+            // Retry attempt: gate is re-enabled, sender permits and delivers.
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        long skippedFeatureDisabled = 0;
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted)
+                    || ReferenceEquals(instrument, metrics.SkippedFeatureDisabled))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+            else if (ReferenceEquals(instrument, metrics.SkippedFeatureDisabled))
+            {
+                Interlocked.Add(ref skippedFeatureDisabled, measurement);
+            }
+        });
+        meterListener.Start();
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 1,
+                DedupeWindow = TimeSpan.FromMinutes(5),
+                RateLimitPerUser = 1,
+                RateLimitWindow = TimeSpan.FromMinutes(5),
+            },
+            metrics: metrics);
+        DateTime occurredAt = new(2026, 7, 15, 9, 0, 0, DateTimeKind.Utc);
+
+        Task first = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt);
+        await preparationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Administrator commits the emergency disable while the sender
+        // is still inside its preparation window.
+        Volatile.Write(ref gateEnabled, 0);
+
+        releasePreparation.TrySetResult();
+        await first.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "the persisted disable committed during preparation must veto TryStart before any provider call");
+        Volatile.Read(ref startVetoed).Should().Be(1,
+            "the sender's TryStart must be vetoed exactly once by the B2 gate re-check");
+        Volatile.Read(ref attempted).Should().Be(0,
+            "Attempted is only incremented from inside a permitted TryStart — a veto must not touch it");
+        Volatile.Read(ref skippedFeatureDisabled).Should().BeGreaterThan(0,
+            "the veto records SkippedFeatureDisabled for observability");
+
+        // Re-enable and retry the exact same version. Full rollback
+        // means dedupe and rate capacity were returned, so the retry
+        // admits and delivers.
+        Volatile.Write(ref gateEnabled, 1);
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "the exact-version retry must succeed once the gate is re-enabled — dedupe/rate/lifecycle were rolled back");
+        Volatile.Read(ref attempted).Should().Be(1,
+            "only the retry crossed the actual transport boundary");
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B2_KillSwitchStaysEnabledDuringPreparation_TransportStartBoundaryPermitsNormally()
+    {
+        // #755 Hicks r2 blocker 2 (symmetric coverage): the B2
+        // gate re-check inside TryStart must NOT reject a normal
+        // send when the gate stays enabled from admission through
+        // the transport-start boundary. Without this test a
+        // misimplementation that stubbornly vetoes every TryStart
+        // would still make the B2 failure test pass.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        int gateEnabled = 1;
+        var gate = new Mock<IOperatorFeatureGate>();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush))
+            .Returns(() => Volatile.Read(ref gateEnabled) == 1);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int providerCalls = 0;
+        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return Task.FromResult(NativePushDispatchResult.TransportStartVetoed());
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return Task.FromResult(NativePushDispatchResult.Delivered());
+        });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: new(2026, 7, 15, 9, 30, 0, DateTimeKind.Utc));
+
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "the gate stayed enabled through the boundary so TryStart must permit the provider call");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B3_TargetedResolvedFencesTargetLifecycleBeforeDisabledGate_VetoesLaterS1TransportStart()
+    {
+        // #755 Hicks r2 blocker 3: a targeted Resolved MUST fence
+        // the target user's lifecycle synchronously under the item
+        // fence lock BEFORE mode / gate / scope / owner-lookup or
+        // any other optional/fallible early exit. Otherwise a
+        // concurrent Created that already admitted the target's
+        // lifecycle can resume after the targeted Resolved returns
+        // and start transport for an older generation — sending a
+        // push for an alert that has already been resolved for that
+        // user.
+        //
+        // Deterministic interleaving:
+        //   * gate initially enabled
+        //   * S1: global Created v1. Enters DispatchForOwnerAsync
+        //     for the single owner U, observes U's lifecycle at v1,
+        //     reaches the sender. Sender pauses BEFORE calling
+        //     TryStart so no transport-start has committed yet.
+        //   * Test flips gate.IsEnabled => false (representative
+        //     fallible early exit for the R2 path).
+        //   * R2: targeted Resolved v2 for user U. Under the fix,
+        //     PublishTargetedResolvedFence runs synchronously and
+        //     advances U's lifecycle to Resolved v2 BEFORE the gate
+        //     check. R2 then hits the disabled gate and returns.
+        //   * Test flips gate.IsEnabled => true and releases S1.
+        //   * S1's sender calls TryStart. TryStart re-checks the
+        //     gate (enabled), then TryStartTransport observes
+        //     reservation.Version=v1 != _latest=v2 and vetoes.
+        //   * Assert: no provider call for S1, exactly one veto,
+        //     Attempted stays at zero, no push was emitted for an
+        //     already-resolved alert.
+        //
+        // Under the pre-B3 design, R2 skips fencing entirely
+        // because targeted Resolved never touched the item fence.
+        // U's lifecycle stays at v1 and S1 resumes to send a
+        // phantom Created push.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        int gateEnabled = 1;
+        var gate = new Mock<IOperatorFeatureGate>();
+        gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush))
+            .Returns(() => Volatile.Read(ref gateEnabled) == 1);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var s1BeforeTryStart = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseS1 = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int senderCalls = 0;
+        int providerCalls = 0;
+        int startVetoed = 0;
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            int index = Interlocked.Increment(ref senderCalls);
+            if (index == 1)
+            {
+                // S1: pause BEFORE crossing the transport boundary.
+                s1BeforeTryStart.TrySetResult();
+                await releaseS1.Task.WaitAsync(cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!transportStart.TryStart().IsPermitted)
+                {
+                    Interlocked.Increment(ref startVetoed);
+                    return NativePushDispatchResult.TransportStartVetoed();
+                }
+
+                Interlocked.Increment(ref providerCalls);
+                sent.Enqueue(envelope);
+                return NativePushDispatchResult.Delivered();
+            }
+
+            // R2 never reaches the sender in the fenced-then-disabled
+            // path because DispatchCoreAsync bails at the gate check
+            // before DispatchForOwnerAsync. Any call here would be
+            // unexpected.
+            Interlocked.Increment(ref providerCalls);
+            sent.Enqueue(envelope);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+        });
+        meterListener.Start();
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 },
+            metrics: metrics);
+
+        DateTime createdAt = new(2026, 7, 15, 10, 0, 0, DateTimeKind.Utc);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+
+        // S1: global Created v1. Enumerates the single active owner
+        // (U) and pauses inside DispatchForOwnerAsync's sender call.
+        Task s1 = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            targetUserId: null,
+            occurredAtUtc: createdAt);
+        await s1BeforeTryStart.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Flip the gate to disabled — R2's fallible early exit is
+        // the persisted-gate check inside DispatchCoreAsync.
+        Volatile.Write(ref gateEnabled, 0);
+
+        // R2: targeted Resolved v2 for U. With B3 the pre-exit fence
+        // advances U's lifecycle to Resolved v2 synchronously under
+        // the item fence lock, THEN DispatchCoreAsync hits the
+        // disabled gate check and returns without dispatching.
+        Task r2 = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: userId,
+            occurredAtUtc: resolvedAt);
+        await r2.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Re-enable and release S1.
+        Volatile.Write(ref gateEnabled, 1);
+        releaseS1.TrySetResult();
+        await s1.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "R2's pre-exit fence advances U's lifecycle to Resolved v2 BEFORE hitting the disabled gate, so S1's TryStart at v1 must veto at TryStartTransport (v1 != v2)");
+        Volatile.Read(ref startVetoed).Should().Be(1,
+            "S1 must observe the version-based veto exactly once");
+        Volatile.Read(ref attempted).Should().Be(0,
+            "Attempted is only incremented from a permitted TryStart; the veto must leave it untouched");
+        sent.Should().BeEmpty("no push must be emitted for an alert that R2 has already resolved for U");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B3_TargetedResolvedFencesTargetLifecycleBeforeScopeCreationFailure_VetoesLaterS1TransportStart()
+    {
+        // #755 Hicks r2 blocker 3 (fallible-early-exit variant): a
+        // second representative early exit — a scope-creation failure
+        // that surfaces before DispatchCoreAsync can enumerate owners
+        // — must not defeat the pre-exit targeted fence either. Same
+        // interleaving as the disabled-gate variant but the R2
+        // dispatch runs against a scope factory that throws on
+        // creation. The pre-exit fence completes synchronously
+        // BEFORE DispatchCoreAsync's scope open call, so U's
+        // lifecycle still advances to Resolved v2. Verifies the fix
+        // does not depend on any specific early-exit reason: as long
+        // as the fence publishes BEFORE the fallible work, S1 is
+        // fenced.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var s1BeforeTryStart = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseS1 = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int senderCalls = 0;
+        int providerCalls = 0;
+        int startVetoed = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            int index = Interlocked.Increment(ref senderCalls);
+            if (index == 1)
+            {
+                s1BeforeTryStart.TrySetResult();
+                await releaseS1.Task.WaitAsync(cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!transportStart.TryStart().IsPermitted)
+                {
+                    Interlocked.Increment(ref startVetoed);
+                    return NativePushDispatchResult.TransportStartVetoed();
+                }
+
+                Interlocked.Increment(ref providerCalls);
+                return NativePushDispatchResult.Delivered();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        // Build the dispatcher with a scope factory whose SECOND call
+        // (used by R2 after S1 has already opened its scope) throws.
+        // The pre-exit targeted fence completes before this throw is
+        // observed.
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        var toggleScope = new ToggleFailingServiceScopeFactory(
+            provider.GetRequiredService<IServiceScopeFactory>());
+        IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        var sut = new NativePushDispatcher(
+            toggleScope,
+            AsTransportAwareForTests(sender),
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+
+        DateTime createdAt = new(2026, 7, 15, 10, 30, 0, DateTimeKind.Utc);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+
+        Task s1 = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            targetUserId: null,
+            occurredAtUtc: createdAt);
+        await s1BeforeTryStart.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Arm the next scope creation to fail — this is R2's
+        // fallible early exit and happens AFTER the pre-exit
+        // targeted fence has already advanced U's lifecycle.
+        toggleScope.FailNext = true;
+
+        Task r2 = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: userId,
+            occurredAtUtc: resolvedAt);
+        await r2.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The fallible exit did NOT undo the pre-exit fence: U's
+        // lifecycle is at Resolved v2, so S1's transport-start
+        // vetoes on version mismatch.
+        releaseS1.TrySetResult();
+        await s1.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "R2's pre-exit targeted fence must advance U's lifecycle to Resolved v2 regardless of a downstream fallible early exit — S1 at v1 must veto at TryStartTransport");
+        Volatile.Read(ref startVetoed).Should().Be(1);
+    }
+
+    [Fact]
     public async Task DispatchAsync_CancellationBeforeTransportStart_RollsBackDedupeRateAndAttemptMetricForExactRetry()
     {
         Guid userId = Guid.NewGuid();
@@ -6238,6 +6894,33 @@ public sealed class NativePushDispatcherTests
                 ? Timeout.InfiniteTimeSpan
                 : TimeSpan.Zero;
             return new Timer(callback, state, immediateDueTime, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    /// <summary>
+    /// Test-only <see cref="TimeProvider"/> whose current time is
+    /// manually advanced. Used by the Hicks r2 blocker 1 leak-proof
+    /// tests to drive PruneCaches past its 30-second internal rate
+    /// limit and past the seven-day AttentionSnapshotTtl retention
+    /// TTL without wall-clock sleeps.
+    /// </summary>
+    private sealed class AdvancingTimeProvider : TimeProvider
+    {
+        private long _ticks;
+
+        public AdvancingTimeProvider(DateTime initialUtc)
+        {
+            _ticks = initialUtc.Ticks;
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return new(new DateTime(Interlocked.Read(ref _ticks), DateTimeKind.Utc), TimeSpan.Zero);
+        }
+
+        public void Advance(TimeSpan delta)
+        {
+            _ = Interlocked.Add(ref _ticks, delta.Ticks);
         }
     }
 
