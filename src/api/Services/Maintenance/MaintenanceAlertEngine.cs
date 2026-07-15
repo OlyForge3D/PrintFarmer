@@ -104,7 +104,8 @@ public class MaintenanceAlertEngine(
         // When the per-tool maintenance feature is disabled, toolhead-scoped deployments must not
         // generate new per-tool alerts (issue #711, round-5 FIX 2). Printer-wide deployments
         // (null toolhead) are unaffected. A null gate (test constructors) is treated as enabled.
-        bool perToolMaintenanceEnabled = _operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
+        bool perToolMaintenanceEnabled = _operatorFeatureGate is null
+            || await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, cancellationToken).ConfigureAwait(false);
 
         // Evaluate each deployment → plan → tasks
         foreach (PrinterMaintenanceSchedule deployment in deployments)

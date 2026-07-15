@@ -344,12 +344,13 @@ public sealed class RelayNativePushSenderTests
 
         public int Calls => Volatile.Read(ref _calls);
 
-        public NativePushTransportStartDecision TryStart()
+        public Task<NativePushTransportStartDecision> TryStartAsync(CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _calls);
-            return permit
+            NativePushTransportStartDecision decision = permit
                 ? NativePushTransportStartDecision.Permit()
                 : NativePushTransportStartDecision.Veto();
+            return Task.FromResult(decision);
         }
     }
 }

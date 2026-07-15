@@ -412,7 +412,7 @@ public class PrintStatsSyncHostedService(
                 printer.Id,
                 statsExisted,
                 attributionEligible,
-                featureGate.IsEnabled(OperatorFeature.MultiSlotFallback),
+                await featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false),
                 printer.SupportsPerToolAttribution,
                 externalDelta,
                 toolheadStatsRepo,

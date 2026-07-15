@@ -794,6 +794,7 @@ public class PartInventoryServiceTests : IDisposable
         var factory = new Mock<IDbContextFactory<AppDbContext>>(MockBehavior.Strict);
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(false);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         var sut = new PartInventoryService(factory.Object, NullLogger<PartInventoryService>.Instance, gate.Object);
 
         AdjustResult result = await sut.AdjustAsync(

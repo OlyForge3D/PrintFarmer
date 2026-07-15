@@ -98,13 +98,22 @@ public sealed class RelayNativePushSender(
         // Hicks blocker 2: check cancellation explicitly, immediately before
         // crossing the transport-start boundary. Without this, a token that
         // was already cancelled after preparation completed (but before this
-        // call) would still reach TryStart() and could commit dispatcher-owned
+        // call) would still reach TryStartAsync() and could commit dispatcher-owned
         // lifecycle/dedupe/rate state and increment Attempted for an attempt
         // that will never actually reach the network. The dispatcher's own
-        // TryStart() implementation also guards against this independently
+        // TryStartAsync() implementation also guards against this independently
         // (defense in depth) but must never be the ONLY check.
+        //
+        // The transport-start handshake is now async so the dispatcher can perform
+        // its persisted feature-gate re-check outside every in-memory lock (Hicks r2
+        // blocker 2). The awaited call is cancellation-aware: a caller cancel that
+        // arrives while the gate read is in flight vetoes with rollback rather
+        // than blocking a thread-pool worker on the DB round-trip.
         cancellationToken.ThrowIfCancellationRequested();
-        if (!transportStart.TryStart().IsPermitted)
+        NativePushTransportStartDecision decision = await transportStart
+            .TryStartAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!decision.IsPermitted)
         {
             return NativePushDispatchResult.TransportStartVetoed();
         }

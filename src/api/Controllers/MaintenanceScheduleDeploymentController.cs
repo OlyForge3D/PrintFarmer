@@ -60,7 +60,7 @@ public class MaintenanceScheduleDeploymentController(
         CancellationToken ct)
     {
         List<PrinterMaintenanceSchedule> schedules = await _scheduleRepository.GetAllAsync(printerId, planId, activeOnly, ct);
-        if (!_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+        if (!await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
         {
             schedules = schedules.Where(s => !s.ToolheadId.HasValue).ToList();
         }
@@ -77,7 +77,7 @@ public class MaintenanceScheduleDeploymentController(
         PrinterMaintenanceSchedule? schedule = await _scheduleRepository.GetByIdAsync(id, ct);
         if (schedule == null
             || (schedule.ToolheadId.HasValue
-                && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback)))
+                && !await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false)))
         {
             return NotFound();
         }
@@ -94,7 +94,7 @@ public class MaintenanceScheduleDeploymentController(
         CancellationToken ct)
     {
         if (request.ToolheadId.HasValue
-            && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            && !await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
         {
             return BadRequest(new { message = "Per-tool maintenance is disabled." });
         }
@@ -202,7 +202,7 @@ public class MaintenanceScheduleDeploymentController(
         }
 
         if (schedule.ToolheadId.HasValue
-            && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            && !await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
         {
             return BadRequest(new { message = "Per-tool maintenance is disabled." });
         }
@@ -230,7 +230,7 @@ public class MaintenanceScheduleDeploymentController(
         }
 
         if (schedule.ToolheadId.HasValue
-            && !_featureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            && !await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
         {
             return BadRequest(new { message = "Per-tool maintenance is disabled." });
         }

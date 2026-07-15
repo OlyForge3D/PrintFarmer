@@ -101,6 +101,7 @@ public sealed class MaintenanceControllerResolveAlertGateTests
 
         _alertRepository.Setup(r => r.GetByIdAsync(alertId, It.IsAny<CancellationToken>())).ReturnsAsync(alert);
         _operatorFeatureGate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        _operatorFeatureGate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         MaintenanceController controller = CreateController();
 
@@ -136,6 +137,7 @@ public sealed class MaintenanceControllerResolveAlertGateTests
         _statisticsRepository.Setup(r => r.GetByPrinterIdAsync(alert.PrinterId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrinterStatistics?)null);
         _operatorFeatureGate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        _operatorFeatureGate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         MaintenanceController controller = CreateController();
 

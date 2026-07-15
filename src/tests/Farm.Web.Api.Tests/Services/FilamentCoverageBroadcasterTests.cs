@@ -348,6 +348,7 @@ public class FilamentCoverageBroadcasterTests
     {
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
         gate.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(enabled);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.FilamentCoverage, It.IsAny<CancellationToken>())).ReturnsAsync(enabled);
         ServiceCollection services = new();
         services.AddScoped(_ => gate.Object);
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();

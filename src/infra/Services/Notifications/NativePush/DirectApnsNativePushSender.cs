@@ -195,14 +195,23 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
         // Hicks blocker 2: the cached-JWT fast path in GetOrRefreshJwtAsync
         // returns without ever awaiting the JWT lock or observing
         // cancellationToken, so a token cancelled after that return (but
-        // before this call) would otherwise reach TryStart() unchecked and
+        // before this call) would otherwise reach TryStartAsync() unchecked and
         // could commit dispatcher-owned lifecycle/dedupe/rate state and
         // increment Attempted for an attempt that never reaches APNs. The
-        // dispatcher's own TryStart() implementation also guards against
+        // dispatcher's own TryStartAsync() implementation also guards against
         // this independently (defense in depth) but must never be the ONLY
         // check.
+        //
+        // The transport-start handshake is now async so the dispatcher can perform
+        // its persisted feature-gate re-check outside every in-memory lock (Hicks r2
+        // blocker 2). The awaited call is cancellation-aware: a caller cancel that
+        // arrives while the gate read is in flight vetoes with rollback rather
+        // than blocking a thread-pool worker on the DB round-trip.
         cancellationToken.ThrowIfCancellationRequested();
-        if (!transportStart.TryStart().IsPermitted)
+        NativePushTransportStartDecision decision = await transportStart
+            .TryStartAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!decision.IsPermitted)
         {
             return NativePushDispatchResult.TransportStartVetoed();
         }

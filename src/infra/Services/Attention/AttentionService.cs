@@ -521,7 +521,7 @@ public sealed class AttentionService(
             return new AttentionActionResult(AttentionActionOutcome.InvalidAction, $"Action '{actionKind}' is not valid for harvest items.");
         }
 
-        if (_featureGate is not null && !_featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        if (_featureGate is not null && !await _featureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, ct).ConfigureAwait(false))
         {
             return new AttentionActionResult(AttentionActionOutcome.NotFound, "Printed-parts inventory is disabled.");
         }

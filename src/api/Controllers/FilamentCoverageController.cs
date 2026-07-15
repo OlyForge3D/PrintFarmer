@@ -44,7 +44,7 @@ public class FilamentCoverageController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PrinterFilamentCoverageDto>> GetForPrinterAsync(System.Guid id, CancellationToken ct)
     {
-        if (!_featureGate.IsEnabled(OperatorFeature.FilamentCoverage))
+        if (!await _featureGate.IsEnabledAsync(OperatorFeature.FilamentCoverage, ct).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.FilamentCoverage);
         }
@@ -69,7 +69,7 @@ public class FilamentCoverageController(
     [ProducesResponseType(typeof(FleetFilamentCoverageDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<FleetFilamentCoverageDto>> GetForFleetAsync(CancellationToken ct)
     {
-        if (!_featureGate.IsEnabled(OperatorFeature.FilamentCoverage))
+        if (!await _featureGate.IsEnabledAsync(OperatorFeature.FilamentCoverage, ct).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.FilamentCoverage);
         }

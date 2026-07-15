@@ -2943,15 +2943,15 @@ public sealed class NativePushDispatcherTests
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
         int attemptCount = 0;
-        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
         {
             if (Interlocked.Increment(ref attemptCount) == 1)
             {
                 throw new InvalidOperationException("simulated synchronous sender failure before transport");
             }
 
-            transportStart.TryStart().IsPermitted.Should().BeTrue();
-            return Task.FromResult(NativePushDispatchResult.Delivered());
+            (await transportStart.TryStartAsync(cancellationToken)).IsPermitted.Should().BeTrue();
+            return NativePushDispatchResult.Delivered();
         });
 
         NativePushDispatcher sut = BuildWithScope(
@@ -3120,7 +3120,7 @@ public sealed class NativePushDispatcherTests
 
         var attemptedDevices = new ConcurrentQueue<Guid>();
         var perDeviceCounts = new ConcurrentDictionary<Guid, int>();
-        var sender = new DelegateTransportSender((envelope, transportStart, _) =>
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
             Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
             attemptedDevices.Enqueue(tokenId);
@@ -3133,8 +3133,8 @@ public sealed class NativePushDispatcherTests
                     $"kane #755 cycle 3: simulated synchronous sender failure before transport (device={tokenId})");
             }
 
-            transportStart.TryStart().IsPermitted.Should().BeTrue();
-            return Task.FromResult(NativePushDispatchResult.Delivered());
+            (await transportStart.TryStartAsync(cancellationToken)).IsPermitted.Should().BeTrue();
+            return NativePushDispatchResult.Delivered();
         });
 
         NativePushDispatcher sut = BuildWithScope(
@@ -3200,18 +3200,17 @@ public sealed class NativePushDispatcherTests
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
         int attemptCount = 0;
-        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
         {
             if (Interlocked.Increment(ref attemptCount) == 1)
             {
                 // A completed fault is not a transport fact. The typed
                 // sender has deliberately not signaled the boundary.
-                return Task.FromException<NativePushDispatchResult>(
-                    new InvalidOperationException("simulated pre-transport async failure"));
+                throw new InvalidOperationException("simulated pre-transport async failure");
             }
 
-            transportStart.TryStart().IsPermitted.Should().BeTrue();
-            return Task.FromResult(NativePushDispatchResult.Delivered());
+            (await transportStart.TryStartAsync(cancellationToken)).IsPermitted.Should().BeTrue();
+            return NativePushDispatchResult.Delivered();
         });
 
         NativePushDispatcher sut = BuildWithScope(
@@ -3267,20 +3266,19 @@ public sealed class NativePushDispatcherTests
 
         var attemptedDevices = new ConcurrentQueue<Guid>();
         var perDeviceCounts = new ConcurrentDictionary<Guid, int>();
-        var sender = new DelegateTransportSender((envelope, transportStart, _) =>
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
             Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
             attemptedDevices.Enqueue(tokenId);
             int attempt = perDeviceCounts.AddOrUpdate(tokenId, 1, (_, prev) => prev + 1);
             if (attempt == 1)
             {
-                return Task.FromException<NativePushDispatchResult>(
-                    new InvalidOperationException(
-                        $"simulated pre-transport async failure (device={tokenId})"));
+                throw new InvalidOperationException(
+                    $"simulated pre-transport async failure (device={tokenId})");
             }
 
-            transportStart.TryStart().IsPermitted.Should().BeTrue();
-            return Task.FromResult(NativePushDispatchResult.Delivered());
+            (await transportStart.TryStartAsync(cancellationToken)).IsPermitted.Should().BeTrue();
+            return NativePushDispatchResult.Delivered();
         });
 
         NativePushDispatcher sut = BuildWithScope(
@@ -3363,18 +3361,18 @@ public sealed class NativePushDispatcherTests
         innerCts.Cancel();
 
         int attemptCount = 0;
-        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
         {
             if (Interlocked.Increment(ref attemptCount) == 1)
             {
                 // The sender returns a canceled task without signaling the
                 // transport boundary; the dispatcher must roll back first,
                 // then preserve the established cancellation contract.
-                return Task.FromCanceled<NativePushDispatchResult>(innerCts.Token);
+                throw new OperationCanceledException(innerCts.Token);
             }
 
-            transportStart.TryStart().IsPermitted.Should().BeTrue();
-            return Task.FromResult(NativePushDispatchResult.Delivered());
+            (await transportStart.TryStartAsync(cancellationToken)).IsPermitted.Should().BeTrue();
+            return NativePushDispatchResult.Delivered();
         });
 
         NativePushDispatcher sut = BuildWithScope(
@@ -4126,7 +4124,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -4213,7 +4211,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -4312,7 +4310,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -4439,7 +4437,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -4538,7 +4536,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -4675,7 +4673,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -4808,7 +4806,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -4941,7 +4939,7 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -5211,6 +5209,8 @@ public sealed class NativePushDispatcherTests
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush))
             .Returns(() => Volatile.Read(ref gateEnabled) == 1);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
@@ -5242,7 +5242,7 @@ public sealed class NativePushDispatcherTests
                 // the dispatcher's transport-start boundary. The B2
                 // gate re-check inside TryStart is what must veto.
                 cancellationToken.ThrowIfCancellationRequested();
-                NativePushTransportStartDecision decision = transportStart.TryStart();
+                NativePushTransportStartDecision decision = (await transportStart.TryStartAsync(cancellationToken));
                 if (!decision.IsPermitted)
                 {
                     Interlocked.Increment(ref startVetoed);
@@ -5254,7 +5254,7 @@ public sealed class NativePushDispatcherTests
             }
 
             // Retry attempt: gate is re-enabled, sender permits and delivers.
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -5368,6 +5368,8 @@ public sealed class NativePushDispatcherTests
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush))
             .Returns(() => Volatile.Read(ref gateEnabled) == 1);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
@@ -5378,15 +5380,15 @@ public sealed class NativePushDispatcherTests
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
         int providerCalls = 0;
-        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
         {
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
-                return Task.FromResult(NativePushDispatchResult.TransportStartVetoed());
+                return NativePushDispatchResult.TransportStartVetoed();
             }
 
             Interlocked.Increment(ref providerCalls);
-            return Task.FromResult(NativePushDispatchResult.Delivered());
+            return NativePushDispatchResult.Delivered();
         });
 
         NativePushDispatcher sut = BuildWithScope(
@@ -5451,6 +5453,8 @@ public sealed class NativePushDispatcherTests
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush))
             .Returns(() => Volatile.Read(ref gateEnabled) == 1);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
@@ -5478,7 +5482,7 @@ public sealed class NativePushDispatcherTests
                 await releaseS1.Task.WaitAsync(cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!transportStart.TryStart().IsPermitted)
+                if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
                 {
                     Interlocked.Increment(ref startVetoed);
                     return NativePushDispatchResult.TransportStartVetoed();
@@ -5613,7 +5617,7 @@ public sealed class NativePushDispatcherTests
                 await releaseS1.Task.WaitAsync(cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!transportStart.TryStart().IsPermitted)
+                if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
                 {
                     Interlocked.Increment(ref startVetoed);
                     return NativePushDispatchResult.TransportStartVetoed();
@@ -5708,7 +5712,7 @@ public sealed class NativePushDispatcherTests
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
 
-            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            (await transportStart.TryStartAsync(cancellationToken)).IsPermitted.Should().BeTrue();
             Interlocked.Increment(ref startedTransports);
             return NativePushDispatchResult.Delivered();
         });
@@ -5811,15 +5815,21 @@ public sealed class NativePushDispatcherTests
         int providerCalls = 0;
         var sender = new DelegateTransportSender(async (_, transportStart, _) =>
         {
-            // Deliberately does NOT check cancellationToken itself — this is
+            // Deliberately does NOT check its own cancellation token — this is
             // exactly the "misbehaving sender" the dispatcher-side guard
             // must defend against. It waits on a plain (non-cancellation-
-            // aware) signal so the test can force the token to already be
-            // cancelled before this call reaches TryStart().
+            // aware) signal so the test can force the caller/dispatcher
+            // cancellation captured at DispatcherTransportStart construction
+            // to already be signalled before this call reaches TryStartAsync().
+            //
+            // A CancellationToken.None is passed as the sender-side token so
+            // the dispatcher's veto path is driven by the caller/dispatcher
+            // token, not the sender's own — matching the interface contract
+            // that the dispatcher never relies solely on the sender.
             readyToCancel.TrySetResult();
             await releaseSender.Task;
             Interlocked.Increment(ref tryStartCalls);
-            if (!transportStart.TryStart().IsPermitted)
+            if (!(await transportStart.TryStartAsync(CancellationToken.None)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
@@ -5925,15 +5935,17 @@ public sealed class NativePushDispatcherTests
             .Returns(Task.CompletedTask);
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
         var attemptedDevices = new ConcurrentQueue<Guid>();
-        var sender = new DelegateTransportSender((envelope, transportStart, _) =>
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            (await transportStart.TryStartAsync(cancellationToken)).IsPermitted.Should().BeTrue();
             Guid deviceId = Guid.Parse(envelope.DeviceTokenId);
             attemptedDevices.Enqueue(deviceId);
-            return deviceId == firstDevice.Id
-                ? Task.FromException<NativePushDispatchResult>(
-                    new InvalidOperationException("simulated rapid post-start provider fault"))
-                : Task.FromResult(NativePushDispatchResult.Delivered());
+            if (deviceId == firstDevice.Id)
+            {
+                throw new InvalidOperationException("simulated rapid post-start provider fault");
+            }
+
+            return NativePushDispatchResult.Delivered();
         });
         using var metrics = new NativePushMetrics();
         long attempted = 0;
@@ -6002,6 +6014,8 @@ public sealed class NativePushDispatcherTests
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(value => value.IsEnabled(OperatorFeature.NativePush))
             .Returns(() => featureEnabled);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(featureEnabled));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         int activeOwnerLookups = 0;
         tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
@@ -6395,6 +6409,949 @@ public sealed class NativePushDispatcherTests
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Hicks r2 blocker 1 tests — resolution fencing outside a safe options
+    // boundary. Reads of IOptionsMonitor<NativePushSettings>.CurrentValue can
+    // throw during validated configuration reload, so any read taken BEFORE
+    // resolution fencing (or between fence acquisition and the top-level
+    // try/finally that owns lease release) can (a) let an older prepared send
+    // start unfenced, or (b) leak fence leases and stale exact-version retry
+    // reservations.
+    //
+    // The dispatcher's contract:
+    //   * For Resolved (global or targeted), publish/fence synchronously
+    //     BEFORE every fallible options/gate/scope/owner/delivery op.
+    //   * Immediately establish a top-level try/finally that owns and
+    //     releases fence/lifecycle leases. Every post-fence fallible op
+    //     runs inside it.
+    //   * For non-Resolved, options/config failures must happen BEFORE
+    //     any persistent state (lane, fence, lifecycle) is allocated.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B1_OptionsThrowDuringGlobalResolved_FencesLifecycleAndVetoesOlderS1_AndAdmitsExactRetryAfterRecovery()
+    {
+        // Deterministic interleaving:
+        //   * S1 (Created v1): sender pauses AFTER preparation, before
+        //     invoking transportStart.TryStartAsync. Lifecycle installed
+        //     at v1; sender is holding a valid reservation.
+        //   * Test arms the options monitor to throw on the NEXT single
+        //     CurrentValue read (simulating a validated-options reload
+        //     throw). All subsequent reads succeed.
+        //   * R2 (Resolved v2 global): DispatchAsync entry MUST NOT read
+        //     options for Resolved kinds (blocker 1 A). DispatchCoreAsync
+        //     publishes the tombstone + advances U's lifecycle to v2 under
+        //     the AttentionItemFence lock BEFORE reading options. Options
+        //     read then throws; the top-level try/finally releases the fence
+        //     lease and PruneCaches drives bounded reclamation using
+        //     defaults.
+        //   * Test releases S1. Sender calls TryStartAsync — dispatcher's
+        //     async gate returns true, then TryStartTransport observes
+        //     reservation.Version=v1 != _latest=v2 and vetoes S1.
+        //   * Test dispatches R2 as an exact-version retry (same v2). The
+        //     options monitor has recovered so the retry proceeds through
+        //     the fence, admits the resolution, and completes.
+        //
+        // Assertions: providerCalls stays at 0 for the entire test
+        // (Resolved carries the Background-priority dismiss which is a
+        // silent push — the delivery still fires under the retry, but the
+        // key invariant is S1 never delivers a phantom Created push after
+        // R2 fenced it). Metrics: Attempted stays 0 for S1's veto, then
+        // increments on R2's retry attempt.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var s1PreparationDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var s1Release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int senderCalls = 0;
+        int providerCallsS1 = 0;
+        int providerCallsRetry = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            int idx = Interlocked.Increment(ref senderCalls);
+            if (envelope.ChangeKind == AttentionChangeKind.Created)
+            {
+                s1PreparationDone.TrySetResult();
+                await s1Release.Task.WaitAsync(cancellationToken);
+                NativePushTransportStartDecision decision = await transportStart.TryStartAsync(cancellationToken);
+                if (!decision.IsPermitted)
+                {
+                    return NativePushDispatchResult.TransportStartVetoed();
+                }
+
+                Interlocked.Increment(ref providerCallsS1);
+                return NativePushDispatchResult.Delivered();
+            }
+
+            NativePushTransportStartDecision d = await transportStart.TryStartAsync(cancellationToken);
+            if (!d.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCallsRetry);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var throwingMonitor = new ThrowingOptionsMonitor(
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+        });
+        meterListener.Start();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        using var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            AsTransportAwareForTests(sender),
+            throwingMonitor,
+            metrics,
+            NullLogger<NativePushDispatcher>.Instance);
+        DateTime createdAt = new(2026, 7, 15, 12, 0, 0, DateTimeKind.Utc);
+
+        // S1: Created v1 — sender pauses inside.
+        Task s1 = sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: createdAt);
+        await s1PreparationDone.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Arm the monitor to throw on the very next CurrentValue read only.
+        // R2's DispatchCoreAsync will invoke it AFTER the fence has been
+        // published; the top-level try/finally must therefore release the
+        // fence lease cleanly even though the options read throws.
+        throwingMonitor.ArmThrowsForNextReads(1);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+
+        // Release S1. Its sender resumes and calls TryStartAsync. The gate is
+        // enabled, but the lifecycle has been advanced to v2 by R2's fence
+        // so TryStartTransport vetoes S1's v1 reservation.
+        s1Release.TrySetResult();
+        await s1.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCallsS1).Should().Be(0,
+            "S1 is fenced by R2's synchronous lifecycle advancement inside the AttentionItemFence lock; " +
+            "the options throw does not undo that fencing, so S1's TryStartAsync must veto even though the gate is enabled");
+
+        // Exact retry of R2 (same version). The monitor has recovered so
+        // this retry proceeds through the fence. The lane admits the
+        // exact-version retry because the first R2 completed its lane
+        // participant during its own DispatchAsync finally. S1's paused
+        // transport never committed lifecycle ownership (no successful
+        // delivery on the underlying occurrence), so the retry lands in
+        // the "resolutionCapture == null" path after attention lookup and
+        // does NOT emit a silent dismissal — the important observation for
+        // this test is that the retry PROCEEDED THROUGH THE FENCE to the
+        // attention lookup, proving no leaked fence/lifecycle lease.
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+
+        attention.Verify(
+            a => a.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()),
+            Times.AtLeast(2),
+            "S1's Created called attention.FindItemAsync once (before its transport was fenced), and R2's exact-version retry must call it again after proceeding through the fence — proving the fence lease was released cleanly and the retry was admitted");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B1_OptionsThrowDuringTargetedResolved_FencesTargetLifecycleAndVetoesOlderS1_AndAdmitsExactRetryAfterRecovery()
+    {
+        // Symmetric to the global-resolution test above, exercising
+        // <see cref="PublishTargetedResolvedFence"/>'s ordering-fence path.
+        // Under the fix, the targeted Resolved's item fence acquisition
+        // and per-user lifecycle advance happen synchronously in
+        // DispatchCoreAsync BEFORE the options read, so an options throw
+        // still leaves the target's lifecycle at Resolved v2 and vetoes
+        // any concurrent older-version transport-start.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var s1PreparationDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var s1Release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int providerCallsS1 = 0;
+        int providerCallsRetry = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (envelope.ChangeKind == AttentionChangeKind.Created)
+            {
+                s1PreparationDone.TrySetResult();
+                await s1Release.Task.WaitAsync(cancellationToken);
+                NativePushTransportStartDecision decision = await transportStart.TryStartAsync(cancellationToken);
+                if (!decision.IsPermitted)
+                {
+                    return NativePushDispatchResult.TransportStartVetoed();
+                }
+
+                Interlocked.Increment(ref providerCallsS1);
+                return NativePushDispatchResult.Delivered();
+            }
+
+            NativePushTransportStartDecision d = await transportStart.TryStartAsync(cancellationToken);
+            if (!d.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCallsRetry);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var throwingMonitor = new ThrowingOptionsMonitor(
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        using var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            AsTransportAwareForTests(sender),
+            throwingMonitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+        DateTime createdAt = new(2026, 7, 15, 12, 30, 0, DateTimeKind.Utc);
+
+        Task s1 = sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, occurredAtUtc: createdAt);
+        await s1PreparationDone.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        throwingMonitor.ArmThrowsForNextReads(1);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: userId, occurredAtUtc: resolvedAt);
+
+        s1Release.TrySetResult();
+        await s1.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCallsS1).Should().Be(0,
+            "targeted Resolved's fence advances only the target user's lifecycle to v2 — S1 at v1 must veto");
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: userId, occurredAtUtc: resolvedAt);
+
+        attention.Verify(
+            a => a.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()),
+            Times.AtLeast(2),
+            "S1's Created called attention.FindItemAsync once, and R2's exact-version retry must call it again after proceeding through the targeted fence — proving the fence lease was released cleanly");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B1_OptionsThrowAtEntryForNonResolved_ZeroStateAllocation()
+    {
+        // For non-Resolved change kinds, the disabled-fast-path options read
+        // happens BEFORE TryObserveDispatch. If it throws, no dispatch lane,
+        // no item fence, and no lifecycle should be allocated: the exception
+        // propagates up unchanged (the caller — AttentionBroadcaster — treats
+        // dispatcher throws as a delivery-only failure and does not block the
+        // attention broadcast).
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new DelegateTransportSender((_, transportStart, _) =>
+            throw new InvalidOperationException("sender must never be reached when options throw at entry"));
+
+        using var throwingMonitor = new ThrowingOptionsMonitor(
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        using var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            AsTransportAwareForTests(sender),
+            throwingMonitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+
+        throwingMonitor.ArmThrowsForNextReads(1);
+        Func<Task> act = () => sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: new(2026, 7, 15, 13, 0, 0, DateTimeKind.Utc));
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "options throws at the pre-allocation entry read must propagate — no state has been allocated to protect");
+
+        sut.AttentionDispatchLaneCountForTests.Should().Be(0,
+            "a throwing entry options read for non-Resolved must not allocate any lane");
+        sut.AttentionItemFenceCountForTests.Should().Be(0,
+            "a throwing entry options read for non-Resolved must not allocate any item fence");
+        sut.AttentionLifecycleCountForTests.Should().Be(0,
+            "a throwing entry options read for non-Resolved must not allocate any lifecycle");
+    }
+
+    // -----------------------------------------------------------------------
+    // Hicks r2 blocker 2 tests — uncancellable sync-over-async persisted gate
+    // I/O under lock. The transport-start handshake used to hold a lock while
+    // performing sync-over-async EF I/O for the persisted gate re-check.
+    // Under the fix, the async gate read runs OUTSIDE every dispatcher/
+    // lifecycle/item/transport lock, is cancellation-aware, and fails
+    // closed on repository/DB errors with a logged rollback.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B2_AsyncGatePausedAfterSenderPrep_DisableCommittedBeforeReadCompletes_VetoesAndAdmitsExactRetryAfterReenable()
+    {
+        // Deterministic:
+        //   * gate initially enabled; async read paused via ControllableAsyncGate.
+        //   * Sender prepares, then calls TryStartAsync.
+        //   * Dispatcher's TryStartAsync awaits gate.IsEnabledAsync — the fake
+        //     stalls on a TCS held by the test.
+        //   * Test flips SetEnabled(false) then Release()s the paused gate.
+        //   * Paused gate completes returning false — TryStartAsync vetoes,
+        //     rolls back the reservation, does NOT call TryStartTransport,
+        //     Attempted stays 0.
+        //   * Test flips SetEnabled(true) and dispatches an exact-version
+        //     retry — succeeds all the way through.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        using var gate = new ControllableAsyncGate();
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int providerCalls = 0;
+        int vetoedCount = 0;
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
+        {
+            NativePushTransportStartDecision decision = await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                Interlocked.Increment(ref vetoedCount);
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        long skippedFeatureDisabled = 0;
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted)
+                    || ReferenceEquals(instrument, metrics.SkippedFeatureDisabled))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+            else if (ReferenceEquals(instrument, metrics.SkippedFeatureDisabled))
+            {
+                Interlocked.Add(ref skippedFeatureDisabled, measurement);
+            }
+        });
+        meterListener.Start();
+
+        // Ensure DispatchForOwnerAsync's first async gate reads pass through
+        // enabled so the sender is actually invoked. Only the transport-start
+        // gate read is paused deterministically.
+        gate.SetEnabled(true);
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 },
+            metrics: metrics);
+
+        gate.ArmPauseForCallCounts(pauseAfterCall: 4); // Owner/device/retry gate reads run through (calls 1-4); transport-start gate read (call 5) pauses.
+        DateTime occurredAt = new(2026, 7, 15, 14, 0, 0, DateTimeKind.Utc);
+        Task dispatch = sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+
+        await gate.WaitForPausedAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The gate read is paused. Flip disabled and then release the pause;
+        // the async read resolves to `false` and the dispatcher vetoes.
+        gate.SetEnabled(false);
+        gate.ReleasePause();
+        await dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "the async gate resolved to disabled at the transport-start authorization linearization point");
+        Volatile.Read(ref vetoedCount).Should().Be(1);
+        Volatile.Read(ref attempted).Should().Be(0,
+            "Attempted is only incremented from a permitted TryStartAsync; the veto must leave it untouched");
+        Volatile.Read(ref skippedFeatureDisabled).Should().BeGreaterThan(0,
+            "the disabled gate at transport-start must be reported as a feature-disabled skip");
+
+        // Re-enable and exact-version retry: delivers once. The fence must
+        // not have leaked a lifecycle version reservation.
+        gate.SetEnabled(true);
+        gate.DisarmPause();
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "exact-version retry after re-enable delivers once");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B2_SlowAsyncGate_CancellationPropagatesPromptly_NoProviderNoAttempted_ExactRetryRecoverable()
+    {
+        // Slow gate + cancellation must veto promptly and roll back. The
+        // caller/dispatcher cancellation token is captured at
+        // DispatcherTransportStart construction and linked to the sender's
+        // token, so awaiting a paused gate propagates cancellation without
+        // waiting on the DB.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        using var gate = new ControllableAsyncGate();
+        gate.SetEnabled(true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int providerCalls = 0;
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
+        {
+            NativePushTransportStartDecision decision = await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+        });
+        meterListener.Start();
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 },
+            metrics: metrics);
+
+        gate.ArmPauseForCallCounts(pauseAfterCall: 4);
+        using var cts = new CancellationTokenSource();
+        DateTime occurredAt = new(2026, 7, 15, 15, 0, 0, DateTimeKind.Utc);
+        Task dispatch = sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt, cancellationToken: cts.Token);
+
+        await gate.WaitForPausedAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Cancel while the async gate is paused. The dispatcher must observe
+        // cancellation without waiting for the gate to resolve.
+        cts.Cancel();
+        Func<Task> act = () => dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "cancellation observed while awaiting the async gate propagates promptly");
+
+        // The gate is still paused (we deliberately never released it) —
+        // release it now so the dispatcher's task fully unwinds and no
+        // resources are leaked. The dispatcher's own veto path should not
+        // depend on this release; cancellation already unwound the await.
+        gate.ReleasePause();
+
+        Volatile.Read(ref providerCalls).Should().Be(0);
+        Volatile.Read(ref attempted).Should().Be(0);
+
+        // Recovery: dispatch again with a fresh, uncancelled token and same
+        // version. Exact-version retry succeeds.
+        gate.DisarmPause();
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "exact-version retry after cancellation recovery delivers once");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B2_AsyncGateThrowsDbError_FailsClosedLogsAndRollsBack_ExactRetryRecoverable()
+    {
+        // Repository/DB errors at the transport-start authorization
+        // linearization point must fail closed: no provider call, no
+        // Attempted, reservations rolled back, and an explicit log line
+        // captured. An exact-version retry after recovery delivers once.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        using var gate = new ControllableAsyncGate();
+        gate.SetEnabled(true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int providerCalls = 0;
+        int vetoedCount = 0;
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
+        {
+            NativePushTransportStartDecision decision = await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                Interlocked.Increment(ref vetoedCount);
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.Attempted))
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+        });
+        meterListener.Start();
+
+        var recordingLogger = new RecordingDispatcherLogger();
+        var services = new ServiceCollection();
+        services.AddSingleton<IOperatorFeatureGate>(gate);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        using var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            AsTransportAwareForTests(sender),
+            new StaticOptionsMonitor(new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 }),
+            metrics,
+            recordingLogger);
+
+        gate.ArmThrowOnCall(callIndex: 5, ex: new InvalidOperationException("simulated DB outage at transport-start gate read"));
+        DateTime occurredAt = new(2026, 7, 15, 16, 0, 0, DateTimeKind.Utc);
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "gate throws must fail closed — no provider call may be admitted");
+        Volatile.Read(ref vetoedCount).Should().Be(1);
+        Volatile.Read(ref attempted).Should().Be(0);
+        recordingLogger.Warnings.Should().Contain(msg =>
+            msg.Contains("[NativePush] Feature-gate read failed at transport-start", StringComparison.Ordinal),
+            "the dispatcher must log the fail-closed veto with delivery/attention-item context");
+
+        // Recovery: exact-version retry delivers once.
+        gate.DisarmThrow();
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "exact-version retry after DB recovery delivers once — no leaked reservation");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_HicksR2_B2_AsyncGateReadOutsideLock_ConcurrentIndependentTransportNotBlocked()
+    {
+        // Blocker 2 core claim: the persisted feature-gate read runs OUTSIDE
+        // every dispatcher/lifecycle/item/transport lock. Prove it by
+        // pausing item A's gate at transport-start while item B (an
+        // unrelated attention item for a different user) dispatches
+        // concurrently. Item B must reach its provider without waiting
+        // on item A's paused gate.
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        AttentionItemDto itemA = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto itemB = BuildAttentionItem(AttentionKind.Failure);
+        await using AppDbContext db = BuildDbContext();
+        using var gate = new ControllableAsyncGate();
+        gate.SetEnabled(true);
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid> { userA, userB });
+        tokens.Setup(r => r.GetActiveByUserAsync(userA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userA,
+                    InstallationId = "install-A",
+                    Token = "AA".PadRight(64, 'A'),
+                    Platform = "ios",
+                    Environment = "development",
+                    IsActive = true,
+                },
+            });
+        tokens.Setup(r => r.GetActiveByUserAsync(userB, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userB,
+                    InstallationId = "install-B",
+                    Token = "BB".PadRight(64, 'B'),
+                    Platform = "ios",
+                    Environment = "development",
+                    IsActive = true,
+                },
+            });
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(a => a.FindItemAsync(userA, itemA.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(itemA);
+        attention.Setup(a => a.FindItemAsync(userB, itemB.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(itemB);
+
+        int providerA = 0;
+        int providerB = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            NativePushTransportStartDecision decision = await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            if (envelope.AttentionItemId == itemA.Id)
+            {
+                Interlocked.Increment(ref providerA);
+            }
+            else if (envelope.AttentionItemId == itemB.Id)
+            {
+                Interlocked.Increment(ref providerB);
+            }
+
+            return NativePushDispatchResult.Delivered();
+        });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+
+        // Arm the pause so the FIRST transport-start gate read pauses. For a
+        // fresh dispatch with 1 owner + 1 device + 1 attempt, the gate is
+        // consumed 4 times (dispatch-core initial, per-owner, per-device,
+        // retry-loop) BEFORE the transport-start invocation reads the gate
+        // as call 5. Pausing at call 5 targets the transport-start read
+        // deterministically.
+        gate.ArmPauseForCallCounts(pauseAfterCall: 4);
+        DateTime occurredAt = new(2026, 7, 15, 17, 0, 0, DateTimeKind.Utc);
+        Task dispatchA = sut.DispatchAsync(itemA.Id, AttentionChangeKind.Created, userA, occurredAtUtc: occurredAt);
+        await gate.WaitForPausedAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Item A's transport-start is paused inside the async gate read.
+        // Item B for a different user/item must not be blocked — its own
+        // gate reads run concurrently on a separate lifecycle/lane.
+        gate.DisarmPause();
+        Task dispatchB = sut.DispatchAsync(itemB.Id, AttentionChangeKind.Created, userB, occurredAtUtc: occurredAt);
+        await dispatchB.WaitAsync(TimeSpan.FromSeconds(10));
+        Volatile.Read(ref providerB).Should().Be(1,
+            "item B's unrelated transport must complete while item A's async gate is paused — the gate read must not be under any shared lock");
+
+        // Release item A's paused gate; A completes.
+        gate.ReleasePause();
+        await dispatchA.WaitAsync(TimeSpan.FromSeconds(10));
+        Volatile.Read(ref providerA).Should().Be(1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Fakes for the new blocker tests. Placed alongside the other test
+    // helpers in this file so they compile without additional wiring.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Options monitor that can be armed to throw on the next N
+    /// <see cref="CurrentValue"/> reads, simulating a validated-options
+    /// reload throw. Subsequent reads return the configured normal value.
+    /// </summary>
+    private sealed class ThrowingOptionsMonitor : IOptionsMonitor<NativePushSettings>, IDisposable
+    {
+        private readonly NativePushSettings _normal;
+        private int _remainingThrows;
+
+        public ThrowingOptionsMonitor(NativePushSettings normal)
+        {
+            _normal = normal;
+        }
+
+        public NativePushSettings CurrentValue
+        {
+            get
+            {
+                if (Interlocked.Decrement(ref _remainingThrows) >= 0)
+                {
+                    throw new InvalidOperationException("simulated validated-options reload throw");
+                }
+
+                return _normal;
+            }
+        }
+
+        public void ArmThrowsForNextReads(int count)
+            => Interlocked.Exchange(ref _remainingThrows, count);
+
+        public NativePushSettings Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<NativePushSettings, string?> listener) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    /// <summary>
+    /// Production-realistic async operator-feature gate fake. Supports:
+    /// <list type="bullet">
+    ///   <item>Setting the effective enabled flag.</item>
+    ///   <item>Pausing async reads on a specific call index (e.g., the
+    ///     transport-start read) so tests can flip the enabled flag or
+    ///     cancel the dispatch while the gate read is in flight.</item>
+    ///   <item>Throwing on a specific call index to simulate a DB outage.</item>
+    /// </list>
+    /// The synchronous <see cref="IsEnabled"/> path returns the flag
+    /// unconditionally — it exists only so the type satisfies the
+    /// interface for consumers that still take the sync surface.
+    /// </summary>
+    private sealed class ControllableAsyncGate : IOperatorFeatureGate, IDisposable
+    {
+        private readonly object _sync = new();
+        private int _asyncCalls;
+        private volatile bool _enabled = true;
+        private int _pauseAfterCall = -1;
+        private TaskCompletionSource? _pauseTcs;
+        private TaskCompletionSource? _pauseObservedTcs;
+        private TaskCompletionSource? _activePauseTcs;
+        private int _throwOnCall = -1;
+        private Exception? _throwWith;
+
+        public void SetEnabled(bool enabled) => _enabled = enabled;
+
+        public void ArmPauseForCallCounts(int pauseAfterCall)
+        {
+            lock (_sync)
+            {
+                _pauseAfterCall = pauseAfterCall;
+                _pauseTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pauseObservedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+
+        public void DisarmPause()
+        {
+            lock (_sync)
+            {
+                // Only disarm the arming state; the already-active TCS is preserved
+                // so <see cref="ReleasePause"/> can still complete an in-flight
+                // paused await after a disarm. Tests deliberately disarm to let
+                // unrelated concurrent gate reads pass through without pausing.
+                _pauseAfterCall = -1;
+                _pauseTcs = null;
+                _pauseObservedTcs = null;
+            }
+        }
+
+        public void ReleasePause()
+        {
+            TaskCompletionSource? tcs;
+            lock (_sync)
+            {
+                tcs = _activePauseTcs ?? _pauseTcs;
+            }
+
+            tcs?.TrySetResult();
+        }
+
+        public Task WaitForPausedAsync()
+        {
+            TaskCompletionSource? tcs;
+            lock (_sync)
+            {
+                tcs = _pauseObservedTcs;
+            }
+
+            return tcs?.Task ?? Task.CompletedTask;
+        }
+
+        public void ArmThrowOnCall(int callIndex, Exception ex)
+        {
+            lock (_sync)
+            {
+                _throwOnCall = callIndex;
+                _throwWith = ex;
+            }
+        }
+
+        public void DisarmThrow()
+        {
+            lock (_sync)
+            {
+                _throwOnCall = -1;
+                _throwWith = null;
+            }
+        }
+
+        public bool IsEnabled(OperatorFeature feature) => _enabled;
+
+        public async Task<bool> IsEnabledAsync(OperatorFeature feature, CancellationToken cancellationToken = default)
+        {
+            int callIndex = Interlocked.Increment(ref _asyncCalls);
+
+            TaskCompletionSource? pauseTcs = null;
+            TaskCompletionSource? pauseObservedTcs = null;
+            int throwOnCall;
+            Exception? throwWith;
+            int pauseAfterCall;
+            lock (_sync)
+            {
+                pauseAfterCall = _pauseAfterCall;
+                throwOnCall = _throwOnCall;
+                throwWith = _throwWith;
+                if (pauseAfterCall >= 0 && callIndex == pauseAfterCall + 1)
+                {
+                    pauseTcs = _pauseTcs;
+                    pauseObservedTcs = _pauseObservedTcs;
+                    _activePauseTcs = pauseTcs;
+                }
+            }
+
+            if (throwOnCall == callIndex && throwWith is not null)
+            {
+                throw throwWith;
+            }
+
+            if (pauseTcs is not null)
+            {
+                pauseObservedTcs?.TrySetResult();
+                await pauseTcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return _enabled;
+        }
+
+        public bool IsHardDisabledByEnvironment(OperatorFeature feature) => false;
+
+        public string GetFlagName(OperatorFeature feature) => feature.ToString();
+
+        public IReadOnlyList<(OperatorFeature Feature, string FlagName)> AllFeatures =>
+            new[] { (OperatorFeature.NativePush, "nativePushEnabled") };
+
+        public OperatorFeatureFlagsDto GetEffectiveFlags() => new()
+        {
+            NativePushEnabled = _enabled,
+        };
+
+        public void Dispose()
+        {
+            TaskCompletionSource? tcs;
+            lock (_sync)
+            {
+                tcs = _pauseTcs;
+                _pauseTcs = null;
+            }
+
+            tcs?.TrySetResult();
+        }
+    }
+
     private static Farm.Infrastructure.Domain.User BuildUser(Guid userId, string name)
     {
         return new Farm.Infrastructure.Domain.User
@@ -6503,7 +7460,14 @@ public sealed class NativePushDispatcherTests
     private static Mock<IOperatorFeatureGate> BuildGate(bool enabled)
     {
         var gate = new Mock<IOperatorFeatureGate>();
+        // Keep the sync IsEnabled set for controllers/services that still take
+        // the synchronous surface, and mirror the same value on the async
+        // <see cref="IOperatorFeatureGate.IsEnabledAsync"/> path used by the
+        // dispatcher's transport-start handshake (Hicks r2 blocker 2). Both
+        // must agree so tests that build a single gate keep behaving as before.
         gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush)).Returns(enabled);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(enabled);
         return gate;
     }
 
@@ -6690,8 +7654,11 @@ public sealed class NativePushDispatcherTests
     private sealed class RecordingDispatcherLogger : ILogger<NativePushDispatcher>
     {
         private readonly ConcurrentQueue<Exception> _exceptions = new();
+        private readonly ConcurrentQueue<string> _warnings = new();
 
         public IReadOnlyCollection<Exception> Exceptions => _exceptions.ToArray();
+
+        public IReadOnlyCollection<string> Warnings => _warnings.ToArray();
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -6708,6 +7675,11 @@ public sealed class NativePushDispatcherTests
             if (exception is not null)
             {
                 _exceptions.Enqueue(exception);
+            }
+
+            if (logLevel == LogLevel.Warning)
+            {
+                _warnings.Enqueue(formatter(state, exception));
             }
         }
     }
@@ -6751,14 +7723,17 @@ public sealed class NativePushDispatcherTests
             return inner.SendAsync(envelope, cancellationToken);
         }
 
-        public Task<NativePushDispatchResult> SendAsync(
+        public async Task<NativePushDispatchResult> SendAsync(
             NativePushEnvelope envelope,
             INativePushTransportStart transportStart,
             CancellationToken cancellationToken = default)
         {
-            return transportStart.TryStart().IsPermitted
-                ? inner.SendAsync(envelope, cancellationToken)
-                : Task.FromResult(NativePushDispatchResult.TransportStartVetoed());
+            NativePushTransportStartDecision decision = await transportStart
+                .TryStartAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return decision.IsPermitted
+                ? await inner.SendAsync(envelope, cancellationToken).ConfigureAwait(false)
+                : NativePushDispatchResult.TransportStartVetoed();
         }
     }
 

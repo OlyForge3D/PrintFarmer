@@ -175,7 +175,7 @@ public class FilamentCoverageService(
     {
         SpoolCoverageSettings settings = GetSettings();
 
-        if (!_featureGate.IsEnabled(OperatorFeature.FilamentCoverage))
+        if (!await _featureGate.IsEnabledAsync(OperatorFeature.FilamentCoverage, ct).ConfigureAwait(false))
         {
             return [];
         }

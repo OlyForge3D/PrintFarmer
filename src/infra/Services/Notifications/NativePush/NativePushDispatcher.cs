@@ -175,6 +175,22 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
+        // Hicks r2 blocker 1 (A): resolution fencing MUST run synchronously
+        // before every fallible operation, so a Resolved change kind
+        // deliberately skips the entry options snapshot. If
+        // <see cref="IOptionsMonitor{T}.CurrentValue"/> throws during a
+        // validated configuration reload here, the exception must not prevent
+        // a Resolved from reaching the fence — otherwise an older prepared
+        // targeted send (S1) that already passed transport-start preparation
+        // could still resume and deliver unfenced after the reload recovers.
+        // For non-Resolved change kinds the disabled fast-path DOES require
+        // the current settings snapshot, and it is read BEFORE any persistent
+        // state (lane, fence, lifecycle) is allocated: a throw here propagates
+        // without leaking any dispatcher-owned state because
+        // <see cref="TryObserveDispatch"/> runs strictly after this early
+        // return. See the DispatchCoreAsync boundary for the resolution-time
+        // fencing invariant.
+        //
         // Hicks r2 blocker 1: a disabled-mode Created/Updated dispatch must
         // NOT observe a dispatch lane. The prior implementation always ran
         // TryObserveDispatch first and then early-returned at
@@ -195,11 +211,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // and DispatchCoreAsync's own finally releases the fence's
         // participant leases and drives bounded PruneCaches on the
         // disabled early return so its own state cannot leak either.
-        NativePushSettings entrySettings = _optionsMonitor.CurrentValue;
-        if (entrySettings.Mode == NativePushMode.Disabled
-            && changeKind != AttentionChangeKind.Resolved)
+        if (changeKind != AttentionChangeKind.Resolved)
         {
-            return;
+            NativePushSettings entrySettings = _optionsMonitor.CurrentValue;
+            if (entrySettings.Mode == NativePushMode.Disabled)
+            {
+                return;
+            }
         }
 
         if (!TryObserveDispatch(dispatchKey, version, out AttentionDispatchLane lane))
@@ -272,14 +290,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             ? PublishTargetedResolvedFence(attentionItemId, targetForFence, version)
             : null;
 
-        // Snapshot the startup-bound settings for a consistent fan-out. The
-        // NativePush section is validated with ValidateOnStart; configuration
-        // changes require a process restart rather than taking effect mid-flight.
-        // Resolved events consume a per-user pre-resolution snapshot and emit a
-        // silent dismissal even after the source removes the live item.
-        NativePushSettings settings = _optionsMonitor.CurrentValue;
+        // Hicks r2 blocker 1 (B): every fallible operation past this point —
+        // <see cref="IOptionsMonitor{T}.CurrentValue"/>, gate reads, scope
+        // creation, DB queries, and delivery — MUST run inside the top-level
+        // try/finally that owns fence + lifecycle lease release. A throw from
+        // the validated-options reload here would otherwise leak the version-
+        // specific fence participant leases acquired above (S1 exact-version
+        // retry would remain stale) and skip the bounded PruneCaches that
+        // retires past-retention state on the disabled/no-op path. Capturing
+        // <c>settingsSnapshot</c> in an outer local lets the finally still
+        // drive bounded reclamation even when the read itself failed.
+        NativePushSettings? settingsSnapshot = null;
         try
         {
+            // Snapshot the startup-bound settings for a consistent fan-out. The
+            // NativePush section is validated with ValidateOnStart; configuration
+            // changes require a process restart rather than taking effect mid-flight.
+            // Resolved events consume a per-user pre-resolution snapshot and emit a
+            // silent dismissal even after the source removes the live item.
+            NativePushSettings settings = _optionsMonitor.CurrentValue;
+            settingsSnapshot = settings;
             if (settings.Mode == NativePushMode.Disabled)
             {
                 return;
@@ -290,7 +320,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
             IServiceProvider sp = scope.ServiceProvider;
             IOperatorFeatureGate gate = sp.GetRequiredService<IOperatorFeatureGate>();
-            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return;
@@ -350,7 +380,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // Re-check the gate on every recipient so a mid-flight flip stops sends.
-                if (!gate.IsEnabled(OperatorFeature.NativePush))
+                if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
                 {
                     _metrics.SkippedFeatureDisabled.Add(1);
                     return;
@@ -410,6 +440,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         catch (Exception ex)
         {
             // Delivery failures must never break the attention broadcast path.
+            // A validated-options reload that throws lands here (blocker 1 B):
+            // the fence + lifecycle leases still release below and PruneCaches
+            // still drives bounded reclamation using safe defaults.
             _logger.LogWarning(ex, "[NativePush] Dispatch failed for attentionItemId={AttentionItemId}", attentionItemId);
         }
         finally
@@ -431,9 +464,17 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // Resolved traffic drive the same bounded reclamation as normal
             // traffic; the internal 30-second rate limit prevents redundant
             // sweeps in bursty conditions.
-            if (settings.Mode == NativePushMode.Disabled)
+            //
+            // Hicks r2 blocker 1 (B) extension: when the options read itself
+            // threw before <c>settingsSnapshot</c> could be assigned, use safe
+            // defaults so bounded reclamation still runs. <c>new
+            // NativePushSettings()</c> defaults to <see cref="NativePushMode.Disabled"/>
+            // and a 30-second RateLimitWindow, matching the same eviction
+            // cadence the normal disabled path uses.
+            NativePushSettings pruneSettings = settingsSnapshot ?? new NativePushSettings();
+            if (settingsSnapshot is null || pruneSettings.Mode == NativePushMode.Disabled)
             {
-                PruneCaches(UtcNow, settings);
+                PruneCaches(UtcNow, pruneSettings);
             }
         }
     }
@@ -579,7 +620,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!gate.IsEnabled(OperatorFeature.NativePush))
+                if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
                 {
                     _metrics.SkippedFeatureDisabled.Add(1);
                     return;
@@ -1133,7 +1174,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             // This persisted gate read is intentionally adjacent to the transport call.
             // A retry must never inherit the enabled decision made by an earlier attempt.
-            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            // Awaited outside every lock — the dispatcher does not hold any in-memory
+            // lock at this point, so a slow DB round-trip only delays this dispatch's
+            // retry cadence, never unrelated concurrent transports.
+            if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return new NativePushSendOutcome(null, anyTransportStarted);
@@ -1235,6 +1279,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
 
             var transportStart = new DispatcherTransportStart(
+                _logger,
+                envelope.AttentionItemId,
                 lifecycle,
                 reservation,
                 () =>
@@ -1251,7 +1297,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                     _metrics.Attempted.Add(1);
                 },
-                () => gate.IsEnabled(OperatorFeature.NativePush),
+                async ct => await gate.IsEnabledAsync(OperatorFeature.NativePush, ct).ConfigureAwait(false),
                 () => _metrics.SkippedFeatureDisabled.Add(1),
                 cancellationToken);
 
@@ -1320,7 +1366,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // alert generation. Discard that provider result before retry or any
             // result attribution.
             cancellationToken.ThrowIfCancellationRequested();
-            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return new NativePushSendOutcome(null, true);
@@ -1361,12 +1407,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     }
 
     private sealed class DispatcherTransportStart(
+        ILogger logger,
+        string attentionItemId,
         AttentionLifecycle lifecycle,
         LifecycleSendReservation reservation,
         Action onStarted,
-        Func<bool> isFeatureEnabled,
+        Func<CancellationToken, Task<bool>> isFeatureEnabledAsync,
         Action onFeatureDisabledVeto,
-        CancellationToken cancellationToken) : INativePushTransportStart
+        CancellationToken dispatchCancellationToken) : INativePushTransportStart
     {
         private readonly object _sync = new();
         private readonly PendingTransportAttempt _attempt = new();
@@ -1385,8 +1433,96 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        public NativePushTransportStartDecision TryStart()
+        public async Task<NativePushTransportStartDecision> TryStartAsync(CancellationToken cancellationToken)
         {
+            // Hicks r2 blocker 2: the persisted operator feature-gate read is the
+            // authorization linearization point and it MUST run outside every
+            // in-memory lock. The prior implementation invoked a synchronous
+            // <c>isFeatureEnabled()</c> delegate that internally blocked on the
+            // async repository read via <c>.GetAwaiter().GetResult()</c> — under
+            // the sync lock below that pinned the caller's thread on an
+            // unbounded EF/SQL round-trip, blocked pool workers, prevented
+            // cancellation from reaching later checks, and let reservations
+            // and lanes accumulate.
+            //
+            // Read the gate BEFORE acquiring the transport lock. Cancellation
+            // propagates naturally through both the caller/dispatcher token
+            // (captured at construction) and the sender-passed token. A
+            // repository/DB throw is logged fail-closed at this exact site
+            // and the reservation is rolled back so an exact-version retry
+            // remains recoverable after DB recovery.
+            //
+            // A pre-cancelled token short-circuits without reading the gate at
+            // all: pre-cancellation must never issue a DB query on the way to
+            // committing a doomed attempt, and the veto+rollback below is the
+            // same outcome the atomic revalidation section would produce.
+            //
+            // <paramref name="cancellationToken"/> is the sender-side token
+            // required by <see cref="INativePushTransportStart.TryStartAsync"/>.
+            // It is linked with the outer dispatcher/caller token captured at
+            // construction time so either signal aborts the awaited gate read
+            // and drives a veto+rollback without pinning a thread.
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(
+                dispatchCancellationToken,
+                cancellationToken);
+            CancellationToken linkedToken = linked.Token;
+            if (linkedToken.IsCancellationRequested)
+            {
+                VetoAndRollback();
+                return NativePushTransportStartDecision.Veto();
+            }
+
+            bool gateEnabled;
+            try
+            {
+                gateEnabled = await isFeatureEnabledAsync(linkedToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Caller/dispatcher cancellation propagates unchanged. A pre-
+                // transport rollback returns dedupe/rate and reverts the
+                // reservation so an exact-version retry recovers after
+                // cancellation clears.
+                VetoAndRollback();
+                throw;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                // Fail-closed on repository/DB/gate errors. Logged explicitly with
+                // the delivery/attention-item context (the gate itself does not
+                // know which envelope caused the read). A follow-up retry after
+                // DB recovery re-enters this path and receives a fresh decision.
+                logger.LogWarning(
+                    ex,
+                    "[NativePush] Feature-gate read failed at transport-start for attentionItemId={AttentionItemId}; failing closed and rolling back the reservation for exact-version retry.",
+                    attentionItemId);
+                VetoAndRollback();
+                return NativePushTransportStartDecision.Veto();
+            }
+
+            if (!gateEnabled)
+            {
+                VetoAndRollback();
+                onFeatureDisabledVeto();
+                return NativePushTransportStartDecision.Veto();
+            }
+
+            // The gate has authorized this attempt. Now take the narrow
+            // transport lock and atomically revalidate every dispatcher-owned
+            // invariant that could have changed while we awaited the gate:
+            //   * caller/dispatcher cancellation observed strictly after the
+            //     authorization vetoes (rolls back);
+            //   * a prior <c>TryStartAsync</c> may have already committed or
+            //     vetoed;
+            //   * a concurrent newer generation may have superseded this
+            //     reservation's lifecycle version (rejected by
+            //     <see cref="AttentionLifecycle.TryStartTransport"/>);
+            //   * a Resolved capture may have consumed the snapshot pointer.
+            // Commit is EXACTLY-ONCE: only one <c>TryStartAsync</c> per
+            // reservation can transition <c>_state = Started</c> and emit
+            // <c>Attempted</c>. Cancellation observed AFTER a permitted
+            // decision is a genuine, already-committed attempt and is never
+            // retroactively vetoed — the interface's documented contract.
             lock (_sync)
             {
                 if (_state != TransportStartState.Pending)
@@ -1394,54 +1530,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     return NativePushTransportStartDecision.Veto();
                 }
 
-                // Hicks r2 blocker 2: re-evaluate the persisted feature gate
-                // at the actual transport-start boundary, AFTER the sender
-                // finished all pre-transport preparation (JWT signing, key
-                // I/O, payload build) and IMMEDIATELY before a real provider
-                // request would be accepted. The dispatcher's own gate check
-                // in SendWithRetriesAsync runs BEFORE preparation, so an
-                // administrator committing a persisted disable during a
-                // slow-preparation window would otherwise be observed only
-                // AFTER the provider call has already fired — a later gate
-                // check cannot undo an already-sent push. Reading the gate
-                // here re-queries persisted state at the last possible
-                // synchronous moment before <see cref="lifecycle.TryStartTransport"/>
-                // would commit lifecycle ownership, dedupe/rate reservations,
-                // and the <c>Attempted</c> metric. On disabled: veto and
-                // fully roll back — dedupe/rate are returned, the reservation
-                // reverts to <see cref="LifecycleSendReservation.TryBeginRollback"/>
-                // state, <c>Attempted</c> is not incremented, and an
-                // exact-version retry recovers once the gate is re-enabled.
-                //
-                // Reading the persisted gate is a bounded synchronous
-                // operation (documented in <see cref="OperatorFeatureGate.LoadSettings"/>
-                // as sync-over-async on a scoped repository). It never
-                // blocks on external I/O beyond a single indexed row read,
-                // and its broad exception handler ensures a false safe-default
-                // rather than a propagating throw.
-                if (!isFeatureEnabled())
-                {
-                    _state = TransportStartState.Closed;
-                    lifecycle.RollbackReservation(reservation);
-                    onFeatureDisabledVeto();
-                    return NativePushTransportStartDecision.Veto();
-                }
-
-                // Hicks blocker 2 (dispatcher-side guard): a sender must never
-                // commit a real provider attempt once cancellation has
-                // already been requested, even if it forgot — or raced — its
-                // own pre-transport cancellation check. This is the last
-                // synchronous checkpoint before TryStartTransport would
-                // commit lifecycle ownership, dedupe/rate reservations, and
-                // Attempted, so it stays as close to the provider call as
-                // this handshake allows. Rolling back here is identical to a
-                // normal veto: the reservation remains valid for an
-                // exact-version retry and Attempted is left unchanged.
-                // Cancellation observed strictly AFTER this check returns
-                // Permit() is a genuine in-flight attempt — it keeps normal
-                // retry/attribution semantics and is never retroactively
-                // undone by this guard.
-                if (cancellationToken.IsCancellationRequested)
+                if (linkedToken.IsCancellationRequested)
                 {
                     _state = TransportStartState.Closed;
                     lifecycle.RollbackReservation(reservation);
@@ -1459,6 +1548,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 _state = TransportStartState.Started;
                 onStarted();
                 return NativePushTransportStartDecision.Permit();
+            }
+        }
+
+        private void VetoAndRollback()
+        {
+            lock (_sync)
+            {
+                if (_state != TransportStartState.Pending)
+                {
+                    return;
+                }
+
+                _state = TransportStartState.Closed;
+                lifecycle.RollbackReservation(reservation);
             }
         }
 
@@ -1515,7 +1618,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
         IOperatorFeatureGate gate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
-        if (!gate.IsEnabled(OperatorFeature.NativePush))
+        if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
             _metrics.SkippedFeatureDisabled.Add(1);
             return DeviceDispatchOutcome.DispatchStopped;

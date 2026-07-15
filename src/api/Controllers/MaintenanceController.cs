@@ -64,7 +64,7 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceAlert> alerts = await _alertRepository.GetAllActiveAlertsAsync(ct);
-            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            if (!await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
             {
                 alerts = alerts.Where(a => !a.ToolheadId.HasValue).ToList();
             }
@@ -91,7 +91,7 @@ public class MaintenanceController(
             MaintenanceAlert? alert = await _alertRepository.GetByIdAsync(id, ct);
             if (alert == null
                 || (alert.ToolheadId.HasValue
-                    && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback)))
+                    && !await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false)))
             {
                 return NotFound($"Alert with ID {id} not found");
             }
@@ -115,7 +115,7 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceAlert> alerts = await _alertRepository.GetActivePrinterAlertsAsync(printerId, ct);
-            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            if (!await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
             {
                 alerts = alerts.Where(a => !a.ToolheadId.HasValue).ToList();
             }
@@ -206,7 +206,7 @@ public class MaintenanceController(
             // mirroring CreateMaintenanceLogAsync. Reject rather than silently strip the scope so
             // the resolution log never misrepresents which head was serviced.
             if (alert.ToolheadId.HasValue
-                && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+                && !await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
             {
                 return BadRequest("Per-tool maintenance is disabled.");
             }
@@ -343,7 +343,7 @@ public class MaintenanceController(
     {
         try
         {
-            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            bool includeToolheadScope = await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
             DateTime now = DateTime.UtcNow;
 
             List<Printer> printers;
@@ -638,7 +638,7 @@ public class MaintenanceController(
         try
         {
             List<MaintenanceLog> logs = await _logRepository.GetByPrinterIdAsync(printerId, ct);
-            if (!_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+            if (!await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
             {
                 logs = logs.Where(l => !l.ToolheadId.HasValue).ToList();
             }
@@ -694,7 +694,7 @@ public class MaintenanceController(
             }
 
             if (effectiveToolheadId.HasValue
-                && !_operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback))
+                && !await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
             {
                 return BadRequest("Per-tool maintenance is disabled.");
             }
@@ -788,7 +788,7 @@ public class MaintenanceController(
     {
         try
         {
-            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            bool includeToolheadScope = await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
 
             // Get all statistics with printer info
             var allStats = await _statisticsRepository.GetAllAsync(ct);
@@ -1048,7 +1048,7 @@ public class MaintenanceController(
             DateTime start = startDate ?? DateTime.UtcNow.AddMonths(-6);
             DateTime end = endDate ?? DateTime.UtcNow;
 
-            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            bool includeToolheadScope = await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
             var trends = await _logRepository.GetTrendsAsync(start, end, includeToolheadScope, ct);
 
             var response = trends.Select(t => new MaintenanceTrendResponse(
@@ -1076,7 +1076,7 @@ public class MaintenanceController(
     {
         try
         {
-            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            bool includeToolheadScope = await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
             var lifespans = await _logRepository.GetComponentLifespanAsync(includeToolheadScope, ct);
 
             var response = lifespans.Select(l => new ComponentLifespanResponse(
@@ -1104,7 +1104,7 @@ public class MaintenanceController(
     {
         try
         {
-            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            bool includeToolheadScope = await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
             var costs = await _logRepository.GetCostAnalysisAsync(months, includeToolheadScope, ct);
 
             var response = costs.Select(c => new MaintenanceCostResponse(
@@ -1129,7 +1129,7 @@ public class MaintenanceController(
     {
         try
         {
-            bool includeToolheadScope = _operatorFeatureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+            bool includeToolheadScope = await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
             var uptimes = await _logRepository.GetPrinterUptimeAsync(includeToolheadScope, ct);
 
             var response = uptimes.Select(u => new PrinterUptimeResponse(

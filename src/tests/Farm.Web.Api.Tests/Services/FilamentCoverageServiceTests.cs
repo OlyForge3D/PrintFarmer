@@ -58,6 +58,7 @@ public class FilamentCoverageServiceTests
 
         Mock<IOperatorFeatureGate> gateMock = new(MockBehavior.Strict);
         gateMock.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(coverageEnabled);
+        gateMock.Setup(g => g.IsEnabledAsync(OperatorFeature.FilamentCoverage, It.IsAny<CancellationToken>())).ReturnsAsync(coverageEnabled);
 
         Mock<IFilamentCoverageSpoolResolver> resolverMock = new(MockBehavior.Strict);
         resolverMock
@@ -971,6 +972,7 @@ public class FilamentCoverageServiceTests
         settingsMock.Setup(s => s.Get<SpoolCoverageSettings>()).Returns(new SpoolCoverageSettings());
         Mock<IOperatorFeatureGate> gateMock = new(MockBehavior.Strict);
         gateMock.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(true);
+        gateMock.Setup(g => g.IsEnabledAsync(OperatorFeature.FilamentCoverage, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         Mock<IFilamentCoverageSpoolResolver> resolverMock = new(MockBehavior.Strict);
         resolverMock
             .Setup(r => r.ResolveAsync(It.IsAny<IReadOnlyList<Printer>>(), It.IsAny<CancellationToken>()))

@@ -27,6 +27,7 @@ public class TasksControllerTests
 
         // Default: shift-plan feature is enabled.
         _featureGateMock.Setup(g => g.IsEnabled(OperatorFeature.ShiftPlan)).Returns(true);
+        _featureGateMock.Setup(g => g.IsEnabledAsync(OperatorFeature.ShiftPlan, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         _controller = new TasksController(
             _taskServiceMock.Object,
@@ -123,6 +124,7 @@ public class TasksControllerTests
     public async Task GetPendingTasksAsync_ViewShift_FeatureDisabled_ReturnsNotFound()
     {
         _featureGateMock.Setup(g => g.IsEnabled(OperatorFeature.ShiftPlan)).Returns(false);
+        _featureGateMock.Setup(g => g.IsEnabledAsync(OperatorFeature.ShiftPlan, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         // OperatorFeatureProblemDetails.NotFound calls gate.GetFlagName internally.
         _featureGateMock.Setup(g => g.GetFlagName(OperatorFeature.ShiftPlan))
             .Returns("shiftPlanEnabled");

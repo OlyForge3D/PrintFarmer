@@ -275,6 +275,7 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
 
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         MaintenanceAlertEngine engine = new(
             _stats.Object,
@@ -314,6 +315,7 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
 
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         MaintenanceAlertEngine engine = CreateEngine(gate.Object);
 
         Func<Task> act = mutation switch
@@ -355,6 +357,7 @@ public sealed class MaintenanceAlertEngineToolheadScopeTests
 
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         MaintenanceAlertEngine engine = CreateEngine(gate.Object);
 
         Task act = mutation switch

@@ -39,6 +39,9 @@ public sealed class MaintenanceControllerFleetToolheadScopeTests
         _operatorFeatureGate
             .Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback))
             .Returns(() => _multiSlotEnabled);
+        _operatorFeatureGate
+            .Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(_multiSlotEnabled));
     }
 
     private MaintenanceController CreateController()

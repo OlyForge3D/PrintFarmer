@@ -318,6 +318,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
 
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance, gate.Object);
         DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
@@ -342,6 +343,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
 
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance, gate.Object);
         DispatchScore s = (await scorer.ScorePrintersForJobAsync(job.Id)).Single();
@@ -362,12 +364,13 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
 
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         DispatchScorer scorer = new(_context, NullLogger<DispatchScorer>.Instance, gate.Object);
         List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
 
         scores.Should().HaveCount(2);
-        gate.Verify(g => g.IsEnabled(OperatorFeature.MultiSlotFallback), Times.Once);
+        gate.Verify(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ---- Finding 4: per-tool grams coverage overlay ----

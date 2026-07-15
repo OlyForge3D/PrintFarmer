@@ -36,7 +36,7 @@ public sealed class PartOutputSnapshotService(
     public async Task<bool> CaptureJobSnapshotIfAbsentAsync(PrintJob job, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(job);
-        if (!featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        if (!await featureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, ct).ConfigureAwait(false))
         {
             return false;
         }

@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Farm.Infrastructure.Services.OperatorFeatures;
 
@@ -32,6 +34,36 @@ public interface IOperatorFeatureGate
 
     /// <summary>Returns whether a specific operator feature is enabled for the current request.</summary>
     bool IsEnabled(OperatorFeature feature);
+
+    /// <summary>
+    /// Asynchronous, cancellation-aware equivalent of <see cref="IsEnabled(OperatorFeature)"/>.
+    ///
+    /// <para>
+    /// Callers that run inside <see cref="System.Threading.SemaphoreSlim"/>-serialised
+    /// critical sections, hold in-memory locks (e.g., the native-push dispatcher's
+    /// transport-start lock, the delivery-lifecycle lock, or a request-scoped
+    /// pipeline that cannot block a thread-pool worker on database I/O) MUST use this
+    /// method rather than <see cref="IsEnabled(OperatorFeature)"/>. The synchronous
+    /// overload blocks on the underlying async repository read via
+    /// <see cref="System.Runtime.CompilerServices.TaskAwaiter.GetResult"/>, so under a
+    /// lock it can pin the caller's thread on an unbounded EF/SQL round-trip and
+    /// prevent cancellation from reaching later checks.
+    /// </para>
+    ///
+    /// <para>
+    /// Failure semantics differ from the synchronous overload: DB/repository errors
+    /// are <b>not</b> swallowed here. Callers (typically dispatchers) MUST catch and
+    /// log fail-closed at the same boundary they roll back any reservations, so
+    /// operational log lines carry the specific delivery/lifecycle context. A
+    /// malformed persisted JSON row still degrades to
+    /// <see cref="Farm.Infrastructure.Settings.OperatorFeatureSettings"/> defaults
+    /// (mirroring the sync path) — that is a data-shape failure, not an infrastructure
+    /// outage, and the capability endpoint's contract still requires a stable read.
+    /// </para>
+    /// </summary>
+    /// <param name="feature">The operator feature to resolve.</param>
+    /// <param name="cancellationToken">Cancellation propagated from the caller's dispatch/send scope.</param>
+    Task<bool> IsEnabledAsync(OperatorFeature feature, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns whether the given feature is hard-disabled by the environment (an explicit
