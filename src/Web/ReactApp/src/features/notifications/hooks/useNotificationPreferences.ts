@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
 import type {
+  ApiError,
   NotificationCapabilitiesResponse,
   NotificationPreferencesDto,
   UpdateNotificationPreferencesRequest,
@@ -29,15 +30,27 @@ const KEYS = {
   capabilities: () => [...KEYS.all, 'capabilities', getAuthCacheIdentity()] as const,
 };
 
+function isApiError(error: unknown): error is ApiError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'statusCode' in error &&
+    typeof (error as { statusCode: unknown }).statusCode === 'number'
+  );
+}
+
 export function useNotificationPreferences() {
   return useQuery<NotificationPreferencesDto | null>({
     queryKey: KEYS.preferences(),
     queryFn: async () => {
       try {
         return await apiClient.getNotificationPreferences();
-      } catch {
-        // 404 means no preferences set yet — return defaults
-        return null;
+      } catch (error) {
+        if (isApiError(error) && error.statusCode === 404) {
+          return null;
+        }
+
+        throw error;
       }
     },
   });

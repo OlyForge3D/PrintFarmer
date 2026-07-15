@@ -9,6 +9,7 @@ import {
   useUpdateNotificationPreferences,
 } from '@/features/notifications/hooks/useNotificationPreferences';
 import { usePushSubscription } from '@/features/notifications/hooks/usePushSubscription';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { NotificationFrequency, NotificationPreferenceEventType } from '@/types/api';
 import type { UpdateNotificationPreferencesRequest } from '@/types/api';
 import {
@@ -25,20 +26,6 @@ import {
   type EventRowMeta,
 } from '@/features/notifications/operatorCategories';
 import { toast } from 'sonner';
-
-const DEFAULT_PREFERENCES: UpdateNotificationPreferencesRequest = {
-  enableEmailNotifications: true,
-  enablePushNotifications: true,
-  enableInAppNotifications: true,
-  enableTelegramNotifications: false,
-  notifyOnCompletion: true,
-  notifyOnFailure: true,
-  notifyOnStart: false,
-  notifyOnPause: true,
-  eventChannelPreferences: defaultEventChannelPreferences(),
-  frequency: NotificationFrequency.RealTime,
-  retentionDays: 30,
-};
 
 const FREQUENCY_OPTIONS = [
   { value: NotificationFrequency.RealTime, label: 'Real-time' },
@@ -59,7 +46,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
 
-  const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest>(DEFAULT_PREFERENCES);
+  const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest | null>(null);
   const [serverSupportsOperatorCategories, setServerSupportsOperatorCategories] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
@@ -69,15 +56,20 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   // non-404 network/server error — must NOT be interpreted as legacy or the
   // save path silently strips operator edits. `capabilitiesResolved` is
   // the single source of truth for "safe to build a save payload".
-  const capabilitiesResolved = !isCapsLoading && capsError == null;
+  const capabilitiesResolved =
+    hasResolvedQueryData(capabilities) && !isCapsLoading && capsError == null;
+  const capabilitiesPending =
+    !hasResolvedQueryData(capabilities) && capsError == null;
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
 
   useEffect(() => {
+    if (!hasResolvedQueryData(preferences)) return;
+
     const { form, serverSupportsOperatorCategories: supports } = hydratePreferences(
-      preferences ?? null,
+      preferences,
       capabilities ?? null,
     );
     // The banner-visibility flag must sync independently of form dirtiness
@@ -111,8 +103,12 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     [],
   );
   const isAnyPushEnabled = useMemo(
-    () => hasAnyEnrolledPush(formState.eventChannelPreferences, visibleEventTypes, supportedEventTypes),
-    [formState.eventChannelPreferences, visibleEventTypes, supportedEventTypes],
+    () => hasAnyEnrolledPush(
+      formState?.eventChannelPreferences,
+      visibleEventTypes,
+      supportedEventTypes,
+    ),
+    [formState?.eventChannelPreferences, visibleEventTypes, supportedEventTypes],
   );
 
   const updateMatrixField = (
@@ -120,6 +116,11 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     key: 'inApp' | 'email' | 'push' | 'telegram',
     value: boolean,
   ) => {
+    if (formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
     const current = formState.eventChannelPreferences ?? defaultEventChannelPreferences();
     const nextMatrix = current.map(item => {
       if (item.eventType !== eventType) return item;
@@ -129,7 +130,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
       return { ...item, [key]: value };
     });
 
-    setFormState(prev => withDerivedLegacyFlags({ ...prev, eventChannelPreferences: nextMatrix }));
+    setFormState(withDerivedLegacyFlags({ ...formState, eventChannelPreferences: nextMatrix }));
     setIsDirty(true);
   };
 
@@ -137,14 +138,24 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     key: K,
     value: UpdateNotificationPreferencesRequest[K],
   ) => {
-    setFormState(prev => ({ ...prev, [key]: value }));
+    if (formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
+    setFormState({ ...formState, [key]: value });
     setIsDirty(true);
   };
 
   const getEventPreference = (eventType: NotificationPreferenceEventType) =>
-    (formState.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
+    (formState?.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
 
   const handleSave = async () => {
+    if (!hasResolvedQueryData(preferences) || formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
     // Refuse to build a save payload from unresolved capability state.
     // `buildSavePayload(request, undefined)` would treat the server as legacy
     // and permanently strip operator-row edits, reporting success to the
@@ -171,7 +182,23 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     }
   };
 
-  if (isPrefsLoading || isCapsLoading) {
+  if (prefsError) {
+    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
+    if (embedded) return errorContent;
+    return (
+      <PageTemplate title="Notification Preferences" icon={BellIcon}>
+        {errorContent}
+      </PageTemplate>
+    );
+  }
+
+  if (
+    isPrefsLoading ||
+    !hasResolvedQueryData(preferences) ||
+    isCapsLoading ||
+    capabilitiesPending ||
+    formState === null
+  ) {
     const loadingContent = (
       <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
         <Spinner size="lg" />
@@ -181,16 +208,6 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     return (
       <PageTemplate title="Notification Preferences" icon={BellIcon}>
         {loadingContent}
-      </PageTemplate>
-    );
-  }
-
-  if (prefsError) {
-    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
-    if (embedded) return errorContent;
-    return (
-      <PageTemplate title="Notification Preferences" icon={BellIcon}>
-        {errorContent}
       </PageTemplate>
     );
   }

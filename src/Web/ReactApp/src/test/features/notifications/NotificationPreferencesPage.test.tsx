@@ -1,14 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 import { NotificationFrequency, NotificationPreferenceEventType } from '@/types/api';
-import type { NotificationPreferencesDto, UpdateNotificationPreferencesRequest } from '@/types/api';
+import type {
+  NotificationCapabilitiesResponse,
+  NotificationPreferencesDto,
+  UpdateNotificationPreferencesRequest,
+} from '@/types/api';
+import { apiClient } from '@/services/api';
 
-const mockUseNotificationPreferences = vi.fn();
-const mockUseNotificationCapabilities = vi.fn();
-const mockMutateAsync = vi.fn();
-const mockUseUpdateNotificationPreferences = vi.fn();
 const mockUsePushSubscription = vi.fn();
 
 vi.mock('sonner', () => ({
@@ -18,10 +20,12 @@ vi.mock('sonner', () => ({
   },
 }));
 
-vi.mock('@/features/notifications/hooks/useNotificationPreferences', () => ({
-  useNotificationPreferences: () => mockUseNotificationPreferences(),
-  useNotificationCapabilities: () => mockUseNotificationCapabilities(),
-  useUpdateNotificationPreferences: () => mockUseUpdateNotificationPreferences(),
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    getNotificationPreferences: vi.fn(),
+    getNotificationCapabilities: vi.fn(),
+    updateNotificationPreferences: vi.fn(),
+  },
 }));
 
 vi.mock('@/features/notifications/hooks/usePushSubscription', () => ({
@@ -77,30 +81,70 @@ const CAPABLE_CAPABILITIES = {
 };
 
 function renderPage() {
-  return render(
-    <MemoryRouter>
-      <NotificationPreferencesPage />
-    </MemoryRouter>,
-  );
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NotificationPreferencesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
+function getPreferencesMock() {
+  return vi.mocked(apiClient.getNotificationPreferences);
+}
+
+function updatePreferencesMock() {
+  return vi.mocked(apiClient.updateNotificationPreferences);
+}
+
+function getCapabilitiesMock() {
+  return vi.mocked(apiClient.getNotificationCapabilities);
+}
+
+function expectFrequency(value: NotificationFrequency) {
+  expect(screen.getByLabelText('Notification frequency')).toHaveValue(value);
+}
+
+async function waitForPreferences() {
+  await screen.findByText('Event × Channel Matrix');
+}
+
+function setAuthoritativePreferences(overrides: Partial<NotificationPreferencesDto> = {}) {
+  setPreferences({ ...createLegacyPreferences(), ...overrides });
+}
+
+function setPreferences(preferences: NotificationPreferencesDto) {
+  getPreferencesMock().mockResolvedValue(preferences);
+}
+
+function setCapabilities(capabilities: NotificationCapabilitiesResponse | null = null) {
+  getCapabilitiesMock().mockResolvedValue(capabilities);
+}
+
+function expectPreferencesBlocked() {
+  expect(screen.getByRole('status', { name: 'Loading preferences' })).toBeInTheDocument();
+  expect(screen.queryByText('Event × Channel Matrix')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Save Preferences' })).not.toBeInTheDocument();
 }
 
 describe('NotificationPreferencesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseNotificationPreferences.mockReturnValue({
-      data: createLegacyPreferences(),
-      isLoading: false,
-      error: null,
-    });
-    mockUseNotificationCapabilities.mockReturnValue({
-      data: null, // legacy: capabilities endpoint 404
-      isLoading: false,
-      error: null,
-    });
-    mockUseUpdateNotificationPreferences.mockReturnValue({
-      mutateAsync: mockMutateAsync,
-      isPending: false,
-    });
+    onlineManager.setOnline(true);
+    setAuthoritativePreferences();
+    setCapabilities();
+    updatePreferencesMock().mockResolvedValue(createLegacyPreferences());
     mockUsePushSubscription.mockReturnValue({
       isSupported: true,
       isSubscribed: true,
@@ -108,11 +152,15 @@ describe('NotificationPreferencesPage', () => {
       error: null,
       subscribe: vi.fn(),
     });
-    mockMutateAsync.mockResolvedValue({});
   });
 
-  it('renders the event-by-channel matrix headers and rows', () => {
+  afterEach(() => {
+    onlineManager.setOnline(true);
+  });
+
+  it('renders the event-by-channel matrix headers and rows', async () => {
     renderPage();
+    await waitForPreferences();
 
     expect(screen.getByText('Event × Channel Matrix')).toBeInTheDocument();
     // Header appears in both job matrix and operator matrix cards, so use getAllByText
@@ -124,8 +172,9 @@ describe('NotificationPreferencesPage', () => {
     expect(screen.getByLabelText('Print Complete Telegram')).toBeInTheDocument();
   });
 
-  it('keeps print-failed in-app always on and disabled', () => {
+  it('keeps print-failed in-app always on and disabled', async () => {
     renderPage();
+    await waitForPreferences();
 
     const failedInApp = screen.getByLabelText('Print Failed in-app') as HTMLInputElement;
     expect(failedInApp.checked).toBe(true);
@@ -135,15 +184,16 @@ describe('NotificationPreferencesPage', () => {
 
   it('saves updated matrix when toggles change', async () => {
     renderPage();
+    await waitForPreferences();
 
     fireEvent.click(screen.getByLabelText('Print Started email'));
     fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
 
     await waitFor(() => {
-      expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+      expect(updatePreferencesMock()).toHaveBeenCalledTimes(1);
     });
 
-    const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+    const payload = updatePreferencesMock().mock.calls[0][0] as UpdateNotificationPreferencesRequest;
     const started = payload.eventChannelPreferences?.find(x => x.eventType === NotificationPreferenceEventType.JobStarted);
     expect(started?.email).toBe(true);
     expect(payload.enableEmailNotifications).toBe(true);
@@ -151,23 +201,25 @@ describe('NotificationPreferencesPage', () => {
 
   it('saves Telegram opt-in when a Telegram toggle changes', async () => {
     renderPage();
+    await waitForPreferences();
 
     fireEvent.click(screen.getByLabelText('Print Complete Telegram'));
     fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
 
     await waitFor(() => {
-      expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+      expect(updatePreferencesMock()).toHaveBeenCalledTimes(1);
     });
 
-    const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+    const payload = updatePreferencesMock().mock.calls[0][0] as UpdateNotificationPreferencesRequest;
     const completed = payload.eventChannelPreferences?.find(x => x.eventType === NotificationPreferenceEventType.JobCompleted);
     expect(completed?.telegram).toBe(true);
     expect(payload.enableTelegramNotifications).toBe(true);
   });
 
   describe('operator alerts (issue #716)', () => {
-    it('renders operator alert rows with descriptions and accessible toggles', () => {
+    it('renders operator alert rows with descriptions and accessible toggles', async () => {
       renderPage();
+      await waitForPreferences();
 
       expect(screen.getByRole('heading', { name: 'Operator Alerts' })).toBeInTheDocument();
       expect(screen.getByText('Filament Runout Risk')).toBeInTheDocument();
@@ -188,27 +240,21 @@ describe('NotificationPreferencesPage', () => {
       }
     });
 
-    it('shows a legacy-server notice when the server does not expose operator categories', () => {
+    it('shows a legacy-server notice when the server does not expose operator categories', async () => {
       renderPage();
+      await waitForPreferences();
 
       expect(
         screen.getByText(/server does not yet expose operator alert categories/i),
       ).toBeInTheDocument();
     });
 
-    it('hides the legacy notice when the capabilities probe advertises operator tokens', () => {
-      mockUseNotificationPreferences.mockReturnValue({
-        data: createCapablePreferences(),
-        isLoading: false,
-        error: null,
-      });
-      mockUseNotificationCapabilities.mockReturnValue({
-        data: CAPABLE_CAPABILITIES,
-        isLoading: false,
-        error: null,
-      });
+    it('hides the legacy notice when the capabilities probe advertises operator tokens', async () => {
+      setPreferences(createCapablePreferences());
+      setCapabilities(CAPABLE_CAPABILITIES);
 
       renderPage();
+      await waitForPreferences();
 
       expect(
         screen.queryByText(/server does not yet expose operator alert categories/i),
@@ -217,6 +263,7 @@ describe('NotificationPreferencesPage', () => {
 
     it('strips operator tokens from the save payload on legacy servers (capabilities probe 404)', async () => {
       renderPage();
+      await waitForPreferences();
 
       // On a legacy server operator toggles are disabled (see below), so we
       // trigger the save via a visible job-row edit and rely on the hydrated
@@ -228,10 +275,10 @@ describe('NotificationPreferencesPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
 
       await waitFor(() => {
-        expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+        expect(updatePreferencesMock()).toHaveBeenCalledTimes(1);
       });
 
-      const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+      const payload = updatePreferencesMock().mock.calls[0][0] as UpdateNotificationPreferencesRequest;
       const tokens = payload.eventChannelPreferences?.map(r => r.eventType) ?? [];
       expect(tokens).toEqual(
         expect.arrayContaining([
@@ -248,27 +295,20 @@ describe('NotificationPreferencesPage', () => {
     });
 
     it('keeps operator tokens in the save payload when the capabilities probe advertises them', async () => {
-      mockUseNotificationPreferences.mockReturnValue({
-        data: createCapablePreferences(),
-        isLoading: false,
-        error: null,
-      });
-      mockUseNotificationCapabilities.mockReturnValue({
-        data: CAPABLE_CAPABILITIES,
-        isLoading: false,
-        error: null,
-      });
+      setPreferences(createCapablePreferences());
+      setCapabilities(CAPABLE_CAPABILITIES);
 
       renderPage();
+      await waitForPreferences();
 
       fireEvent.click(screen.getByLabelText('Maintenance Due Telegram'));
       fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
 
       await waitFor(() => {
-        expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+        expect(updatePreferencesMock()).toHaveBeenCalledTimes(1);
       });
 
-      const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+      const payload = updatePreferencesMock().mock.calls[0][0] as UpdateNotificationPreferencesRequest;
       const maintenance = payload.eventChannelPreferences?.find(
         r => r.eventType === NotificationPreferenceEventType.MaintenanceDue,
       );
@@ -276,14 +316,12 @@ describe('NotificationPreferencesPage', () => {
       expect(payload.enableTelegramNotifications).toBe(true);
     });
 
-    it('hydrates operator-row values from a capable server response', () => {
-      mockUseNotificationPreferences.mockReturnValue({
-        data: createCapablePreferences(),
-        isLoading: false,
-        error: null,
-      });
+    it('hydrates operator-row values from a capable server response', async () => {
+      setPreferences(createCapablePreferences());
+      setCapabilities(CAPABLE_CAPABILITIES);
 
       renderPage();
+      await waitForPreferences();
 
       // PrinterOffline had all four channels on in the capable fixture.
       expect((screen.getByLabelText('Printer Offline in-app') as HTMLInputElement).checked).toBe(true);
@@ -305,18 +343,11 @@ describe('NotificationPreferencesPage', () => {
         push: true,
         telegram: false,
       });
-      mockUseNotificationPreferences.mockReturnValue({
-        data: capable,
-        isLoading: false,
-        error: null,
-      });
-      mockUseNotificationCapabilities.mockReturnValue({
-        data: CAPABLE_CAPABILITIES,
-        isLoading: false,
-        error: null,
-      });
+      setPreferences(capable);
+      setCapabilities(CAPABLE_CAPABILITIES);
 
       renderPage();
+      await waitForPreferences();
 
       // No visible label/toggle for printerFailure.
       expect(screen.queryByText(/printer failure/i)).not.toBeInTheDocument();
@@ -328,9 +359,9 @@ describe('NotificationPreferencesPage', () => {
       fireEvent.click(screen.getByLabelText('Harvest Ready push'));
       fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
 
-      await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(updatePreferencesMock()).toHaveBeenCalledTimes(1));
 
-      const payload = mockMutateAsync.mock.calls[0][0] as UpdateNotificationPreferencesRequest;
+      const payload = updatePreferencesMock().mock.calls[0][0] as UpdateNotificationPreferencesRequest;
       const printerFailure = payload.eventChannelPreferences?.find(
         r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
       );
@@ -339,31 +370,24 @@ describe('NotificationPreferencesPage', () => {
   });
 
   describe('capability gating (trio remediation)', () => {
-    it('shows the loading spinner while capabilities are still resolving, even if preferences have arrived', () => {
-      mockUseNotificationCapabilities.mockReturnValue({
-        data: undefined,
-        isLoading: true,
-        error: null,
-      });
+    it('shows the loading spinner while capabilities are still resolving, even if preferences have arrived', async () => {
+      getCapabilitiesMock().mockImplementation(() => new Promise(() => {}));
 
       renderPage();
+      await waitFor(() => expect(getPreferencesMock()).toHaveBeenCalledTimes(1));
 
       expect(screen.getByRole('status', { name: /loading preferences/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /save preferences/i })).not.toBeInTheDocument();
     });
 
-    it('disables the save button and surfaces a warning when the capabilities probe errors', () => {
-      mockUseNotificationCapabilities.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: new Error('network'),
-      });
+    it('disables the save button and surfaces a warning when the capabilities probe errors', async () => {
+      getCapabilitiesMock().mockRejectedValue(new Error('network'));
 
       renderPage();
 
       // Warning banner in the operator card
       expect(
-        screen.getByText(/could not verify notification capabilities/i),
+        await screen.findByText(/could not verify notification capabilities/i, {}, { timeout: 3_000 }),
       ).toBeInTheDocument();
 
       // Even after editing a job row (which makes the form dirty), save
@@ -374,8 +398,9 @@ describe('NotificationPreferencesPage', () => {
       expect((saveButton as HTMLButtonElement).disabled).toBe(true);
     });
 
-    it('disables operator toggles on legacy servers so users cannot make changes that would be silently stripped', () => {
+    it('disables operator toggles on legacy servers so users cannot make changes that would be silently stripped', async () => {
       renderPage();
+      await waitForPreferences();
 
       for (const label of [
         'Filament Runout Risk',
@@ -390,7 +415,7 @@ describe('NotificationPreferencesPage', () => {
       }
     });
 
-    it('does NOT let the hidden PrinterFailure default-push flag keep the browser-push warning permanently on', () => {
+    it('does NOT let the hidden PrinterFailure default-push flag keep the browser-push warning permanently on', async () => {
       // Capable server, but user has push=false on every VISIBLE row. The
       // hidden PrinterFailure default has push=true. Before the fix,
       // `isAnyPushEnabled` iterated the full matrix and the warning could
@@ -407,16 +432,8 @@ describe('NotificationPreferencesPage', () => {
         push: true,
         telegram: false,
       });
-      mockUseNotificationPreferences.mockReturnValue({
-        data: noVisiblePush,
-        isLoading: false,
-        error: null,
-      });
-      mockUseNotificationCapabilities.mockReturnValue({
-        data: CAPABLE_CAPABILITIES,
-        isLoading: false,
-        error: null,
-      });
+      setPreferences(noVisiblePush);
+      setCapabilities(CAPABLE_CAPABILITIES);
       // Push subscription reports not-subscribed so the warning would render
       // if any push-enabled row was visible.
       mockUsePushSubscription.mockReturnValue({
@@ -428,13 +445,14 @@ describe('NotificationPreferencesPage', () => {
       });
 
       renderPage();
+      await waitForPreferences();
 
       // Warning text: "Browser push is off. Enable it to receive push notifications"
       // (or equivalent). It must NOT be shown because no VISIBLE row has push=true.
       expect(screen.queryByText(/enable browser push/i)).not.toBeInTheDocument();
     });
 
-    it('gates operator rows per advertised token — a partial rollout enables only the advertised rows', () => {
+    it('gates operator rows per advertised token — a partial rollout enables only the advertised rows', async () => {
       // Server advertises jobs + HarvestReady + FilamentRunout only;
       // MaintenanceDue and PrinterOffline are NOT in supportedEventTypes.
       // Before this fix the disabled state was all-or-nothing
@@ -442,27 +460,20 @@ describe('NotificationPreferencesPage', () => {
       // token enabled ALL four operator rows — including ones the server
       // does not actually accept, which `buildSavePayload` would then
       // silently strip on save without any UI indication.
-      mockUseNotificationPreferences.mockReturnValue({
-        data: createCapablePreferences(),
-        isLoading: false,
-        error: null,
-      });
-      mockUseNotificationCapabilities.mockReturnValue({
-        data: {
-          supportedEventTypes: [
-            NotificationPreferenceEventType.JobStarted,
-            NotificationPreferenceEventType.JobCompleted,
-            NotificationPreferenceEventType.JobFailed,
-            NotificationPreferenceEventType.JobPaused,
-            NotificationPreferenceEventType.HarvestReady,
-            NotificationPreferenceEventType.FilamentRunout,
-          ],
-        },
-        isLoading: false,
-        error: null,
+      setPreferences(createCapablePreferences());
+      setCapabilities({
+        supportedEventTypes: [
+          NotificationPreferenceEventType.JobStarted,
+          NotificationPreferenceEventType.JobCompleted,
+          NotificationPreferenceEventType.JobFailed,
+          NotificationPreferenceEventType.JobPaused,
+          NotificationPreferenceEventType.HarvestReady,
+          NotificationPreferenceEventType.FilamentRunout,
+        ],
       });
 
       renderPage();
+      await waitForPreferences();
 
       for (const label of ['Filament Runout Risk', 'Harvest Ready']) {
         expect((screen.getByLabelText(`${label} in-app`) as HTMLInputElement).disabled).toBe(false);
@@ -476,6 +487,63 @@ describe('NotificationPreferencesPage', () => {
         expect((screen.getByLabelText(`${label} push`) as HTMLInputElement).disabled).toBe(true);
         expect((screen.getByLabelText(`${label} Telegram`) as HTMLInputElement).disabled).toBe(true);
       }
+    });
+  });
+
+  describe('required query guards (issue #761)', () => {
+    it('blocks synthetic defaults and writes during an offline paused first load, then uses authoritative data after reconnecting', async () => {
+      onlineManager.setOnline(false);
+      setAuthoritativePreferences({ frequency: NotificationFrequency.Weekly });
+
+      renderPage();
+
+      expectPreferencesBlocked();
+      expect(getPreferencesMock()).not.toHaveBeenCalled();
+      expect(updatePreferencesMock()).not.toHaveBeenCalled();
+
+      onlineManager.setOnline(true);
+
+      await waitForPreferences();
+      expectFrequency(NotificationFrequency.Weekly);
+      expect(screen.getByLabelText('Print Started email')).not.toBeChecked();
+      expect(getPreferencesMock()).toHaveBeenCalledTimes(1);
+      expect(updatePreferencesMock()).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByLabelText('Print Started email'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+      await waitFor(() => {
+        expect(updatePreferencesMock()).toHaveBeenCalledTimes(1);
+      });
+
+      expect(updatePreferencesMock().mock.calls[0][0]).toEqual(
+        expect.objectContaining({ frequency: NotificationFrequency.Weekly }),
+      );
+    });
+
+    it('treats a resolved 404 as empty preferences and keeps defaults editable', async () => {
+      getPreferencesMock().mockRejectedValue({ statusCode: 404, message: 'Not found' });
+
+      renderPage();
+      await waitForPreferences();
+
+      expectFrequency(NotificationFrequency.RealTime);
+      fireEvent.click(screen.getByLabelText('Print Started email'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+      await waitFor(() => {
+        expect(updatePreferencesMock()).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('does not turn a failed preferences request into editable defaults', async () => {
+      getPreferencesMock().mockRejectedValue({ statusCode: 503, message: 'Unavailable' });
+
+      renderPage();
+
+      expect(await screen.findByText('Failed to load notification preferences')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save Preferences' })).not.toBeInTheDocument();
+      expect(updatePreferencesMock()).not.toHaveBeenCalled();
     });
   });
 });
