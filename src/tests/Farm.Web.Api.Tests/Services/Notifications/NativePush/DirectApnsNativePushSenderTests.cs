@@ -6,6 +6,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -53,25 +54,37 @@ public sealed class DirectApnsNativePushSenderTests
     }
 
     [Fact]
-    public async Task SendAsync_Success_SignsWellFormedProviderJwtAndSetsApnsTopic()
+    public async Task SendAsync_Alert_EmitsExactHeadersPayloadAndValidProviderJwt()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
         HttpRequestMessage? captured = null;
+        string? capturedJson = null;
+        DateTime expiration = new(2030, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        NativePushEnvelope alert = Sample with { ExpiresAtUtc = expiration };
         DirectApnsNativePushSender sut = CreateSender(settings, req =>
         {
             captured = req;
+            capturedJson = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        NativePushDispatchResult result = await sut.SendAsync(Sample);
+        NativePushDispatchResult result = await sut.SendAsync(alert);
 
         try
         {
             result.Success.Should().BeTrue();
             captured.Should().NotBeNull();
-            captured!.Headers.GetValues("apns-topic").Should().Contain("com.example.app");
-            captured.Headers.GetValues("apns-push-type").Should().Contain("alert");
-            captured.Headers.GetValues("apns-priority").Should().Contain("10");
+            captured!.RequestUri.Should().Be(new Uri("https://api.push.apple.com/3/device/device-token-abc"));
+            captured.Version.Should().Be(HttpVersion.Version20);
+            captured.VersionPolicy.Should().Be(HttpVersionPolicy.RequestVersionOrHigher);
+            captured.Headers.GetValues("apns-topic").Should().Equal("com.example.app");
+            captured.Headers.GetValues("apns-push-type").Should().Equal("alert");
+            captured.Headers.GetValues("apns-priority").Should().Equal("10");
+            captured.Headers.GetValues("apns-expiration").Should().Equal(
+                new DateTimeOffset(expiration).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            string expectedJson = $$"""{"aps":{"alert":{"title":"Printer A","body":"Print failed"},"sound":"default","badge":1,"category":"PRINTER_FAILURE","thread-id":"printer:x:failure","mutable-content":1},"attentionItemId":"att-1","attentionKind":"failure","changeKind":"created","printerId":"{{Sample.PrinterId:D}}","deepLink":"printfarmer://attention/att-1","actions":["PAUSE"]}""";
+            capturedJson.Should().Be(expectedJson);
 
             captured.Headers.Authorization!.Scheme.Should().Be("bearer");
             string jwt = captured.Headers.Authorization.Parameter!;
@@ -93,6 +106,50 @@ public sealed class DirectApnsNativePushSenderTests
 
             byte[] signedData = Encoding.ASCII.GetBytes($"{parts[0]}.{parts[1]}");
             key.VerifyData(signedData, sigBytes, HashAlgorithmName.SHA256).Should().BeTrue();
+        }
+        finally
+        {
+            key.Dispose();
+            sut.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_BackgroundDismissal_UsesSilentHeadersAndContentAvailableOnlyAps()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        HttpRequestMessage? captured = null;
+        string? capturedJson = null;
+        DirectApnsNativePushSender sut = CreateSender(settings, request =>
+        {
+            captured = request;
+            capturedJson = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        NativePushEnvelope background = Sample with
+        {
+            Title = null,
+            Subtitle = null,
+            Body = null,
+            ChangeKind = AttentionChangeKind.Resolved,
+            Priority = NativePushPriority.Background,
+            ActionIds = Array.Empty<string>(),
+        };
+
+        try
+        {
+            NativePushDispatchResult result = await sut.SendAsync(background);
+
+            result.Success.Should().BeTrue();
+            captured.Should().NotBeNull();
+            captured!.Headers.GetValues("apns-push-type").Should().Equal("background");
+            captured.Headers.GetValues("apns-priority").Should().Equal("5");
+            capturedJson.Should().NotBeNull();
+            using JsonDocument payload = JsonDocument.Parse(capturedJson!);
+            JsonElement aps = payload.RootElement.GetProperty("aps");
+            aps.EnumerateObject().Select(property => property.Name)
+                .Should().Equal("content-available");
+            aps.GetProperty("content-available").GetInt32().Should().Be(1);
         }
         finally
         {
@@ -194,38 +251,68 @@ public sealed class DirectApnsNativePushSenderTests
         }
     }
 
-    /// <summary>
-    /// Hicks #1 regression: an internally-generated <see cref="TaskCanceledException"/>
-    /// (which <see cref="HttpClient"/> raises when its own timeout timer fires, distinct
-    /// from a caller-token cancellation) MUST propagate as an
-    /// <see cref="OperationCanceledException"/>. The previous implementation filtered
-    /// on <c>cancellationToken.IsCancellationRequested</c> and, when the caller passed
-    /// <see cref="CancellationToken.None"/>, the filter was ALWAYS false and the OCE
-    /// fell through into a generic catch that mapped it to
-    /// <see cref="NativePushDispatchResult.Transient(string)"/>("timeout"). This
-    /// silently converted a real send failure into a spurious transient retry.
-    ///
-    /// The fix removed the OCE catch — OCE propagates naturally past the remaining
-    /// <see cref="HttpRequestException"/> catch.
-    /// </summary>
     [Fact]
-    public async Task SendAsync_InternalTaskCanceledException_PropagatesAsOperationCanceled()
+    public async Task SendAsync_InternalTaskCanceledException_ReturnsTransientTimeout()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
         try
         {
             DirectApnsNativePushSender sut = CreateSender(settings, _ =>
-            {
-                // TaskCanceledException is a subclass of OperationCanceledException;
-                // raised without a triggered token, it models HttpClient's internal
-                // timeout-timer cancellation.
-                throw new TaskCanceledException("internal HttpClient timeout");
-            });
+                throw new TaskCanceledException("internal HttpClient timeout"));
 
-            Func<Task> act = () => sut.SendAsync(Sample, CancellationToken.None);
+            NativePushDispatchResult result = await sut.SendAsync(Sample, CancellationToken.None);
 
-            await act.Should().ThrowAsync<OperationCanceledException>(
-                "internal-timeout OCE MUST propagate; it must NOT be turned into a Transient result");
+            result.IsTransient.Should().BeTrue();
+            result.Reason.Should().Be("timeout");
+            result.TokenInvalidated.Should().BeFalse();
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_HttpClientTimeout_ReturnsTransientWithoutCallerCancellation()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        using var handler = new BlockingUntilCanceledHandler();
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(100) };
+        using DirectApnsNativePushSender sut = CreateSender(settings, client);
+        try
+        {
+            Task<NativePushDispatchResult> send = sut.SendAsync(Sample, CancellationToken.None);
+            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            NativePushDispatchResult result = await send.WaitAsync(TimeSpan.FromSeconds(5));
+
+            result.IsTransient.Should().BeTrue();
+            result.Reason.Should().Be("timeout");
+            handler.ObservedCancellation.Should().BeTrue();
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_CallerCancellation_PropagatesFromBlockedHttpRequest()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        using var handler = new BlockingUntilCanceledHandler();
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        using DirectApnsNativePushSender sut = CreateSender(settings, client);
+        using var cts = new CancellationTokenSource();
+        try
+        {
+            Task<NativePushDispatchResult> send = sut.SendAsync(Sample, cts.Token);
+            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await send.WaitAsync(TimeSpan.FromSeconds(5)));
+            handler.ObservedCancellation.Should().BeTrue();
         }
         finally
         {
@@ -381,6 +468,165 @@ public sealed class DirectApnsNativePushSenderTests
         }
     }
 
+    [Fact]
+    public async Task SendAsync_MissingP8File_LogsOnlySanitizedSigningCategory()
+    {
+        string secretLeaf = $"native-push-missing-secret-{Guid.NewGuid():N}.p8";
+        string keyPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), secretLeaf));
+        File.Delete(keyPath);
+        NativePushSettings settings = MakePathSettings(keyPath);
+        var logger = new RecordingDirectSenderLogger();
+
+        using DirectApnsNativePushSender sut = CreateSender(
+            settings,
+            _ => throw new InvalidOperationException("HTTP must not run when the key file is missing."),
+            logger);
+
+        NativePushDispatchResult result = await sut.SendAsync(Sample);
+
+        result.Reason.Should().Be("jwt_sign_failed");
+        AssertSanitizedSigningLog(
+            logger,
+            "key_file_missing",
+            keyPath,
+            secretLeaf,
+            settings.Apns.KeyId!,
+            settings.Apns.TeamId!,
+            Sample.Token);
+    }
+
+    [Fact]
+    public async Task SendAsync_UnreadableP8Path_LogsOnlySanitizedSigningCategory()
+    {
+        string secretLeaf = $"native-push-unreadable-secret-{Guid.NewGuid():N}.p8";
+        string keyPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), secretLeaf));
+        Directory.CreateDirectory(keyPath);
+        NativePushSettings settings = MakePathSettings(keyPath);
+        var logger = new RecordingDirectSenderLogger();
+
+        try
+        {
+            using DirectApnsNativePushSender sut = CreateSender(
+                settings,
+                _ => throw new InvalidOperationException("HTTP must not run when the key path is unreadable."),
+                logger);
+
+            NativePushDispatchResult result = await sut.SendAsync(Sample);
+
+            result.Reason.Should().Be("jwt_sign_failed");
+            AssertSanitizedSigningLog(
+                logger,
+                "key_file_unreadable",
+                keyPath,
+                secretLeaf,
+                settings.Apns.KeyId!,
+                settings.Apns.TeamId!,
+                Sample.Token);
+        }
+        finally
+        {
+            Directory.Delete(keyPath);
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_CorruptedOnDiskPem_DisposesReplacementKeyWhenImportThrows()
+    {
+        string keyPath = Path.Combine(
+            Path.GetTempPath(),
+            $"native-push-corrupt-key-{Guid.NewGuid():N}.p8");
+        const string secretPemFragment = "corrupted-private-material-secret";
+        await File.WriteAllTextAsync(
+            keyPath,
+            $"-----BEGIN PRIVATE KEY-----\n{secretPemFragment}\n-----END PRIVATE KEY-----");
+        var settings = new NativePushSettings
+        {
+            Mode = NativePushMode.Direct,
+            Apns = new NativePushApnsSettings
+            {
+                TeamId = "TEAM123ABC",
+                KeyId = "KEY123ABCD",
+                BundleId = "com.example.app",
+                P8KeyPath = keyPath,
+                Environment = "production",
+            },
+        };
+        var replacementKey = new ImportThrowingEcdsa();
+        var logger = new RecordingDirectSenderLogger();
+
+        try
+        {
+            using DirectApnsNativePushSender sut = CreateSender(
+                settings,
+                _ => throw new InvalidOperationException("HTTP must not run when key import fails."),
+                logger);
+            sut.SigningKeyFactoryForTests = () => replacementKey;
+
+            NativePushDispatchResult result = await sut.SendAsync(Sample);
+
+            result.Reason.Should().Be("jwt_sign_failed");
+            replacementKey.ImportAttempted.Should().BeTrue();
+            replacementKey.IsDisposed.Should().BeTrue(
+                "ownership must be released immediately when on-disk PEM import fails");
+            AssertSanitizedSigningLog(
+                logger,
+                "key_material_invalid",
+                keyPath,
+                Path.GetFileName(keyPath),
+                secretPemFragment,
+                settings.Apns.KeyId!,
+                settings.Apns.TeamId!,
+                Sample.Token);
+        }
+        finally
+        {
+            File.Delete(keyPath);
+        }
+    }
+
+    private static NativePushSettings MakePathSettings(string keyPath)
+    {
+        return new NativePushSettings
+        {
+            Mode = NativePushMode.Direct,
+            Apns = new NativePushApnsSettings
+            {
+                TeamId = "TEAM-PATH-SECRET",
+                KeyId = "KEY-PATH-SECRET",
+                BundleId = "com.example.secret-path",
+                P8KeyPath = keyPath,
+                Environment = "production",
+            },
+        };
+    }
+
+    private static void AssertSanitizedSigningLog(
+        RecordingDirectSenderLogger logger,
+        string expectedCategory,
+        params string[] forbiddenFragments)
+    {
+        CapturedLog entry = logger.Entries.Should().ContainSingle().Subject;
+        entry.EventId.Id.Should().Be(70801);
+        entry.EventId.Name.Should().Be("NativePushJwtSignFailed");
+        entry.Exception.Should().BeNull(
+            "exceptions from key loading/import can carry absolute paths or key material");
+        entry.Properties.Should().ContainKey("FailureCategory")
+            .WhoseValue.Should().Be(expectedCategory);
+
+        foreach (string fragment in forbiddenFragments.Where(value => !string.IsNullOrEmpty(value)))
+        {
+            entry.State.Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                $"structured log state must not disclose '{fragment}'");
+            entry.Message.Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                $"rendered log text must not disclose '{fragment}'");
+            entry.StructuredState.Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                $"structured properties must not disclose '{fragment}'");
+            (entry.Exception?.ToString() ?? string.Empty)
+                .Contains(fragment, StringComparison.OrdinalIgnoreCase).Should().BeFalse(
+                    $"no logged exception may carry '{fragment}'");
+        }
+    }
+
     private static (NativePushSettings settings, ECDsa key) MakeDirectSettings()
     {
         ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -402,12 +648,28 @@ public sealed class DirectApnsNativePushSenderTests
 
     private static DirectApnsNativePushSender CreateSender(
         NativePushSettings settings,
-        Func<HttpRequestMessage, HttpResponseMessage> responder)
+        Func<HttpRequestMessage, HttpResponseMessage> responder,
+        ILogger<DirectApnsNativePushSender>? logger = null)
     {
         var handler = new StubHandler(responder);
         var factory = new StubHttpClientFactory(new HttpClient(handler));
         IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
-        return new DirectApnsNativePushSender(factory, monitor, NullLogger<DirectApnsNativePushSender>.Instance);
+        return new DirectApnsNativePushSender(
+            factory,
+            monitor,
+            logger ?? NullLogger<DirectApnsNativePushSender>.Instance);
+    }
+
+    private static DirectApnsNativePushSender CreateSender(
+        NativePushSettings settings,
+        HttpClient client)
+    {
+        var factory = new StubHttpClientFactory(client);
+        IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
+        return new DirectApnsNativePushSender(
+            factory,
+            monitor,
+            NullLogger<DirectApnsNativePushSender>.Instance);
     }
 
     private static byte[] Base64UrlDecode(string value)
@@ -417,6 +679,84 @@ public sealed class DirectApnsNativePushSenderTests
         return Convert.FromBase64String(padded);
     }
 
+    private sealed class ImportThrowingEcdsa : ECDsa
+    {
+        public bool ImportAttempted { get; private set; }
+
+        public bool IsDisposed { get; private set; }
+
+        public override void ImportFromPem(ReadOnlySpan<char> input)
+        {
+            ImportAttempted = true;
+            throw new CryptographicException("Simulated corrupted PEM.");
+        }
+
+        public override byte[] SignHash(byte[] hash) => throw new NotSupportedException();
+
+        public override bool VerifyHash(byte[] hash, byte[] signature) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed |= disposing;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed record CapturedLog(
+        EventId EventId,
+        string State,
+        string Message,
+        string StructuredState,
+        Exception? Exception,
+        IReadOnlyDictionary<string, string> Properties);
+
+    private sealed class RecordingDirectSenderLogger : ILogger<DirectApnsNativePushSender>
+    {
+        private readonly List<CapturedLog> _entries = [];
+
+        public IReadOnlyList<CapturedLog> Entries => _entries;
+
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+            => NoopScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> values
+                ? values.ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value?.ToString() ?? string.Empty,
+                    StringComparer.Ordinal)
+                : new Dictionary<string, string>(StringComparer.Ordinal);
+            string structuredState = string.Join(
+                "|",
+                properties.Select(pair => $"{pair.Key}={pair.Value}"));
+            _entries.Add(new CapturedLog(
+                eventId,
+                state?.ToString() ?? string.Empty,
+                formatter(state, exception),
+                structuredState,
+                exception,
+                properties));
+        }
+
+        private sealed class NoopScope : IDisposable
+        {
+            public static NoopScope Instance { get; } = new();
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+
     private sealed class StaticOptionsMonitor(NativePushSettings value) : IOptionsMonitor<NativePushSettings>
     {
         public NativePushSettings CurrentValue { get; } = value;
@@ -424,6 +764,31 @@ public sealed class DirectApnsNativePushSenderTests
         public NativePushSettings Get(string? name) => CurrentValue;
 
         public IDisposable? OnChange(Action<NativePushSettings, string?> listener) => null;
+    }
+
+    private sealed class BlockingUntilCanceledHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool ObservedCancellation { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("The request cancellation token was not signaled.");
+            }
+            catch (OperationCanceledException)
+            {
+                ObservedCancellation = true;
+                throw;
+            }
+        }
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler

@@ -1,511 +1,408 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
+using System.Data;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
+using Farm.Infrastructure.Repositories.Notifications;
+using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Notifications.NativePush;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.Notifications;
 
-/// <summary>
-/// Bishop #12 / Hicks #3 hardened race coverage.
-///
-/// Every test in this file drives the REAL production retry path — the
-/// service is wired with a genuine <see cref="IDbContextFactory{AppDbContext}"/>
-/// and <see cref="Farm.Infrastructure.Services.Notifications.PreferenceConcurrencyRetry"/>
-/// is exercised end-to-end. The prior test-side <c>for (attempt) { catch { Delay } }</c>
-/// loop is gone: it silently masked a broken production retry.
-///
-/// Test seams are minimal: only the internal
-/// <c>NotificationService.OnAfterPreferenceReadForTestsAsync</c> hook is
-/// used to inject a deterministic barrier that guarantees the adverse
-/// interleaving (stale legacy writer derives channel master=false while
-/// modern writer enables a disjoint attention row). Production defaults
-/// remain unchanged.
-/// </summary>
 public sealed class NotificationServicePreferenceRaceTests
 {
-    /// <summary>
-    /// Adverse race: L (legacy) reads the pre-mutation row and would derive
-    /// master EnablePushNotifications=false from its stale view; M (modern)
-    /// concurrently enables PushOnPrinterFailure=true on a disjoint attention
-    /// row. Under the production retry path, L's first attempt hits a
-    /// serialization/concurrency failure, PreferenceConcurrencyRetry
-    /// classifies it as transient, and L retries on a fresh context where
-    /// the tracked read now sees M's committed PushOnPrinterFailure=true.
-    /// L's derived master flag then reflects the merged nine-row state and
-    /// the final row on disk has master=true.
-    ///
-    /// SQLite has no row versioning so a natural concurrent-writer race
-    /// cannot surface the transient exception the production classifier is
-    /// designed to swallow (PostgreSQL 40001 / SQL Server 1205/3960 /
-    /// SqlUpdateConcurrencyException — all real provider signals under
-    /// SERIALIZABLE / snapshot isolation). We inject the equivalent
-    /// <see cref="DbUpdateConcurrencyException"/> from the internal test
-    /// seam AFTER L's read AND AFTER M's commit — the exception itself is
-    /// synthetic but every subsequent step (classifier, retry loop, fresh
-    /// context, merge) is the real production path.
-    ///
-    /// Without the fix the final master would be false (L's stale-derived
-    /// value overwrites M's correct one). We prove the fix by asserting
-    /// both writers' effects survive and that L's retry counter
-    /// incremented (the retry path was actually exercised, not linearised
-    /// by luck) — a pre-fix implementation that lacked the classifier /
-    /// retry loop would either swallow the injected exception silently or
-    /// surface it uncaught, in both cases failing the assertions below.
-    /// </summary>
     [Fact]
-    public async Task AdverseSchedule_StaleLegacyWriterAndDisjointModernWriter_ProducesConsistentMasterFlagsAfterRetry()
+    public async Task UpdatePreferencesAsync_ConcurrentFirstCreate_RetriesRealSnapshotConflictAndMerges()
     {
-        Guid userId = Guid.NewGuid();
-        const string connString = "Data Source=file:pref-race-adverse?mode=memory&cache=shared";
+        await using SqlitePreferenceRaceStore store = await SqlitePreferenceRaceStore.CreateAsync(
+            createPreferences: false);
+        var coordinator = new PreferenceRaceCoordinator(
+            store.UserId,
+            initialRowShouldExist: false,
+            retryWinnerPredicate: preferences => preferences?.TelegramOnMaintenanceDue == true);
+        var loserLogger = new RecordingLogger();
+        var winnerLogger = new RecordingLogger();
+        await using AppDbContext loserFallback = store.CreateContext();
+        await using AppDbContext winnerFallback = store.CreateContext();
+        NotificationService loser = BuildService(loserFallback, store.Factory, loserLogger);
+        NotificationService winner = BuildService(winnerFallback, store.Factory, winnerLogger);
+        loser.OnAfterPreferenceReadForTestsAsync = coordinator.LoserReadHookAsync;
+        winner.OnAfterPreferenceReadForTestsAsync = coordinator.WinnerReadHookAsync;
 
-        await using SqliteConnection keepAlive = new(connString);
-        await keepAlive.OpenAsync();
+        NotificationPreferencesUpdate loserPatch = MatrixPatch(
+            NotificationPreferenceEvent.JobStarted,
+            inApp: false,
+            email: true,
+            push: false,
+            telegram: false);
+        NotificationPreferencesUpdate winnerPatch = MatrixPatch(
+            NotificationPreferenceEvent.MaintenanceDue,
+            inApp: false,
+            email: false,
+            push: false,
+            telegram: true);
 
-        DbContextOptions<AppDbContext> BuildOptions() =>
-            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connString).Options;
+        Task loserTask = loser.UpdatePreferencesAsync(store.UserId, loserPatch);
+        Task winnerTask = RunWinnerAsync(
+            () => winner.UpdatePreferencesAsync(store.UserId, winnerPatch),
+            coordinator);
+        await Task.WhenAll(loserTask, winnerTask).WaitAsync(TimeSpan.FromSeconds(20));
 
-        DbContextOptions<AppDbContext> options = BuildOptions();
-
-        await using (AppDbContext seedDb = new(options))
-        {
-            await seedDb.Database.EnsureCreatedAsync();
-            seedDb.Users.Add(new User
-            {
-                Id = userId,
-                Username = "race-adverse",
-                Email = "adverse@test.local",
-                PasswordHash = "x",
-            });
-            // Seed an all-off preferences row so every master flag begins false.
-            var seed = new NotificationPreferences { UserId = userId };
-            NotificationPreferencesDefaults.Apply(seed);
-            // Override defaults to a stricter all-off baseline so we can
-            // observe M's PushOnPrinterFailure=true as the ONLY signal
-            // flipping master EnablePushNotifications from false to true.
-            seed.InAppOnJobStarted = false;
-            seed.InAppOnJobCompleted = false;
-            seed.InAppOnJobFailed = false;
-            seed.InAppOnJobPaused = false;
-            seed.EmailOnJobStarted = false;
-            seed.EmailOnJobCompleted = false;
-            seed.EmailOnJobFailed = false;
-            seed.EmailOnJobPaused = false;
-            seed.PushOnJobStarted = false;
-            seed.PushOnJobCompleted = false;
-            seed.PushOnJobFailed = false;
-            seed.PushOnJobPaused = false;
-            seed.TelegramOnJobStarted = false;
-            seed.TelegramOnJobCompleted = false;
-            seed.TelegramOnJobFailed = false;
-            seed.TelegramOnJobPaused = false;
-            seed.InAppOnPrinterFailure = false;
-            seed.EmailOnPrinterFailure = false;
-            seed.PushOnPrinterFailure = false;
-            seed.TelegramOnPrinterFailure = false;
-            seed.InAppOnFilamentRunout = false;
-            seed.EmailOnFilamentRunout = false;
-            seed.PushOnFilamentRunout = false;
-            seed.TelegramOnFilamentRunout = false;
-            seed.InAppOnHarvestReady = false;
-            seed.EmailOnHarvestReady = false;
-            seed.PushOnHarvestReady = false;
-            seed.TelegramOnHarvestReady = false;
-            seed.InAppOnMaintenanceDue = false;
-            seed.EmailOnMaintenanceDue = false;
-            seed.PushOnMaintenanceDue = false;
-            seed.TelegramOnMaintenanceDue = false;
-            seed.InAppOnPrinterOffline = false;
-            seed.EmailOnPrinterOffline = false;
-            seed.PushOnPrinterOffline = false;
-            seed.TelegramOnPrinterOffline = false;
-            seed.EnableInAppNotifications = false;
-            seed.EnableEmailNotifications = false;
-            seed.EnablePushNotifications = false;
-            seed.EnableTelegramNotifications = false;
-            seedDb.NotificationPreferences.Add(seed);
-            await seedDb.SaveChangesAsync();
-        }
-
-        // Real production factory. Both writers pull independent
-        // AppDbContext instances backed by fresh SqliteConnection objects.
-        var factory = new SharedConnectionStringDbContextFactory(options);
-
-        // Writer L (legacy): explicit InApp enable on job-started only. Its
-        // effect on the nine-row state is InAppOnJobStarted=true only — a
-        // "stale-derived-from-local-view" master computation gives
-        // EnableInApp=true (from L's own mutation) but EnablePush=false
-        // (L's local view of push rows is entirely off).
-        NotificationPreferencesUpdate legacyPatch = new(
-            EnableEmailNotifications: null,
-            EnablePushNotifications: null,
-            EnableInAppNotifications: true,
-            EnableTelegramNotifications: null,
-            NotifyOnStart: true,
-            NotifyOnCompletion: null,
-            NotifyOnFailure: null,
-            NotifyOnPause: null,
-            Frequency: null,
-            RetentionDays: null,
-            MatrixRows: null);
-
-        // Writer M (modern): enable PushOnPrinterFailure=true — a disjoint
-        // attention row L never addresses. On the FINAL nine-row state the
-        // master EnablePushNotifications must be true.
-        NotificationPreferencesUpdate modernPatch = new(
-            EnableEmailNotifications: null,
-            EnablePushNotifications: null,
-            EnableInAppNotifications: null,
-            EnableTelegramNotifications: null,
-            NotifyOnStart: null,
-            NotifyOnCompletion: null,
-            NotifyOnFailure: null,
-            NotifyOnPause: null,
-            Frequency: null,
-            RetentionDays: null,
-            MatrixRows: new[]
-            {
-                new NotificationPreferencesRowPatch(
-                    NotificationPreferenceEvent.PrinterFailure,
-                    InApp: false,
-                    Email: false,
-                    Push: true,
-                    Telegram: false),
-            });
-
-        // Barrier design:
-        //   - L's task and M's task start concurrently.
-        //   - M waits on `legacyReadDone` so L reads the seed FIRST (stale
-        //     from L's perspective given M's forthcoming write).
-        //   - L's attempt 1 seam signals `legacyReadDone` then immediately
-        //     throws a synthetic DbUpdateConcurrencyException so
-        //     PreferenceConcurrencyRetry rolls back L's Serializable
-        //     transaction (releases the SQLite RESERVED lock) and enters its
-        //     backoff before retrying with a fresh context.
-        //   - M unblocks (legacyReadDone set), opens its own writer,
-        //     commits its disjoint push mutation, and signals
-        //     `modernCommitted`.
-        //   - L's attempt 2 opens a fresh context, reads M's committed
-        //     row, applies L's mutation on top, and commits cleanly.
-        //
-        // The synthetic exception is intentional: SQLite has no row
-        // versioning so a natural concurrent-writer race between two
-        // Serializable transactions manifests as SQLITE_BUSY on BEGIN
-        // IMMEDIATE (which serialises them at the lock level rather than
-        // surfacing a distinguishable classifier signal). On real
-        // providers under SERIALIZABLE / snapshot isolation the losing
-        // writer surfaces DbUpdateConcurrencyException (or a wrapped
-        // 40001 / 1205 / 3960 provider exception); the classifier +
-        // retry loop is the production path the test exercises.
-        TaskCompletionSource legacyReadDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        TaskCompletionSource modernCommitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        int legacyAttemptCount = 0;
-
-        async Task RunLegacyWriterAsync()
-        {
-            await using AppDbContext writerContext = await factory.CreateDbContextAsync();
-            var service = new NotificationService(
-                notificationRepository: null!,
-                usersRepository: null!,
-                logger: NullLogger<NotificationService>.Instance,
-                dbContext: writerContext,
-                preferencesContextFactory: factory);
-
-            service.OnAfterPreferenceReadForTestsAsync = _ =>
-            {
-                int attempt = Interlocked.Increment(ref legacyAttemptCount);
-                if (attempt == 1)
-                {
-                    // Signal M can begin; then throw so L's tx rolls back
-                    // (releasing RESERVED) and PreferenceConcurrencyRetry
-                    // retries on a fresh context after M commits.
-                    legacyReadDone.TrySetResult();
-                    throw new DbUpdateConcurrencyException(
-                        "Simulated SERIALIZABLE serialization failure between legacy and modern writers.");
-                }
-
-                // Attempt 2+: proceed normally so the fresh-context read of
-                // M's committed row and L's own mutation land.
-                return Task.CompletedTask;
-            };
-
-            _ = await service.UpdatePreferencesAsync(userId, legacyPatch, CancellationToken.None);
-        }
-
-        async Task RunModernWriterAsync()
-        {
-            // Wait until L has taken its stale read AND released its
-            // RESERVED lock (L's attempt 1 seam throws immediately after
-            // signalling). Only then does M open its own writer, guaranteeing
-            // the adverse ordering: L reads before M, M commits before L
-            // retries.
-            // Generous timeout tolerates CI runner scheduling jitter (Linux SQLite
-            // under load) while still failing fast if the barrier truly deadlocks.
-            await legacyReadDone.Task.WaitAsync(TimeSpan.FromSeconds(60));
-
-            await using AppDbContext writerContext = await factory.CreateDbContextAsync();
-            var service = new NotificationService(
-                notificationRepository: null!,
-                usersRepository: null!,
-                logger: NullLogger<NotificationService>.Instance,
-                dbContext: writerContext,
-                preferencesContextFactory: factory);
-
-            _ = await service.UpdatePreferencesAsync(userId, modernPatch, CancellationToken.None);
-
-            // Observation channel: not consumed by L (L's attempt 2 has no
-            // seam wait), but recorded so the verifier can prove M's write
-            // landed before L's retry produced the merged final row.
-            modernCommitted.TrySetResult();
-        }
-
-        Task legacyTask = Task.Run(RunLegacyWriterAsync);
-        Task modernTask = Task.Run(RunModernWriterAsync);
-        await Task.WhenAll(legacyTask, modernTask);
-
-        // Read the final persisted row via a fresh context.
-        await using AppDbContext verifyContext = new(options);
-        NotificationPreferences? final = await verifyContext.NotificationPreferences
+        await using AppDbContext verify = store.CreateContext();
+        NotificationPreferences[] rows = await verify.NotificationPreferences
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId == userId);
-        final.Should().NotBeNull();
-
-        // M's effect survived.
-        final!.PushOnPrinterFailure.Should().BeTrue(
-            "modern writer's attention-row mutation must be persisted");
-
-        // L's effect survived — this proves L's retry did NOT overwrite M
-        // by re-reading M's row and merging correctly.
-        final.InAppOnJobStarted.Should().BeTrue(
-            "legacy writer's job-row mutation must be persisted after retry");
-
-        // The critical master-flag assertion: it must derive from the FINAL
-        // merged nine-row state, not L's stale pre-M view.
-        final.EnablePushNotifications.Should().BeTrue(
-            "EnablePushNotifications must be derived from the final row (M's PushOnPrinterFailure=true), " +
-            "not L's stale local view of the push columns");
-        final.EnableInAppNotifications.Should().BeTrue(
-            "L's own InAppOnJobStarted=true is enough to imply master EnableInApp=true");
-
-        // The retry path was actually exercised.
-        legacyAttemptCount.Should().BeGreaterThan(
-            1,
-            "the adverse schedule forces L into at least one PreferenceConcurrencyRetry attempt");
+            .Where(preferences => preferences.UserId == store.UserId)
+            .ToArrayAsync();
+        rows.Should().ContainSingle();
+        rows[0].EmailOnJobStarted.Should().BeTrue();
+        rows[0].TelegramOnMaintenanceDue.Should().BeTrue();
+        AssertRealConflictAndExactRetry(coordinator, store.Factory, loserLogger, winnerLogger, verify.ContextId);
     }
 
-    /// <summary>
-    /// First-create convergence: two writers hitting a userId that has no
-    /// persisted row must converge on a single row. One writer wins the
-    /// unique-index race and creates; the loser gets a
-    /// UserIdUniqueConflict classification, retries with a fresh context,
-    /// reads the winner's row, applies its own patch on top, and commits.
-    /// Both writers' effects must survive.
-    /// </summary>
     [Fact]
-    public async Task FirstCreateConvergence_TwoConcurrentInsertsForSameUser_ProduceSingleMergedRow()
+    public async Task UpdateAttentionCategoryPreferencesAsync_ConcurrentDisjointUpdates_RetriesRealSnapshotConflictAndMerges()
     {
-        Guid userId = Guid.NewGuid();
-        const string connString = "Data Source=file:pref-first-create-race?mode=memory&cache=shared";
+        await using SqlitePreferenceRaceStore store = await SqlitePreferenceRaceStore.CreateAsync(
+            createPreferences: true);
+        var coordinator = new PreferenceRaceCoordinator(
+            store.UserId,
+            initialRowShouldExist: true,
+            retryWinnerPredicate: preferences =>
+                preferences is not null
+                && AttentionPushCategoryPreferences
+                    .FromJson(preferences.AttentionPushCategoryPreferencesJson)
+                    .Categories.TryGetValue("winner-key", out bool enabled)
+                && enabled);
+        var loserLogger = new RecordingLogger();
+        var winnerLogger = new RecordingLogger();
+        await using AppDbContext loserFallback = store.CreateContext();
+        await using AppDbContext winnerFallback = store.CreateContext();
+        NotificationService loser = BuildService(loserFallback, store.Factory, loserLogger);
+        NotificationService winner = BuildService(winnerFallback, store.Factory, winnerLogger);
+        loser.OnAfterPreferenceReadForTestsAsync = coordinator.LoserReadHookAsync;
+        winner.OnAfterPreferenceReadForTestsAsync = coordinator.WinnerReadHookAsync;
 
-        await using SqliteConnection keepAlive = new(connString);
-        await keepAlive.OpenAsync();
+        Task<AttentionCategoryUpdateResult> loserTask = loser.UpdateAttentionCategoryPreferencesAsync(
+            store.UserId,
+            new Dictionary<string, bool> { ["loser-key"] = false });
+        Task<AttentionCategoryUpdateResult> winnerTask = RunWinnerAsync(
+            () => winner.UpdateAttentionCategoryPreferencesAsync(
+                store.UserId,
+                new Dictionary<string, bool> { ["winner-key"] = true }),
+            coordinator);
+        AttentionCategoryUpdateResult[] results = await Task.WhenAll(loserTask, winnerTask)
+            .WaitAsync(TimeSpan.FromSeconds(20));
 
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlite(connString)
-            .Options;
-
-        await using (AppDbContext seedDb = new(options))
-        {
-            await seedDb.Database.EnsureCreatedAsync();
-            seedDb.Users.Add(new User
-            {
-                Id = userId,
-                Username = "first-create-race",
-                Email = "firstcreate@test.local",
-                PasswordHash = "x",
-            });
-            await seedDb.SaveChangesAsync();
-        }
-
-        var factory = new SharedConnectionStringDbContextFactory(options);
-
-        NotificationPreferencesUpdate patchA = new(
-            EnableEmailNotifications: null,
-            EnablePushNotifications: null,
-            EnableInAppNotifications: true,
-            EnableTelegramNotifications: null,
-            NotifyOnStart: true,
-            NotifyOnCompletion: null,
-            NotifyOnFailure: null,
-            NotifyOnPause: null,
-            Frequency: null,
-            RetentionDays: null,
-            MatrixRows: null);
-
-        NotificationPreferencesUpdate patchB = new(
-            EnableEmailNotifications: null,
-            EnablePushNotifications: null,
-            EnableInAppNotifications: null,
-            EnableTelegramNotifications: null,
-            NotifyOnStart: null,
-            NotifyOnCompletion: null,
-            NotifyOnFailure: null,
-            NotifyOnPause: null,
-            Frequency: null,
-            RetentionDays: null,
-            MatrixRows: new[]
-            {
-                new NotificationPreferencesRowPatch(
-                    NotificationPreferenceEvent.FilamentRunout,
-                    InApp: false,
-                    Email: false,
-                    Push: true,
-                    Telegram: false),
-            });
-
-        async Task RunAsync(NotificationPreferencesUpdate patch)
-        {
-            await using AppDbContext ctx = await factory.CreateDbContextAsync();
-            var service = new NotificationService(
-                notificationRepository: null!,
-                usersRepository: null!,
-                logger: NullLogger<NotificationService>.Instance,
-                dbContext: ctx,
-                preferencesContextFactory: factory);
-            _ = await service.UpdatePreferencesAsync(userId, patch, CancellationToken.None);
-        }
-
-        await Task.WhenAll(Task.Run(() => RunAsync(patchA)), Task.Run(() => RunAsync(patchB)));
-
-        await using AppDbContext verify = new(options);
-        List<NotificationPreferences> rows = await verify.NotificationPreferences
+        results.Should().OnlyContain(result => result.Status == AttentionCategoryUpdateStatus.Success);
+        await using AppDbContext verify = store.CreateContext();
+        NotificationPreferences persisted = await verify.NotificationPreferences
             .AsNoTracking()
-            .Where(p => p.UserId == userId)
-            .ToListAsync();
-
-        rows.Should().HaveCount(1, "concurrent first-creates must converge on a single row");
-        rows[0].InAppOnJobStarted.Should().BeTrue("patch A's effect must survive");
-        rows[0].PushOnFilamentRunout.Should().BeTrue("patch B's effect must survive");
-        rows[0].EnableInAppNotifications.Should().BeTrue();
-        rows[0].EnablePushNotifications.Should().BeTrue();
+            .SingleAsync(preferences => preferences.UserId == store.UserId);
+        AttentionPushCategoryPreferences map = AttentionPushCategoryPreferences.FromJson(
+            persisted.AttentionPushCategoryPreferencesJson);
+        map.Categories.Should().ContainKey("loser-key").WhoseValue.Should().BeFalse();
+        map.Categories.Should().ContainKey("winner-key").WhoseValue.Should().BeTrue();
+        AssertRealConflictAndExactRetry(coordinator, store.Factory, loserLogger, winnerLogger, verify.ContextId);
     }
 
-    /// <summary>
-    /// Complements the race tests: on a single writer the returned entity IS
-    /// the persisted (tracked) row and master flags derive from the final
-    /// nine-row merged state.
-    /// </summary>
-    [Fact]
-    public async Task PatchApi_ReturnsPersistedRow_WithMasterFlagsDerivedFromNineRowMergedState()
+    private static void AssertRealConflictAndExactRetry(
+        PreferenceRaceCoordinator coordinator,
+        TrackingContextFactory factory,
+        RecordingLogger loserLogger,
+        RecordingLogger winnerLogger,
+        DbContextId verificationContextId)
     {
-        Guid userId = Guid.NewGuid();
-        const string connString = "Data Source=file:pref-patch-persisted-row?mode=memory&cache=shared";
+        coordinator.LoserReadCount.Should().Be(2);
+        coordinator.WinnerReadCount.Should().Be(1);
+        coordinator.RetryStartedAfterWinnerCommit.Should().BeTrue();
+        coordinator.RetryObservedWinner.Should().BeTrue();
+        coordinator.ContextIds.Should().HaveCount(3);
+        coordinator.ContextIds.Should().OnlyHaveUniqueItems();
+        coordinator.TransactionIds.Should().HaveCount(3);
+        coordinator.TransactionIds.Should().OnlyHaveUniqueItems();
+        factory.CreatedContextIds.Should().HaveCount(3);
+        factory.CreatedContextIds.Should().OnlyHaveUniqueItems();
+        factory.CreatedContextIds.Should().BeEquivalentTo(coordinator.ContextIds);
+        factory.CreatedContextIds.Should().NotContain(verificationContextId);
 
-        await using SqliteConnection connection = new(connString);
-        await connection.OpenAsync();
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlite(connString)
-            .Options;
+        winnerLogger.Exceptions.Should().BeEmpty();
+        Exception conflict = loserLogger.Exceptions.Should().ContainSingle().Subject;
+        DbUpdateException updateConflict = conflict.Should().BeOfType<DbUpdateException>().Subject;
+        SqliteException provider = updateConflict.InnerException.Should().BeOfType<SqliteException>().Subject;
+        provider.SqliteErrorCode.Should().Be(5);
+        provider.SqliteExtendedErrorCode.Should().Be(517);
+        provider.Message.Should().Contain("database is locked");
+    }
 
-        await using (AppDbContext seedDb = new(options))
-        {
-            await seedDb.Database.EnsureCreatedAsync();
-            seedDb.Users.Add(new User
-            {
-                Id = userId,
-                Username = "patch-user",
-                Email = "patch@test.local",
-                PasswordHash = "x",
-            });
-            await seedDb.SaveChangesAsync();
-        }
-
-        var factory = new SharedConnectionStringDbContextFactory(options);
-        await using AppDbContext db = await factory.CreateDbContextAsync();
-        var service = new NotificationService(
-            notificationRepository: null!,
-            usersRepository: null!,
-            logger: NullLogger<NotificationService>.Instance,
-            dbContext: db,
+    private static NotificationService BuildService(
+        AppDbContext fallbackContext,
+        TrackingContextFactory factory,
+        ILogger<NotificationService> logger)
+    {
+        return new NotificationService(
+            Mock.Of<INotificationRepository>(),
+            Mock.Of<IUsersRepository>(),
+            logger,
+            fallbackContext,
             preferencesContextFactory: factory);
-
-        NotificationPreferencesUpdate patch = new(
-            EnableEmailNotifications: true,
-            EnablePushNotifications: true,
-            EnableInAppNotifications: true,
-            EnableTelegramNotifications: true,
-            NotifyOnStart: false,
-            NotifyOnCompletion: false,
-            NotifyOnFailure: false,
-            NotifyOnPause: false,
-            Frequency: NotificationFrequency.RealTime,
-            RetentionDays: 45,
-            MatrixRows: new[]
-            {
-                new NotificationPreferencesRowPatch(
-                    NotificationPreferenceEvent.MaintenanceDue,
-                    InApp: false,
-                    Email: false,
-                    Push: false,
-                    Telegram: false),
-            });
-
-        NotificationPreferences persisted = await service.UpdatePreferencesAsync(userId, patch, CancellationToken.None);
-
-        // MaintenanceDue row fully off on the tracked entity.
-        persisted.InAppOnMaintenanceDue.Should().BeFalse();
-        persisted.PushOnMaintenanceDue.Should().BeFalse();
-
-        // Master flags derived from the final merged nine-row row. Under
-        // Hicks #3 canonical defaults, at least one InApp and one Push row
-        // is on so master EnableInApp/EnablePush=true. Email/Telegram
-        // defaults are all false so their masters remain false regardless
-        // of the request scalar hint (master derives from ROWS, not the
-        // scalar).
-        persisted.EnableInAppNotifications.Should().BeTrue();
-        persisted.EnablePushNotifications.Should().BeTrue();
-        persisted.EnableEmailNotifications.Should().BeFalse();
-        persisted.EnableTelegramNotifications.Should().BeFalse();
-        persisted.RetentionDays.Should().Be(45);
-
-        await using AppDbContext verify = new(options);
-        NotificationPreferences? onDisk = await verify.NotificationPreferences
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId == userId);
-        onDisk.Should().NotBeNull();
-        onDisk!.RetentionDays.Should().Be(45);
-        onDisk.InAppOnMaintenanceDue.Should().BeFalse();
     }
 
-    /// <summary>
-    /// Test-only <see cref="IDbContextFactory{T}"/> that hands out
-    /// AppDbContext instances backed by a SQLite in-memory database
-    /// identified by a shared connection string. Each instance opens its own
-    /// SqliteConnection so it participates in real cross-connection
-    /// serialization semantics, exactly like a request-scoped
-    /// DbContext in production.
-    /// </summary>
-    private sealed class SharedConnectionStringDbContextFactory : IDbContextFactory<AppDbContext>
+    private static async Task<T> RunWinnerAsync<T>(
+        Func<Task<T>> operation,
+        PreferenceRaceCoordinator coordinator)
     {
-        private readonly DbContextOptions<AppDbContext> _options;
-
-        public SharedConnectionStringDbContextFactory(DbContextOptions<AppDbContext> options)
+        try
         {
-            _options = options;
+            T result = await operation();
+            coordinator.WinnerCommitted.TrySetResult();
+            return result;
+        }
+        catch (Exception exception)
+        {
+            coordinator.WinnerCommitted.TrySetException(exception);
+            throw;
+        }
+    }
+
+    private static NotificationPreferencesUpdate MatrixPatch(
+        NotificationPreferenceEvent eventType,
+        bool inApp,
+        bool email,
+        bool push,
+        bool telegram) =>
+        new(
+            EnableEmailNotifications: null,
+            EnablePushNotifications: null,
+            EnableInAppNotifications: null,
+            EnableTelegramNotifications: null,
+            NotifyOnStart: null,
+            NotifyOnCompletion: null,
+            NotifyOnFailure: null,
+            NotifyOnPause: null,
+            Frequency: null,
+            RetentionDays: null,
+            MatrixRows:
+            [
+                new NotificationPreferencesRowPatch(eventType, inApp, email, push, telegram),
+            ]);
+
+    private sealed class PreferenceRaceCoordinator
+    {
+        private readonly Guid _userId;
+        private readonly bool _initialRowShouldExist;
+        private readonly Func<NotificationPreferences?, bool> _retryWinnerPredicate;
+        private readonly TaskCompletionSource _loserRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _winnerRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ConcurrentQueue<DbContextId> _contextIds = new();
+        private readonly ConcurrentQueue<Guid> _transactionIds = new();
+        private int _loserReadCount;
+        private int _winnerReadCount;
+
+        public PreferenceRaceCoordinator(
+            Guid userId,
+            bool initialRowShouldExist,
+            Func<NotificationPreferences?, bool> retryWinnerPredicate)
+        {
+            _userId = userId;
+            _initialRowShouldExist = initialRowShouldExist;
+            _retryWinnerPredicate = retryWinnerPredicate;
         }
 
-        public AppDbContext CreateDbContext() => new(_options);
+        public TaskCompletionSource WinnerCommitted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int LoserReadCount => Volatile.Read(ref _loserReadCount);
+
+        public int WinnerReadCount => Volatile.Read(ref _winnerReadCount);
+
+        public bool RetryStartedAfterWinnerCommit { get; private set; }
+
+        public bool RetryObservedWinner { get; private set; }
+
+        public IReadOnlyCollection<DbContextId> ContextIds => _contextIds.ToArray();
+
+        public IReadOnlyCollection<Guid> TransactionIds => _transactionIds.ToArray();
+
+        public async Task LoserReadHookAsync(
+            AppDbContext context,
+            CancellationToken cancellationToken)
+        {
+            RecordSerializableAttempt(context);
+            int readNumber = Interlocked.Increment(ref _loserReadCount);
+            NotificationPreferences? observed = await ReadAsync(context, cancellationToken);
+            if (readNumber == 1)
+            {
+                (observed is not null).Should().Be(_initialRowShouldExist);
+                _loserRead.TrySetResult();
+                await _winnerRead.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                await WinnerCommitted.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                return;
+            }
+
+            readNumber.Should().Be(2);
+            RetryStartedAfterWinnerCommit = WinnerCommitted.Task.IsCompletedSuccessfully;
+            RetryObservedWinner = _retryWinnerPredicate(observed);
+        }
+
+        public async Task WinnerReadHookAsync(
+            AppDbContext context,
+            CancellationToken cancellationToken)
+        {
+            RecordSerializableAttempt(context);
+            Interlocked.Increment(ref _winnerReadCount).Should().Be(1);
+            await _loserRead.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            NotificationPreferences? observed = await ReadAsync(context, cancellationToken);
+            (observed is not null).Should().Be(_initialRowShouldExist);
+            _winnerRead.TrySetResult();
+        }
+
+        private void RecordSerializableAttempt(AppDbContext context)
+        {
+            IDbContextTransaction? currentTransaction = context.Database.CurrentTransaction;
+            currentTransaction.Should().NotBeNull(
+                "each race attempt must own a relational transaction");
+            IDbContextTransaction transaction = currentTransaction!;
+            transaction.GetDbTransaction().IsolationLevel.Should().Be(IsolationLevel.Serializable);
+            _contextIds.Enqueue(context.ContextId);
+            _transactionIds.Enqueue(transaction.TransactionId);
+        }
+
+        private async Task<NotificationPreferences?> ReadAsync(
+            AppDbContext context,
+            CancellationToken cancellationToken)
+        {
+            return await context.NotificationPreferences
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    preferences => preferences.UserId == _userId,
+                    cancellationToken);
+        }
+    }
+
+    private sealed class TrackingContextFactory(
+        DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
+    {
+        private readonly ConcurrentQueue<DbContextId> _createdContextIds = new();
+
+        public IReadOnlyCollection<DbContextId> CreatedContextIds => _createdContextIds.ToArray();
+
+        public AppDbContext CreateDbContext()
+        {
+            var context = new AppDbContext(options);
+            _createdContextIds.Enqueue(context.ContextId);
+            return context;
+        }
 
         public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(new AppDbContext(_options));
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(CreateDbContext());
+        }
+    }
+
+    private sealed class SqlitePreferenceRaceStore : IAsyncDisposable
+    {
+        private readonly string _databasePath;
+        private readonly DbContextOptions<AppDbContext> _options;
+
+        private SqlitePreferenceRaceStore(
+            string databasePath,
+            DbContextOptions<AppDbContext> options,
+            Guid userId)
+        {
+            _databasePath = databasePath;
+            _options = options;
+            UserId = userId;
+            Factory = new TrackingContextFactory(options);
+        }
+
+        public Guid UserId { get; }
+
+        public TrackingContextFactory Factory { get; }
+
+        public static async Task<SqlitePreferenceRaceStore> CreateAsync(bool createPreferences)
+        {
+            string databasePath = Path.Combine(
+                Path.GetTempPath(),
+                $"preference-race-{Guid.NewGuid():N}.db");
+            string connectionString =
+                $"Data Source={databasePath};Pooling=False;Default Timeout=1";
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connectionString)
+                .Options;
+            Guid userId = Guid.NewGuid();
+            var store = new SqlitePreferenceRaceStore(databasePath, options, userId);
+
+            await using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                await using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = "PRAGMA journal_mode=WAL;";
+                object? mode = await command.ExecuteScalarAsync();
+                mode.Should().Be("wal");
+            }
+
+            await using AppDbContext seed = store.CreateContext();
+            await seed.Database.EnsureCreatedAsync();
+            seed.Users.Add(new User
+            {
+                Id = userId,
+                Username = $"preference-race-{userId:N}",
+                Email = $"preference-race-{userId:N}@test.local",
+                PasswordHash = "x",
+            });
+            if (createPreferences)
+            {
+                seed.NotificationPreferences.Add(NotificationPreferencesDefaults.Create(userId));
+            }
+
+            await seed.SaveChangesAsync();
+            return store;
+        }
+
+        public AppDbContext CreateContext() => new(_options);
+
+        public ValueTask DisposeAsync()
+        {
+            File.Delete(_databasePath);
+            File.Delete(_databasePath + "-shm");
+            File.Delete(_databasePath + "-wal");
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingLogger : ILogger<NotificationService>
+    {
+        private readonly ConcurrentQueue<Exception> _exceptions = new();
+
+        public IReadOnlyCollection<Exception> Exceptions => _exceptions.ToArray();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (exception is not null)
+            {
+                _exceptions.Enqueue(exception);
+            }
+        }
     }
 }

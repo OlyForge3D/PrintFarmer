@@ -29,24 +29,27 @@ public sealed class NativePushSettings
     public NativePushMode Mode { get; set; } = NativePushMode.Disabled;
 
     /// <summary>
-    /// Sender attempts before a give-up (must be ≥ 1). Retries only apply to transient
-    /// failures (5xx / network); 4xx responses are terminal.
+    /// Sender attempts before a give-up (must be ≥ 1). Retries apply only to typed
+    /// transient outcomes (timeouts, network failures, 408/429/5xx, provider-JWT refresh);
+    /// other 4xx responses are terminal.
     /// </summary>
     public int MaxAttempts { get; set; } = 3;
 
     /// <summary>
-    /// Consecutive failures before a device token is soft-deactivated. A subsequent
-    /// successful registration upsert re-activates the row.
+    /// Consecutive explicitly token-attributable failures before a device token is
+    /// soft-deactivated. Provider, relay, configuration, topic, JWT, and payload failures
+    /// do not change token health. A subsequent registration upsert re-activates the row.
     /// </summary>
     public int FailureDeactivationThreshold { get; set; } = 5;
 
     /// <summary>
-    /// Sliding-window size for per-user rate limiting (default 30s). At most
-    /// <see cref="RateLimitPerUser"/> envelopes are emitted per user per window.
+    /// Sliding-window size for rate limiting (default 30s). At most
+    /// <see cref="RateLimitPerUser"/> logical alerts are emitted per
+    /// (user, printer, attention kind) per window.
     /// </summary>
     public TimeSpan RateLimitWindow { get; set; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Max envelopes per user per <see cref="RateLimitWindow"/>. Default 20.</summary>
+    /// <summary>Max logical alerts per (user, printer, kind) per <see cref="RateLimitWindow"/>. Default 20.</summary>
     public int RateLimitPerUser { get; set; } = 20;
 
     /// <summary>Deduplication cache window (default 60s). Drops repeats of the same envelope key.</summary>
@@ -90,10 +93,10 @@ public sealed class NativePushApnsSettings
     /// <summary>App bundle identifier — used verbatim as the <c>apns-topic</c> header.</summary>
     public string? BundleId { get; set; }
 
-    /// <summary>Absolute path to the .p8 key file. Prefer this over inline PEM.</summary>
+    /// <summary>Absolute path to the .p8 key file, used only when no inline PEM is supplied.</summary>
     public string? P8KeyPath { get; set; }
 
-    /// <summary>Inline PEM contents of the .p8. Prefer <see cref="P8KeyPath"/>.</summary>
+    /// <summary>Inline .p8 PEM contents. When supplied, this takes precedence over <see cref="P8KeyPath"/>.</summary>
     public string? P8KeyPem { get; set; }
 
     /// <summary>Default APNs environment for direct mode: <c>production</c> or <c>development</c>.</summary>

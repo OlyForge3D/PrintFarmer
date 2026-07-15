@@ -13,9 +13,10 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 /// credentials rather than lazily degrading to "notConfigured" on the first
 /// dispatch — a misconfigured relay endpoint or an invalid .p8 file is a
 /// deployment defect, not a per-envelope skip. The APNs key material is
-/// cryptographically parsed with <c>ECDsa.ImportFromPem</c>
-/// during validation and the temporary key is disposed before returning; any
-/// PEM parse or curve-check failure fails startup with a sanitized diagnostic.
+/// cryptographically parsed with <c>ECDsa.ImportFromPem</c>. A disposable
+/// sign/verify probe proves that the selected P-256 PEM contains private key
+/// material; public-only PEMs are rejected before startup completes. The
+/// temporary key is disposed before returning, and every failure is sanitized.
 ///
 /// Registered via <c>AddOptions&lt;NativePushSettings&gt;()...ValidateOnStart()</c>
 /// so the process fails to start with a redacted, mode-specific error if any
@@ -23,12 +24,14 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 /// is set (the shipping default) no credentials are validated and the sender is
 /// wired to a no-op — this is intentional: an out-of-the-box deployment must
 /// still start with an empty <c>NativePush</c> section.
+/// Because these settings are bound and validated at startup, changing any
+/// <c>NativePush</c> value requires a process restart.
 ///
 /// Runtime source precedence for the APNs key mirrors
-/// <see cref="DirectApnsNativePushSender.EnsureSigningKey"/> — a VALID inline
-/// PEM wins and the file path is ignored, otherwise the file is loaded. The
-/// validator observes the same precedence so a well-configured inline key
-/// combined with a missing / unreadable path still starts cleanly.
+/// <see cref="DirectApnsNativePushSender.EnsureSigningKey"/> — any nonblank
+/// inline PEM is the selected source and the file path is ignored. An invalid
+/// inline key fails validation rather than silently falling back to a different
+/// credential. The file is loaded only when the inline slot is empty.
 ///
 /// Diagnostics are deliberately sanitized. We NEVER emit:
 /// * the raw bearer relay ApiKey,
@@ -241,6 +244,24 @@ public sealed class NativePushSettingsValidator : IValidateOptions<NativePushSet
             && !string.Equals(parameters.Curve.Oid.FriendlyName, "nistP256", StringComparison.OrdinalIgnoreCase))
         {
             failures.Add($"NativePush:Apns:{source} must be a P-256 (nistP256) ECDSA key as required by APNs ES256.");
+            return;
+        }
+
+        // ImportFromPem also accepts PUBLIC KEY PEM blocks. Prove possession of
+        // private material without exporting it: a public-only key cannot sign,
+        // while a valid private P-256 key must round-trip this disposable probe.
+        try
+        {
+            ReadOnlySpan<byte> challenge = "PrintFarmer APNs credential validation"u8;
+            byte[] signature = probeKey.SignData(challenge, HashAlgorithmName.SHA256);
+            if (!probeKey.VerifyData(challenge, signature, HashAlgorithmName.SHA256))
+            {
+                failures.Add($"NativePush:Apns:{source} is not a valid PEM-encoded ECDSA private key.");
+            }
+        }
+        catch (Exception)
+        {
+            failures.Add($"NativePush:Apns:{source} is not a valid PEM-encoded ECDSA private key.");
         }
     }
 }

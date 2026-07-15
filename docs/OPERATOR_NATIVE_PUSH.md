@@ -23,11 +23,12 @@ The default is **disabled**. The recommended production topology is **relay**;
 `direct` exists so an operator who signs their own build can bring their own
 provider key without a code change.
 
-> **`NativePush__Mode` is startup-selected — a process restart is required to
-> change it.** The sender that backs `INativePushSender` is bound once at
-> composition time from `NativePush__Mode`; there is no supported way to hot-swap
-> senders mid-process. If you edit `NativePush__Mode` in config, `.env`, or a
-> Kubernetes secret, cycle the API pod / container so the new value takes effect.
+> **All `NativePushSettings` values are startup-bound and require a process
+> restart after changes.** The options are validated with `ValidateOnStart()`,
+> and the sender that backs `INativePushSender` is selected once at composition
+> time from `NativePush__Mode`; there is no supported runtime settings reload.
+> If you edit the `NativePush` section in config, `.env`, or a Kubernetes secret,
+> cycle the API pod / container so every new value takes effect.
 > `OperatorFeatures__nativePushEnabled` and the DB-backed feature flag remain
 > hot-reloadable and are the correct tools for runtime enable/disable.
 
@@ -40,38 +41,50 @@ time (chosen by `Mode`); the disabled sender is a no-op that returns
 
 - Secrets are only read from configuration (env / user-secrets / mounted files).
   Nothing is committed to the repository, nothing is echoed in logs.
-- Direct APNs mode accepts the `.p8` either as a mounted file path
-  (`NativePush__Apns__P8KeyPath`) or an inline PEM
-  (`NativePush__Apns__P8KeyPem`). The path form is preferred and validated for
-  existence + readability at startup.
+- Direct APNs mode accepts a **private P-256 ECDSA** `.p8` either as a mounted
+  file path (`NativePush__Apns__P8KeyPath`) or an inline PEM
+  (`NativePush__Apns__P8KeyPem`). When both are set, any nonblank inline PEM is
+  authoritative and the path is ignored; an invalid/public-only inline key fails
+  startup rather than falling back to the file. The path is read only when the
+  inline slot is empty.
 - Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued per
   installation by OlyForge3D. The relay endpoint URL is separate
   (`NativePush__Relay__Endpoint`).
-- Deployment templates and `.env.example` document the keys but never contain
+- Deployment template `.env.template` documents the keys but never contains
   live values. See `.env.template` at the repository root.
 - Startup validation (`NativePushSettingsValidator`, wired via
   `AddOptions<NativePushSettings>().ValidateOnStart()`) fails fast when a
   non-disabled mode is missing its required keys, points at a `.p8` that
-  cannot be read, or has an obviously malformed endpoint. Diagnostics never
-  echo secrets.
+  cannot be read, supplies malformed or public-only key material, uses a curve
+  other than P-256, or has an invalid endpoint. Diagnostics never echo secrets,
+  PEM contents, or key paths.
 
 ### JWT / expiry / retry (direct mode)
 
 - Provider JWT is ES256, `iss=TeamId`, `iat=now`, cached and rotated at ≤ 50
   minutes.
-- `apns-topic = BundleId`, `apns-priority = 10` for alerts, `apns-expiration`
-  is the earlier of `deadlineAt` and `now + 30 min` for critical items,
-  `now + 5 min` for informational.
-- Retries: exponential backoff `1s → 5s → 15s`, total three attempts, only on
-  5xx / network errors. `4xx` responses are terminal.
+- `apns-topic = BundleId`, `apns-priority = 10` for alerts, and
+  `apns-expiration` is the earlier of `deadlineAt` and the severity cap:
+  `now + 30 min` for warning/critical alerts and `now + 5 min` for informational
+  alerts. Silent `Resolved` dismissals expire after 5 minutes.
+- Retries: `MaxAttempts` defaults to three total attempts with bounded linear
+  backoff (`200 ms`, then `400 ms`). Only typed transient outcomes are retried:
+  HTTP `408`/`429`/`5xx`, network errors, rejected/expired provider JWTs, and
+  internal `HttpClient.Timeout`. Other `4xx` responses are terminal.
 - Response classification:
   - `200 OK` → success.
-  - `410 Gone` OR APNs body reason `BadDeviceToken` / `Unregistered` → token
-    is permanently invalidated; the row is hard-deleted from `DeviceTokens`
-    and the fleet-side counter is not touched.
+  - `410 Gone` OR APNs body reason `BadDeviceToken` / `Unregistered` → the
+    exact attempted registration incarnation (`DeviceToken.Id` plus
+    `RegistrationVersion`) is hard-deleted and the fleet-side counter is not
+    touched. A concurrent registration refresh rotates the version, making every
+    stale success, failure, or invalidation outcome a no-op. Rows that merely
+    share provider-token text in another environment/topic/installation/user are
+    preserved.
   - `408 Request Timeout`, `429 Too Many Requests`, `5xx`, socket errors,
-    or client-side timeouts → **transient**. The dispatcher retries per
-    backoff and, critically, does **not** increment the per-token
+    or internal `HttpClient.Timeout` → **transient**. Caller/shutdown token
+    cancellation propagates immediately and is never converted to a retry.
+    The dispatcher retries transient results per backoff and, critically, does
+    **not** increment the per-token
     consecutive-failure counter — so an APNs / relay outage cannot
     soft-deactivate the entire fleet.
   - Other `4xx` (e.g. `400 BadCollapseId`, `403 InvalidProviderToken`,
@@ -125,7 +138,7 @@ invoked:
 1. A 60-second LRU dedupe on `(userId, attentionItemId, changeKind)` — a
    burst of `attentionchanged` fires for the same source collapses to one
    push per user.
-2. A token bucket per `(printerId, attentionKind)` at 1 push per 30s. Excess
+2. A token bucket per `(userId, printerId, attentionKind)` at 1 logical alert per 30s. Excess
    is dropped (not queued) and counted.
 
 Both guards emit metrics (`native_push_deduplicated`, `native_push_rate_limited`).
@@ -133,7 +146,7 @@ Both guards emit metrics (`native_push_deduplicated`, `native_push_rate_limited`
 ## 2. Actionable categories and deep links
 
 The category identifiers and action ids are stable across the mobile app and
-the server. String enum wire values are camelCase per the API contract.
+the server. String enum wire values are PascalCase per the API contract.
 
 | `attentionKind` | APNs `category`     | actions on lock-screen              | primary deep link                                                                     |
 |-----------------|---------------------|-------------------------------------|---------------------------------------------------------------------------------------|
@@ -162,12 +175,20 @@ APS payload shape (identical across relay and direct modes):
   },
   "attentionItemId": "failure:{incidentId}",
   "attentionKind": "failure",
+  "changeKind": "created",
   "printerId": "{printerId}",
   "jobId": "{jobId}",
   "toolheadIndex": 0,
-  "deepLink": "printfarmer://attention/{attentionItemId}"
+  "deepLink": "printfarmer://attention/{attentionItemId}",
+  "actions": ["PAUSE", "CANCEL", "SNOOZE_15"]
 }
 ```
+
+The alert `aps` dictionary has exactly the six members shown above; `sound` and
+`badge` are always `"default"` and `1`. Nullable alert/custom members are omitted
+when absent. A resolved dismissal instead has the exact APS dictionary
+`{ "content-available": 1 }` and uses background priority; it never includes an
+alert, sound, badge, category, thread, or mutable-content member.
 
 ## 3. Double gate on `nativePushEnabled`
 
@@ -198,7 +219,8 @@ Disabling the flag never mutates `DeviceTokens`. Rows are only removed when:
 - The user is deleted (cascade FK).
 
 Consecutive-failure soft-deactivation (`IsActive=false`) triggers after 5
-consecutive send failures for the same token; the row is retained for
+consecutive provider-attributed token failures; relay, configuration, JWT, topic,
+payload, and unknown failures do not affect token health. The row is retained for
 diagnostics and can be reactivated on next successful registration upsert.
 
 ## 5. Persistence
@@ -208,22 +230,25 @@ New entity `DeviceToken` (main app, `AppDbContext`):
 | Column                     | Type            | Notes                                                     |
 |----------------------------|------------------|-----------------------------------------------------------|
 | `Id`                       | `uuid`           | PK.                                                       |
+| `RegistrationVersion`      | `bigint`         | Rotated on each upsert; guards all provider outcomes.     |
 | `UserId`                   | `uuid`           | FK → `Users(Id)`, cascade delete.                         |
-| `InstallationId`           | `varchar(64)`    | Per-server installation id from the mobile app.           |
-| `Token`                    | `varchar(256)`   | Provider-issued device token (APNs hex today).            |
+| `InstallationId`           | `varchar(128)`   | Canonical ASCII installation id (1–128 characters).       |
+| `Token`                    | `varchar(256)`   | Canonical lowercase APNs hex token (64–256 characters).   |
 | `Platform`                 | `varchar(16)`    | `ios` today. `android` reserved.                          |
 | `Environment`              | `varchar(16)`    | `development` (sandbox) or `production`.                  |
-| `AppBundleId`              | `varchar(128)`   | Bundle id captured on registration.                        |
+| `AppBundleId`              | `varchar(256)`   | Canonical lowercase bundle id.                             |
 | `CreatedAt`                | `timestamptz`    | UTC creation.                                              |
 | `LastUsedAt`               | `timestamptz?`   | Last successful send (or last upsert).                     |
-| `LastFailureAt`            | `timestamptz?`   | Last transient send failure.                               |
-| `ConsecutiveFailureCount`  | `int`            | Reset on success; deactivates at 5.                        |
+| `LastFailureAt`            | `timestamptz?`   | Last provider-attributed token failure.                    |
+| `ConsecutiveFailureCount`  | `int`            | Token failures only; reset on success; deactivates at 5.  |
 | `IsActive`                 | `bool`           | Soft-deactivated tokens are skipped by fan-out.            |
 
 Indexes:
 
 - Unique `(UserId, InstallationId)` — one token per installation per user; upsert.
-- Non-unique `(Token)` for fast reverse lookup on inbound `410 Gone`.
+- Non-unique `(Token)` for provider-token diagnostics. Provider outcomes never
+  use token text as identity; every mutation is conditional on the dispatched
+  `(DeviceToken.Id, RegistrationVersion)` incarnation.
 
 Extension to `NotificationPreferences` (same entity, one new column):
 
@@ -244,8 +269,10 @@ against `AppDbContext`. SQLite local dev picks up the entity via `EnsureCreated`
 After the SignalR broadcast, it invokes `INativePushDispatcher.DispatchAsync`
 (resolved via `IServiceScopeFactory` — the pattern documented in
 `docs/OPERATOR_FEATURE_GATES.md`). Dispatch failure never breaks the broadcast
-path; every exception is logged and swallowed. See
-`AttentionBroadcaster.cs` for the invocation site.
+path; non-cancellation failures are logged and isolated. Caller/shutdown
+cancellation propagates through the dispatcher immediately (the broadcaster's
+shutdown-bound background task then exits cleanly). See `AttentionBroadcaster.cs`
+for the invocation site.
 
 The dispatcher:
 
@@ -269,29 +296,36 @@ The dispatcher:
 5. Applies dedupe + rate-limit.
 6. Re-reads the gate (send-side gate) and calls `INativePushSender.SendAsync`
    for each active token.
+7. Persists each device outcome in a fresh DI scope/AppDbContext. A concurrency
+   failure for one registration is logged and isolated; it cannot poison the
+   tracker used by later devices or owners.
 
-For `Resolved` events, the dispatcher sends a minimal content-available payload
-that lets the client dismiss the corresponding notification without producing a
-new alert.
+For each delivered alert the dispatcher retains a bounded, per-recipient
+pre-resolution routing snapshot. A subsequent `Resolved` change atomically consumes
+that recipient's snapshot and emits an APNs silent dismissal. It bypasses the alert
+rate bucket but remains deduplicated. Direct APNs uses `apns-push-type: background`,
+priority `5`, and an APS object containing only `{ "content-available": 1 }`; no alert,
+category, thread, or mutable-content keys are present. A user without an authorized
+snapshot receives no dismissal.
 
 ## 7. Observability
 
 Meter name: `Farm.Infrastructure.Services.Notifications.NativePush`.
 
-| Instrument                       | Kind      | Tags                                       |
-|----------------------------------|-----------|--------------------------------------------|
-| `native_push_attempts`           | counter   | `mode`, `platform`, `attentionKind`        |
-| `native_push_success`            | counter   | `mode`, `platform`, `attentionKind`        |
-| `native_push_failure`            | counter   | `mode`, `platform`, `attentionKind`, `reason` |
-| `native_push_dropped_disabled`   | counter   | `stage` (`queue` \| `send`)                |
-| `native_push_dropped_no_tokens`  | counter   | `attentionKind`                            |
-| `native_push_token_invalidated`  | counter   | `platform`, `reason`                       |
-| `native_push_retries`            | counter   | `platform`                                 |
-| `native_push_rate_limited`       | counter   | `attentionKind`                            |
-| `native_push_deduplicated`       | counter   | `attentionKind`                            |
-| `native_push_send_ms`            | histogram | `mode`, `platform`                         |
-| `native_push.isolated_device_failure` | counter | `stage` (`send` \| `persist`)            |
-| `native_push.isolated_owner_failure`  | counter | (none)                                    |
+| Instrument                              | Kind    | Tags                         |
+|-----------------------------------------|---------|------------------------------|
+| `native_push.attempted`                 | counter | (none)                       |
+| `native_push.delivered`                 | counter | `mode`                       |
+| `native_push.transient_failed`          | counter | `mode`, `reason`             |
+| `native_push.terminal_failed`           | counter | `mode`, `reason`             |
+| `native_push.tokens_invalidated`        | counter | (none)                       |
+| `native_push.skipped_feature_disabled`  | counter | (none)                       |
+| `native_push.skipped_dedupe`            | counter | (none)                       |
+| `native_push.skipped_rate_limit`        | counter | (none)                       |
+| `native_push.skipped_category_opt_out`  | counter | (none)                       |
+| `native_push.skipped_not_configured`    | counter | (none)                       |
+| `native_push.isolated_device_failure`   | counter | `stage` (`device`/`persist`) |
+| `native_push.isolated_owner_failure`    | counter | (none)                       |
 
 The two `native_push.isolated_*_failure` counters (added under Vasquez v6 B1
 remediation) surface fan-out isolation activity in the dispatcher. Each
@@ -299,7 +333,7 @@ increment is a **non-cancellation** exception that was safely attributable to a
 single owner or a single device and therefore isolated so the remaining
 owners/devices continued dispatching. Cancellations propagate and are never
 counted here. An operator seeing `isolated_device_failure{stage="persist"}`
-climb should investigate the `NotificationService.MarkTokenInvalidatedAsync`
+climb should investigate the scoped `IDeviceTokenRepository` outcome
 persistence path — one device's persist step is failing but the send itself
 already succeeded.
 
@@ -319,7 +353,7 @@ NativePush__Mode=disabled
 # NativePush__Relay__Endpoint=https://push-relay.olyforge3d.com/v1/dispatch
 # NativePush__Relay__ApiKey=<per-install bearer, obtained from OlyForge3D>
 
-# Direct APNs mode (self-signed / enterprise). Prefer the file path form.
+# Direct APNs mode (self-signed / enterprise). Inline PEM takes precedence over the path.
 # NativePush__Mode=direct
 # NativePush__Apns__TeamId=...
 # NativePush__Apns__KeyId=...

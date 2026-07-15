@@ -17,14 +17,14 @@ namespace Farm.Infrastructure.Services.Notifications;
 /// * Job rows: InApp/Push mirror the pre-#708 completion/failure/pause
 ///   defaults (start off, others on); Email/Telegram default off across the
 ///   board so a first-visit user never surprise-emails on a completion.
-/// * Master flags derive from the row state after applying the matrix so a
-///   response DTO reads exactly what would be persisted.
+/// * Global channel controls have canonical defaults but remain independent
+///   kill switches; matrix rows never derive or reopen them.
 /// </summary>
 public static class NotificationPreferencesDefaults
 {
     /// <summary>
     /// Applies the canonical default matrix onto <paramref name="prefs"/>.
-    /// Every attention and job column plus every master flag is overwritten,
+    /// Every attention and job column plus every independent global channel control is overwritten,
     /// so callers can use this on either a fresh entity or a partially
     /// populated one — the resulting state is deterministic. Rows not listed
     /// here (Id, UserId, timestamps, category-JSON) are NOT touched.
@@ -91,13 +91,11 @@ public static class NotificationPreferencesDefaults
         prefs.NotifyOnFailure = true;
         prefs.NotifyOnPause = true;
 
-        // Master flags are the OR across all nine rows for each channel.
-        // Kept in sync by hand here (rather than a follow-up derive step) so
-        // this helper is a single-shot canonical write.
-        prefs.EnableInAppNotifications = true;   // any InApp row is true
-        prefs.EnableEmailNotifications = false;  // every Email row is false
-        prefs.EnablePushNotifications = true;    // any Push row is true
-        prefs.EnableTelegramNotifications = false; // every Telegram row is false
+        // Canonical defaults for independent global channel controls.
+        prefs.EnableInAppNotifications = true;
+        prefs.EnableEmailNotifications = false;
+        prefs.EnablePushNotifications = true;
+        prefs.EnableTelegramNotifications = false;
 
         prefs.Frequency = NotificationFrequency.RealTime;
         prefs.RetentionDays = 30;

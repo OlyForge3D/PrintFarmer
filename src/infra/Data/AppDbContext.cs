@@ -382,6 +382,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer")
         {
             const string caseSensitiveCollation = "Latin1_General_100_BIN2";
+
+            // Native-push installation identifiers are opaque client identities. PostgreSQL
+            // and SQLite compare their ASCII wire form case-sensitively; pin SQL Server to
+            // the same bytewise semantic before applying the composite unique index.
+            _ = modelBuilder.Entity<DeviceToken>(entity =>
+                entity.Property(token => token.InstallationId).UseCollation(caseSensitiveCollation));
+
             _ = modelBuilder.Entity<IdempotencyRecord>(entity =>
             {
                 _ = entity.Property(r => r.UserId).UseCollation(caseSensitiveCollation);
