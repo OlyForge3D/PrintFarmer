@@ -30,8 +30,8 @@ vi.mock('@/common/hooks/useApi', () => ({
 }));
 
 vi.mock('@/common/components/ui', () => ({
-  Button: ({ children, onClick, disabled, loading, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string; loading?: boolean; iconLeft?: React.ReactNode }) => (
-    <button onClick={onClick} disabled={disabled || loading} {...rest}>{rest.iconLeft}{children}</button>
+  Button: ({ children, onClick, disabled, loading, iconLeft, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string; loading?: boolean; iconLeft?: React.ReactNode }) => (
+    <button onClick={onClick} disabled={disabled || loading} {...rest}>{iconLeft}{children}</button>
   ),
   Badge: ({ children }: { children: React.ReactNode; variant?: string; size?: string }) => (
     <span data-testid="badge">{children}</span>

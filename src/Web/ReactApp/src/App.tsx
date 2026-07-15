@@ -27,28 +27,16 @@ import { apiClient } from '@/services/api';
 
 // Feature Pages
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
-import { PrintersPage } from '@/features/printers/pages/PrintersPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
-import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
-import { ProfileImportWizardPage } from '@/features/tasks';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
-import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
-import { FilesPage } from '@/features/files/pages/FilesPage';
-import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
-import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
-import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
-import { AnalyticsHubPage } from '@/features/analytics/pages/AnalyticsHubPage';
-import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
-import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
-import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors';
 import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
@@ -72,6 +60,63 @@ const LazyPartsInventoryPage = lazy(() =>
   import('@/features/parts-inventory/pages/PartsInventoryPage').then(mod => ({
     default: mod.PartsInventoryPage,
   }))
+);
+
+// Additional lazy route pages to keep the initial (dashboard) bundle small.
+// The static PrinterDashboard remains eager since it is the default landing
+// page; every other feature page is code-split so its JS/CSS + heavy vendor
+// libraries (recharts, three, jspdf, etc.) load only when the route mounts.
+const LazyPrintQueueDashboardPage = lazy(() =>
+  import('@/features/queue/pages/PrintQueueDashboardPage').then(mod => ({
+    default: mod.PrintQueueDashboardPage,
+  }))
+);
+const LazyFilesPage = lazy(() =>
+  import('@/features/files/pages/FilesPage').then(mod => ({ default: mod.FilesPage }))
+);
+const LazyProjectsPage = lazy(() =>
+  import('@/features/projects/pages/ProjectsPage').then(mod => ({ default: mod.ProjectsPage }))
+);
+const LazyFilamentManagementPage = lazy(() =>
+  import('@/features/filamentManagement/pages/FilamentManagementPage').then(mod => ({
+    default: mod.FilamentManagementPage,
+  }))
+);
+const LazyMaintenanceDashboardPage = lazy(() =>
+  import('@/features/maintenance/pages/MaintenanceDashboardPage').then(mod => ({
+    default: mod.MaintenanceDashboardPage,
+  }))
+);
+const LazyPrinterMaintenancePage = lazy(() =>
+  import('@/features/maintenance/pages/PrinterMaintenancePage').then(mod => ({
+    default: mod.PrinterMaintenancePage,
+  }))
+);
+const LazyAnalyticsHubPage = lazy(() =>
+  import('@/features/analytics/pages/AnalyticsHubPage').then(mod => ({
+    default: mod.AnalyticsHubPage,
+  }))
+);
+const LazyLocationDashboardPage = lazy(() =>
+  import('@/features/locations/pages/LocationDashboardPage').then(mod => ({
+    default: mod.LocationDashboardPage,
+  }))
+);
+const LazyAutoDispatchDashboardPage = lazy(() =>
+  import('@/features/auto-dispatch/pages/AutoDispatchDashboardPage').then(mod => ({
+    default: mod.AutoDispatchDashboardPage,
+  }))
+);
+const LazySchedulingPage = lazy(() =>
+  import('@/features/scheduling/pages/SchedulingPage').then(mod => ({
+    default: mod.SchedulingPage,
+  }))
+);
+const LazyProfileImportWizardPage = lazy(() =>
+  import('@/features/tasks').then(mod => ({ default: mod.ProfileImportWizardPage }))
+);
+const LazyPrintersPage = lazy(() =>
+  import('@/features/printers/pages/PrintersPage').then(mod => ({ default: mod.PrintersPage }))
 );
 
 function RouteLoader() {
@@ -240,22 +285,22 @@ function AuthenticatedAppRoutes() {
       <Route path="/*" element={<Layout />}>
         <Route index element={<PrinterDashboard />} />
         <Route path="dashboard" element={<PrinterDashboard />} />
-        <Route path="printers" element={<PrintersPage />} />
-        <Route path="printers/:printerId" element={<PrintersPage />} />
-        <Route path="printers/:printerId/maintenance" element={<PrinterMaintenancePage />} />
+        <Route path="printers" element={<RouteSuspense><LazyPrintersPage /></RouteSuspense>} />
+        <Route path="printers/:printerId" element={<RouteSuspense><LazyPrintersPage /></RouteSuspense>} />
+        <Route path="printers/:printerId/maintenance" element={<RouteSuspense><LazyPrinterMaintenancePage /></RouteSuspense>} />
         <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin"><PrinterGroupsPage /></ProtectedRoute>} />
-        <Route path="printQueue" element={<PrintQueueDashboardPage />} />
-        <Route path="printQueue/:tabId" element={<PrintQueueDashboardPage />} />
+        <Route path="printQueue" element={<RouteSuspense><LazyPrintQueueDashboardPage /></RouteSuspense>} />
+        <Route path="printQueue/:tabId" element={<RouteSuspense><LazyPrintQueueDashboardPage /></RouteSuspense>} />
         <Route path="files/projects" element={<Navigate to="/projects" replace />} />
-        <Route path="files/*" element={<FilesPage />} />
-        <Route path="projects" element={<ProjectsPage />} />
-        <Route path="spools" element={<FilamentManagementPage />} />
-        <Route path="spools/:tabId" element={<FilamentManagementPage />} />
+        <Route path="files/*" element={<RouteSuspense><LazyFilesPage /></RouteSuspense>} />
+        <Route path="projects" element={<RouteSuspense><LazyProjectsPage /></RouteSuspense>} />
+        <Route path="spools" element={<RouteSuspense><LazyFilamentManagementPage /></RouteSuspense>} />
+        <Route path="spools/:tabId" element={<RouteSuspense><LazyFilamentManagementPage /></RouteSuspense>} />
         <Route path="cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
         <Route path="cameras/:tabId" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
         <Route path="nfc-devices" element={<Navigate to="/admin/settings?tab=hardware&sub=nfc" replace />} />
         <Route path="nfc-bindings" element={<NfcBindingsPage />} />
-        <Route path="maintenance" element={<MaintenanceDashboardPage />} />
+        <Route path="maintenance" element={<RouteSuspense><LazyMaintenanceDashboardPage /></RouteSuspense>} />
         <Route
           path="parts-inventory"
           element={
@@ -276,13 +321,13 @@ function AuthenticatedAppRoutes() {
             </ProtectedRoute>
           }
         />
-        <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
+        <Route path="auto-dispatch" element={<RouteSuspense><LazyAutoDispatchDashboardPage /></RouteSuspense>} />
         <Route path="statistics" element={<Navigate to="/analytics?lens=production" replace />} />
         <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
-        <Route path="analytics" element={<AnalyticsHubPage />} />
-        <Route path="scheduling" element={<SchedulingPage />} />
+        <Route path="analytics" element={<RouteSuspense><LazyAnalyticsHubPage /></RouteSuspense>} />
+        <Route path="scheduling" element={<RouteSuspense><LazySchedulingPage /></RouteSuspense>} />
         <Route path="locations" element={<Navigate to="/locations/dashboard" replace />} />
-        <Route path="locations/dashboard" element={<LocationDashboardPage />} />
+        <Route path="locations/dashboard" element={<RouteSuspense><LazyLocationDashboardPage /></RouteSuspense>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/manage?tab=users&sub=accounts" replace /></ProtectedRoute>} />
         <Route path="settings" element={<SettingsShell routeScope="user" />} />
@@ -323,7 +368,7 @@ function AuthenticatedAppRoutes() {
         <Route path="slice-jobs" element={<Navigate to="/admin/manage?tab=operations&sub=workers&workerTab=jobs" replace />} />
         <Route path="slicer-profiles" element={<Navigate to="/admin/settings?tab=slicing&sub=profiles" replace />} />
         <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
-        <Route path="profiles/import" element={<ProfileImportWizardPage />} />
+        <Route path="profiles/import" element={<RouteSuspense><LazyProfileImportWizardPage /></RouteSuspense>} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

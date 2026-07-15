@@ -1187,7 +1187,19 @@ export function Layout() {
           <PlatformBanner />
           <InstallBanner />
           <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2">
-            <RouteErrorBoundary>
+            {/* React Router's `location.key` is a unique string generated
+                per history entry. It changes on ANY navigation — including
+                same-pathname but different search or hash — where
+                `pathname` alone would not. Using `pathname` as the reset
+                key would leave a stuck error boundary on
+                `/reports?range=week` when the operator navigates to
+                `/reports?range=day` or `/reports#summary` because the
+                pathname is identical. Reviewers explicitly flagged this
+                (Hicks #5): tests must exercise real router navigation
+                between same-path/different-query and same-path/different-
+                hash. `location.key` covers both. See:
+                https://reactrouter.com/en/main/hooks/use-location */}
+            <RouteErrorBoundary resetKey={location.key}>
               <Suspense
                 fallback={
                   <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-label="Loading page">
