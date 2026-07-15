@@ -83,39 +83,19 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         builder.ConfigureServices((context, services) =>
         {
-            // Remove only the DbContext configuration, not the whole service
-            ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-            if (dbContextDescriptor != null)
+            foreach (ServiceDescriptor descriptor in services
+                .Where(d => d.ServiceType == typeof(AppDbContext)
+                    || d.ServiceType == typeof(DbContextOptions<AppDbContext>)
+                    || d.ServiceType == typeof(Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration<AppDbContext>)
+                    || d.ServiceType == typeof(IDbContextFactory<AppDbContext>))
+                .ToList())
             {
-                services.Remove(dbContextDescriptor);
+                services.Remove(descriptor);
             }
 
-            // Also remove DbContextFactory and its singleton options since it was registered with the original options
-            ServiceDescriptor? dbContextFactoryDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDbContextFactory<AppDbContext>));
-            if (dbContextFactoryDescriptor != null)
-            {
-                services.Remove(dbContextFactoryDescriptor);
-            }
-
-            // Remove singleton options that were registered for the factory
-            ServiceDescriptor? singletonOptionsDescriptor = services.FirstOrDefault(d =>
-                d.ServiceType == typeof(DbContextOptions<AppDbContext>) && d.Lifetime == ServiceLifetime.Singleton);
-            if (singletonOptionsDescriptor != null)
-            {
-                services.Remove(singletonOptionsDescriptor);
-            }
-
-            // Register in-memory SQLite database
-            services.AddDbContext<AppDbContext>(options =>
-            {
-                options.UseSqlite(_connectionString);
-            });
-
-            // Re-register DbContextFactory with the test SQLite connection (same pattern as production)
-            DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-            optionsBuilder.UseSqlite(_connectionString);
-            services.AddSingleton(optionsBuilder.Options);
-            services.AddDbContextFactory<AppDbContext>();
+            services.AddPooledDbContextFactory<AppDbContext>(options => options.UseSqlite(_connectionString));
+            services.AddScoped(sp =>
+                sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
 
             // Ensure database is created after all services are registered
             ServiceProvider sp = services.BuildServiceProvider();

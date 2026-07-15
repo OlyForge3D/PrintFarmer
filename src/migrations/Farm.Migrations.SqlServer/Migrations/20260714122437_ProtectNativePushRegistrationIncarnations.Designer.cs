@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260714122437_ProtectNativePushRegistrationIncarnations")]
+    partial class ProtectNativePushRegistrationIncarnations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2680,8 +2683,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("InstallationId")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
-                        .UseCollation("Latin1_General_100_BIN2");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()

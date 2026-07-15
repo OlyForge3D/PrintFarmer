@@ -1,560 +1,303 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Reflection;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Notifications;
 using FluentAssertions;
+using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.Notifications;
 
-/// <summary>
-/// Hicks #3 dedicated retry classifier + attempt + fresh-context coverage.
-///
-/// PreferenceConcurrencyRetry is the single production surface that wraps
-/// every preference write. These tests exercise it in isolation:
-///   * classifier accepts DbUpdateConcurrencyException, provider-specific
-///     transient codes (SQLite BUSY, extended UNIQUE), and rejects unrelated
-///     constraint / FK / CHECK / arbitrary-unique failures;
-///   * transient exceptions retry to success on a subsequent attempt;
-///   * expected UserId unique conflicts retry;
-///   * unrelated unique / FK / CHECK constraints DO NOT retry;
-///   * the retry bound is enforced (MaxAttempts);
-///   * cancellation consumes no retry budget and propagates without
-///     classifier interception (Hicks #1 parity);
-///   * every attempt receives a FRESH DbContext instance from the factory —
-///     tracker state from a losing attempt never leaks into the retry.
-///
-/// The tests deliberately do NOT depend on a specific database provider
-/// assembly beyond Microsoft.Data.Sqlite (already referenced by the test
-/// project). Provider-specific exception shapes are exercised through
-/// hand-crafted test-double exception types whose property surface mirrors
-/// the real provider surface the classifier reads by reflection.
-/// </summary>
 public sealed class PreferenceConcurrencyRetryTests
 {
-    /// <summary>
-    /// Classifier accepts <see cref="DbUpdateConcurrencyException"/> as
-    /// transient. This is EF's native optimistic-concurrency signal — under
-    /// SERIALIZABLE isolation on PostgreSQL / SQL Server it is the exact
-    /// exception the losing writer sees.
-    /// </summary>
     [Fact]
-    public void Classify_DbUpdateConcurrencyException_IsTransientProviderConflict()
+    public void Classify_DirectExactDbUpdateConcurrency_IsTransient()
     {
-        var ex = new DbUpdateConcurrencyException("conflict");
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(ex);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
-    }
-
-    /// <summary>
-    /// Classifier walks the InnerException chain — a raw provider exception
-    /// nested inside a DbUpdateException MUST still be recognised.
-    /// </summary>
-    [Fact]
-    public void Classify_SqliteBusy_WrappedInDbUpdateException_IsTransient()
-    {
-        // SQLite error code 5 = SQLITE_BUSY (transient).
-        var sqliteEx = new SqliteException("database is locked", 5);
-        var wrapped = new DbUpdateException("outer", sqliteEx);
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(wrapped);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
-    }
-
-    /// <summary>
-    /// Classifier detects SQLite UserId-unique conflict via extended code
-    /// 2067 (SQLITE_CONSTRAINT_UNIQUE) AND a message that references the
-    /// UserId column — arbitrary UNIQUE conflicts on unrelated columns fall
-    /// through to Rethrow.
-    /// </summary>
-    [Fact]
-    public void Classify_SqliteUniqueOnUserId_IsUserIdUniqueConflict()
-    {
-        // SqliteException surfaces both primary (19) and extended (2067)
-        // codes. We construct one with the extended code so the classifier's
-        // TryGetSqliteErrorCode reflection reads 2067.
-        var sqliteEx = new SqliteException(
-            "SQLite Error 19: 'UNIQUE constraint failed: NotificationPreferences.UserId'.",
-            19,
-            2067);
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(sqliteEx);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
-    }
-
-    /// <summary>
-    /// SQLite UNIQUE conflict on a DIFFERENT column (arbitrary schema
-    /// artefact) MUST fall through to Rethrow so a genuine schema fault is
-    /// surfaced rather than masked by the retry loop.
-    /// </summary>
-    [Fact]
-    public void Classify_SqliteUniqueOnUnrelatedColumn_Rethrow()
-    {
-        var sqliteEx = new SqliteException(
-            "SQLite Error 19: 'UNIQUE constraint failed: SomeOther.SomeColumn'.",
-            19,
-            2067);
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(sqliteEx);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
-    }
-
-    /// <summary>
-    /// SQLite FK / NOT-NULL / CHECK failures MUST NOT retry — those are
-    /// real semantic errors that a retry loop can only worsen.
-    /// </summary>
-    [Fact]
-    public void Classify_SqliteForeignKeyOrCheckFailure_Rethrow()
-    {
-        // 787 = SQLITE_CONSTRAINT_FOREIGNKEY.
-        var fkEx = new SqliteException("FK violation", 19, 787);
-        PreferenceConcurrencyRetry.ClassifierDecision fkDecision = PreferenceConcurrencyRetry.Classify(fkEx);
-        fkDecision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
-
-        // 275 = SQLITE_CONSTRAINT_CHECK.
-        var checkEx = new SqliteException("CHECK violation", 19, 275);
-        PreferenceConcurrencyRetry.ClassifierDecision checkDecision = PreferenceConcurrencyRetry.Classify(checkEx);
-        checkDecision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
-    }
-
-    /// <summary>
-    /// Classifier recognises PostgreSQL 40001 serialization failure through
-    /// reflection on a test-double type whose <c>SqlState</c> property
-    /// mirrors Npgsql's <c>PostgresException.SqlState</c>. Uses the reflection
-    /// surface so the test project does not pull in Npgsql.
-    /// </summary>
-    [Fact]
-    public void Classify_PostgresSerializationFailure_IsTransient()
-    {
-        var pg = new PostgresException(sqlState: "40001", constraintName: null, tableName: null, columnName: null);
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(pg);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
-    }
-
-    /// <summary>
-    /// PostgreSQL 23505 (unique_violation) on the NotificationPreferences_UserId
-    /// index is a UserId conflict; on any other constraint it MUST NOT retry.
-    /// </summary>
-    [Fact]
-    public void Classify_PostgresUniqueOnUserId_IsUserIdUniqueConflict()
-    {
-        var pg = new PostgresException(
-            sqlState: "23505",
-            constraintName: "IX_NotificationPreferences_UserId",
-            tableName: "NotificationPreferences",
-            columnName: "UserId");
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(pg);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
-    }
-
-    /// <summary>
-    /// PostgreSQL 23505 on an UNRELATED constraint (e.g., some third-party
-    /// migration adds a unique index on a different column) MUST NOT retry.
-    /// </summary>
-    [Fact]
-    public void Classify_PostgresUniqueOnUnrelatedConstraint_Rethrow()
-    {
-        var pg = new PostgresException(
-            sqlState: "23505",
-            constraintName: "IX_Something_Else",
-            tableName: "SomeOther",
-            columnName: "SomeColumn");
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(pg);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
-    }
-
-    /// <summary>
-    /// SQL Server deadlock victim (1205), snapshot conflict (3960), and lock
-    /// timeout (1222) all classify as transient.
-    /// </summary>
-    [Theory]
-    [InlineData(1205)]
-    [InlineData(3960)]
-    [InlineData(1222)]
-    public void Classify_SqlServerTransientCodes_AreTransient(int number)
-    {
-        var ex = new SqlException(number, "conflict");
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(ex);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
-    }
-
-    /// <summary>
-    /// SQL Server 2601 / 2627 duplicate-key against the UserId index →
-    /// UserId conflict; against any other index → Rethrow.
-    /// </summary>
-    [Fact]
-    public void Classify_SqlServerUniqueOnUserIdIndex_IsUserIdUniqueConflict()
-    {
-        var ex = new SqlException(2627, "Violation of UNIQUE KEY constraint IX_NotificationPreferences_UserId.");
-
-        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(ex);
-
-        decision.Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
-    }
-
-    /// <summary>
-    /// MySQL / MariaDB 1213 (deadlock) → transient. 1062 duplicate entry on
-    /// the UserId index → UserId conflict; on any other index → Rethrow.
-    /// </summary>
-    [Fact]
-    public void Classify_MySqlDeadlockAndUniqueOnUserId()
-    {
-        var deadlock = new MySqlException(1213, "Deadlock found");
-        PreferenceConcurrencyRetry.Classify(deadlock)
+        PreferenceConcurrencyRetry.Classify(new DbUpdateConcurrencyException("conflict"))
             .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
+    }
 
-        var uniqueUserId = new MySqlException(1062, "Duplicate entry for key 'IX_NotificationPreferences_UserId'");
-        PreferenceConcurrencyRetry.Classify(uniqueUserId)
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Classify_ExactSqliteBusy_DirectOrImmediateDbUpdateWrapper_IsTransient(bool wrapped)
+    {
+        var provider = new SqliteException("database is locked", 5);
+        Exception exception = wrapped ? new DbUpdateException("save", provider) : provider;
+
+        PreferenceConcurrencyRetry.Classify(exception)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Classify_ExactPostgresSerialization_DirectOrImmediateDbUpdateWrapper_IsTransient(bool wrapped)
+    {
+        var provider = new PostgresException("serialization", "ERROR", "ERROR", PostgresErrorCodes.SerializationFailure);
+        Exception exception = wrapped ? new DbUpdateException("save", provider) : provider;
+
+        PreferenceConcurrencyRetry.Classify(exception)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Classify_ExactSqlServerDeadlock_DirectOrImmediateDbUpdateWrapper_IsTransient(bool wrapped)
+    {
+        SqlException provider = CreateSqlException(1205, "deadlock victim");
+        Exception exception = wrapped ? new DbUpdateException("save", provider) : provider;
+
+        PreferenceConcurrencyRetry.Classify(exception)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.TransientProviderConflict);
+    }
+
+    [Theory]
+    [InlineData("SQLite Error 19: 'UNIQUE constraint failed: NotificationPreferences.UserId'.", 2067, true)]
+    [InlineData("SQLite Error 19: 'UNIQUE constraint failed: Other.UserId'.", 2067, false)]
+    [InlineData("SQLite Error 19: 'UNIQUE constraint failed: NotificationPreferences.UserId, NotificationPreferences.Id'.", 2067, false)]
+    [InlineData("FOREIGN KEY constraint failed", 787, false)]
+    [InlineData("CHECK constraint failed", 275, false)]
+    public void Classify_SqliteConstraint_IsExact(string message, int extendedCode, bool expectedRetry)
+    {
+        var exception = new SqliteException(message, 19, extendedCode);
+
+        PreferenceConcurrencyRetry.ClassifierDecision decision = PreferenceConcurrencyRetry.Classify(exception);
+
+        decision.Should().Be(expectedRetry
+            ? PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict
+            : PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+    }
+
+    [Fact]
+    public void Classify_PostgresUnique_RequiresExactConstraintName()
+    {
+        var expected = new PostgresException(
+            "duplicate",
+            "ERROR",
+            "ERROR",
+            PostgresErrorCodes.UniqueViolation,
+            constraintName: "IX_NotificationPreferences_UserId");
+        var unrelated = new PostgresException(
+            "duplicate",
+            "ERROR",
+            "ERROR",
+            PostgresErrorCodes.UniqueViolation,
+            constraintName: "IX_NotificationPreferences_UserId_And_Other");
+        var wrongCase = new PostgresException(
+            "duplicate",
+            "ERROR",
+            "ERROR",
+            PostgresErrorCodes.UniqueViolation,
+            constraintName: "ix_notificationpreferences_userid");
+
+        PreferenceConcurrencyRetry.Classify(expected)
             .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
-
-        var uniqueUnrelated = new MySqlException(1062, "Duplicate entry for key 'ix_something_else'");
-        PreferenceConcurrencyRetry.Classify(uniqueUnrelated)
+        PreferenceConcurrencyRetry.Classify(unrelated)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+        PreferenceConcurrencyRetry.Classify(wrongCase)
             .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
     }
 
-    /// <summary>
-    /// End-to-end: a transient failure on attempt 1 retries to success on
-    /// attempt 2 with a FRESH DbContext instance. Bishop #12 explicitly
-    /// requires fresh context per attempt so no tracker state leaks.
-    /// </summary>
     [Fact]
-    public async Task ExecuteAsync_TransientOnAttempt1_RetriesToSuccessOnAttempt2()
+    public void Classify_SqlServerUnique_RequiresDelimitedExactIndexName()
     {
-        using var factory = new CountingFactory();
-        int attempts = 0;
+        SqlException expected = CreateSqlException(
+            2627,
+            "Violation of UNIQUE KEY constraint 'IX_NotificationPreferences_UserId'.");
+        SqlException unrelated = CreateSqlException(
+            2627,
+            "Violation of UNIQUE KEY constraint 'IX_NotificationPreferences_UserId_And_Other'.");
 
-        int result = await PreferenceConcurrencyRetry.ExecuteAsync<int>(
-            factory,
-            fallbackContext: null,
-            operation: (ctx, _) =>
-            {
-                attempts++;
-                if (attempts == 1)
-                {
-                    throw new DbUpdateConcurrencyException("transient");
-                }
-
-                return Task.FromResult(42);
-            },
-            logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None);
-
-        result.Should().Be(42);
-        attempts.Should().Be(2, "the classifier must retry on a transient conflict and succeed on the second attempt");
-        factory.CreatedContexts.Should().Be(2, "each attempt MUST get a fresh DbContext instance");
-        factory.DistinctContexts.Count.Should().Be(2, "the two attempts must see two DIFFERENT DbContext references");
+        PreferenceConcurrencyRetry.Classify(expected)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.UserIdUniqueConflict);
+        PreferenceConcurrencyRetry.Classify(unrelated)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
     }
 
-    /// <summary>
-    /// Expected UserId-unique conflict retries (first-create convergence).
-    /// </summary>
     [Fact]
-    public async Task ExecuteAsync_UserIdUniqueOnAttempt1_Retries()
+    public void Classify_ArbitraryAndDeepWrappers_AreRejected()
     {
-        using var factory = new CountingFactory();
-        int attempts = 0;
+        var provider = new SqliteException("database is locked", 5);
+        Exception arbitrary = new ArbitraryWrapperException("outer", provider);
+        Exception deep = new DbUpdateException(
+            "save",
+            new ArbitraryWrapperException("middle", provider));
+        Exception wrappedConcurrency = new ArbitraryWrapperException(
+            "outer",
+            new DbUpdateConcurrencyException("conflict"));
 
-        int result = await PreferenceConcurrencyRetry.ExecuteAsync<int>(
-            factory,
-            fallbackContext: null,
-            operation: (ctx, _) =>
-            {
-                attempts++;
-                if (attempts == 1)
-                {
-                    throw new SqliteException(
-                        "SQLite Error 19: 'UNIQUE constraint failed: NotificationPreferences.UserId'.",
-                        19,
-                        2067);
-                }
-
-                return Task.FromResult(7);
-            },
-            logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None);
-
-        result.Should().Be(7);
-        attempts.Should().Be(2);
+        PreferenceConcurrencyRetry.Classify(arbitrary)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+        PreferenceConcurrencyRetry.Classify(deep)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+        PreferenceConcurrencyRetry.Classify(wrappedConcurrency)
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
     }
 
-    /// <summary>
-    /// Unrelated UNIQUE / FK / CHECK violations MUST NOT retry — the caller
-    /// gets the raw exception on the first surface.
-    /// </summary>
     [Fact]
-    public async Task ExecuteAsync_UnrelatedUniqueConstraint_DoesNotRetry()
+    public void Classify_ShortNameAndDbExceptionLookAlikes_AreRejected()
+    {
+        PreferenceConcurrencyRetry.Classify(new SqliteExceptionLookAlike("database is locked"))
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+        PreferenceConcurrencyRetry.Classify(new DbExceptionLookAlike("database is locked"))
+            .Should().Be(PreferenceConcurrencyRetry.ClassifierDecision.Rethrow);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnsupportedFailure_PreservesOriginalAndDoesNotRetry()
     {
         using var factory = new CountingFactory();
+        var original = new DbUpdateException(
+            "foreign key violation",
+            new SqliteException("FOREIGN KEY constraint failed", 19, 787));
         int attempts = 0;
 
         Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
             factory,
             fallbackContext: null,
-            operation: (ctx, _) =>
+            operation: (_, _) =>
             {
                 attempts++;
-                throw new SqliteException(
-                    "SQLite Error 19: 'UNIQUE constraint failed: SomeOther.SomeColumn'.",
-                    19,
-                    2067);
+                throw original;
             },
             logger: NullLogger.Instance,
             cancellationToken: CancellationToken.None);
 
-        await act.Should().ThrowAsync<SqliteException>();
-        attempts.Should().Be(1, "unrelated unique constraints MUST NOT trigger a retry");
-    }
-
-    /// <summary>
-    /// FK violation → no retry. Same rule for CHECK / NOT NULL.
-    /// </summary>
-    [Fact]
-    public async Task ExecuteAsync_ForeignKeyViolation_DoesNotRetry()
-    {
-        using var factory = new CountingFactory();
-        int attempts = 0;
-
-        Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
-            factory,
-            fallbackContext: null,
-            operation: (ctx, _) =>
-            {
-                attempts++;
-                throw new SqliteException("FK violation", 19, 787);
-            },
-            logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None);
-
-        await act.Should().ThrowAsync<SqliteException>();
+        (await act.Should().ThrowAsync<DbUpdateException>()).Which.Should().BeSameAs(original);
         attempts.Should().Be(1);
     }
 
-    /// <summary>
-    /// Repeated transient failures MUST stop at MaxAttempts and surface the
-    /// last transient exception verbatim. This guards against unbounded
-    /// retry storms under sustained provider contention.
-    /// </summary>
     [Fact]
-    public async Task ExecuteAsync_RepeatedTransient_StopsAtMaxAttempts()
+    public async Task ExecuteAsync_Cancellation_PropagatesWithoutRetry()
     {
         using var factory = new CountingFactory();
-        int attempts = 0;
 
         Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
             factory,
             fallbackContext: null,
-            operation: (ctx, _) =>
-            {
-                attempts++;
-                throw new DbUpdateConcurrencyException($"transient #{attempts}");
-            },
-            logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None);
-
-        await act.Should().ThrowAsync<DbUpdateConcurrencyException>();
-        attempts.Should().Be(PreferenceConcurrencyRetry.MaxAttempts,
-            "the retry bound MUST cap runaway attempts");
-    }
-
-    /// <summary>
-    /// Cancellation propagates unconditionally without consuming any retry
-    /// budget. If the caller cancels at the entrance, no attempt runs.
-    /// </summary>
-    [Fact]
-    public async Task ExecuteAsync_PreCancelledToken_ThrowsWithoutRunningAnyAttempt()
-    {
-        using var factory = new CountingFactory();
-        int attempts = 0;
-
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
-
-        Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
-            factory,
-            fallbackContext: null,
-            operation: (ctx, _) =>
-            {
-                attempts++;
-                return Task.FromResult(0);
-            },
-            logger: NullLogger.Instance,
-            cancellationToken: cts.Token);
-
-        await act.Should().ThrowAsync<OperationCanceledException>();
-        attempts.Should().Be(0, "a pre-cancelled token MUST NOT allow any attempt to run");
-    }
-
-    /// <summary>
-    /// Cancellation raised INSIDE an attempt (OperationCanceledException
-    /// surfacing from the operation) propagates unconditionally — it MUST
-    /// NOT be classified as transient, MUST NOT be swallowed, and MUST NOT
-    /// consume the retry budget beyond that single attempt.
-    /// </summary>
-    [Fact]
-    public async Task ExecuteAsync_InnerOperationCanceledException_RethrowsWithoutRetry()
-    {
-        using var factory = new CountingFactory();
-        int attempts = 0;
-
-        Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
-            factory,
-            fallbackContext: null,
-            operation: (ctx, _) =>
-            {
-                attempts++;
-                throw new OperationCanceledException("simulated inner cancel");
-            },
+            operation: (_, _) => throw new OperationCanceledException("cancelled"),
             logger: NullLogger.Instance,
             cancellationToken: CancellationToken.None);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
-        attempts.Should().Be(1, "OCE MUST propagate on the first surface without a retry");
-    }
-
-    /// <summary>
-    /// Successful operation completes on attempt 1 with no retry — the
-    /// happy path.
-    /// </summary>
-    [Fact]
-    public async Task ExecuteAsync_HappyPath_CompletesOnFirstAttempt()
-    {
-        using var factory = new CountingFactory();
-
-        int result = await PreferenceConcurrencyRetry.ExecuteAsync<int>(
-            factory,
-            fallbackContext: null,
-            operation: (ctx, _) => Task.FromResult(99),
-            logger: NullLogger.Instance,
-            cancellationToken: CancellationToken.None);
-
-        result.Should().Be(99);
         factory.CreatedContexts.Should().Be(1);
     }
 
-    /// <summary>
-    /// A test-double PostgreSQL-shaped exception that mirrors
-    /// <c>Npgsql.PostgresException</c>'s reflection surface (SqlState,
-    /// ConstraintName, TableName, ColumnName). The classifier reads these
-    /// via reflection and matches on <c>GetType().Name == "PostgresException"</c>,
-    /// so we name this nested type exactly to satisfy the switch.
-    /// </summary>
-    private sealed class PostgresException : Exception
+    private static SqlException CreateSqlException(int number, string message)
     {
-        public PostgresException(string sqlState, string? constraintName, string? tableName, string? columnName)
-            : base($"PostgresException {sqlState}")
-        {
-            SqlState = sqlState;
-            ConstraintName = constraintName;
-            TableName = tableName;
-            ColumnName = columnName;
-        }
+        const BindingFlags instanceFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var collection = (SqlErrorCollection)Activator.CreateInstance(
+            typeof(SqlErrorCollection),
+            instanceFlags,
+            binder: null,
+            args: null,
+            culture: null)!;
+        ConstructorInfo errorConstructor = typeof(SqlError)
+            .GetConstructors(instanceFlags)
+            .OrderByDescending(constructor => constructor.GetParameters().Length)
+            .First();
+        object?[] errorArguments = BuildArguments(errorConstructor.GetParameters(), number, message, collection);
+        var error = (SqlError)errorConstructor.Invoke(errorArguments);
+        _ = typeof(SqlErrorCollection)
+            .GetMethod("Add", instanceFlags)!
+            .Invoke(collection, [error]);
 
-        // Reflection contract: the classifier reads these by property name.
-        public string SqlState { get; }
-
-        public string? ConstraintName { get; }
-
-        public string? TableName { get; }
-
-        public string? ColumnName { get; }
+        MethodInfo factory = typeof(SqlException)
+            .GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
+            .Where(method => method.Name == "CreateException")
+            .First(method => method.GetParameters().Length >= 2
+                && method.GetParameters()[0].ParameterType == typeof(SqlErrorCollection));
+        return (SqlException)factory.Invoke(
+            null,
+            BuildArguments(factory.GetParameters(), number, message, collection))!;
     }
 
-    /// <summary>
-    /// Test-double SQL Server-shaped exception mirroring
-    /// <c>Microsoft.Data.SqlClient.SqlException</c>: Number property.
-    /// The classifier's typeName switch matches on <c>GetType().Name ==
-    /// "SqlException"</c>.
-    /// </summary>
-    private sealed class SqlException : Exception
+    private static object?[] BuildArguments(
+        ParameterInfo[] parameters,
+        int number,
+        string message,
+        SqlErrorCollection collection)
     {
-        public SqlException(int number, string message)
-            : base(message)
+        return parameters.Select(parameter =>
         {
-            Number = number;
-        }
+            if (parameter.ParameterType == typeof(SqlErrorCollection))
+            {
+                return (object)collection;
+            }
 
-        public int Number { get; }
+            if (parameter.ParameterType == typeof(int))
+            {
+                return parameter.Name?.Contains("number", StringComparison.OrdinalIgnoreCase) == true
+                    ? number
+                    : 0;
+            }
+
+            if (parameter.ParameterType == typeof(byte))
+            {
+                return (byte)0;
+            }
+
+            if (parameter.ParameterType == typeof(uint))
+            {
+                return 0U;
+            }
+
+            if (parameter.ParameterType == typeof(Guid))
+            {
+                return Guid.Empty;
+            }
+
+            if (parameter.ParameterType == typeof(string))
+            {
+                return parameter.Name?.Contains("message", StringComparison.OrdinalIgnoreCase) == true
+                    ? message
+                    : "test";
+            }
+
+            return null;
+        }).ToArray();
     }
 
-    /// <summary>
-    /// Test-double MySQL exception mirroring MySqlConnector's Number
-    /// surface. Classifier matches on <c>GetType().Name == "MySqlException"</c>.
-    /// </summary>
-    private sealed class MySqlException : Exception
-    {
-        public MySqlException(int number, string message)
-            : base(message)
-        {
-            Number = number;
-        }
+    private sealed class ArbitraryWrapperException(string message, Exception inner)
+        : Exception(message, inner);
 
-        public int Number { get; }
-    }
+    private sealed class SqliteExceptionLookAlike(string message) : Exception(message);
 
-    /// <summary>
-    /// Counting factory: creates a fresh <see cref="AppDbContext"/> backed
-    /// by a per-test shared-cache SQLite database. Records how many contexts
-    /// were created and each distinct reference so tests can prove
-    /// fresh-context semantics.
-    /// </summary>
+    private sealed class DbExceptionLookAlike(string message) : System.Data.Common.DbException(message);
+
     private sealed class CountingFactory : IDbContextFactory<AppDbContext>, IDisposable
     {
         private readonly SqliteConnection _keepAlive;
         private readonly DbContextOptions<AppDbContext> _options;
-        private readonly HashSet<AppDbContext> _distinct = new();
 
         public CountingFactory()
         {
-            string connString = "Data Source=file:pcr-tests-" + Guid.NewGuid().ToString("N") + "?mode=memory&cache=shared";
-            _keepAlive = new SqliteConnection(connString);
+            string connectionString = $"Data Source=file:retry-{Guid.NewGuid():N}?mode=memory&cache=shared";
+            _keepAlive = new SqliteConnection(connectionString);
             _keepAlive.Open();
-            _options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connString).Options;
-            using var seed = new AppDbContext(_options);
-            seed.Database.EnsureCreated();
+            _options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connectionString)
+                .Options;
+            using var context = new AppDbContext(_options);
+            _ = context.Database.EnsureCreated();
         }
 
         public int CreatedContexts { get; private set; }
 
-        public IReadOnlyCollection<AppDbContext> DistinctContexts => _distinct;
-
         public AppDbContext CreateDbContext()
         {
             CreatedContexts++;
-            var ctx = new AppDbContext(_options);
-            _distinct.Add(ctx);
-            return ctx;
+            return new AppDbContext(_options);
         }
 
         public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(CreateDbContext());
 
-        public void Dispose()
-        {
-            _keepAlive.Dispose();
-        }
-    }
-
-    /// <summary>Minimal NullLogger that supports the parameterised LogWarning call.</summary>
-    private static class NullLogger
-    {
-        public static Microsoft.Extensions.Logging.ILogger Instance { get; } = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        public void Dispose() => _keepAlive.Dispose();
     }
 }

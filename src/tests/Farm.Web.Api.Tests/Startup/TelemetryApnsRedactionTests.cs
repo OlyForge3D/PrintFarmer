@@ -1,16 +1,13 @@
-﻿using Farm.Web.Api.Startup;
+﻿using System.Diagnostics;
+using Farm.Web.Api.Startup;
 using FluentAssertions;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Startup;
 
 /// <summary>
-/// Regression test for Bishop v3 recommendation and v2 blocker B1: the APNs
-/// URL redaction MUST be applied for hosts that match the APNs
-/// production/sandbox/development endpoints, and MUST leave non-APNs hosts
-/// untouched. This unit-tests the helpers directly; a fuller end-to-end
-/// OTel-exporter test exists as future work but is not required to lock the
-/// redaction contract.
+/// Regression coverage for APNs URL redaction helpers and both production
+/// HttpClient instrumentation enrichers.
 /// </summary>
 public sealed class TelemetryApnsRedactionTests
 {
@@ -54,4 +51,66 @@ public sealed class TelemetryApnsRedactionTests
         TelemetryStartup.RedactApnsTokenPath("/3/device/tokenabc?extra=1")
             .Should().Be("/3/device/<REDACTED>");
     }
+    [Fact]
+    public void EnrichApnsHttpRequest_RedactsPathAndRemovesEveryQueryTag()
+    {
+        const string token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"https://api.push.apple.com/3/device/{token}?deviceToken={token}");
+        using Activity activity = BuildLeakyActivity(token);
+
+        TelemetryStartup.EnrichApnsHttpRequest(activity, request);
+
+        AssertProductionTagsAreRedacted(activity, token);
+    }
+
+    [Fact]
+    public void EnrichApnsHttpResponse_ReappliesRedactionAndRemovesEveryQueryTag()
+    {
+        const string token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"https://api.sandbox.push.apple.com/3/device/{token}?token={token}");
+        using var response = new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
+        {
+            RequestMessage = request,
+        };
+        using Activity activity = BuildLeakyActivity(token);
+
+        TelemetryStartup.EnrichApnsHttpResponse(activity, response);
+
+        AssertProductionTagsAreRedacted(activity, token);
+    }
+
+    private static Activity BuildLeakyActivity(string token)
+    {
+        var activity = new Activity("apns-test");
+        _ = activity.Start();
+        _ = activity.SetTag("url.full", $"https://api.push.apple.com/3/device/{token}?token={token}");
+        _ = activity.SetTag("http.url", $"https://api.push.apple.com/3/device/{token}?token={token}");
+        _ = activity.SetTag("url.path", $"/3/device/{token}");
+        _ = activity.SetTag("http.request.path", $"/3/device/{token}");
+        _ = activity.SetTag("url.query", $"token={token}");
+        _ = activity.SetTag("http.request.query", $"token={token}");
+        return activity;
+    }
+
+    private static void AssertProductionTagsAreRedacted(Activity activity, string token)
+    {
+        activity.GetTagItem("url.full")!.ToString().Should()
+            .EndWith("/3/device/<REDACTED>")
+            .And.NotContain("?");
+        activity.GetTagItem("http.url")!.ToString().Should()
+            .EndWith("/3/device/<REDACTED>")
+            .And.NotContain("?");
+        activity.GetTagItem("url.path").Should().Be("/3/device/<REDACTED>");
+        activity.GetTagItem("http.request.path").Should().Be("/3/device/<REDACTED>");
+        activity.GetTagItem("url.query").Should().BeNull();
+        activity.GetTagItem("http.request.query").Should().BeNull();
+        activity.TagObjects
+            .Select(tag => tag.Value?.ToString() ?? string.Empty)
+            .Should().OnlyContain(value => !value.Contains(token, StringComparison.Ordinal));
+    }
+
 }

@@ -663,8 +663,7 @@ public sealed class NotificationPreferencesContractTests
             row.Telegram.Should().BeFalse();
         }
 
-        // Master flags derived from final tracked state: push=true (all rows
-        // have push=true), inApp=true, email/telegram=false.
+        // Explicit global controls remain independent from the full matrix.
         dto.EnablePushNotifications.Should().BeTrue();
         dto.EnableInAppNotifications.Should().BeTrue();
         dto.EnableEmailNotifications.Should().BeFalse();
@@ -727,17 +726,11 @@ public sealed class NotificationPreferencesContractTests
     }
 
     [Fact]
-    public async System.Threading.Tasks.Task LegacyPut_ChannelMasterFalse_ZeroesAttentionRowsForThatChannel()
+    public async System.Threading.Tasks.Task LegacyPut_ChannelMasterFalse_PreservesAttentionRowsAndDisablesGlobalChannel()
     {
-        // Hicks H1-v5-final regression: a legacy-shaped PUT (no matrix) that
-        // sets EnablePushNotifications=false must also drop the five
-        // attention PushOn* rows for that user. Otherwise
-        // ApplyMasterFlagsFromMatrix (OR across all 9 push rows) sees the
-        // preserved attention PushOn*=true values and recomputes
-        // EnablePushNotifications back to true — silently reactivating the
-        // channel the legacy client tried to disable and letting the
-        // dispatcher's master gate fall open. The fix is symmetric across
-        // all four channels; this test proves it for push and in-app.
+        // A legacy global disable is an independent kill switch. It must not
+        // destroy retained attention-row choices needed if the user later
+        // re-enables the channel.
         var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<
                 Farm.Infrastructure.Data.AppDbContext>()
             .UseInMemoryDatabase(databaseName: System.Guid.NewGuid().ToString())
@@ -790,31 +783,27 @@ public sealed class NotificationPreferencesContractTests
             await dbContext.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId);
         persisted.Should().NotBeNull();
 
-        // All five attention PushOn* rows are now OFF — proving the master
-        // OR cannot silently reactivate push.
-        persisted!.PushOnPrinterFailure.Should().BeFalse();
-        persisted.PushOnFilamentRunout.Should().BeFalse();
-        persisted.PushOnHarvestReady.Should().BeFalse();
-        persisted.PushOnMaintenanceDue.Should().BeFalse();
-        persisted.PushOnPrinterOffline.Should().BeFalse();
+        // Per-kind choices are retained while the independent global gates
+        // suppress delivery.
+        persisted!.PushOnPrinterFailure.Should().BeTrue();
+        persisted.PushOnFilamentRunout.Should().BeTrue();
+        persisted.PushOnHarvestReady.Should().BeTrue();
+        persisted.PushOnMaintenanceDue.Should().BeTrue();
+        persisted.PushOnPrinterOffline.Should().BeTrue();
 
-        // Same symmetric guarantee for in-app attention rows.
-        persisted.InAppOnPrinterFailure.Should().BeFalse();
-        persisted.InAppOnFilamentRunout.Should().BeFalse();
-        persisted.InAppOnHarvestReady.Should().BeFalse();
-        persisted.InAppOnMaintenanceDue.Should().BeFalse();
-        persisted.InAppOnPrinterOffline.Should().BeFalse();
+        // The same retention rule applies to in-app attention rows.
+        persisted.InAppOnPrinterFailure.Should().BeTrue();
+        persisted.InAppOnFilamentRunout.Should().BeTrue();
+        persisted.InAppOnHarvestReady.Should().BeTrue();
+        persisted.InAppOnMaintenanceDue.Should().BeTrue();
+        persisted.InAppOnPrinterOffline.Should().BeTrue();
 
-        // The push master recomputed by ApplyMasterFlagsFromMatrix now holds
-        // the OFF value the caller intended — this is the dispatcher master
-        // gate and the whole point of H1-v5-final.
+        // Explicit global controls persist verbatim.
         persisted.EnablePushNotifications.Should().BeFalse();
 
-        // Note: EnableInAppNotifications remains TRUE by legacy contract —
-        // InAppOnJobFailed is force-set to true in the legacy branch so
-        // critical failures can never be fully silenced. The push master
-        // has no such override, which is why the H1-v5 dispatcher-gate
-        // reactivation defect only manifested on push.
+        persisted.EnableInAppNotifications.Should().BeFalse();
+        persisted.EnableEmailNotifications.Should().BeFalse();
+        persisted.EnableTelegramNotifications.Should().BeFalse();
     }
 
     [Fact]
@@ -1188,13 +1177,10 @@ public sealed class NotificationPreferencesContractTests
 
     [Fact]
     public async System.Threading.Tasks.Task
-        UpdatePreferences_MasterFlagDerivedFromAllNineRows_WhenOnlyAttentionPushEnabled()
+        UpdatePreferences_ExplicitGlobalOptOut_RemainsOffWhenAttentionPushRowIsEnabled()
     {
-        // Hicks v5 H1 regression: the shared-preference write projection was
-        // OR'ing only the four legacy job rows. That silently reset the four
-        // Enable{Channel}Notifications master flags to `false` whenever a
-        // user disabled every job row even though attention rows were still
-        // sending. Post-fix: master flags derive from all nine rows.
+        // Global controls are independent kill switches. Matrix values must
+        // never synthesize an opt-in after the user explicitly opted out.
         var (dbContext, userId) = await BuildInMemoryDbWithUserAsync();
         await using Farm.Infrastructure.Data.AppDbContext _ = dbContext;
 
@@ -1224,6 +1210,7 @@ public sealed class NotificationPreferencesContractTests
         var incoming = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
         {
             UserId = userId,
+            EnablePushNotifications = false,
             PushOnJobStarted = false,
             PushOnJobCompleted = false,
             PushOnJobFailed = false,
@@ -1243,16 +1230,15 @@ public sealed class NotificationPreferencesContractTests
                 .FirstOrDefaultAsync(p => p.UserId == userId);
         persisted.Should().NotBeNull();
         persisted!.EnablePushNotifications.Should()
-            .BeTrue("PushOnPrinterFailure alone must lift the master flag; the OR must span all nine rows");
+            .BeFalse("matrix rows must not reopen an explicitly disabled global channel");
     }
 
     [Fact]
     public async System.Threading.Tasks.Task
-        UpdatePreferences_MasterFlagDerivedFromAllNineRows_WhenAllPushRowsFalse()
+        UpdatePreferences_ExplicitGlobalOptIn_RemainsOnWhenAllPushRowsAreOff()
     {
-        // Symmetric: every push row false across all nine event types must
-        // produce EnablePushNotifications=false. Guards against a broken OR
-        // that leaves the master flag `true` when nothing is enabled.
+        // Symmetric independence: row opt-outs do not silently rewrite the
+        // separately selected global control.
         var (dbContext, userId) = await BuildInMemoryDbWithUserAsync();
         await using Farm.Infrastructure.Data.AppDbContext _ = dbContext;
 
@@ -1275,6 +1261,7 @@ public sealed class NotificationPreferencesContractTests
         var incoming = new Farm.Infrastructure.Domain.Notifications.NotificationPreferences
         {
             UserId = userId,
+            EnablePushNotifications = true,
             PushOnJobStarted = false,
             PushOnJobCompleted = false,
             PushOnJobFailed = false,
@@ -1294,7 +1281,7 @@ public sealed class NotificationPreferencesContractTests
                 .FirstOrDefaultAsync(p => p.UserId == userId);
         persisted.Should().NotBeNull();
         persisted!.EnablePushNotifications.Should()
-            .BeFalse("with every push row off, EnablePushNotifications must be off");
+            .BeTrue("matrix rows must not close an explicitly enabled global channel");
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -216,7 +217,7 @@ public class NotificationsController(INotificationService notificationService) :
     [AllowAnonymous]
     public ActionResult<NotificationPreferencesCapabilitiesDto> GetPreferencesCapabilities()
     {
-        // Enum members are converted to the same camelCase wire tokens the
+        // Enum members are converted to the same PascalCase value tokens the
         // JsonStringEnumConverter emits everywhere else in the DTO, via the
         // pre-built CapabilitiesJsonOptions singleton, so the two paths stay
         // in lock-step even if the naming policy ever changes.
@@ -394,21 +395,22 @@ public class NotificationsController(INotificationService notificationService) :
         }
 
         if (request is null
-            || string.IsNullOrWhiteSpace(request.InstallationId)
-            || string.IsNullOrWhiteSpace(request.Token)
-            || string.IsNullOrWhiteSpace(request.Platform)
-            || string.IsNullOrWhiteSpace(request.Environment))
+            || !NativePushRegistrationContract.IsCanonicalInstallationId(request.InstallationId)
+            || !NativePushRegistrationContract.IsCanonicalApnsToken(request.Token)
+            || !NativePushRegistrationContract.IsCanonicalPlatform(request.Platform)
+            || !NativePushRegistrationContract.IsCanonicalEnvironment(request.Environment)
+            || !NativePushRegistrationContract.IsCanonicalAppBundleId(request.AppBundleId))
         {
-            return BadRequest(new { error = "installationId, token, platform and environment are required" });
+            return BadRequest(new { error = "Native-push registration values are not in canonical form." });
         }
 
         _ = await deviceTokens.UpsertAsync(
             userId,
-            request.InstallationId.Trim(),
-            request.Token.Trim(),
-            request.Platform.Trim().ToLowerInvariant(),
-            request.Environment.Trim().ToLowerInvariant(),
-            string.IsNullOrWhiteSpace(request.AppBundleId) ? null : request.AppBundleId.Trim(),
+            request.InstallationId,
+            request.Token,
+            request.Platform,
+            request.Environment,
+            request.AppBundleId,
             cancellationToken);
         return NoContent();
     }
@@ -440,12 +442,13 @@ public class NotificationsController(INotificationService notificationService) :
             return Unauthorized(new { error = "User ID not found in claims" });
         }
 
-        if (request is null || string.IsNullOrWhiteSpace(request.InstallationId))
+        if (request is null
+            || !NativePushRegistrationContract.IsCanonicalInstallationId(request.InstallationId))
         {
-            return BadRequest(new { error = "installationId is required" });
+            return BadRequest(new { error = "installationId must be in canonical form" });
         }
 
-        _ = await deviceTokens.DeleteByInstallationAsync(userId, request.InstallationId.Trim(), cancellationToken);
+        _ = await deviceTokens.DeleteByInstallationAsync(userId, request.InstallationId, cancellationToken);
         return NoContent();
     }
 
@@ -564,6 +567,15 @@ public class NotificationsController(INotificationService notificationService) :
                     title: "Attention category batch too large");
             }
 
+            int requestBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request).Length;
+            if (requestBytes > MaxAttentionCategoryJsonBytes)
+            {
+                return Problem(
+                    detail: $"Serialized attention category request must not exceed {MaxAttentionCategoryJsonBytes} UTF-8 bytes.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category batch too large");
+            }
+
             foreach (string key in incoming.Keys)
             {
                 if (string.IsNullOrEmpty(key))
@@ -589,9 +601,18 @@ public class NotificationsController(INotificationService notificationService) :
             return Unauthorized(new { error = "User ID not found in claims" });
         }
 
-        IReadOnlyDictionary<string, bool> updates = request?.Categories is null
-            ? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, bool>(request.Categories, StringComparer.OrdinalIgnoreCase);
+        var updates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        if (request?.Categories is not null)
+        {
+            // System.Text.Json preserves object-property order in Dictionary.
+            // Assign through the indexer so raw case variants collapse
+            // deterministically with ordered last-write-wins rather than the
+            // comparer-changing Dictionary constructor throwing a 500.
+            foreach (KeyValuePair<string, bool> update in request.Categories)
+            {
+                updates[update.Key] = update.Value;
+            }
+        }
 
         // Hicks #6: the merge/read/save is service-owned so a serializable
         // transaction + retry can guarantee concurrent first-creates converge
@@ -634,13 +655,13 @@ public class NotificationsController(INotificationService notificationService) :
     /// persisted JSON column while comfortably exceeding the count of real
     /// AttentionKind categories in the finalized #708 contract (Bishop v6).
     /// </summary>
-    private const int MaxAttentionCategoryKeysPerRequest = 32;
+    private const int MaxAttentionCategoryKeysPerRequest = AttentionPushCategoryPreferences.MaxKeysPerRequest;
 
     /// <summary>
     /// Maximum length in characters of each attention-category key in a single
     /// update request. Real AttentionKind enum names are well under this bound.
     /// </summary>
-    private const int MaxAttentionCategoryKeyLength = 64;
+    private const int MaxAttentionCategoryKeyLength = AttentionPushCategoryPreferences.MaxKeyLength;
 
     /// <summary>
     /// Cumulative bound (Hicks #4): the maximum number of category keys that
@@ -650,7 +671,7 @@ public class NotificationsController(INotificationService notificationService) :
     /// bound. Exceeding the bound returns 400 and leaves persisted JSON
     /// byte-for-byte unchanged.
     /// </summary>
-    private const int MaxAttentionCategoryKeysPersisted = 128;
+    private const int MaxAttentionCategoryKeysPersisted = AttentionPushCategoryPreferences.MaxPersistedKeys;
 
     /// <summary>
     /// Cumulative bound (Hicks #4): the maximum UTF-8 encoded byte size of
@@ -658,7 +679,7 @@ public class NotificationsController(INotificationService notificationService) :
     /// against the PROSPECTIVE merged map so a burst of long-valued keys
     /// cannot silently blow past reasonable row storage.
     /// </summary>
-    private const int MaxAttentionCategoryJsonBytes = 8 * 1024;
+    private const int MaxAttentionCategoryJsonBytes = AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes;
 
     private static NotificationPreferencesDto ToDto(NotificationPreferences preferences)
     {
@@ -1047,8 +1068,8 @@ public class NotificationPreferencesCapabilitiesDto
 {
     /// <summary>
     /// Ordered set of <see cref="NotificationPreferenceEventType"/> tokens the
-    /// server accepts, using the same camelCase JSON tokens the update
-    /// endpoint accepts (e.g. <c>"jobStarted"</c>, <c>"printerFailure"</c>).
+    /// server accepts, using the same PascalCase enum-value tokens the update
+    /// endpoint accepts (e.g. <c>"JobStarted"</c>, <c>"PrinterFailure"</c>).
     /// </summary>
     public List<string> SupportedEventTypes { get; set; } = new();
 }
@@ -1102,18 +1123,40 @@ public class UnsubscribePushRequest
 public class DeviceTokenRegistrationRequest
 {
     /// <summary>Per-server installation identifier supplied by the mobile app.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.InstallationIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.InstallationIdPattern,
+        ErrorMessage = "InstallationId must use canonical ASCII identifier syntax.")]
     public string InstallationId { get; set; } = string.Empty;
 
     /// <summary>Provider-issued device token (APNs hex).</summary>
+    [Required]
+    [StringLength(
+        NativePushRegistrationContract.TokenMaxLength,
+        MinimumLength = NativePushRegistrationContract.TokenMinLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.ApnsTokenPattern,
+        ErrorMessage = "Token must be a byte-aligned lowercase hexadecimal APNs token.")]
     public string Token { get; set; } = string.Empty;
 
     /// <summary>Client platform: <c>ios</c> today; <c>android</c> reserved.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.PlatformMaxLength)]
+    [RegularExpression(NativePushRegistrationContract.PlatformPattern)]
     public string Platform { get; set; } = "ios";
 
     /// <summary>APNs environment: <c>development</c> or <c>production</c>.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.EnvironmentMaxLength)]
+    [RegularExpression(NativePushRegistrationContract.EnvironmentPattern)]
     public string Environment { get; set; } = "production";
 
     /// <summary>App bundle identifier reported by the mobile app (diagnostics only).</summary>
+    [StringLength(NativePushRegistrationContract.AppBundleIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.AppBundleIdPattern,
+        ErrorMessage = "AppBundleId must use canonical lowercase bundle-id syntax.")]
     public string? AppBundleId { get; set; }
 }
 
@@ -1121,6 +1164,11 @@ public class DeviceTokenRegistrationRequest
 public class DeviceTokenUnregistrationRequest
 {
     /// <summary>Per-server installation identifier to remove.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.InstallationIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.InstallationIdPattern,
+        ErrorMessage = "InstallationId must use canonical ASCII identifier syntax.")]
     public string InstallationId { get; set; } = string.Empty;
 }
 

@@ -22,6 +22,7 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
 
     private const string ProductionHost = "https://api.push.apple.com";
     private const string SandboxHost = "https://api.sandbox.push.apple.com";
+    private static readonly EventId JwtSignFailedEvent = new(70801, "NativePushJwtSignFailed");
 
     // Provider JWTs must be rotated ≤60m per Apple; we rotate at 50m for headroom.
     private static readonly TimeSpan JwtLifetime = TimeSpan.FromMinutes(50);
@@ -91,6 +92,12 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
     /// </summary>
     internal Func<CancellationToken, Task>? OnBeforeInvalidateWaitAsyncForTests { get; set; }
 
+    /// <summary>
+    /// Test-only factory used to prove that a replacement key is disposed when PEM import
+    /// fails. Production always uses <see cref="ECDsa.Create()"/>.
+    /// </summary>
+    internal Func<ECDsa> SigningKeyFactoryForTests { get; set; } = static () => ECDsa.Create();
+
     /// <inheritdoc />
     public string ModeName => "direct";
 
@@ -121,7 +128,15 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "[NativePush/direct] Failed to sign provider JWT for attentionItemId={AttentionItemId}.", envelope.AttentionItemId);
+            // File-system and PEM exceptions routinely embed the absolute key path or key
+            // material in Message/ToString. Never attach the exception to the log event and
+            // never include credential-bearing settings in structured state. A fixed category
+            // retains enough operational signal without disclosing the .p8 path, key ids,
+            // provider token, or PEM contents.
+            _logger.LogError(
+                JwtSignFailedEvent,
+                "[NativePush/direct] Provider JWT signing failed; category={FailureCategory}.",
+                ClassifySigningFailure(ex));
             return NativePushDispatchResult.Terminal("jwt_sign_failed");
         }
 
@@ -138,7 +153,15 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("bearer", jwt);
         request.Headers.TryAddWithoutValidation("apns-topic", bundleId);
-        request.Headers.TryAddWithoutValidation("apns-push-type", "alert");
+
+        // Hicks post-merge #1: a silent Resolved push (no user-visible alert)
+        // MUST advertise `apns-push-type: background` — APNs otherwise rejects
+        // priority 5 combined with a missing alert dict. Alert pushes retain
+        // the "alert" type. We select on Priority so the sender never
+        // second-guesses the dispatcher's intent.
+        request.Headers.TryAddWithoutValidation(
+            "apns-push-type",
+            envelope.Priority == NativePushPriority.Background ? "background" : "alert");
         request.Headers.TryAddWithoutValidation(
             "apns-priority",
             envelope.Priority == NativePushPriority.Background ? "5" : "10");
@@ -150,15 +173,11 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
                 unix.ToString(CultureInfo.InvariantCulture));
         }
 
-        // Hicks #1: no OperationCanceledException catch here. TaskCanceledException
-        // is an OperationCanceledException subclass — HttpClient uses it for both
-        // caller-token cancellation AND its own internal per-request timer. A
-        // previous version filtered on `cancellationToken.IsCancellationRequested`
-        // and mapped the internal-timer OCE into a Transient("timeout") result,
-        // which silently swallowed cancellation when the caller passed
-        // CancellationToken.None. Cancellation is a first-class control-flow
-        // signal, not a transient wire condition; letting every OCE propagate
-        // unchanged is the mandated behaviour.
+        // HttpClient.Timeout and caller/shutdown cancellation both surface as
+        // OperationCanceledException. The caller token is authoritative: when it
+        // is signaled, cancellation propagates unchanged. An OCE with an
+        // unsignaled caller token is the named client's internal timeout and is a
+        // transient provider failure eligible for dispatcher retry.
         try
         {
             using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
@@ -199,6 +218,14 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             }
 
             return NativePushDispatchResult.Terminal(apnsReason ?? $"http_{status}");
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                ex,
+                "[NativePush/direct] HTTP request timed out for attentionItemId={AttentionItemId}.",
+                envelope.AttentionItemId);
+            return NativePushDispatchResult.Transient("timeout");
         }
         catch (HttpRequestException ex)
         {
@@ -249,12 +276,22 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         // Wire shape: standard APS root + typed custom keys the mobile app reads to route
         // the tap / action to the correct in-app destination. Deep link is the fallback for
         // out-of-band launches; category drives which registered action buttons render.
-        var aps = new ApsRoot(
-            new ApsAlert(envelope.Title, envelope.Subtitle, envelope.Body),
-            envelope.Category,
-            envelope.ThreadId,
-            MutableContent: 1,
-            envelope.Priority == NativePushPriority.Background ? 1 : (int?)null);
+        //
+        // Hicks post-merge #1: a Background push (silent Resolved) MUST omit
+        // the alert dict entirely — the client SDK on iOS treats presence of
+        // `alert` on an apns-push-type=background push as a validation
+        // failure. We emit `content-available: 1` only so iOS delivers the
+        // payload to the app in the background and the client can silently
+        // dismiss its cached copy.
+        object aps = envelope.Priority == NativePushPriority.Background
+            ? new ApsBackground(ContentAvailable: 1)
+            : new ApsAlertRoot(
+                new ApsAlert(envelope.Title, envelope.Subtitle, envelope.Body),
+                Sound: "default",
+                Badge: 1,
+                envelope.Category,
+                envelope.ThreadId,
+                MutableContent: 1);
         var root = new ApsWireRoot(
             aps,
             envelope.AttentionItemId,
@@ -292,6 +329,17 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         {
             return null;
         }
+    }
+
+    private static string ClassifySigningFailure(Exception exception)
+    {
+        return exception switch
+        {
+            FileNotFoundException or DirectoryNotFoundException => "key_file_missing",
+            UnauthorizedAccessException or IOException => "key_file_unreadable",
+            CryptographicException or ArgumentException or FormatException => "key_material_invalid",
+            _ => "signing_failed",
+        };
     }
 
     private async Task<string> GetOrRefreshJwtAsync(NativePushApnsSettings apns, CancellationToken cancellationToken)
@@ -341,11 +389,20 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             ? apns.P8KeyPem!
             : File.ReadAllText(apns.P8KeyPath!);
 
-        ECDsa ecdsa = ECDsa.Create();
-        ecdsa.ImportFromPem(pem);
+        ECDsa? replacement = SigningKeyFactoryForTests();
+        try
+        {
+            replacement.ImportFromPem(pem);
 
-        _cachedSigningKey?.Dispose();
-        _cachedSigningKey = ecdsa;
+            ECDsa? previous = _cachedSigningKey;
+            _cachedSigningKey = replacement;
+            replacement = null;
+            previous?.Dispose();
+        }
+        finally
+        {
+            replacement?.Dispose();
+        }
     }
 
     private async Task InvalidateJwtCacheAsync(string failedJwt, CancellationToken cancellationToken)
@@ -393,15 +450,19 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
         [property: JsonPropertyName("subtitle")] string? Subtitle,
         [property: JsonPropertyName("body")] string? Body);
 
-    private sealed record ApsRoot(
+    private sealed record ApsAlertRoot(
         [property: JsonPropertyName("alert")] ApsAlert Alert,
+        [property: JsonPropertyName("sound")] string Sound,
+        [property: JsonPropertyName("badge")] int Badge,
         [property: JsonPropertyName("category")] string Category,
         [property: JsonPropertyName("thread-id")] string ThreadId,
-        [property: JsonPropertyName("mutable-content")] int MutableContent,
-        [property: JsonPropertyName("content-available")] int? ContentAvailable);
+        [property: JsonPropertyName("mutable-content")] int MutableContent);
+
+    private sealed record ApsBackground(
+        [property: JsonPropertyName("content-available")] int ContentAvailable);
 
     private sealed record ApsWireRoot(
-        [property: JsonPropertyName("aps")] ApsRoot Aps,
+        [property: JsonPropertyName("aps")] object Aps,
         [property: JsonPropertyName("attentionItemId")] string AttentionItemId,
         [property: JsonPropertyName("attentionKind")] string AttentionKind,
         [property: JsonPropertyName("changeKind")] string ChangeKind,
