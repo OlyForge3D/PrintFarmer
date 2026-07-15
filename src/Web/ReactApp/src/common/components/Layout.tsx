@@ -33,6 +33,7 @@ import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIc
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -404,6 +405,9 @@ export function Layout() {
 
   const availableNavigationItems = useMemo<SectionedNavigationItem[]>(() => {
     const isHiddenByCapabilities = (item: NavigationItem) => {
+      if (!hasResolvedQueryData(capabilities)) {
+        return item.requiresSlicingCapability || item.requiresModelFiles;
+      }
       if (item.requiresSlicingCapability && capabilities?.slicingEnabled === false) return true;
       if (item.requiresModelFiles && capabilities?.modelFilesEnabled === false) return true;
       return false;
