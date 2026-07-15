@@ -1399,6 +1399,106 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_UnrelatedSnapshots_StartSynchronousSenderWorkConcurrently()
+    {
+        Guid firstUserId = Guid.NewGuid();
+        Guid secondUserId = Guid.NewGuid();
+        AttentionItemDto firstItem = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto secondItem = BuildAttentionItem(AttentionKind.Offline);
+
+        string databaseName = Guid.NewGuid().ToString();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName)
+            .Options;
+        await using (var db = new AppDbContext(options))
+        {
+            db.NotificationPreferences.AddRange(
+            BuildPushPreferences(firstUserId),
+            BuildPushPreferences(secondUserId));
+            await db.SaveChangesAsync();
+        }
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveByUserAsync(firstUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([MakeToken(firstUserId, "first-installation")]);
+        tokens.Setup(r => r.GetActiveByUserAsync(secondUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([MakeToken(secondUserId, "second-installation")]);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(s => s.FindItemAsync(firstUserId, firstItem.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(firstItem);
+        attention.Setup(s => s.FindItemAsync(secondUserId, secondItem.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(secondItem);
+
+        var firstStartupEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStartupEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstStartup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecondStartup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, cancellationToken) =>
+            {
+                TaskCompletionSource entered = envelope.AttentionItemId == firstItem.Id
+                    ? firstStartupEntered
+                    : secondStartupEntered;
+                TaskCompletionSource release = envelope.AttentionItemId == firstItem.Id
+                    ? releaseFirstStartup
+                    : releaseSecondStartup;
+
+                entered.TrySetResult();
+                release.Task.Wait(cancellationToken);
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        var services = new ServiceCollection();
+        services.AddDbContext<AppDbContext>(builder => builder.UseInMemoryDatabase(databaseName));
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton<IAttentionService>(attention.Object);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            sender.Object,
+            new StaticOptionsMonitor(new NativePushSettings { Mode = NativePushMode.Direct }),
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+
+        Task firstDispatch = Task.Factory.StartNew(
+            () => sut.DispatchAsync(firstItem.Id, AttentionChangeKind.Created, firstUserId),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default).Unwrap();
+        Task? secondDispatch = null;
+        try
+        {
+            await firstStartupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            secondDispatch = Task.Factory.StartNew(
+                () => sut.DispatchAsync(secondItem.Id, AttentionChangeKind.Created, secondUserId),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Unwrap();
+            await secondStartupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            releaseFirstStartup.TrySetResult();
+            releaseSecondStartup.TrySetResult();
+        }
+
+        secondDispatch.Should().NotBeNull();
+        await Task.WhenAll(firstDispatch, secondDispatch!).WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
     public async Task DispatchAsync_RateLimit_ScopedPerKindNotPerUser()
     {
         // Hicks H2-v5-final regression: a noisy kind must not silence
