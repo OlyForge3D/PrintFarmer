@@ -25,6 +25,12 @@ export interface RadioGroupProps {
   direction?: 'horizontal' | 'vertical';
   /** Additional className for the container */
   className?: string;
+  /** Accessible name (via id reference). Required for screen-reader affordance on the radiogroup itself. */
+  'aria-labelledby'?: string;
+  /** Optional accessible description (via id reference). */
+  'aria-describedby'?: string;
+  /** Optional accessible name inline (use aria-labelledby when a visible label exists). */
+  'aria-label'?: string;
 }
 
 export const RadioGroup: React.FC<RadioGroupProps> = ({
@@ -36,6 +42,9 @@ export const RadioGroup: React.FC<RadioGroupProps> = ({
   invalid,
   direction = 'vertical',
   className,
+  'aria-labelledby': ariaLabelledBy,
+  'aria-describedby': ariaDescribedBy,
+  'aria-label': ariaLabel,
 }) => {
   return (
     <div
@@ -45,6 +54,9 @@ export const RadioGroup: React.FC<RadioGroupProps> = ({
         className
       )}
       role="radiogroup"
+      aria-labelledby={ariaLabelledBy}
+      aria-describedby={ariaDescribedBy}
+      aria-label={ariaLabel}
     >
       {options.map((option) => (
         <Radio
