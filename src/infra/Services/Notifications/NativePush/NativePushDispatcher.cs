@@ -270,6 +270,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
 
             item = null;
+
+            // #756: the alert generation this snapshot represents exhausted
+            // every device without a single successful delivery (all-transient
+            // outage, terminal failures, or invalidations). The client never
+            // received the alert this dismissal would clear, so treat the
+            // dismissal as a benign no-op rather than send a silent push for
+            // an alert that was never seen. Partial success (at least one
+            // device delivered) still emits the dismissal to every current
+            // device below, preserving per-recipient behavior.
+            if (!resolvedSnapshot!.HasSuccessfulDelivery)
+            {
+                _metrics.SkippedNeverDelivered.Add(1);
+                return;
+            }
         }
         else if (item is null)
         {
@@ -652,6 +666,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (result.Success)
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
+
+            // Mark the shared per-owner generation delivered BEFORE persisting
+            // the token outcome. activeSnapshot is null for the Resolved silent
+            // dismissal itself (nothing to mark), and non-null only for a
+            // Created/Updated alert send whose IsSnapshotCurrent check above
+            // already confirmed this instance is still the authoritative entry.
+            activeSnapshot?.MarkDelivered();
+
             await tokens.RecordSuccessAsync(
                 deviceToken.Id,
                 deviceToken.RegistrationVersion,
@@ -938,7 +960,24 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         Guid PrinterId,
         Guid? JobId,
         int? ToolheadIndex,
-        DateTime CapturedAtUtc);
+        DateTime CapturedAtUtc)
+    {
+        // Set once any device in this alert generation is attributed a
+        // successful delivery. Resolved consumes this same instance out of
+        // the dictionary, so the flag survives independent of ownership
+        // checks/removal timing (#756). A generation that never flips this
+        // (all-transient exhaustion, terminal failures, or invalidations
+        // across every device) never actually reached the client, so its
+        // resolution dismissal is skipped as a benign no-op rather than
+        // sent for an alert the device never saw.
+        private int _hasSuccessfulDelivery;
+
+        /// <summary>True once at least one device attempt for this alert generation succeeded.</summary>
+        public bool HasSuccessfulDelivery => Volatile.Read(ref _hasSuccessfulDelivery) != 0;
+
+        /// <summary>Marks this alert generation as having achieved at least one successful delivery.</summary>
+        public void MarkDelivered() => Interlocked.Exchange(ref _hasSuccessfulDelivery, 1);
+    }
 
     private bool ShouldEmit(string key, NativePushSettings settings, DateTime nowUtc)
     {

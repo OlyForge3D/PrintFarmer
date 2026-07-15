@@ -387,6 +387,160 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_AllTransientDeliveryFailureThenResolved_SkipsDismissalAsBenignNoOp()
+    {
+        // #756: every attempt for this recipient's alert generation exhausts
+        // as Transient — the device never actually received the Created
+        // alert. A later Resolved must treat the dismissal as a benign no-op
+        // rather than send a silent push clearing something never shown.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(BuildPushPreferences(userId));
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken deviceToken = MakeToken(userId, "always-transient-device");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([userId]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([deviceToken]);
+
+        var attention = new Mock<IAttentionService>();
+        int findCount = 0;
+        attention.Setup(service => service.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref findCount) == 1 ? item : null);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => captured.Add(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Transient("timeout"));
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 3,
+            },
+            new ImmediateTimeProvider(new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc)));
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        captured.Should().HaveCount(
+            3,
+            "MaxAttempts exhausts all 3 transient retries for the Created alert and no Resolved dismissal is ever sent");
+        captured.Should().OnlyContain(envelope => envelope.ChangeKind == AttentionChangeKind.Created);
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        tokens.Verify(repository => repository.RecordFailureAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        tokens.Verify(repository => repository.InvalidateAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MixedSuccessfulAndNeverDeliveredRecipients_ResolvedOnlyDismissesDeliveredRecipient()
+    {
+        // #756: per-recipient partial success must be preserved. ownerDelivered
+        // got a successful device delivery and is owed a dismissal;
+        // ownerNeverDelivered exhausts every attempt as Transient across its
+        // own device and must not receive a synthetic dismissal for an alert
+        // it never received. One owner's outcome must not affect the other's.
+        Guid ownerDelivered = Guid.NewGuid();
+        Guid ownerNeverDelivered = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.AddRange(
+            BuildPushPreferences(ownerDelivered),
+            BuildPushPreferences(ownerNeverDelivered));
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken deliveredToken = MakeToken(ownerDelivered, "delivered-device");
+        DeviceToken neverDeliveredToken = MakeToken(ownerNeverDelivered, "never-delivered-device");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([ownerDelivered, ownerNeverDelivered]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(ownerDelivered, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([deliveredToken]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(ownerNeverDelivered, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([neverDeliveredToken]);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        int deliveredReads = 0;
+        int neverDeliveredReads = 0;
+        attention.Setup(service => service.FindItemAsync(ownerDelivered, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref deliveredReads) == 1 ? item : null);
+        attention.Setup(service => service.FindItemAsync(ownerNeverDelivered, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref neverDeliveredReads) == 1 ? item : null);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                captured.Add(envelope);
+                return Task.FromResult(envelope.Token == neverDeliveredToken.Token
+                    ? NativePushDispatchResult.Transient("timeout")
+                    : NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 2,
+            },
+            new ImmediateTimeProvider(new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc)));
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+        captured.Clear();
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Resolved, targetUserId: null);
+
+        captured.Should().ContainSingle(
+            "only the recipient with at least one successful delivery is owed a dismissal");
+        NativePushEnvelope resolved = captured.Single();
+        resolved.ChangeKind.Should().Be(AttentionChangeKind.Resolved);
+        resolved.Token.Should().Be(deliveredToken.Token);
+    }
+
+    [Fact]
     public async Task DispatchAsync_PerKindPushOffButMasterOn_DoesNotCallSender()
     {
         // Bishop v6 hardening: EnablePushNotifications=true crossed with
@@ -1879,24 +2033,30 @@ public sealed class NativePushDispatcherTests
                     occurredAtUtc: updatedAt.AddSeconds(1))
                 .WaitAsync(TimeSpan.FromSeconds(10));
 
-            sent.Should().Equal(AttentionChangeKind.Updated, AttentionChangeKind.Resolved);
+            // #756: the only attempt so far for this generation returned
+            // Transient("timeout") and the pending retry that could still
+            // succeed is fenced by this same resolution consuming the
+            // snapshot below — this recipient has zero successful
+            // deliveries for this generation, so the dismissal is a benign
+            // no-op and must NOT be sent.
+            sent.Should().Equal(AttentionChangeKind.Updated);
 
             clock.ReleaseRetry();
             await updated.WaitAsync(TimeSpan.FromSeconds(10));
 
             sent.Should().Equal(
-                new[] { AttentionChangeKind.Updated, AttentionChangeKind.Resolved },
-                "the consumed snapshot makes the pending targeted retry obsolete");
+                new[] { AttentionChangeKind.Updated },
+                "the consumed snapshot makes the pending targeted retry obsolete and the never-delivered generation suppresses the dismissal");
             sender.Verify(value => value.SendAsync(
                     It.IsAny<NativePushEnvelope>(),
                     It.IsAny<CancellationToken>()),
-                Times.Exactly(2));
+                Times.Exactly(1));
             tokens.Verify(repository => repository.RecordSuccessAsync(
                     It.IsAny<Guid>(),
                     It.IsAny<long>(),
                     It.IsAny<DateTime>(),
                     It.IsAny<CancellationToken>()),
-                Times.Once);
+                Times.Never);
             tokens.Verify(repository => repository.RecordFailureAsync(
                     It.IsAny<Guid>(),
                     It.IsAny<long>(),
