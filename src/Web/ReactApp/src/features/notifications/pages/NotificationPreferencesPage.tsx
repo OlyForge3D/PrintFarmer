@@ -27,20 +27,6 @@ import {
 } from '@/features/notifications/operatorCategories';
 import { toast } from 'sonner';
 
-const DEFAULT_PREFERENCES: UpdateNotificationPreferencesRequest = {
-  enableEmailNotifications: true,
-  enablePushNotifications: true,
-  enableInAppNotifications: true,
-  enableTelegramNotifications: false,
-  notifyOnCompletion: true,
-  notifyOnFailure: true,
-  notifyOnStart: false,
-  notifyOnPause: true,
-  eventChannelPreferences: defaultEventChannelPreferences(),
-  frequency: NotificationFrequency.RealTime,
-  retentionDays: 30,
-};
-
 const FREQUENCY_OPTIONS = [
   { value: NotificationFrequency.RealTime, label: 'Real-time' },
   { value: NotificationFrequency.Hourly, label: 'Hourly digest' },
@@ -60,41 +46,30 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
 
-  const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest>(DEFAULT_PREFERENCES);
+  const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest | null>(null);
   const [serverSupportsOperatorCategories, setServerSupportsOperatorCategories] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
 
   // The capability probe explicitly resolves to `null` on legacy servers
-  // (endpoint 404). Any other unresolved state — still loading, paused
-  // (auth not ready), or a non-404 network/server error — must NOT be
-  // interpreted as legacy or the save path silently strips operator edits.
-  // `capabilitiesResolved` is the single source of truth for
-  // "safe to build a save payload". Requires `hasResolvedQueryData` too so
-  // a paused query (isFetching:false, data:undefined) can't slip past.
+  // (endpoint 404). Any other unresolved state — still loading, or a
+  // non-404 network/server error — must NOT be interpreted as legacy or the
+  // save path silently strips operator edits. `capabilitiesResolved` is
+  // the single source of truth for "safe to build a save payload".
   const capabilitiesResolved =
-    !isCapsLoading && capsError == null && hasResolvedQueryData(capabilities);
-
-  // The preferences query may be paused (auth not ready) — TanStack v5
-  // reports `isLoading: false` in that state while `preferences` is still
-  // `undefined`. Only a `hasResolvedQueryData` check reliably distinguishes
-  // "no data yet" (undefined) from the legitimate resolved-null case
-  // (queryFn returned null on a 404). See #766.
-  const preferencesResolved = hasResolvedQueryData(preferences);
+    hasResolvedQueryData(capabilities) && !isCapsLoading && capsError == null;
+  const capabilitiesPending =
+    !hasResolvedQueryData(capabilities) && capsError == null;
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
 
   useEffect(() => {
-    // Guard against paused/first-load undefined preferences: without this,
-    // hydratePreferences would receive `null` and treat the server as legacy
-    // before real data arrives, then overwrite the local form on the very
-    // next tick. See #766.
-    if (!preferencesResolved) return;
+    if (!hasResolvedQueryData(preferences)) return;
 
     const { form, serverSupportsOperatorCategories: supports } = hydratePreferences(
-      preferences ?? null,
+      preferences,
       capabilities ?? null,
     );
     // The banner-visibility flag must sync independently of form dirtiness
@@ -106,7 +81,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
     setFormState(withDerivedLegacyFlags(form));
     setIsDirty(false);
-  }, [preferences, capabilities, preferencesResolved]);
+  }, [preferences, capabilities]);
 
   // Per-row capability gate for the operator block. `serverSupportsOperatorCategories`
   // only tells us the server advertised AT LEAST ONE operator token — during a
@@ -128,8 +103,12 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     [],
   );
   const isAnyPushEnabled = useMemo(
-    () => hasAnyEnrolledPush(formState.eventChannelPreferences, visibleEventTypes, supportedEventTypes),
-    [formState.eventChannelPreferences, visibleEventTypes, supportedEventTypes],
+    () => hasAnyEnrolledPush(
+      formState?.eventChannelPreferences,
+      visibleEventTypes,
+      supportedEventTypes,
+    ),
+    [formState?.eventChannelPreferences, visibleEventTypes, supportedEventTypes],
   );
 
   const updateMatrixField = (
@@ -137,6 +116,11 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     key: 'inApp' | 'email' | 'push' | 'telegram',
     value: boolean,
   ) => {
+    if (formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
     const current = formState.eventChannelPreferences ?? defaultEventChannelPreferences();
     const nextMatrix = current.map(item => {
       if (item.eventType !== eventType) return item;
@@ -167,19 +151,17 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     (formState?.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
 
   const handleSave = async () => {
+    if (!hasResolvedQueryData(preferences) || formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
     // Refuse to build a save payload from unresolved capability state.
     // `buildSavePayload(request, undefined)` would treat the server as legacy
     // and permanently strip operator-row edits, reporting success to the
     // user — a silent data-loss bug. Guarded by `capabilitiesResolved`.
     if (!capabilitiesResolved) {
       toast.error('Still checking notification capabilities — please retry in a moment');
-      return;
-    }
-    // Refuse to save if preferences are still unresolved (paused first
-    // load): saving a synthetic default over the yet-unfetched authoritative
-    // preferences would silently overwrite the user's real settings. See #766.
-    if (!preferencesResolved) {
-      toast.error('Notification preferences are still loading');
       return;
     }
     try {
@@ -200,10 +182,6 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     }
   };
 
-  // Error must be checked before the loading gate: a failed preferences
-  // request leaves `preferences === undefined` (so `preferencesResolved`
-  // is false), which would otherwise pin the spinner forever instead of
-  // surfacing the failure. See #766.
   if (prefsError) {
     const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
     if (embedded) return errorContent;
@@ -214,10 +192,13 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     );
   }
 
-  // Loading also blocks on `!preferencesResolved` so a paused first-load
-  // query (auth not ready) does not fall through to the form with only
-  // synthetic defaults. See #766.
-  if (isPrefsLoading || isCapsLoading || !preferencesResolved) {
+  if (
+    isPrefsLoading ||
+    !hasResolvedQueryData(preferences) ||
+    isCapsLoading ||
+    capabilitiesPending ||
+    formState === null
+  ) {
     const loadingContent = (
       <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
         <Spinner size="lg" />

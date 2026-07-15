@@ -10,16 +10,24 @@ import type {
 /**
  * React-Query keys for the notification-preferences feature.
  *
- * The whole ['notifications'] prefix is treated as user-owned sensitive data
- * and is purged by common/auth/sensitiveQueryCache.ts on every identity
- * transition (#762/#765). We therefore do not need to fold auth identity
- * into these keys — the cache is cleared before the new identity can read
- * anything, including a previously cached capability probe.
+ * The capabilities key incorporates a coarse-grained server/auth identity so
+ * a stale cached probe from a previous session/server cannot be reused on a
+ * downgraded server (which would let the client PUT operator tokens the new
+ * server rejects with 400). We deliberately hash only the presence of an
+ * auth token, not its value, to avoid pinning the token into cache keys.
  */
+function getAuthCacheIdentity(): string {
+  try {
+    return localStorage.getItem('auth-token') ? 'authed' : 'anon';
+  } catch {
+    return 'anon';
+  }
+}
+
 const KEYS = {
   all: ['notifications'] as const,
   preferences: () => [...KEYS.all, 'preferences'] as const,
-  capabilities: () => [...KEYS.all, 'capabilities'] as const,
+  capabilities: () => [...KEYS.all, 'capabilities', getAuthCacheIdentity()] as const,
 };
 
 function isApiError(error: unknown): error is ApiError {
@@ -57,8 +65,7 @@ export function useNotificationPreferences() {
  * used elsewhere: capabilities is a safety gate for wire compatibility, so
  * detecting a server upgrade/downgrade quickly is more important than
  * reducing probe traffic. Mutations invalidate the key on success, and the
- * cache is naturally purged on auth transitions by
- * common/auth/sensitiveQueryCache.ts (['notifications'] prefix).
+ * cache is naturally re-keyed on auth transitions via `getAuthCacheIdentity`.
  */
 export function useNotificationCapabilities() {
   return useQuery<NotificationCapabilitiesResponse | null>({
