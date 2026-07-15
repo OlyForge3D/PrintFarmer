@@ -21,8 +21,10 @@ import { queryClient } from '@/services/queryClient';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useNotificationPreferences } from '@/features/notifications/hooks/useNotificationPreferences';
+import { useUserSettings, useUpdateUserSettings } from '@/features/settings/hooks/useUserSettings';
 import { NotificationFrequency } from '@/types/api';
 import type { AuthenticationResult, NotificationPreferencesDto, UserDto } from '@/types/api';
+import type { UserSettingsResponse } from '@/features/settings/types';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -32,6 +34,8 @@ vi.mock('@/services/api', () => ({
     register: vi.fn(),
     getNotificationPreferences: vi.fn(),
     updateNotificationPreferences: vi.fn(),
+    get: vi.fn(),
+    put: vi.fn(),
   },
 }));
 
@@ -86,6 +90,29 @@ function PreferencesConsumer() {
   );
 }
 
+function settingsFor(userId: string): UserSettingsResponse {
+  return {
+    userId,
+    theme: 'dark',
+    locale: 'en',
+    itemsPerPage: 25,
+    defaultSlicerPreset: null,
+    printablesUsername: null,
+    rowVersion: 'v1',
+  };
+}
+
+function SettingsConsumer() {
+  const { data } = useUserSettings();
+  const mutation = useUpdateUserSettings();
+  return (
+    <div>
+      {data && <span data-testid="settings-owner">{data.userId}</span>}
+      <button onClick={() => mutation.mutate({ theme: 'light' })}>save-settings</button>
+    </div>
+  );
+}
+
 function Harness() {
   const { isAuthenticated, user, login, logout } = useAuth();
   return (
@@ -95,6 +122,7 @@ function Harness() {
       <button onClick={() => logout()}>logout</button>
       {isAuthenticated && <span data-testid="current-user">{user?.id}</span>}
       {isAuthenticated && <PreferencesConsumer />}
+      {isAuthenticated && <SettingsConsumer />}
     </div>
   );
 }
@@ -125,6 +153,11 @@ describe('Identity transition cache isolation (#762)', () => {
       }
       return { success: false, error: 'invalid credentials' };
     });
+    // Default settings mocks so tests that don't care about
+    // useUserSettings/useUpdateUserSettings (mounted unconditionally by
+    // <SettingsConsumer /> whenever authenticated) still resolve cleanly.
+    vi.mocked(apiClient.get).mockResolvedValue({ data: settingsFor('unset') } as never);
+    vi.mocked(apiClient.put).mockResolvedValue({ data: settingsFor('unset') } as never);
   });
 
   it('never exposes identity A cached preferences to identity B after logout/login', async () => {
@@ -224,5 +257,43 @@ describe('Identity transition cache isolation (#762)', () => {
 
     expect(queryClient.getQueryData(['printers'])).toEqual([{ id: 'printer-1' }]);
     expect(queryClient.getQueryData(['settings', 'farm'])).toEqual({ name: 'My Farm' });
+  });
+
+  it('discards a dirty-form settings save started by A if it resolves after A logs out, instead of repopulating the shared cache', async () => {
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
+    vi.mocked(apiClient.get).mockResolvedValue({ data: settingsFor('user-a') } as never);
+
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('settings-owner')).toHaveTextContent('user-a'));
+
+    // A edits the form and clicks save, but the PUT response is slow — hold
+    // it open so we can log out before it resolves ("dirty-form timing").
+    let resolveSave: (value: { data: UserSettingsResponse }) => void = () => {};
+    vi.mocked(apiClient.put).mockImplementation(
+      () => new Promise((resolve) => { resolveSave = resolve; }),
+    );
+    await act(async () => {
+      screen.getByRole('button', { name: 'save-settings' }).click();
+    });
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'logout' }).click();
+    });
+    await waitFor(() => expect(screen.queryByTestId('current-user')).toBeNull());
+    expect(queryClient.getQueryData(['settings', 'user'])).toBeUndefined();
+
+    // A's save now resolves, after logout has already purged the cache and
+    // bumped the auth epoch. The mutation's onSuccess must detect the
+    // identity transition and discard the response rather than writing A's
+    // data back into the shared ['settings', 'user'] cache key.
+    await act(async () => {
+      resolveSave({ data: settingsFor('user-a') });
+    });
+
+    expect(queryClient.getQueryData(['settings', 'user'])).toBeUndefined();
   });
 });

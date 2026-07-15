@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
+import { getAuthEpoch } from '@/common/auth/authEpoch';
 
 describe('clearSensitiveUserQueries', () => {
   let queryClient: QueryClient;
@@ -18,6 +19,10 @@ describe('clearSensitiveUserQueries', () => {
     queryClient.setQueryData(['settings', 'user'], { theme: 'dark' });
     queryClient.setQueryData(['passkeys'], [{ id: 'pk-1' }]);
     queryClient.setQueryData(['apiKeys', 'user-a'], [{ id: 'key-1' }]);
+    queryClient.setQueryData(['printables', 'oauth-status'], { connected: true });
+    queryClient.setQueryData(['printables', 'liked-models'], [{ id: 'model-1' }]);
+    queryClient.setQueryData(['printables', 'download-history'], [{ id: 'dl-1' }]);
+    queryClient.setQueryData(['slice-jobs'], [{ id: 'job-1' }]);
 
     await clearSensitiveUserQueries(queryClient);
 
@@ -27,6 +32,10 @@ describe('clearSensitiveUserQueries', () => {
     expect(queryClient.getQueryData(['settings', 'user'])).toBeUndefined();
     expect(queryClient.getQueryData(['passkeys'])).toBeUndefined();
     expect(queryClient.getQueryData(['apiKeys', 'user-a'])).toBeUndefined();
+    expect(queryClient.getQueryData(['printables', 'oauth-status'])).toBeUndefined();
+    expect(queryClient.getQueryData(['printables', 'liked-models'])).toBeUndefined();
+    expect(queryClient.getQueryData(['printables', 'download-history'])).toBeUndefined();
+    expect(queryClient.getQueryData(['slice-jobs'])).toBeUndefined();
   });
 
   it('does not clear unrelated public/shared caches', async () => {
@@ -66,5 +75,15 @@ describe('clearSensitiveUserQueries', () => {
 
     // The stale response must not have repopulated the cache.
     expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined();
+  });
+
+  it('bumps the shared auth epoch on every call', async () => {
+    const before = getAuthEpoch();
+
+    await clearSensitiveUserQueries(queryClient);
+    expect(getAuthEpoch()).toBe(before + 1);
+
+    await clearSensitiveUserQueries(queryClient);
+    expect(getAuthEpoch()).toBe(before + 2);
   });
 });
