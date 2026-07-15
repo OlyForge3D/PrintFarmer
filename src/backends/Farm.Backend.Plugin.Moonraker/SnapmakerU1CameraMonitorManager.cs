@@ -69,6 +69,10 @@ public sealed class SnapmakerU1CameraMonitorManager(
     {
         CancellationTokenSource? oldCts = state.IdleStopCts;
         state.IdleStopCts = null;
+
+        // Cancel before Dispose so any in-flight Task.Delay observes cancellation
+        // and the stale timer does not issue camera.stop_monitor at the old deadline.
+        oldCts?.Cancel();
         oldCts?.Dispose();
 
         CancellationTokenSource cts = new();
@@ -133,6 +137,10 @@ public sealed class SnapmakerU1CameraMonitorManager(
         state.StopRetryCount++;
         CancellationTokenSource? oldCts = state.IdleStopCts;
         state.IdleStopCts = null;
+
+        // Cancel before Dispose to prevent the superseded retry timer from issuing
+        // a stale camera.stop_monitor at the old backoff deadline.
+        oldCts?.Cancel();
         oldCts?.Dispose();
 
         CancellationTokenSource cts = new();
