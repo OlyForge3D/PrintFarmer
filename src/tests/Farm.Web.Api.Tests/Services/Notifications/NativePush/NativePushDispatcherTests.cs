@@ -4633,6 +4633,399 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_ResolutionRetryAfterCancelDuringSettlementWait_AdmitsAndDismissesOnLateS1Success()
+    {
+        // #755 Hicks (lifecycle-admission variant): a version-blind
+        // AttentionLifecycle participant count rejects an exact-latest
+        // resolution retry while an older, still-pending generation keeps
+        // the total > 0. Deterministic interleaving:
+        //   * S1 (targeted Created v1) genuinely starts and remains
+        //     pending in transport.
+        //   * R2 (global Resolved v2) admits, captures S1's shared
+        //     AttentionDeliveryLineage under the lifecycle lock, then
+        //     enters WaitForPendingTransportsAsync outside every lock.
+        //   * R2's caller cancels while it is still awaiting settlement.
+        //     R2 releases only its OWN v2 lease on the lifecycle; S1's
+        //     v1 lease remains active.
+        //   * The exact R2 retry (same v2) MUST admit and capture S1's
+        //     lineage again — the version-blind design rejected this
+        //     because `_participants != 0` (S1 still there) and the
+        //     dismissal never fired even after S1 succeeded.
+        //   * S1 succeeds late. `HasSuccessfulDelivery` flips true on
+        //     the shared lineage. R2 retry observes it via its own
+        //     capture and fires exactly one dismissal.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var firstTransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstTransport = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            int callIndex = Interlocked.Increment(ref sendCount);
+            sent.Enqueue(envelope);
+            if (callIndex == 1)
+            {
+                // S1: pauses so its attempt stays pending on the shared
+                // AttentionDeliveryLineage while R2 captures, cancels,
+                // and retries. This is the older-generation participant
+                // that used to keep the lifecycle's participant count
+                // > 0 and reject the exact R2 retry.
+                firstTransportStarted.TrySetResult(envelope);
+                return await releaseFirstTransport.Task.WaitAsync(cancellationToken);
+            }
+
+            // R2 retry's dismissal, after S1's late success flipped
+            // HasSuccessfulDelivery on the captured lineage.
+            return NativePushDispatchResult.Delivered();
+        });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+
+        int settlementWaitCount = 0;
+        var firstSettlementWait = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var retrySettlementWait = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        sut.OnResolutionSettlementWaitStartedForTests = () =>
+        {
+            if (Interlocked.Increment(ref settlementWaitCount) == 1)
+            {
+                firstSettlementWait.TrySetResult();
+            }
+            else
+            {
+                retrySettlementWait.TrySetResult();
+            }
+        };
+
+        DateTime createdAt = new(2026, 7, 15, 4, 0, 0, DateTimeKind.Utc);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+
+        // S1: targeted Created (v1). Enters transport and pauses.
+        Task s1 = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await firstTransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // R2 first: global Resolved (v2). Different dispatch lane than
+        // S1, so it does not queue on S1's Gate; it fences S1's
+        // lifecycle synchronously, captures the pending lineage, then
+        // parks in WaitForPendingTransportsAsync where the test seam
+        // fires — so we are DEFINITELY still holding the v2 lifecycle
+        // lease when the cancellation lands.
+        using var firstCts = new CancellationTokenSource();
+        Task r2First = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt,
+            cancellationToken: firstCts.Token);
+        await firstSettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        firstCts.Cancel();
+        Func<Task> awaitCancelledFirst = () => r2First;
+        await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
+
+        // R2 retry (same v2, global). On the buggy version-blind design
+        // this returns silently (Stale) because S1's v1 still counts
+        // against the shared lifecycle. With version-scoped tracking it
+        // MUST admit, capture the SAME lineage instance again, and
+        // reach a second settlement wait.
+        Task r2Retry = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+        await retrySettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        r2Retry.IsCompleted.Should().BeFalse(
+            "the exact-version retry must be admitted and waiting for S1's still-pending transport");
+
+        // Release S1 as a late success. The retry's capture holds the
+        // SAME lineage instance, so MarkDelivered on S1 flips
+        // HasSuccessfulDelivery for the retry and the dismissal fires.
+        releaseFirstTransport.TrySetResult(NativePushDispatchResult.Delivered());
+        await Task.WhenAll(s1, r2Retry).WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+            AttentionChangeKind.Created,
+            AttentionChangeKind.Resolved);
+        sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Resolved)
+            .Should().Be(1,
+                "S1's late success must be observed exactly once by the admitted R2 retry");
+        Volatile.Read(ref settlementWaitCount).Should().Be(2,
+            "both R2 first and R2 retry must actually enter WaitForPendingTransports — under the version-blind design the retry is rejected before it can capture");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResolutionRetryAfterCancelDuringSettlementWait_LateS1FailureSkipsDismissalWithoutFalseSuccess()
+    {
+        // Complement of the "late S1 success" variant above: the retry
+        // must still be admitted and MUST observe S1's LATE FAILURE
+        // across the shared lineage, and MUST NOT fire a false
+        // dismissal. Proves the version-scoped fix does not paper over
+        // the "no successful delivery" branch when it enables the retry
+        // to admit.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var firstTransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstTransport = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            int callIndex = Interlocked.Increment(ref sendCount);
+            sent.Enqueue(envelope);
+            if (callIndex == 1)
+            {
+                firstTransportStarted.TrySetResult(envelope);
+                return await releaseFirstTransport.Task.WaitAsync(cancellationToken);
+            }
+
+            return NativePushDispatchResult.Delivered();
+        });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+
+        int settlementWaitCount = 0;
+        var firstSettlementWait = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var retrySettlementWait = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        sut.OnResolutionSettlementWaitStartedForTests = () =>
+        {
+            if (Interlocked.Increment(ref settlementWaitCount) == 1)
+            {
+                firstSettlementWait.TrySetResult();
+            }
+            else
+            {
+                retrySettlementWait.TrySetResult();
+            }
+        };
+
+        DateTime createdAt = new(2026, 7, 15, 4, 5, 0, DateTimeKind.Utc);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+
+        Task s1 = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await firstTransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        using var firstCts = new CancellationTokenSource();
+        Task r2First = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt,
+            cancellationToken: firstCts.Token);
+        await firstSettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        firstCts.Cancel();
+        Func<Task> awaitCancelledFirst = () => r2First;
+        await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
+
+        Task r2Retry = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+        await retrySettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        r2Retry.IsCompleted.Should().BeFalse(
+            "the exact-version retry must be admitted and waiting for S1");
+
+        // Release S1 with a LATE failure — the shared lineage keeps
+        // HasSuccessfulDelivery = false. The retry MUST benign-skip
+        // the dismissal instead of firing a phantom Resolved envelope.
+        releaseFirstTransport.TrySetResult(NativePushDispatchResult.Transient("provider_unavailable"));
+        await Task.WhenAll(s1, r2Retry).WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+            AttentionChangeKind.Created);
+        sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Resolved)
+            .Should().Be(0,
+                "the shared lineage never delivered, so the admitted retry must not fire a false dismissal");
+        Volatile.Read(ref settlementWaitCount).Should().Be(2,
+            "the retry must still admit and enter WaitForPendingTransports — proving the no-false-success outcome is not just the retry being silently rejected");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_TargetedDispatchLaneExactRetryAfterCancelWhileQueuedBehindOlderPending_IsAdmittedAndDelivered()
+    {
+        // #755 Hicks (dispatch-lane variant of the same version-blind
+        // bug at the AttentionDispatchLane admission around line 1510):
+        //   * S1 targeted Created (v1) acquires the lane's Gate and
+        //     pauses in transport.
+        //   * R2 targeted Updated (v2 > v1) admits at the SAME lane
+        //     (its higher version passes the ordering check), then
+        //     blocks queued behind S1 on the Gate. TryObserveDispatch
+        //     runs synchronously before the first await in
+        //     DispatchAsync, so v2 is committed to the lane's active
+        //     set before the caller sees the returned Task.
+        //   * R2's caller cancels while queued. Gate.WaitAsync throws
+        //     OperationCanceledException; the finally releases only
+        //     R2's own v2 lease from the lane; S1's v1 remains active.
+        //   * The exact R2 retry (same v2) MUST admit at the same lane
+        //     — the version-blind design rejected this because the
+        //     lane's `_participants != 0` (S1 still counts). Fixed
+        //     design admits because `_activeVersions.Contains(v2)` is
+        //     false after R2 first released only its own v2 slot.
+        //   * S1 completes, Gate is released, R2 retry acquires it and
+        //     delivers its own generation to the sender.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var s1TransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseS1 = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            int callIndex = Interlocked.Increment(ref sendCount);
+            sent.Enqueue(envelope);
+            if (callIndex == 1)
+            {
+                s1TransportStarted.TrySetResult(envelope);
+                return await releaseS1.Task.WaitAsync(cancellationToken);
+            }
+
+            return NativePushDispatchResult.Delivered();
+        });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+
+        DateTime createdAt = new(2026, 7, 15, 4, 10, 0, DateTimeKind.Utc);
+        DateTime updatedAt = createdAt.AddSeconds(1);
+
+        // S1: targeted Created (v1). Holds the lane's Gate + pauses.
+        Task s1 = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await s1TransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // R2 first (targeted Updated v2) on the SAME lane. The lane
+        // admission is synchronous — TryObserveDispatch runs before
+        // the first await in DispatchAsync — so v2 is committed to the
+        // lane's _activeVersions before the caller sees the returned
+        // Task. The Task then blocks on the Gate (S1 holds it).
+        using var firstCts = new CancellationTokenSource();
+        Task r2First = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Updated,
+            userId,
+            occurredAtUtc: updatedAt,
+            cancellationToken: firstCts.Token);
+
+        firstCts.Cancel();
+        Func<Task> awaitCancelledFirst = () => r2First;
+        await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
+
+        // R2 retry (targeted Updated v2). On the buggy version-blind
+        // dispatch-lane design this returns silently because
+        // `_participants != 0` (S1's v1 is still there). Fixed design
+        // admits because `_activeVersions.Contains(_latest=v2)` is
+        // false after R2 first released only its own v2 lease. The
+        // retry then queues on the Gate behind S1.
+        Task r2Retry = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Updated,
+            userId,
+            occurredAtUtc: updatedAt);
+
+        // TryObserveDispatch is synchronous, so by the time
+        // sut.DispatchAsync returns the Task has either been rejected
+        // at admission (RanToCompletion — the buggy path) or admitted
+        // and parked on Gate.WaitAsync (WaitingForActivation — the
+        // fixed path). No race window: an admitted Task cannot
+        // advance past the Gate because S1 still holds it.
+        r2Retry.IsCompleted.Should().BeFalse(
+            "the exact-version retry must have been admitted at the dispatch lane and queued on the gate behind S1");
+
+        releaseS1.TrySetResult(NativePushDispatchResult.Delivered());
+        await Task.WhenAll(s1, r2Retry).WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+            AttentionChangeKind.Created,
+            AttentionChangeKind.Updated);
+        sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Updated)
+            .Should().Be(1,
+                "the admitted retry must run its own generation exactly once");
+    }
+
+    [Fact]
     public async Task DispatchAsync_CancellationBeforeTransportStart_RollsBackDedupeRateAndAttemptMetricForExactRetry()
     {
         Guid userId = Guid.NewGuid();

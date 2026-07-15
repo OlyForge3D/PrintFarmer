@@ -172,7 +172,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 lane.Gate.Release();
             }
 
-            lane.Complete();
+            lane.Complete(version);
         }
     }
 
@@ -528,7 +528,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
             else
             {
-                lifecycle.Complete();
+                lifecycle.Complete(version);
             }
         }
     }
@@ -847,6 +847,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 participants.Add(new GlobalResolvedParticipant(
                     tracked.UserId,
                     tracked.Lifecycle,
+                    version,
                     resolutionCapture));
             }
             else if (result == AttentionLifecycleObserveResult.Retired)
@@ -1487,9 +1488,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private sealed class AttentionDispatchLane
     {
         private readonly object _sync = new();
+
+        // Active participants tracked per accepted version so a still-pending
+        // older-version participant cannot block an equal-latest retry whose
+        // own earlier participant already released (#755 Hicks). Retire and
+        // Gate ordering continue to use the sum via _totalParticipants so a
+        // lane cannot be pruned while any generation is still in flight.
+        // A given (version) can be re-observed only after its participant
+        // has completed (equal-version admission requires the current-version
+        // slot to be empty), so each version key is either absent or exactly
+        // one — a HashSet-style membership check is sufficient.
+        private readonly HashSet<AttentionDispatchVersion> _activeVersions = [];
         private AttentionDispatchVersion _latest;
         private DateTime _lastObservedAtUtc;
-        private int _participants;
+        private int _totalParticipants;
         private bool _hasVersion;
         private bool _retired;
 
@@ -1507,7 +1519,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 }
 
                 int versionOrder = _hasVersion ? version.CompareTo(_latest) : 1;
-                if (versionOrder < 0 || (versionOrder == 0 && _participants != 0))
+                if (versionOrder < 0
+                    || (versionOrder == 0 && _activeVersions.Contains(_latest)))
                 {
                     return AttentionDispatchObserveResult.Stale;
                 }
@@ -1519,7 +1532,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                 _lastObservedAtUtc = observedAtUtc;
                 _hasVersion = true;
-                _participants++;
+                _ = _activeVersions.Add(version);
+                _totalParticipants++;
                 return AttentionDispatchObserveResult.Accepted;
             }
         }
@@ -1532,11 +1546,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        public void Complete()
+        public void Complete(AttentionDispatchVersion version)
         {
             lock (_sync)
             {
-                _participants--;
+                if (_activeVersions.Remove(version))
+                {
+                    _totalParticipants--;
+                }
             }
         }
 
@@ -1544,7 +1561,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             lock (_sync)
             {
-                if (_retired || _participants != 0 || _lastObservedAtUtc >= cutoffUtc)
+                if (_retired || _totalParticipants != 0 || _lastObservedAtUtc >= cutoffUtc)
                 {
                     return false;
                 }
@@ -1576,6 +1593,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private sealed class GlobalResolvedParticipant(
         Guid userId,
         AttentionLifecycle lifecycle,
+        AttentionDispatchVersion version,
         ResolutionCapture? capture)
     {
         private int _completed;
@@ -1590,7 +1608,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             if (Interlocked.Exchange(ref _completed, 1) == 0)
             {
-                Lifecycle.Complete();
+                // Release the version-specific lease that
+                // FenceTrackedLifecyclesForGlobalResolution acquired via
+                // TryObserve. Passing the resolution version keeps a still-
+                // pending older-generation participant from blocking an
+                // equal-latest retry after this resolution releases (#755).
+                Lifecycle.Complete(version);
             }
         }
     }
@@ -1870,7 +1893,19 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // truly-committed resolution's consumed one.
         private AttentionDeliveryLineage? _lineage;
         private DateTime _lastObservedAtUtc;
-        private int _participants;
+
+        // Active participants tracked per accepted version so a still-pending
+        // older-version participant cannot block an equal-latest retry whose
+        // own earlier participant already released (#755 Hicks). Retire and
+        // pruning continue to use the sum via _totalParticipants so a
+        // lifecycle cannot be pruned while any generation is still in flight.
+        // A given (version) can be re-observed only after its participant
+        // has completed (equal-version admission requires _latestCommitted to
+        // be false AND the current-version slot to be empty), so each version
+        // key is either absent or exactly one — a HashSet-style membership
+        // check is sufficient.
+        private readonly HashSet<AttentionDispatchVersion> _activeVersions = [];
+        private int _totalParticipants;
         private bool _hasVersion;
         private bool _latestCommitted;
         private bool _retired;
@@ -1892,7 +1927,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                 int versionOrder = _hasVersion ? version.CompareTo(_latest) : 1;
                 if (versionOrder < 0
-                    || (versionOrder == 0 && (_latestCommitted || _participants != 0)))
+                    || (versionOrder == 0
+                        && (_latestCommitted || _activeVersions.Contains(_latest))))
                 {
                     return AttentionLifecycleObserveResult.Stale;
                 }
@@ -1905,7 +1941,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                 _lastObservedAtUtc = observedAtUtc;
                 _hasVersion = true;
-                _participants++;
+                _ = _activeVersions.Add(version);
+                _totalParticipants++;
                 if (changeKind == AttentionChangeKind.Resolved && _lineage is AttentionDeliveryLineage activeLineage)
                 {
                     // Take a stable, point-in-time read of the active
@@ -2202,11 +2239,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        public void Complete()
+        public void Complete(AttentionDispatchVersion version)
         {
             lock (_sync)
             {
-                _participants--;
+                if (_activeVersions.Remove(version))
+                {
+                    _totalParticipants--;
+                }
             }
         }
 
@@ -2215,7 +2255,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             lock (_sync)
             {
                 if (_retired
-                    || _participants != 0
+                    || _totalParticipants != 0
                     || _lastObservedAtUtc >= cutoffUtc
                     || (_snapshot is not null && _snapshot.CapturedAtUtc >= cutoffUtc))
                 {
