@@ -2750,6 +2750,476 @@ public sealed class NativePushDispatcherTests
         captured[2].AttentionItemId.Should().Be(initial.Id);
     }
 
+    [Fact]
+    public async Task DispatchAsync_MultiDeviceSyncSenderExceptionForEveryDeviceOnFirstAttempt_ContinuesToSiblingsAndAllowsSameVersionRecoveryForEveryDevice()
+    {
+        // #755 Kane cycle 3 deterministic coverage — multi-device sync throw.
+        //
+        // When the sender throws SYNCHRONOUSLY before transport truly starts
+        // (i.e., before any awaitable has begun), the failure is a
+        // pre-transport per-device event. The dispatcher must:
+        //   (a) continue to sibling devices in the same fan-out; and
+        //   (b) leave every synchronously-failed device eligible for
+        //       exact-version recovery via a subsequent DispatchAsync at
+        //       the same version.
+        //
+        // On the rejected candidate, the outer per-owner device loop bails
+        // as soon as SendAndApplyForDeviceAsync returns DispatchStopped —
+        // which the IsCurrent check produces after a sync-throw because no
+        // snapshot was committed. Sibling B is therefore never attempted.
+        // A subsequent same-version dispatch is fenced once any earlier
+        // device did commit the snapshot. The invariant proved here is that
+        // BOTH devices must be reachable on the fan-out and BOTH must retry
+        // when their prior attempt never truly began transport.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken deviceA = MakeToken(userId, "kane-multi-device-a");
+        DeviceToken deviceB = MakeToken(userId, "kane-multi-device-b");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid> { userId });
+        tokens.Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { deviceA, deviceB });
+        var successWrites = new ConcurrentBag<Guid>();
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, long, DateTime, CancellationToken>((id, _, _, _) => successWrites.Add(id))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var attemptedDevices = new ConcurrentQueue<Guid>();
+        var perDeviceCounts = new ConcurrentDictionary<Guid, int>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
+                attemptedDevices.Enqueue(tokenId);
+                int attempt = perDeviceCounts.AddOrUpdate(tokenId, 1, (_, prev) => prev + 1);
+                if (attempt == 1)
+                {
+                    // Synchronous throw BEFORE any awaitable transport work
+                    // has started. Simulates typed-transport guard rejection,
+                    // HttpClient factory construction failure, or any
+                    // pre-await invariant violation inside the sender.
+                    throw new InvalidOperationException(
+                        $"kane #755 cycle 3: simulated synchronous sender failure before transport (device={tokenId})");
+                }
+
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        DateTime occurredAt = new(2026, 7, 14, 22, 30, 0, DateTimeKind.Utc);
+
+        // Dispatch #1 at v1 — the sender throws synchronously for the first
+        // device it is invoked with. Sibling continuation invariant: the
+        // second device must ALSO be attempted in the same fan-out.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+        Guid[] firstDispatchAttempts = attemptedDevices.ToArray();
+        firstDispatchAttempts.Should().BeEquivalentTo(
+            new[] { deviceA.Id, deviceB.Id },
+            "the sender's synchronous throw for device A must be isolated at the per-device boundary; device B must still be attempted in the SAME fan-out (sibling continuation)");
+
+        // Dispatch #2 at the SAME v1 — exact-version recovery invariant.
+        // Because NEITHER device truly started transport on the first
+        // dispatch (their sync throws were rolled back inside TryBeginSend),
+        // no per-device lifecycle commit may fence the retry. Every device
+        // must retry at the same version and deliver on this attempt.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+        Guid[] allAttempts = attemptedDevices.ToArray();
+        allAttempts.Should().HaveCount(
+            4,
+            "the exact-version retry must invoke the sender a second time for BOTH devices — the first attempt's sync throw never truly started transport, so no lifecycle commit may fence the retry for either device");
+        perDeviceCounts[deviceA.Id].Should().Be(2, "device A: 1 sync throw + 1 delivered retry");
+        perDeviceCounts[deviceB.Id].Should().Be(2, "device B: 1 sync throw + 1 delivered retry");
+
+        // Every retried device must persist its success.
+        successWrites.Should().BeEquivalentTo(new[] { deviceA.Id, deviceB.Id });
+        tokens.Verify(r => r.RecordFailureAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a synchronous pre-transport throw is never evidence against a token's health");
+        tokens.Verify(r => r.InvalidateAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResolvedFullyCompletesBeforeNewerCreatedReservation_NewerCreatedEmitsUnderAtomicResetInterleavingA()
+    {
+        // #755 Kane cycle 3 deterministic coverage — dedupe-reset race
+        // interleaving (a): "Resolution completes BEFORE the newer same-kind
+        // reservation is established."
+        //
+        // Sequential awaits establish observable ordering without timing
+        // sleeps: each DispatchAsync is fully complete (including transport,
+        // result persistence, and lifecycle Complete) before the next
+        // DispatchAsync begins. That ordering is what "resolution completes
+        // before" means — Resolved's TryObserve has fired the atomic dedupe
+        // reset AND its silent-dismissal transport is fully done before the
+        // newer Created enters TryObserveLifecycle.
+        //
+        // Invariant: a delivered same-kind generation's versionless dedupe
+        // entry cannot suppress a legitimate newer occurrence when
+        // Resolution has already cleared it atomically under the lifecycle
+        // sync lock. This complements the existing "resolved-blocked"
+        // atomicity test by exercising the fully-completed path.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto initial = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto recurrence = initial with
+        {
+            PrinterId = Guid.NewGuid(),
+            PrinterName = "Kane recurrence printer",
+        };
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        int lookupCount = 0;
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                initial.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                int call = Interlocked.Increment(ref lookupCount);
+                return call switch
+                {
+                    1 => initial,                    // v1 Created
+                    2 => null,                       // v2 Resolved: source dropped item
+                    _ => recurrence,                 // v3 Created (newer): fresh occurrence
+                };
+            });
+
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => sent.Enqueue(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Relay,
+                DedupeWindow = TimeSpan.FromMinutes(10),
+                RateLimitPerUser = 50,
+                RateLimitWindow = TimeSpan.FromMinutes(10),
+            });
+        DateTime t1 = new(2026, 7, 14, 22, 35, 0, DateTimeKind.Utc);
+
+        // Step 1: v1 Created at t1. Sequential await ensures v1's entire
+        // dispatch (including sender transport and lifecycle Complete) is
+        // finished before the next line. A versionless (user, item, Created)
+        // dedupe entry is committed for v1 with expiry (t1 + DedupeWindow).
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1);
+
+        // Step 2: v2 Resolved at t2 > t1. Sequential await ensures v2 is
+        // fully complete. The invariant "Resolution completes" is satisfied
+        // by this await returning. Inside v2's dispatch:
+        //   - TryObserveLifecycle fires ResetActiveLifecycleDedupe under the
+        //     lifecycle sync lock, atomically clearing (user, item, Created).
+        //   - resolvedSnapshot is the v1 activeSnapshot, so a silent
+        //     dismissal is transported and delivered.
+        //   - Lifecycle commit: _snapshot=null, _consumedResolutionVersion=v2.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Resolved, userId, occurredAtUtc: t1.AddSeconds(1));
+
+        // Step 3: v3 newer Created at t3 > t2. Because Resolution has fully
+        // completed, the versionless dedupe entry from v1 is already gone.
+        // v3's TryBeginSend.shouldEmit sees a clean dedupe key and emits.
+        // The recurrence printer id proves this is the newer occurrence, not
+        // a stale resend of v1's envelope.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1.AddSeconds(2));
+
+        NativePushEnvelope[] captured = sent.ToArray();
+        captured.Select(e => e.ChangeKind).Should().Equal(
+            AttentionChangeKind.Created,
+            AttentionChangeKind.Resolved,
+            AttentionChangeKind.Created);
+        captured[0].PrinterId.Should().Be(initial.PrinterId);
+        captured[0].Priority.Should().Be(NativePushPriority.Alert);
+        captured[1].AttentionItemId.Should().Be(initial.Id);
+        captured[1].Priority.Should().Be(NativePushPriority.Background,
+            "the resolved silent dismissal must be a background push, proving Resolution's transport truly completed before v3");
+        captured[2].PrinterId.Should().Be(recurrence.PrinterId,
+            "v3 must emit as a NEW occurrence with the recurrence printer id; a stale resend of v1 would carry the initial printer id");
+        captured[2].ChangeKind.Should().Be(AttentionChangeKind.Created);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_NewerCreatedReservationAttemptedBeforeResolutionRacesIn_NewerMustEmitDespitePriorGenerationVersionlessDedupeInterleavingB()
+    {
+        // #755 Kane cycle 3 deterministic coverage — dedupe-reset race
+        // interleaving (b): "Resolution races AFTER the newer same-kind
+        // reservation is established."
+        //
+        // Sequential awaits establish observable ordering without timing
+        // sleeps: v1 Created is fully dispatched, THEN v2 newer Created is
+        // dispatched (its reservation attempt is "established" — TryObserve
+        // and TryBeginSend both run), THEN v3 Resolved arrives.
+        //
+        // Invariant under test: a rate-limited/no-transport OR delivered
+        // previous same-kind generation's versionless (user, item, Created)
+        // dedupe entry MUST NOT suppress a legitimate newer occurrence
+        // whose lifecycle version is strictly greater. Resolution has NOT
+        // yet fired when v2 attempts to reserve, so the reset cannot help
+        // — the invariant must hold on its own.
+        //
+        // On the rejected candidate:
+        //   - v1 delivers → dedupe entry v1_created retained.
+        //   - v2 TryObserveLifecycle accepts (v2 > v1), then TryBeginSend's
+        //     shouldEmit finds v1's versionless dedupe entry and returns
+        //     false → LifecycleSendBlockReason.Dedupe → v2 NOT sent.
+        //   - v3 Resolved races in after v2's suppressed reservation and
+        //     fires the reset, but it is too late for v2.
+        // On a fixed candidate: v2 emits (invariant preserved).
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto initial = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto recurrence = initial with
+        {
+            PrinterId = Guid.NewGuid(),
+            PrinterName = "Kane newer-Created printer",
+        };
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        int lookupCount = 0;
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                initial.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                int call = Interlocked.Increment(ref lookupCount);
+                return call switch
+                {
+                    1 => initial,     // v1 Created
+                    2 => recurrence,  // v2 newer Created (must emit)
+                    _ => null,        // v3 Resolved: source dropped item
+                };
+            });
+
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => sent.Enqueue(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        // DedupeWindow is much larger than the inter-dispatch spacing so
+        // any lingering versionless dedupe entry from v1 is guaranteed to
+        // still be within-window when v2's TryBeginSend checks it. If the
+        // rejected candidate suppressed v2 by wall-clock expiry rather
+        // than by version-aware logic, this window forces the failure to
+        // reproduce deterministically.
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Relay,
+                DedupeWindow = TimeSpan.FromMinutes(10),
+                RateLimitPerUser = 50,
+                RateLimitWindow = TimeSpan.FromMinutes(10),
+            });
+        DateTime t1 = new(2026, 7, 14, 22, 40, 0, DateTimeKind.Utc);
+
+        // Step 1: v1 Created at t1 fully delivers. Sequential await
+        // guarantees v1's snapshot and dedupe entry are committed before
+        // step 2. The (user, item, Created) key is now in _dedupe with
+        // expiry t1 + DedupeWindow — a versionless reservation.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1);
+
+        // Step 2: v2 newer Created at t2 > t1. Sequential await ensures
+        // v2's "reservation is established" (TryObserveLifecycle accepts
+        // v2 > v1; TryBeginSend is entered) BEFORE Resolution arrives in
+        // step 3. This is the "newer same-kind reservation established"
+        // clause of interleaving (b).
+        //
+        // The rejected candidate suppresses this dispatch at TryBeginSend's
+        // shouldEmit because v1's versionless dedupe entry is still within
+        // window. That is the concrete bug this assertion pins.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1.AddSeconds(1));
+
+        // Step 3: v3 Resolved at t3 > t2 races in AFTER v2's reservation
+        // is established. Its onResolvedObserved would clear the Created
+        // dedupe entry, but on the rejected candidate v2 has already been
+        // suppressed by v1's entry. A silent dismissal is still expected
+        // if a snapshot exists (v1's snapshot, still present on rejected
+        // because v2 never committed a new one; v2's snapshot on a fixed
+        // candidate).
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Resolved, userId, occurredAtUtc: t1.AddSeconds(2));
+
+        NativePushEnvelope[] captured = sent.ToArray();
+        captured.Select(e => e.ChangeKind).Should().Equal(
+            new[]
+            {
+                AttentionChangeKind.Created,
+                AttentionChangeKind.Created,
+                AttentionChangeKind.Resolved,
+            },
+            "v2's newer Created reservation must not be suppressed by v1's versionless dedupe entry; the invariant fails if v2 is silently dropped");
+        captured[0].PrinterId.Should().Be(initial.PrinterId);
+        captured[1].PrinterId.Should().Be(recurrence.PrinterId,
+            "the second Created envelope must carry the recurrence printer id, proving v2 emitted (not a duplicate replay of v1)");
+        captured[1].ChangeKind.Should().Be(AttentionChangeKind.Created);
+        captured[1].Priority.Should().Be(NativePushPriority.Alert);
+        captured[2].AttentionItemId.Should().Be(initial.Id);
+        captured[2].Priority.Should().Be(NativePushPriority.Background);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_GlobalResolvedWithoutPriorLifecycleForTokenlessRecipient_ReRegistrationCannotResurrectStaleTargetedAlert()
+    {
+        // #755 Kane cycle 3 deterministic coverage — tokenless recipient
+        // whose targeted dispatch has NOT yet installed its lifecycle.
+        //
+        // Sequence (deterministic via sequential awaits and a
+        // TaskCompletionSource re-registration barrier):
+        //   1. User A has no active device tokens AND no prior lifecycle
+        //      entry for the attention item (targeted dispatch has never
+        //      run for this (user, item) pair).
+        //   2. A global Resolved arrives. Because both
+        //      GetActiveTokenOwnersAsync and GetOwnersWithLifecycleFor are
+        //      empty for user A, the resolution installs no lifecycle
+        //      tombstone for user A on the rejected candidate.
+        //   3. User A re-registers, receiving a fresh device token.
+        //   4. A stale targeted Created arrives for user A with an
+        //      OccurredAt strictly earlier than the resolution. This
+        //      simulates a delayed queue drain, a retried source event,
+        //      or a batched targeted dispatch that landed after global
+        //      resolution.
+        //
+        // Invariant: stale targeted delivery to a re-registered tokenless
+        // recipient MUST NOT occur after a global resolution.
+        //
+        // On the rejected candidate: user A's fresh lifecycle at step 4 is
+        // brand new (_hasVersion=false), so TryObserveLifecycle accepts the
+        // stale targeted Created's version unconditionally and the alert
+        // is delivered — a stale-send bug.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+
+        // Explicit re-registration gate: tokens are absent until we release
+        // this TaskCompletionSource, then present with a fresh registration
+        // for the stale targeted retry. No timing sleep — the flip is
+        // triggered by the test setter between dispatches.
+        var reRegistered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        DeviceToken? reRegisteredToken = null;
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (reRegistered.Task.IsCompletedSuccessfully)
+                {
+                    return Task.FromResult<IReadOnlyList<Guid>>(new List<Guid> { userId });
+                }
+
+                return Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+            });
+        tokens.Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (reRegisteredToken is DeviceToken current)
+                {
+                    return Task.FromResult<IReadOnlyList<DeviceToken>>(new List<DeviceToken> { current });
+                }
+
+                return Task.FromResult<IReadOnlyList<DeviceToken>>(Array.Empty<DeviceToken>());
+            });
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Source-of-truth attention lookup: on the stale targeted retry the
+        // source has not yet propagated the resolution, so FindItemAsync
+        // still returns the live item. If the dispatcher had no
+        // tombstone/version fence, this is exactly the state that lets a
+        // stale alert land on the re-registered device.
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(s => s.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => sent.Enqueue(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 1,
+            });
+        DateTime resolvedAt = new(2026, 7, 14, 22, 45, 0, DateTimeKind.Utc);
+        DateTime staleTargetedAt = resolvedAt.AddSeconds(-30);
+
+        // Step 1 & 2: global Resolved arrives while user A is tokenless
+        // AND has no prior lifecycle for this item. The rejected candidate
+        // installs no lifecycle tombstone for user A.
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+        sent.Should().BeEmpty(
+            "the global resolution has no owners to dispatch to — a tokenless recipient with no prior lifecycle cannot receive a silent dismissal");
+
+        // Step 3: user A re-registers via the explicit barrier. The
+        // dispatcher will now see user A as an active token owner for any
+        // subsequent lookup — no timing sleep is used.
+        reRegisteredToken = MakeToken(userId, "kane-tokenless-reregister");
+        reRegistered.TrySetResult();
+
+        // Step 4: a stale targeted Created arrives for user A at
+        // staleTargetedAt < resolvedAt. The invariant fails on the
+        // rejected candidate: the dispatcher installs a fresh lifecycle
+        // for (user, item) and delivers the stale alert to the newly
+        // re-registered device.
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: staleTargetedAt);
+
+        sent.Should().BeEmpty(
+            "a stale targeted alert arriving after a global resolution — even when the recipient's lifecycle was not installed at resolution time — must not deliver after re-registration; the version fence must survive tokenless resolution");
+        sender.Verify(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "no envelope may reach the sender for the stale targeted retry");
+    }
+
     private static async Task AssertPostSendDisableDiscardsResultAsync(
         NativePushMode mode,
         NativePushDispatchResult completedResult)
