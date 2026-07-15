@@ -1,11 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import type { NotificationPreferencesDto, UpdateNotificationPreferencesRequest } from '@/types/api';
+import type { ApiError, NotificationPreferencesDto, UpdateNotificationPreferencesRequest } from '@/types/api';
 
 const KEYS = {
   all: ['notifications'] as const,
   preferences: () => [...KEYS.all, 'preferences'] as const,
 };
+
+function isApiError(error: unknown): error is ApiError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'statusCode' in error &&
+    typeof (error as { statusCode: unknown }).statusCode === 'number'
+  );
+}
 
 export function useNotificationPreferences() {
   return useQuery<NotificationPreferencesDto | null>({
@@ -13,9 +22,12 @@ export function useNotificationPreferences() {
     queryFn: async () => {
       try {
         return await apiClient.getNotificationPreferences();
-      } catch {
-        // 404 means no preferences set yet — return defaults
-        return null;
+      } catch (error) {
+        if (isApiError(error) && error.statusCode === 404) {
+          return null;
+        }
+
+        throw error;
       }
     },
   });
