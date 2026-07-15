@@ -27,18 +27,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly ConcurrentDictionary<string, DateTime> _dedupe = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<RateLimitKey, RateLimitBucket> _rateLimits = new();
 
-    // Per-recipient pre-resolution snapshots. A user can consume only a snapshot
-    // captured after that same user passed item visibility, role, preference,
-    // token, dedupe, and rate gates. Keying by user prevents one owner's visible
-    // item (especially admin-only maintenance) from authorizing another owner.
-    // Resolved atomically consumes the entry before any send-side checks, making
-    // replay safe even when a later opt-in changes.
-    private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionSnapshot> _snapshots = new();
-
-    // Snapshot capture, consumption, replacement, and transport invocation share this
-    // short critical section. It closes the ownership-check/send race without holding
-    // a lock while awaiting provider I/O.
-    private readonly object _snapshotOwnershipSync = new();
+    // One lifecycle per recipient and attention item orders snapshot ownership across
+    // targeted and global audience lanes without serializing unrelated recipients.
+    private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionLifecycle> _attentionLifecycles = new();
 
     // One versioned lane per item and delivery audience serializes an active lifecycle
     // transition, coalesces queued transitions to the newest authoritative timestamp,
@@ -108,7 +99,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return;
             }
 
-            await DispatchCoreAsync(attentionItemId, changeKind, targetUserId, cancellationToken);
+            await DispatchCoreAsync(
+                attentionItemId,
+                changeKind,
+                targetUserId,
+                version,
+                cancellationToken);
         }
         finally
         {
@@ -125,6 +121,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         string attentionItemId,
         AttentionChangeKind changeKind,
         Guid? targetUserId,
+        AttentionDispatchVersion version,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(attentionItemId))
@@ -203,6 +200,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         userId,
                         attentionItemId,
                         changeKind,
+                        version,
                         settings,
                         gate,
                         tokens,
@@ -243,6 +241,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         Guid userId,
         string attentionItemId,
         AttentionChangeKind changeKind,
+        AttentionDispatchVersion version,
         NativePushSettings settings,
         IOperatorFeatureGate gate,
         IDeviceTokenRepository tokens,
@@ -251,147 +250,141 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         CancellationToken cancellationToken)
     {
         var snapshotKey = new AttentionSnapshotKey(userId, attentionItemId);
-        AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
-        AttentionSnapshot? activeSnapshot = null;
-        AttentionSnapshot? resolvedSnapshot = null;
-
-        if (changeKind == AttentionChangeKind.Resolved)
+        if (!TryObserveLifecycle(
+                snapshotKey,
+                version,
+                changeKind,
+                out AttentionLifecycle lifecycle,
+                out AttentionSnapshot? resolvedSnapshot))
         {
-            // A dismissal is authorized only by this recipient's pre-resolution
-            // snapshot, even when the source has not removed the live row yet.
-            // This prevents a newly authorized owner from receiving a dismissal
-            // for an alert that was never delivered to that owner.
-            lock (_snapshotOwnershipSync)
+            return;
+        }
+
+        try
+        {
+            AttentionItemDto? item = await attention.FindItemAsync(
+                userId,
+                attentionItemId,
+                cancellationToken);
+            AttentionSnapshot? activeSnapshot = null;
+
+            if (changeKind == AttentionChangeKind.Resolved)
             {
-                if (!_snapshots.TryRemove(snapshotKey, out resolvedSnapshot))
+                ResetActiveLifecycleDedupe(userId, attentionItemId);
+                if (resolvedSnapshot is null)
                 {
                     return;
                 }
+
+                item = null;
             }
-
-            item = null;
-        }
-        else if (item is null)
-        {
-            return;
-        }
-
-        AttentionKind kind = item?.Kind ?? resolvedSnapshot!.Kind;
-        Guid printerId = item?.PrinterId ?? resolvedSnapshot!.PrinterId;
-        if (AttentionPushCategories.CategoryFor(kind) is null)
-        {
-            return;
-        }
-
-        // Maintenance is admin-only. Re-check current role even for a snapshot
-        // so revocation before resolution suppresses the dismissal.
-        if (kind == AttentionKind.Maintenance
-            && !await IsFarmAdminAsync(db, userId, cancellationToken))
-        {
-            return;
-        }
-
-        NotificationPreferences? prefs = await db.NotificationPreferences
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(
-            prefs?.AttentionPushCategoryPreferencesJson);
-        if (!catPrefs.IsEnabled(kind)
-            || (prefs is not null && !prefs.EnablePushNotifications)
-            || !IsPushEnabledForKind(prefs, kind))
-        {
-            _metrics.SkippedCategoryOptOut.Add(1);
-            return;
-        }
-
-        IReadOnlyList<DeviceToken> userTokens = await tokens.GetActiveByUserAsync(userId, cancellationToken);
-        if (userTokens.Count == 0)
-        {
-            return;
-        }
-
-        string dedupeKey = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{userId:D}|{attentionItemId}|{changeKind}");
-        if (!ShouldEmit(dedupeKey, settings, UtcNow))
-        {
-            _metrics.SkippedDedupe.Add(1);
-            return;
-        }
-
-        // Charge once per logical alert, never once per device. Silent resolved
-        // dismissals are control messages and bypass the alert budget; otherwise
-        // a just-delivered alert would consume the only slot and prevent its own
-        // timely dismissal. Dedupe still makes the dismissal exactly-once.
-        if (changeKind != AttentionChangeKind.Resolved)
-        {
-            var rateKey = new RateLimitKey(userId, printerId, kind);
-            if (!TryConsumeRate(rateKey, settings, UtcNow))
+            else if (item is null)
             {
-                _metrics.SkippedRateLimit.Add(1);
                 return;
             }
 
-            // Capture only the minimal routing shape, and only for this owner
-            // after every authorization/preference guard above has passed. The exact
-            // instance is the delivery generation checked before every transport try.
-            activeSnapshot = new AttentionSnapshot(
-                Kind: item!.Kind,
-                PrinterId: item.PrinterId,
-                JobId: item.JobId,
-                ToolheadIndex: item.ToolheadIndex,
-                CapturedAtUtc: UtcNow);
-            lock (_snapshotOwnershipSync)
+            AttentionKind kind = item?.Kind ?? resolvedSnapshot!.Kind;
+            Guid printerId = item?.PrinterId ?? resolvedSnapshot!.PrinterId;
+            if (AttentionPushCategories.CategoryFor(kind) is null)
             {
-                _snapshots[snapshotKey] = activeSnapshot;
-            }
-        }
-
-        foreach (DeviceToken deviceToken in userTokens)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (!gate.IsEnabled(OperatorFeature.NativePush))
-            {
-                _metrics.SkippedFeatureDisabled.Add(1);
                 return;
             }
 
-            try
+            // Maintenance is admin-only. Re-check current role even for a snapshot
+            // so revocation before resolution suppresses the dismissal.
+            if (kind == AttentionKind.Maintenance
+                && !await IsFarmAdminAsync(db, userId, cancellationToken))
             {
-                DeviceDispatchOutcome outcome = await SendAndApplyForDeviceAsync(
-                    userId,
-                    attentionItemId,
-                    changeKind,
-                    item,
-                    resolvedSnapshot,
-                    snapshotKey,
-                    activeSnapshot,
-                    deviceToken,
-                    settings,
-                    gate,
-                    cancellationToken);
-                if (outcome == DeviceDispatchOutcome.DispatchStopped)
+                return;
+            }
+
+            NotificationPreferences? prefs = await db.NotificationPreferences
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+            AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(
+                prefs?.AttentionPushCategoryPreferencesJson);
+            if (!catPrefs.IsEnabled(kind)
+                || (prefs is not null && !prefs.EnablePushNotifications)
+                || !IsPushEnabledForKind(prefs, kind))
+            {
+                _metrics.SkippedCategoryOptOut.Add(1);
+                return;
+            }
+
+            IReadOnlyList<DeviceToken> userTokens = await tokens.GetActiveByUserAsync(
+                userId,
+                cancellationToken);
+            if (userTokens.Count == 0)
+            {
+                return;
+            }
+
+            string dedupeKey = BuildDedupeKey(userId, attentionItemId, changeKind);
+            RateLimitKey? rateKey = null;
+            if (changeKind != AttentionChangeKind.Resolved)
+            {
+                rateKey = new RateLimitKey(userId, printerId, kind);
+                activeSnapshot = new AttentionSnapshot(
+                    Kind: item!.Kind,
+                    PrinterId: item.PrinterId,
+                    JobId: item.JobId,
+                    ToolheadIndex: item.ToolheadIndex,
+                    CapturedAtUtc: UtcNow);
+            }
+
+            foreach (DeviceToken deviceToken in userTokens)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!gate.IsEnabled(OperatorFeature.NativePush))
                 {
+                    _metrics.SkippedFeatureDisabled.Add(1);
                     return;
                 }
+
+                try
+                {
+                    DeviceDispatchOutcome outcome = await SendAndApplyForDeviceAsync(
+                        userId,
+                        attentionItemId,
+                        changeKind,
+                        item,
+                        resolvedSnapshot,
+                        lifecycle,
+                        version,
+                        activeSnapshot,
+                        dedupeKey,
+                        rateKey,
+                        deviceToken,
+                        settings,
+                        gate,
+                        cancellationToken);
+                    if (outcome == DeviceDispatchOutcome.DispatchStopped)
+                    {
+                        return;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _metrics.IsolatedDeviceFailure.Add(
+                        1,
+                        new KeyValuePair<string, object?>("stage", "device"));
+                    _logger.LogWarning(
+                        ex,
+                        "[NativePush] Isolated per-device failure for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; continuing with remaining devices.",
+                        deviceToken.Id,
+                        userId,
+                        attentionItemId);
+                }
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _metrics.IsolatedDeviceFailure.Add(
-                    1,
-                    new KeyValuePair<string, object?>("stage", "device"));
-                _logger.LogWarning(
-                    ex,
-                    "[NativePush] Isolated per-device failure for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; continuing with remaining devices.",
-                    deviceToken.Id,
-                    userId,
-                    attentionItemId);
-            }
+        }
+        finally
+        {
+            lifecycle.Complete();
         }
     }
 
@@ -401,26 +394,34 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionChangeKind changeKind,
         AttentionItemDto? item,
         AttentionSnapshot? resolvedSnapshot,
-        AttentionSnapshotKey snapshotKey,
+        AttentionLifecycle lifecycle,
+        AttentionDispatchVersion version,
         AttentionSnapshot? activeSnapshot,
+        string dedupeKey,
+        RateLimitKey? rateKey,
         DeviceToken deviceToken,
         NativePushSettings settings,
         IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
     {
-        // Rate limit consumption has moved to DispatchForOwnerAsync so it
-        // runs after logical-event dedupe and is charged exactly once per
-        // envelope regardless of how many devices this user has.
         NativePushEnvelope envelope = item is not null
             ? BuildEnvelope(item, changeKind, deviceToken)
             : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken);
+        AttentionSnapshot lifecycleSnapshot = activeSnapshot
+            ?? resolvedSnapshot
+            ?? throw new InvalidOperationException("A lifecycle snapshot is required before native-push transport.");
         NativePushDispatchResult? result;
         try
         {
             result = await SendWithRetriesAsync(
+                userId,
                 envelope,
-                snapshotKey,
-                activeSnapshot,
+                lifecycle,
+                version,
+                lifecycleSnapshot,
+                changeKind,
+                dedupeKey,
+                rateKey,
                 settings,
                 gate,
                 cancellationToken);
@@ -434,7 +435,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         catch (Exception ex)
         {
-            if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+            if (!lifecycle.IsCurrent(
+                    version,
+                    lifecycleSnapshot,
+                    changeKind == AttentionChangeKind.Resolved))
             {
                 return DeviceDispatchOutcome.DispatchStopped;
             }
@@ -455,8 +459,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         try
         {
             return await ApplyResultAsync(
-                snapshotKey,
-                activeSnapshot,
+                lifecycle,
+                version,
+                lifecycleSnapshot,
+                changeKind == AttentionChangeKind.Resolved,
                 deviceToken,
                 result,
                 settings,
@@ -505,6 +511,38 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
+    private bool TryObserveLifecycle(
+        AttentionSnapshotKey key,
+        AttentionDispatchVersion version,
+        AttentionChangeKind changeKind,
+        out AttentionLifecycle lifecycle,
+        out AttentionSnapshot? resolvedSnapshot)
+    {
+        while (true)
+        {
+            lifecycle = _attentionLifecycles.GetOrAdd(
+                key,
+                static _ => new AttentionLifecycle());
+            AttentionLifecycleObserveResult result = lifecycle.TryObserve(
+                version,
+                changeKind,
+                UtcNow,
+                out resolvedSnapshot);
+            if (result == AttentionLifecycleObserveResult.Accepted)
+            {
+                return true;
+            }
+
+            if (result == AttentionLifecycleObserveResult.Stale)
+            {
+                return false;
+            }
+
+            // A pruner retired this lifecycle after GetOrAdd returned it. Retry
+            // against the replacement rather than updating orphaned state.
+        }
+    }
+
     private static DateTime NormalizeOccurredAt(DateTime occurredAt)
     {
         return occurredAt.Kind switch
@@ -526,6 +564,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         };
     }
 
+    private static string BuildDedupeKey(
+        Guid userId,
+        string attentionItemId,
+        AttentionChangeKind changeKind)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{userId:D}|{attentionItemId}|{changeKind}");
+    }
+
+    private void ResetActiveLifecycleDedupe(Guid userId, string attentionItemId)
+    {
+        _dedupe.TryRemove(
+            BuildDedupeKey(userId, attentionItemId, AttentionChangeKind.Created),
+            out _);
+        _dedupe.TryRemove(
+            BuildDedupeKey(userId, attentionItemId, AttentionChangeKind.Updated),
+            out _);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -533,9 +591,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     }
 
     private async Task<NativePushDispatchResult?> SendWithRetriesAsync(
+        Guid userId,
         NativePushEnvelope envelope,
-        AttentionSnapshotKey snapshotKey,
-        AttentionSnapshot? activeSnapshot,
+        AttentionLifecycle lifecycle,
+        AttentionDispatchVersion version,
+        AttentionSnapshot lifecycleSnapshot,
+        AttentionChangeKind changeKind,
+        string dedupeKey,
+        RateLimitKey? rateKey,
         NativePushSettings settings,
         IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
@@ -556,28 +619,49 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             bool transportStarted = false;
             try
             {
-                Task<NativePushDispatchResult> sendTask;
-                if (activeSnapshot is null)
+                Func<bool>? tryConsumeRate = rateKey is RateLimitKey activeRateKey
+                    ? () => TryConsumeRate(activeRateKey, settings, UtcNow)
+                    : null;
+                Func<Task<NativePushDispatchResult>> startSend = () =>
                 {
-                    transportStarted = true;
-                    sendTask = _sender.SendAsync(envelope, cancellationToken);
-                }
-                else
-                {
-                    lock (_snapshotOwnershipSync)
+                    if (changeKind != AttentionChangeKind.Resolved)
                     {
-                        if (!IsSnapshotCurrentUnderLock(snapshotKey, activeSnapshot))
-                        {
-                            return null;
-                        }
-
-                        // Keep the ownership check and synchronous transport invocation
-                        // in one critical section. Provider I/O is awaited after release.
-                        transportStarted = true;
-                        sendTask = _sender.SendAsync(envelope, cancellationToken);
+                        _dedupe.TryRemove(
+                            BuildDedupeKey(
+                                userId,
+                                envelope.AttentionItemId,
+                                AttentionChangeKind.Resolved),
+                            out _);
                     }
+
+                    return _sender.SendAsync(envelope, cancellationToken);
+                };
+                LifecycleSendStart sendStart = lifecycle.TryBeginSend(
+                    version,
+                    lifecycleSnapshot,
+                    changeKind == AttentionChangeKind.Resolved,
+                    () => ShouldEmit(dedupeKey, settings, UtcNow),
+                    tryConsumeRate,
+                    startSend);
+                if (sendStart.BlockReason == LifecycleSendBlockReason.Dedupe)
+                {
+                    _metrics.SkippedDedupe.Add(1);
+                    return null;
                 }
 
+                if (sendStart.BlockReason == LifecycleSendBlockReason.RateLimit)
+                {
+                    _metrics.SkippedRateLimit.Add(1);
+                    return null;
+                }
+
+                Task<NativePushDispatchResult>? sendTask = sendStart.SendTask;
+                if (sendTask is null)
+                {
+                    return null;
+                }
+
+                transportStarted = true;
                 last = await sendTask;
             }
             finally
@@ -600,7 +684,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return null;
             }
 
-            if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+            if (!lifecycle.IsCurrent(
+                    version,
+                    lifecycleSnapshot,
+                    changeKind == AttentionChangeKind.Resolved))
             {
                 return null;
             }
@@ -624,8 +711,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     }
 
     private async Task<DeviceDispatchOutcome> ApplyResultAsync(
-        AttentionSnapshotKey snapshotKey,
-        AttentionSnapshot? activeSnapshot,
+        AttentionLifecycle lifecycle,
+        AttentionDispatchVersion version,
+        AttentionSnapshot activeSnapshot,
+        bool isResolution,
         DeviceToken deviceToken,
         NativePushDispatchResult result,
         NativePushSettings settings,
@@ -642,7 +731,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
         // This is the final attribution claim. Resolution/replacement uses the
         // same lock, so whichever operation enters first defines the ordering.
-        if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+        if (!lifecycle.IsCurrent(version, activeSnapshot, isResolution))
         {
             return DeviceDispatchOutcome.DispatchStopped;
         }
@@ -868,12 +957,17 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     return AttentionDispatchObserveResult.Retired;
                 }
 
-                if (_hasVersion && version.CompareTo(_latest) <= 0)
+                int versionOrder = _hasVersion ? version.CompareTo(_latest) : 1;
+                if (versionOrder < 0 || (versionOrder == 0 && _participants != 0))
                 {
                     return AttentionDispatchObserveResult.Stale;
                 }
 
-                _latest = version;
+                if (versionOrder > 0)
+                {
+                    _latest = version;
+                }
+
                 _lastObservedAtUtc = observedAtUtc;
                 _hasVersion = true;
                 _participants++;
@@ -914,23 +1008,189 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
     private readonly record struct AttentionSnapshotKey(Guid UserId, string AttentionItemId);
 
-    private bool IsSnapshotCurrent(AttentionSnapshotKey key, AttentionSnapshot? expected)
+    private enum AttentionLifecycleObserveResult
     {
-        if (expected is null)
-        {
-            return true;
-        }
-
-        lock (_snapshotOwnershipSync)
-        {
-            return IsSnapshotCurrentUnderLock(key, expected);
-        }
+        Accepted,
+        Stale,
+        Retired,
     }
 
-    private bool IsSnapshotCurrentUnderLock(AttentionSnapshotKey key, AttentionSnapshot expected)
+    private enum LifecycleSendBlockReason
     {
-        return _snapshots.TryGetValue(key, out AttentionSnapshot? current)
-            && ReferenceEquals(current, expected);
+        None,
+        Stale,
+        Dedupe,
+        RateLimit,
+    }
+
+    private readonly record struct LifecycleSendStart(
+        Task<NativePushDispatchResult>? SendTask,
+        LifecycleSendBlockReason BlockReason);
+
+    private sealed class AttentionLifecycle
+    {
+        private readonly object _sync = new();
+        private AttentionDispatchVersion _latest;
+        private AttentionDispatchVersion? _consumedResolutionVersion;
+        private AttentionSnapshot? _snapshot;
+        private DateTime _lastObservedAtUtc;
+        private int _participants;
+        private bool _hasVersion;
+        private bool _latestCommitted;
+        private bool _retired;
+
+        public AttentionLifecycleObserveResult TryObserve(
+            AttentionDispatchVersion version,
+            AttentionChangeKind changeKind,
+            DateTime observedAtUtc,
+            out AttentionSnapshot? resolvedSnapshot)
+        {
+            lock (_sync)
+            {
+                resolvedSnapshot = null;
+                if (_retired)
+                {
+                    return AttentionLifecycleObserveResult.Retired;
+                }
+
+                int versionOrder = _hasVersion ? version.CompareTo(_latest) : 1;
+                if (versionOrder < 0
+                    || (versionOrder == 0 && (_latestCommitted || _participants != 0)))
+                {
+                    return AttentionLifecycleObserveResult.Stale;
+                }
+
+                if (versionOrder > 0)
+                {
+                    _latest = version;
+                    _latestCommitted = false;
+                }
+
+                _lastObservedAtUtc = observedAtUtc;
+                _hasVersion = true;
+                _participants++;
+                if (changeKind == AttentionChangeKind.Resolved)
+                {
+                    resolvedSnapshot = _snapshot;
+                }
+
+                return AttentionLifecycleObserveResult.Accepted;
+            }
+        }
+
+        public LifecycleSendStart TryBeginSend(
+            AttentionDispatchVersion version,
+            AttentionSnapshot expectedSnapshot,
+            bool isResolution,
+            Func<bool> shouldEmit,
+            Func<bool>? tryConsumeRate,
+            Func<Task<NativePushDispatchResult>> startSend)
+        {
+            lock (_sync)
+            {
+                if (_retired || !_hasVersion || version != _latest)
+                {
+                    return new LifecycleSendStart(null, LifecycleSendBlockReason.Stale);
+                }
+
+                bool alreadyStarted = isResolution
+                    ? _consumedResolutionVersion == version
+                    : ReferenceEquals(_snapshot, expectedSnapshot);
+                if (!alreadyStarted)
+                {
+                    if ((isResolution && !ReferenceEquals(_snapshot, expectedSnapshot))
+                        || (!isResolution && _latestCommitted))
+                    {
+                        return new LifecycleSendStart(null, LifecycleSendBlockReason.Stale);
+                    }
+
+                    if (!shouldEmit())
+                    {
+                        _latestCommitted = true;
+                        return new LifecycleSendStart(null, LifecycleSendBlockReason.Dedupe);
+                    }
+
+                    if (tryConsumeRate is not null && !tryConsumeRate())
+                    {
+                        _latestCommitted = true;
+                        return new LifecycleSendStart(null, LifecycleSendBlockReason.RateLimit);
+                    }
+
+                    _latestCommitted = true;
+                    if (isResolution)
+                    {
+                        _snapshot = null;
+                        _consumedResolutionVersion = version;
+                    }
+                    else
+                    {
+                        _snapshot = expectedSnapshot;
+                        _consumedResolutionVersion = null;
+                    }
+                }
+
+                Task<NativePushDispatchResult> sendTask;
+                try
+                {
+                    sendTask = startSend();
+                }
+                catch (Exception ex)
+                {
+                    sendTask = Task.FromException<NativePushDispatchResult>(ex);
+                }
+
+                return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
+            }
+        }
+
+        public bool IsCurrent(
+            AttentionDispatchVersion version,
+            AttentionSnapshot? expectedSnapshot,
+            bool isResolution)
+        {
+            lock (_sync)
+            {
+                return IsCurrentUnderLock(version, expectedSnapshot, isResolution);
+            }
+        }
+
+        public void Complete()
+        {
+            lock (_sync)
+            {
+                _participants--;
+            }
+        }
+
+        public bool TryRetire(DateTime cutoffUtc)
+        {
+            lock (_sync)
+            {
+                if (_retired
+                    || _participants != 0
+                    || _lastObservedAtUtc >= cutoffUtc
+                    || (_snapshot is not null && _snapshot.CapturedAtUtc >= cutoffUtc))
+                {
+                    return false;
+                }
+
+                _retired = true;
+                return true;
+            }
+        }
+
+        private bool IsCurrentUnderLock(
+            AttentionDispatchVersion version,
+            AttentionSnapshot? expectedSnapshot,
+            bool isResolution)
+        {
+            return !_retired
+                && _hasVersion
+                && version == _latest
+                && (isResolution
+                    ? _consumedResolutionVersion == version
+                    : ReferenceEquals(_snapshot, expectedSnapshot));
+        }
     }
 
     private sealed record AttentionSnapshot(
@@ -1072,18 +1332,15 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        // Keep snapshots long enough for real attention lifetimes while bounding
-        // entries whose source never emits Resolved. Value-comparing removal
-        // preserves a concurrently refreshed occurrence.
+        // Keep lifecycle snapshots and tombstones long enough for real attention
+        // lifetimes while bounding entries whose source never emits Resolved.
         DateTime snapshotCutoff = nowUtc - AttentionSnapshotTtl;
-        lock (_snapshotOwnershipSync)
+        foreach (KeyValuePair<AttentionSnapshotKey, AttentionLifecycle> kv in _attentionLifecycles)
         {
-            foreach (KeyValuePair<AttentionSnapshotKey, AttentionSnapshot> kv in _snapshots)
+            if (kv.Value.TryRetire(snapshotCutoff))
             {
-                if (kv.Value.CapturedAtUtc < snapshotCutoff)
-                {
-                    _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots).Remove(kv);
-                }
+                _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionLifecycle>>)_attentionLifecycles)
+                    .Remove(kv);
             }
         }
 
