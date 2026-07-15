@@ -36,17 +36,24 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // and retains a tombstone so delayed Created work cannot follow Resolved.
     private readonly ConcurrentDictionary<AttentionDispatchKey, AttentionDispatchLane> _attentionDispatchLanes = new();
 
-    // Global-resolution item tombstone. When a Resolved with targetUserId=null
-    // is observed, we record the resolved item's version even if no owner
-    // currently holds a targeted lifecycle (temporarily tokenless recipients,
-    // never-dispatched recipients). Any strictly-older subsequent dispatch —
-    // targeted or global — for the same item is fenced here before it can
-    // install a fresh per-user lifecycle at a stale version. This closes the
-    // tokenless-recipient re-registration gap without globally serialising
-    // unrelated (recipient, item) keys: the tombstone is item-scoped only,
-    // authorization is unchanged, and per-recipient lifecycles still manage
-    // their own version ordering for non-stale work.
-    private readonly ConcurrentDictionary<string, AttentionDispatchVersion> _resolvedItemVersions
+    // Per-attention-item linearization point (see AttentionItemFence) between
+    // a global Resolved's tombstone publication + owner enumeration and a
+    // targeted dispatch's per-recipient lifecycle install. Both operations
+    // acquire the SAME fence's lock, so whichever runs first is authoritative
+    // for the other: a targeted install that wins is visible to the
+    // resolution's owner enumeration (which runs after the install, under the
+    // same lock); a resolution that wins publishes a version a subsequent
+    // targeted admission re-checks atomically with its own lifecycle install.
+    // This closes the P-A-D-R-S gap where a temporarily tokenless recipient's
+    // lifecycle does not exist yet when a concurrent global resolution
+    // enumerates owners, so a stale targeted dispatch that read the fence as
+    // unpublished — then paused before installing its lifecycle — could
+    // otherwise resume after a re-registration and deliver past the
+    // resolution. Item-scoped only: authorization is unchanged, and
+    // per-recipient lifecycles still manage their own version ordering for
+    // non-stale work; unrelated attention items and recipients are never
+    // serialised against each other.
+    private readonly ConcurrentDictionary<string, AttentionItemFence> _attentionItemFences
         = new(StringComparer.Ordinal);
 
     private static readonly TimeSpan AttentionSnapshotTtl = TimeSpan.FromDays(7);
@@ -99,32 +106,33 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             NormalizeOccurredAt(occurredAtUtc ?? UtcNow),
             LifecycleOrder(changeKind));
 
-        // Global-resolution item tombstone check. If a strictly-newer global
-        // Resolved has already been observed for this item, reject any older
-        // subsequent dispatch here — even for recipients whose per-user
-        // lifecycles have not yet been installed (temporarily tokenless
-        // recipients that later re-register). This must happen BEFORE the
-        // dispatch lane / lifecycle observers, otherwise a stale targeted
-        // Created would install a brand-new per-user lifecycle at the stale
-        // version and deliver the alert on the re-registered device.
-        if (_resolvedItemVersions.TryGetValue(attentionItemId, out AttentionDispatchVersion resolvedVersion)
-            && version.CompareTo(resolvedVersion) < 0)
+        // Fast-path optimisation only — NOT the authoritative fence. A
+        // torn/stale read of the item-wide resolved tombstone here can only
+        // ever under-reject: the tombstone is monotonically non-decreasing,
+        // so if this peek already justifies rejecting, the authoritative
+        // check below (inside TryObserveLifecycle for targeted dispatches, or
+        // PublishResolvedTombstoneAndEnumerateOwners for global Resolved)
+        // would independently reject it too. This just avoids opening a DI
+        // scope and querying the database for a dispatch that is definitely
+        // stale.
+        //
+        // A one-time check here — as the sole fence — is NOT sufficient for
+        // correctness: it goes stale the instant a concurrent global Resolved
+        // publishes after this line but before this dispatch's per-owner
+        // lifecycle is installed (the P-A-D-R-S interleaving). A temporarily
+        // tokenless recipient with no lifecycle installed yet would not be
+        // found by the resolution's owner enumeration, so a stale targeted
+        // dispatch that already passed this check could resume later and
+        // install a lifecycle unaware of the resolution. The authoritative
+        // fence therefore lives at AttentionItemFence, which links the
+        // per-user lifecycle install to the SAME lock a global resolution's
+        // tombstone publish + owner enumeration uses, so the two can never
+        // cross this gap. See AttentionItemFence for the full invariant.
+        if (_attentionItemFences.TryGetValue(attentionItemId, out AttentionItemFence? fastPathFence)
+            && fastPathFence.PeekResolvedVersion() is AttentionDispatchVersion peekedResolvedVersion
+            && version.CompareTo(peekedResolvedVersion) < 0)
         {
             return;
-        }
-
-        // Record the tombstone for a global Resolved observation BEFORE any
-        // per-owner work. The tombstone is item-scoped, so recording it
-        // early makes the version fence visible to concurrent stale
-        // dispatches even while owner enumeration or targeted fan-out is
-        // still in flight. Targeted resolutions install per-user lifecycle
-        // tombstones and do not need to broadcast an item-wide fence.
-        if (changeKind == AttentionChangeKind.Resolved && targetUserId is null)
-        {
-            _resolvedItemVersions.AddOrUpdate(
-                attentionItemId,
-                version,
-                (_, existing) => version.CompareTo(existing) > 0 ? version : existing);
         }
 
         if (!TryObserveDispatch(dispatchKey, version, out AttentionDispatchLane lane))
@@ -220,7 +228,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     // send after resolution. DispatchForOwnerAsync advances the
                     // lifecycle inside TryObserveLifecycle before the token check,
                     // so a tokenless recipient still receives the version tombstone.
-                    List<Guid>? lifecycleOwners = GetOwnersWithLifecycleFor(attentionItemId);
+                    //
+                    // The tombstone publish and this owner enumeration run as ONE
+                    // atomic unit under AttentionItemFence's lock — the SAME lock a
+                    // concurrent targeted dispatch's lifecycle install acquires in
+                    // TryObserveLifecycle. This is required for correctness, not
+                    // just an optimisation: without this atomicity, a targeted
+                    // dispatch that is concurrently mid-flight (already past its
+                    // own now-stale tombstone check, not yet at its lifecycle
+                    // install) could install a lifecycle for a recipient this
+                    // enumeration missed only because it ran first — the P-A-D-R-S
+                    // interleaving. See AttentionItemFence for the full invariant.
+                    List<Guid>? lifecycleOwners = PublishResolvedTombstoneAndEnumerateOwners(
+                        attentionItemId,
+                        version);
                     if (lifecycleOwners is { Count: > 0 })
                     {
                         var union = new HashSet<Guid>(activeOwners);
@@ -539,15 +560,17 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return DeviceDispatchOutcome.DispatchStopped;
             }
 
-            // Pre-transport synchronous sender failure. TryBeginSend caught
-            // the sync throw before committing _snapshot/_consumedResolutionVersion
-            // and rolled back dedupe/rate reservations. IsCurrent therefore
-            // returns false (no snapshot commit at THIS version), but the
-            // lifecycle has NOT advanced past our version. This is a
+            // Pre-transport sender failure — either a synchronous throw, or
+            // an async sender's Task that was already Faulted/Canceled
+            // before any real transport work began. TryBeginSend detects
+            // both cases and rolls back dedupe/rate reservations without
+            // committing _snapshot/_consumedResolutionVersion. IsCurrent
+            // therefore returns false (no snapshot commit at THIS version),
+            // but the lifecycle has NOT advanced past our version. This is a
             // per-device pre-transport failure, not a supersession: the
             // outer fan-out must continue to sibling devices in the same
             // dispatch, and a subsequent exact-version DispatchAsync must
-            // be able to retry every synchronously-failed device.
+            // be able to retry every such device.
             //
             // Distinguish that state from the post-transport-start
             // fenced-current case, which routes through the sender_exception
@@ -662,29 +685,108 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             key.UserId,
             key.AttentionItemId);
 
+        LifecycleObservation observation = default;
         while (true)
         {
-            lifecycle = _attentionLifecycles.GetOrAdd(
+            AttentionItemFence fence = _attentionItemFences.GetOrAdd(
+                key.AttentionItemId,
+                static _ => new AttentionItemFence());
+
+            // The item-wide resolved-tombstone check and the per-user
+            // lifecycle GetOrAdd/TryObserve run as ONE atomic unit under the
+            // fence's lock. This is the P-A-D-R-S linearization point: a
+            // concurrent global resolution's tombstone publish + owner
+            // enumeration (PublishResolvedTombstoneAndEnumerateOwners) uses
+            // the SAME fence and lock, so the two operations can never cross
+            // this gap for a given attention item. See AttentionItemFence.
+            AttentionItemFenceResult fenceResult = fence.TryAdmitTargeted(
+                version,
+                UtcNow,
+                () => observation = ObserveLifecycleUnderFence(key, version, changeKind, onLifecycleAdvancedOrResolved));
+
+            if (fenceResult == AttentionItemFenceResult.Retired)
+            {
+                // A pruner retired this fence after GetOrAdd returned it. Retry
+                // against the replacement fence instead of executing against an
+                // orphaned tombstone.
+                continue;
+            }
+
+            break;
+        }
+
+        lifecycle = observation.Lifecycle!;
+        resolvedSnapshot = observation.ResolvedSnapshot;
+        return observation.Accepted;
+    }
+
+    /// <summary>
+    /// Installs/advances the per-(recipient, item) lifecycle. Always invoked
+    /// from inside <see cref="AttentionItemFence.TryAdmitTargeted"/>'s lock,
+    /// so this never races a concurrent global resolution's owner
+    /// enumeration for the same attention item.
+    /// </summary>
+    private LifecycleObservation ObserveLifecycleUnderFence(
+        AttentionSnapshotKey key,
+        AttentionDispatchVersion version,
+        AttentionChangeKind changeKind,
+        Action onLifecycleAdvancedOrResolved)
+    {
+        while (true)
+        {
+            AttentionLifecycle candidate = _attentionLifecycles.GetOrAdd(
                 key,
                 static _ => new AttentionLifecycle());
-            AttentionLifecycleObserveResult result = lifecycle.TryObserve(
+            AttentionLifecycleObserveResult result = candidate.TryObserve(
                 version,
                 changeKind,
                 UtcNow,
                 onLifecycleAdvancedOrResolved,
-                out resolvedSnapshot);
+                out AttentionSnapshot? resolved);
             if (result == AttentionLifecycleObserveResult.Accepted)
             {
-                return true;
+                return new LifecycleObservation(true, candidate, resolved);
             }
 
             if (result == AttentionLifecycleObserveResult.Stale)
             {
-                return false;
+                return new LifecycleObservation(false, null, null);
             }
 
             // A pruner retired this lifecycle after GetOrAdd returned it. Retry
             // against the replacement rather than updating orphaned state.
+        }
+    }
+
+    /// <summary>
+    /// Publishes (monotonically bumps) the item-wide resolved tombstone and,
+    /// atomically with the publish under the same <see cref="AttentionItemFence"/>
+    /// lock that a targeted dispatch's lifecycle install uses, enumerates the
+    /// recipients that currently hold a lifecycle for this item. See
+    /// <see cref="AttentionItemFence"/> for why this atomicity is required.
+    /// </summary>
+    private List<Guid>? PublishResolvedTombstoneAndEnumerateOwners(
+        string attentionItemId,
+        AttentionDispatchVersion version)
+    {
+        while (true)
+        {
+            AttentionItemFence fence = _attentionItemFences.GetOrAdd(
+                attentionItemId,
+                static _ => new AttentionItemFence());
+
+            if (fence.TryPublishResolvedAndRun(
+                    version,
+                    UtcNow,
+                    () => GetOwnersWithLifecycleFor(attentionItemId),
+                    out List<Guid>? owners))
+            {
+                return owners;
+            }
+
+            // A pruner retired this fence after GetOrAdd returned it. Retry
+            // against the replacement fence instead of publishing to an
+            // orphaned tombstone.
         }
     }
 
@@ -1225,6 +1327,150 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
     private readonly record struct AttentionSnapshotKey(Guid UserId, string AttentionItemId);
 
+    private enum AttentionItemFenceResult
+    {
+        Accepted,
+        Stale,
+        Retired,
+    }
+
+    private readonly record struct LifecycleObservation(
+        bool Accepted,
+        AttentionLifecycle? Lifecycle,
+        AttentionSnapshot? ResolvedSnapshot);
+
+    /// <summary>
+    /// Per-attention-item linearization point between a global resolution's
+    /// tombstone publication + owner enumeration
+    /// (<see cref="TryPublishResolvedAndRun"/>) and a targeted dispatch's
+    /// per-recipient lifecycle install (<see cref="TryAdmitTargeted"/>).
+    /// Both operations acquire this SAME lock, so for a given attention item
+    /// exactly one of them happens-before the other:
+    ///   - If a targeted admission runs first, the per-user lifecycle it
+    ///     installs under this lock (via the <c>install</c> callback) is
+    ///     already present in <c>_attentionLifecycles</c> by the time a
+    ///     subsequent resolution's owner enumeration runs (also under this
+    ///     lock), so that recipient is included and its lifecycle is
+    ///     properly advanced/fenced by the resolution.
+    ///   - If a resolution's publish-and-enumerate runs first, the published
+    ///     version is visible to any subsequent targeted admission under
+    ///     this same lock, so a stale targeted dispatch is rejected before
+    ///     it can install a lifecycle unaware of the resolution.
+    /// This closes the P-A-D-R-S interleaving: a stale targeted Created (P)
+    /// reads this fence as unpublished, then pauses before installing its
+    /// per-owner lifecycle; a concurrent global Resolved (A) publishes the
+    /// tombstone; the resolution's owner enumeration (D) runs while the
+    /// recipient is tokenless and before its lifecycle exists, so it finds
+    /// no owner to fence and completes; the recipient re-registers a device
+    /// token (R); P resumes (S) and re-enters this fence — with the
+    /// published version now visible under the same lock, P is rejected
+    /// before it can install a lifecycle or reach transport.
+    /// Neither <see cref="TryAdmitTargeted"/> nor
+    /// <see cref="TryPublishResolvedAndRun"/> ever holds this lock across an
+    /// await — both only perform bounded, synchronous in-memory
+    /// dictionary/version work while holding it — so unrelated attention
+    /// items and recipients are never serialised, and there is no
+    /// process-global lock.
+    /// </summary>
+    private sealed class AttentionItemFence
+    {
+        private readonly object _sync = new();
+        private AttentionDispatchVersion? _resolvedVersion;
+        private DateTime _lastTouchedAtUtc;
+        private bool _retired;
+
+        /// <summary>
+        /// Atomically checks <paramref name="version"/> against the
+        /// item-wide resolved tombstone and, only when not fenced, runs
+        /// <paramref name="install"/> (the per-user lifecycle
+        /// GetOrAdd/TryObserve) before releasing the lock.
+        /// </summary>
+        public AttentionItemFenceResult TryAdmitTargeted(
+            AttentionDispatchVersion version,
+            DateTime observedAtUtc,
+            Action install)
+        {
+            lock (_sync)
+            {
+                if (_retired)
+                {
+                    return AttentionItemFenceResult.Retired;
+                }
+
+                _lastTouchedAtUtc = observedAtUtc;
+                if (_resolvedVersion is AttentionDispatchVersion resolved
+                    && version.CompareTo(resolved) < 0)
+                {
+                    return AttentionItemFenceResult.Stale;
+                }
+
+                install();
+                return AttentionItemFenceResult.Accepted;
+            }
+        }
+
+        /// <summary>
+        /// Publishes (monotonically bumps) the item-wide resolved tombstone
+        /// and, atomically with the publish under this same lock, runs
+        /// <paramref name="enumerateOwners"/>. Returns false only when this
+        /// fence has already been retired by the pruner, so the caller can
+        /// retry against a fresh replacement instead of publishing to an
+        /// orphaned tombstone.
+        /// </summary>
+        public bool TryPublishResolvedAndRun(
+            AttentionDispatchVersion version,
+            DateTime observedAtUtc,
+            Func<List<Guid>?> enumerateOwners,
+            out List<Guid>? owners)
+        {
+            lock (_sync)
+            {
+                if (_retired)
+                {
+                    owners = null;
+                    return false;
+                }
+
+                _lastTouchedAtUtc = observedAtUtc;
+                if (_resolvedVersion is null || version.CompareTo(_resolvedVersion.Value) > 0)
+                {
+                    _resolvedVersion = version;
+                }
+
+                owners = enumerateOwners();
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Best-effort, lock-protected read of the currently published
+        /// tombstone version. Used only by DispatchAsync's non-authoritative
+        /// fast-path check; the authoritative fence is
+        /// <see cref="TryAdmitTargeted"/>.
+        /// </summary>
+        public AttentionDispatchVersion? PeekResolvedVersion()
+        {
+            lock (_sync)
+            {
+                return _resolvedVersion;
+            }
+        }
+
+        public bool TryRetire(DateTime cutoffUtc)
+        {
+            lock (_sync)
+            {
+                if (_retired || _lastTouchedAtUtc >= cutoffUtc)
+                {
+                    return false;
+                }
+
+                _retired = true;
+                return true;
+            }
+        }
+    }
+
     private enum AttentionLifecycleObserveResult
     {
         Accepted,
@@ -1391,13 +1637,47 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
                 }
 
+                // An async sender never throws synchronously to this caller:
+                // every concrete INativePushSender implementation is declared
+                // `async Task<...>`, and C#'s async method semantics capture
+                // ANY exception raised before the method's first genuine
+                // await — argument validation, JSON/config errors, an
+                // already-cancelled token observed immediately — into the
+                // returned Task's Faulted/Canceled state rather than throwing
+                // it here. Task.IsCompleted, inspected with zero elapsed time
+                // immediately after startSend() returns control, is the
+                // sound, type-safe boundary for "no real transport attempt
+                // occurred": if the task has not completed yet, the
+                // implementation necessarily yielded at least once (a
+                // genuine transport attempt is in flight), and the
+                // post-transport-start retry / result-attribution path below
+                // applies unchanged — this preserves genuine started-transport
+                // semantics. A task that is ALREADY Faulted or Canceled at
+                // this exact point never reached transport and must be
+                // rolled back exactly like a synchronous throw, so an
+                // exact-version retry and this generation's dedupe/rate
+                // reservations are not poisoned by a send that never truly
+                // started. A task that already completed SUCCESSFULLY (e.g. a
+                // test double's Task.FromResult) is a genuine delivery and
+                // commits normally below.
+                if (sendTask.IsCompleted && !sendTask.IsCompletedSuccessfully)
+                {
+                    if (reservedThisCall)
+                    {
+                        rollbackRate?.Invoke();
+                        rollbackDedupe();
+                    }
+
+                    return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
+                }
+
                 if (!alreadyStarted)
                 {
                     // Commit lifecycle ownership only after startSend returns a
-                    // Task without throwing. From this point the send is
-                    // considered to have handed off to transport; any later
-                    // failure is an async result and follows the normal
-                    // retry / result-attribution path.
+                    // Task that has not already completed unsuccessfully.
+                    // From this point the send is considered to have handed
+                    // off to transport; any later failure is an async result
+                    // and follows the normal retry / result-attribution path.
                     _latestCommitted = true;
                     if (isResolution)
                     {
@@ -1740,16 +2020,19 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        // Global-resolution item tombstones use the same seven-day retention
-        // as snapshots/lanes so a stale targeted dispatch delayed by up to
-        // that window is still rejected. Value-comparing Remove prevents a
-        // race with a concurrent AddOrUpdate that bumped the tombstone to a
-        // newer version between snapshot and remove.
-        foreach (KeyValuePair<string, AttentionDispatchVersion> kv in _resolvedItemVersions)
+        // Item fences use the same seven-day retention as snapshots/lanes so
+        // a stale targeted dispatch delayed by up to that window is still
+        // rejected. TryRetire is decided under the fence's own lock, and a
+        // racing publish/admission that touches the fence between the
+        // enumeration snapshot and this removal is handled by the fence's
+        // own retry-on-Retired loops (TryObserveLifecycle,
+        // PublishResolvedTombstoneAndEnumerateOwners), which retry against a
+        // fresh replacement fence rather than operate on the orphaned one.
+        foreach (KeyValuePair<string, AttentionItemFence> kv in _attentionItemFences)
         {
-            if (kv.Value.OccurredAtUtc < snapshotCutoff)
+            if (kv.Value.TryRetire(snapshotCutoff))
             {
-                _ = ((ICollection<KeyValuePair<string, AttentionDispatchVersion>>)_resolvedItemVersions)
+                _ = ((ICollection<KeyValuePair<string, AttentionItemFence>>)_attentionItemFences)
                     .Remove(kv);
             }
         }

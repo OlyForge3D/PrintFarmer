@@ -3182,6 +3182,251 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_AsyncFaultedTaskBeforeTransport_AllowsSameVersionRetry()
+    {
+        // #755 remediation blocker 2: when an async sender's returned Task
+        // is ALREADY Faulted at the moment TryBeginSend observes it — i.e.
+        // the sender never yielded and never truly reached transport,
+        // instead of throwing synchronously it returned a
+        // Task.FromException-shaped result — the lifecycle must NOT commit
+        // _latestCommitted / _snapshot / dedupe / rate. This is the
+        // realistic failure mode for any `async Task<...> SendAsync(...)`
+        // sender (both concrete senders in this codebase — Relay and
+        // DirectApns — are declared `async`): an exception raised before
+        // the method's first await is captured into the returned Task by
+        // C#'s async method semantics rather than thrown to this caller, so
+        // TryBeginSend's synchronous-throw-only catch never observes it.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int attemptCount = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
+            {
+                if (Interlocked.Increment(ref attemptCount) == 1)
+                {
+                    // No synchronous throw here — the failure is captured
+                    // into the returned Task, exactly like a real `async`
+                    // sender whose exception occurs before its first await.
+                    return Task.FromException<NativePushDispatchResult>(
+                        new InvalidOperationException("simulated pre-transport async failure"));
+                }
+
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        DateTime occurredAt = new(2026, 7, 14, 20, 45, 0, DateTimeKind.Utc);
+
+        // First dispatch: the sender's Task is already Faulted when
+        // TryBeginSend observes it. With the fix, the lifecycle rolls back
+        // dedupe + rate reservations and leaves _latestCommitted false.
+        // With the bug, TryBeginSend committed as soon as startSend()
+        // returned any Task without a synchronous throw, poisoning the
+        // exact-version retry below.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+
+        // Second dispatch with the SAME version must proceed and deliver.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+
+        attemptCount.Should().Be(
+            2,
+            "the exact-version retry must reach the sender again after the first attempt's Task completed unsuccessfully before any transport truly started");
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MultiDeviceAsyncFaultedTaskForEveryDeviceOnFirstAttempt_ContinuesToSiblingsAndAllowsSameVersionRecoveryForEveryDevice()
+    {
+        // #755 remediation blocker 2 — multi-device async-faulted-Task
+        // coverage, mirroring
+        // DispatchAsync_MultiDeviceSyncSenderExceptionForEveryDeviceOnFirstAttempt_ContinuesToSiblingsAndAllowsSameVersionRecoveryForEveryDevice
+        // but for the Task.FromException (no synchronous throw) path.
+        // Proves both (a) sibling continuation within the SAME fan-out and
+        // (b) exact-version recovery for EVERY device, not just device A.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken deviceA = MakeToken(userId, "async-fault-multi-device-a");
+        DeviceToken deviceB = MakeToken(userId, "async-fault-multi-device-b");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid> { userId });
+        tokens.Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { deviceA, deviceB });
+        var successWrites = new ConcurrentBag<Guid>();
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, long, DateTime, CancellationToken>((id, _, _, _) => successWrites.Add(id))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var attemptedDevices = new ConcurrentQueue<Guid>();
+        var perDeviceCounts = new ConcurrentDictionary<Guid, int>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
+                attemptedDevices.Enqueue(tokenId);
+                int attempt = perDeviceCounts.AddOrUpdate(tokenId, 1, (_, prev) => prev + 1);
+                if (attempt == 1)
+                {
+                    // Already-Faulted Task, not a synchronous throw — models
+                    // a real `async` sender whose failure occurs before its
+                    // first await.
+                    return Task.FromException<NativePushDispatchResult>(
+                        new InvalidOperationException(
+                            $"simulated pre-transport async failure (device={tokenId})"));
+                }
+
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        DateTime occurredAt = new(2026, 7, 14, 23, 15, 0, DateTimeKind.Utc);
+
+        // Dispatch #1 at v1 — both devices' Tasks are already Faulted on
+        // their first attempt. Sibling continuation invariant: device B
+        // must still be attempted in the SAME fan-out as device A.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+        Guid[] firstDispatchAttempts = attemptedDevices.ToArray();
+        firstDispatchAttempts.Should().BeEquivalentTo(
+            new[] { deviceA.Id, deviceB.Id },
+            "device A's already-faulted Task must be isolated at the per-device boundary; device B must still be attempted in the SAME fan-out (sibling continuation)");
+
+        // Dispatch #2 at the SAME v1 — exact-version recovery invariant.
+        // Neither device truly started transport on the first dispatch (no
+        // lifecycle commit was made because both Tasks completed
+        // unsuccessfully before TryBeginSend observed them), so no
+        // per-device lifecycle commit may fence the retry. Every device
+        // must retry at the same version and deliver on this attempt.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+        Guid[] allAttempts = attemptedDevices.ToArray();
+        allAttempts.Should().HaveCount(
+            4,
+            "the exact-version retry must invoke the sender a second time for BOTH devices — neither device's first attempt ever truly started transport, so no lifecycle commit may fence the retry for either device");
+        perDeviceCounts[deviceA.Id].Should().Be(2, "device A: 1 async fault + 1 delivered retry");
+        perDeviceCounts[deviceB.Id].Should().Be(2, "device B: 1 async fault + 1 delivered retry");
+
+        successWrites.Should().BeEquivalentTo(new[] { deviceA.Id, deviceB.Id });
+        tokens.Verify(r => r.RecordFailureAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "an already-faulted pre-transport Task is never evidence against a token's health");
+        tokens.Verify(r => r.InvalidateAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_AsyncPreCanceledTaskBeforeTransport_PropagatesButAllowsSameVersionRetry()
+    {
+        // #755 remediation blocker 2 — Task.FromCanceled / pre-cancelled
+        // async-return path, the second completion state (distinct from
+        // Faulted) that must roll back a pre-transport reservation. An
+        // unrelated/internal cancellation (NOT the caller's own
+        // cancellationToken) must still propagate out of DispatchAsync
+        // unchanged — see
+        // DispatchAsync_SenderThrowsOceWithInternalToken_PropagatesWhenCallerTokenIsNone,
+        // which locks in that the dispatcher must not guess that every
+        // unrelated OperationCanceledException is a benign timeout, and
+        // this test does not alter that contract. What this test proves is
+        // the orthogonal half of blocker 2: even though the exception still
+        // propagates, TryBeginSend must not have committed the
+        // lifecycle/dedupe/rate for that failed attempt, so a subsequent
+        // exact-version DispatchAsync can still recover and actually
+        // deliver — distinguishing "no transport occurred" from a genuine
+        // attempted send.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        using var innerCts = new CancellationTokenSource();
+        innerCts.Cancel();
+
+        int attemptCount = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
+            {
+                if (Interlocked.Increment(ref attemptCount) == 1)
+                {
+                    // A genuinely CANCELED task (Task.IsCanceled == true,
+                    // distinct from Task.FromException's Faulted state),
+                    // using an internal token unrelated to the caller's —
+                    // models an unexpected linked-cancellation return.
+                    return Task.FromCanceled<NativePushDispatchResult>(innerCts.Token);
+                }
+
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        DateTime occurredAt = new(2026, 7, 14, 23, 45, 0, DateTimeKind.Utc);
+
+        // First dispatch: sender returns an already-canceled Task. The
+        // dispatcher must not guess this is benign, so it propagates —
+        // matching the established, tested contract for unrelated OCEs.
+        Func<Task> firstAttempt = () => sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: occurredAt,
+            cancellationToken: CancellationToken.None);
+        await firstAttempt.Should().ThrowAsync<OperationCanceledException>();
+
+        // Second dispatch, SAME version: must still be able to deliver.
+        // With the fix, the first attempt's pre-transport cancellation was
+        // rolled back before it propagated, so this is not fenced as stale.
+        // With the bug, TryBeginSend had already committed _latestCommitted
+        // as soon as startSend() returned any Task, permanently fencing
+        // this exact version even though transport never truly started.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+
+        attemptCount.Should().Be(
+            2,
+            "the exact-version retry must reach the sender again after the first attempt's pre-transport cancellation, even though that cancellation propagated out of the first DispatchAsync call");
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task DispatchAsync_RateLimitedVersionlessDedupeSurvivesStalledGlobalResolutionAtomicReset_NewerTargetedCreatedMustEmitInterleavingA()
     {
         // #755 Kane cycle 3 deterministic coverage — dedupe-reset race
@@ -3711,6 +3956,162 @@ public sealed class NativePushDispatcherTests
         sender.Verify(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "no envelope may reach the sender for the stale targeted retry");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ConcurrentGlobalResolvedDuringTargetedLifecycleInstall_FencesRegardlessOfInterleaving()
+    {
+        // #755 remediation blocker 1 (P-A-D-R-S): deterministic regression
+        // for the item-tombstone TOCTOU that the rejected candidate left
+        // open. Unlike
+        // DispatchAsync_GlobalResolvedWithoutPriorLifecycleForTokenlessRecipient_ReRegistrationCannotResurrectStaleTargetedAlert
+        // (fully sequential: the global Resolved completes entirely BEFORE
+        // the stale targeted Created is even dispatched) this test
+        // orchestrates genuine, deterministic concurrency:
+        //
+        // P. A stale targeted Created (v1) for a tokenless, never-before-
+        //    dispatched recipient starts. It is deterministically paused —
+        //    via a gated IServiceScopeFactory — after DispatchAsync's own
+        //    (at-that-moment-correct) tombstone read, but strictly BEFORE
+        //    it reaches TryObserveLifecycle, the point that installs its
+        //    per-owner lifecycle. (TryObserveLifecycle is the very first
+        //    statement once a targeted dispatch reaches its owner; the only
+        //    genuine synchronisation point before it is scope creation.)
+        // A. While P is paused, a concurrent global Resolved (v2 > v1) runs
+        //    to completion and publishes the item-wide tombstone.
+        // D. That SAME Resolved dispatch enumerates lifecycle owners while
+        //    the recipient is tokenless AND before P has installed any
+        //    lifecycle — it finds no owner for this recipient and
+        //    completes without sending anything.
+        // R. The recipient re-registers a device token.
+        // S. P is released and resumes: on the rejected design (a one-time
+        //    tombstone check at DispatchAsync's entry, already read as
+        //    absent before A published) it installs a fresh lifecycle
+        //    unaware of the resolution, fetches the now-present token, and
+        //    sends the stale alert AFTER the resolution. With the fix,
+        //    AttentionItemFence's shared lock means P's resumed
+        //    TryObserveLifecycle call re-checks the SAME, now-published
+        //    tombstone atomically with its own lifecycle install and is
+        //    rejected before any transport.
+        //
+        // Mutation proof (see validation notes): reverting
+        // AttentionItemFence.TryAdmitTargeted to unconditionally admit (or
+        // reverting DispatchAsync/PublishResolvedTombstoneAndEnumerateOwners
+        // to the old one-time, non-atomic _resolvedItemVersions check) makes
+        // this test fail — P installs a lifecycle and sends unconditionally
+        // once released.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+
+        bool reRegistered = false;
+        DeviceToken? reRegisteredToken = null;
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<IReadOnlyList<Guid>>(
+                reRegistered ? new List<Guid> { userId } : Array.Empty<Guid>()));
+        tokens.Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<IReadOnlyList<DeviceToken>>(
+                reRegisteredToken is DeviceToken current
+                    ? new List<DeviceToken> { current }
+                    : Array.Empty<DeviceToken>()));
+        tokens.Setup(r => r.RecordSuccessAsync(
+                It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(s => s.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => sent.Enqueue(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        IServiceScopeFactory realFactory = provider.GetRequiredService<IServiceScopeFactory>();
+
+        var targetedEnteredScopeCreation = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTargetedScopeCreation = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var gatedFactory = new FirstCallGatedServiceScopeFactory(
+            realFactory,
+            targetedEnteredScopeCreation,
+            releaseTargetedScopeCreation);
+
+        IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        var sut = new NativePushDispatcher(
+            gatedFactory,
+            sender.Object,
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+
+        DateTime resolvedAt = new(2026, 7, 14, 22, 0, 0, DateTimeKind.Utc);
+        DateTime staleTargetedAt = resolvedAt.AddSeconds(-30);
+
+        // P: kick off the stale targeted Created on a background thread —
+        // its DispatchCoreAsync call is the FIRST call to CreateScope, so
+        // the gate blocks it deterministically right there, strictly before
+        // TryObserveLifecycle for userId has ever run.
+        Task targetedTask = Task.Run(() => sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: staleTargetedAt));
+
+        await targetedEnteredScopeCreation.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // A + D: the global Resolved runs to full completion while P is
+        // genuinely paused. The recipient is tokenless and has no lifecycle
+        // yet (P hasn't reached TryObserveLifecycle), so this finds no
+        // owner and completes silently.
+        await sut.DispatchAsync(
+                item.Id,
+                AttentionChangeKind.Resolved,
+                targetUserId: null,
+                occurredAtUtc: resolvedAt)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Should().BeEmpty(
+            "the global resolution has no owners yet — the tokenless recipient has no installed lifecycle while the targeted dispatch is paused");
+
+        // R: recipient re-registers a device token.
+        reRegisteredToken = MakeToken(userId, "pdrs-tokenless-reregister");
+        reRegistered = true;
+
+        // S: release P. On the rejected design it now installs a lifecycle
+        // unaware of the resolution and sends. With the fix, the shared
+        // AttentionItemFence rejects it before any lifecycle install/send.
+        releaseTargetedScopeCreation.TrySetResult();
+        await targetedTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Should().BeEmpty(
+            "a stale targeted Created racing a concurrent global Resolved must never install a lifecycle and transport after the resolution, regardless of which side reaches its own critical section first");
+        sender.Verify(
+            s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "no envelope may reach the sender once the resolution has published its tombstone, even if it published it while the targeted dispatch was already mid-flight");
     }
 
     private static async Task AssertPostSendDisableDiscardsResultAsync(
@@ -4287,6 +4688,35 @@ public sealed class NativePushDispatcherTests
             {
                 _exceptions.Enqueue(exception);
             }
+        }
+    }
+
+    /// <summary>
+    /// Wraps a real <see cref="IServiceScopeFactory"/> and deterministically
+    /// blocks the FIRST call to <see cref="CreateScope"/> until released,
+    /// letting every subsequent call through immediately. CreateAsyncScope
+    /// (used by NativePushDispatcher) synchronously delegates to
+    /// CreateScope — it is the one point before TryObserveLifecycle where a
+    /// targeted DispatchAsync call can be paused deterministically. The
+    /// blocked call is intended to run on a background thread (started via
+    /// Task.Run) so the test method's own thread is never blocked.
+    /// </summary>
+    private sealed class FirstCallGatedServiceScopeFactory(
+        IServiceScopeFactory inner,
+        TaskCompletionSource entered,
+        TaskCompletionSource release) : IServiceScopeFactory
+    {
+        private int _callCount;
+
+        public IServiceScope CreateScope()
+        {
+            if (Interlocked.Increment(ref _callCount) == 1)
+            {
+                entered.TrySetResult();
+                release.Task.GetAwaiter().GetResult();
+            }
+
+            return inner.CreateScope();
         }
     }
 
