@@ -15,6 +15,7 @@ import {
   buildSavePayload,
   defaultEventChannelPreferences,
   hydratePreferences,
+  resolveSupportedEventTypes,
   withDerivedLegacyFlags,
 } from '@/features/notifications/preferencesAdapter';
 import {
@@ -105,6 +106,16 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     () => (formState.eventChannelPreferences ?? [])
       .some(item => visibleEventTypes.has(item.eventType) && item.push),
     [formState.eventChannelPreferences, visibleEventTypes],
+  );
+
+  // Per-row capability gate for the operator block. `serverSupportsOperatorCategories`
+  // only tells us the server advertised AT LEAST ONE operator token — during a
+  // partial rollout it can advertise some operator tokens but not others, and
+  // enabling edits on a row whose token isn't in `supportedEventTypes` would let
+  // the user toggle a row that `buildSavePayload` then silently strips on save.
+  const supportedEventTypes = useMemo(
+    () => resolveSupportedEventTypes(capabilities ?? null),
+    [capabilities],
   );
 
   const updateMatrixField = (
@@ -295,7 +306,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
           {matrixHeader}
           <div className="space-y-3">
             {OPERATOR_EVENT_ROWS.map(row =>
-              renderRow(row, !serverSupportsOperatorCategories || !!capsError),
+              renderRow(row, !supportedEventTypes.has(row.eventType) || !!capsError),
             )}
           </div>
         </div>

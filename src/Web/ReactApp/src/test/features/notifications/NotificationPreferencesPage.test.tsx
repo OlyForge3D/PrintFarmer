@@ -433,5 +433,49 @@ describe('NotificationPreferencesPage', () => {
       // (or equivalent). It must NOT be shown because no VISIBLE row has push=true.
       expect(screen.queryByText(/enable browser push/i)).not.toBeInTheDocument();
     });
+
+    it('gates operator rows per advertised token — a partial rollout enables only the advertised rows', () => {
+      // Server advertises jobs + HarvestReady + FilamentRunout only;
+      // MaintenanceDue and PrinterOffline are NOT in supportedEventTypes.
+      // Before this fix the disabled state was all-or-nothing
+      // (`!serverSupportsOperatorCategories`), so advertising ANY operator
+      // token enabled ALL four operator rows — including ones the server
+      // does not actually accept, which `buildSavePayload` would then
+      // silently strip on save without any UI indication.
+      mockUseNotificationPreferences.mockReturnValue({
+        data: createCapablePreferences(),
+        isLoading: false,
+        error: null,
+      });
+      mockUseNotificationCapabilities.mockReturnValue({
+        data: {
+          supportedEventTypes: [
+            NotificationPreferenceEventType.JobStarted,
+            NotificationPreferenceEventType.JobCompleted,
+            NotificationPreferenceEventType.JobFailed,
+            NotificationPreferenceEventType.JobPaused,
+            NotificationPreferenceEventType.HarvestReady,
+            NotificationPreferenceEventType.FilamentRunout,
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      renderPage();
+
+      for (const label of ['Filament Runout Risk', 'Harvest Ready']) {
+        expect((screen.getByLabelText(`${label} in-app`) as HTMLInputElement).disabled).toBe(false);
+        expect((screen.getByLabelText(`${label} email`) as HTMLInputElement).disabled).toBe(false);
+        expect((screen.getByLabelText(`${label} push`) as HTMLInputElement).disabled).toBe(false);
+        expect((screen.getByLabelText(`${label} Telegram`) as HTMLInputElement).disabled).toBe(false);
+      }
+      for (const label of ['Maintenance Due', 'Printer Offline']) {
+        expect((screen.getByLabelText(`${label} in-app`) as HTMLInputElement).disabled).toBe(true);
+        expect((screen.getByLabelText(`${label} email`) as HTMLInputElement).disabled).toBe(true);
+        expect((screen.getByLabelText(`${label} push`) as HTMLInputElement).disabled).toBe(true);
+        expect((screen.getByLabelText(`${label} Telegram`) as HTMLInputElement).disabled).toBe(true);
+      }
+    });
   });
 });

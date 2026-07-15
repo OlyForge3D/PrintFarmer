@@ -216,10 +216,12 @@ describe('preferencesAdapter.hydratePreferences', () => {
       r => r.eventType === NotificationPreferenceEventType.JobCompleted,
     );
     // Rich defaults, not DEFAULT_MATRIX_ROW (which would be all-false).
+    // email=false matches the #708 canonical backend seed
+    // (NotificationPreferencesDefaults.Apply): no surprise first-visit email.
     expect(completed).toEqual({
       eventType: NotificationPreferenceEventType.JobCompleted,
       inApp: true,
-      email: true,
+      email: false,
       push: true,
       telegram: false,
     });
@@ -258,6 +260,11 @@ describe('preferencesAdapter.withDerivedLegacyFlags', () => {
     const matrix = defaultEventChannelPreferences();
     const started = matrix.find(r => r.eventType === NotificationPreferenceEventType.JobStarted)!;
     started.push = true;
+    // #708 canonical defaults have email=false on every row (see
+    // defaultEventChannelPreferences), so exercise the email-derivation
+    // path explicitly rather than relying on an incidental default.
+    const completed = matrix.find(r => r.eventType === NotificationPreferenceEventType.JobCompleted)!;
+    completed.email = true;
 
     const derived = withDerivedLegacyFlags({
       enableEmailNotifications: false,
@@ -464,13 +471,14 @@ describe('preferencesAdapter.buildSavePayload', () => {
     expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
   });
 
-  it('derives enablePushNotifications from the OUTBOUND payload — legacy strip happens before derive', () => {
-    // User has push OFF on every visible job row, but the hidden operator
-    // rows carry `push=true` defaults from DEFAULT_ATTENTION_ROW. Before the
-    // strip-before-derive fix, the legacy save payload would still emit
-    // `enablePushNotifications: true` because master flags were computed on
-    // the full matrix. Backend treats that flag as a hard delivery gate, so
-    // silently flipping it on every save was a real corruption.
+  it('derives enablePushNotifications from tokens the server accepts — unsupported operator defaults on a legacy server must not leak into the master flag', () => {
+    // Legacy server (capabilities=null → supported = job tokens only). User
+    // has push OFF on every visible job row, but the hidden operator rows
+    // carry `push=true` defaults from DEFAULT_ATTENTION_ROW. Those rows are
+    // UNSUPPORTED on a legacy server (it has no column for them at all), so
+    // they must not influence the derived master flag — otherwise the save
+    // payload would emit `enablePushNotifications: true` even though the
+    // user has push off on every row the server actually understands.
     const matrix = defaultEventChannelPreferences().map(r =>
       // Force ALL push flags off (both job and operator defaults).
       r.eventType === NotificationPreferenceEventType.JobCompleted
@@ -502,6 +510,50 @@ describe('preferencesAdapter.buildSavePayload', () => {
     // cannot influence the derived master.
     expect(payload.eventChannelPreferences?.some(
       r => r.eventType === NotificationPreferenceEventType.HarvestReady,
+    )).toBe(false);
+  });
+
+  it('derives enablePushNotifications from the FULL matrix on a capable server — a hidden but SUPPORTED PrinterFailure row must not be masked by an all-off visible matrix', () => {
+    // Regression for the Hicks/Dallas-adjudicated master-flag defect: on a
+    // capable server (all 9 tokens advertised, including PrinterFailure),
+    // every VISIBLE row has push off, but the hidden PrinterFailure row
+    // (never rendered by the UI, always omitted from the outbound rows via
+    // partial-PUT preservation) still carries push=true. The backend
+    // enforces `enablePushNotifications` as a hard delivery gate, so
+    // deriving the flag from the stripped (visible-only) matrix would emit
+    // `false` and silently suppress delivery of the preserved PrinterFailure
+    // alert even though the row itself survives the PUT untouched.
+    const matrix = defaultEventChannelPreferences().map(r =>
+      r.eventType === NotificationPreferenceEventType.PrinterFailure ? r : { ...r, push: false },
+    );
+    const hiddenPrinterFailure = matrix.find(
+      r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
+    );
+    expect(hiddenPrinterFailure?.push).toBe(true); // sanity: hidden row still push=true
+
+    const form: UpdateNotificationPreferencesRequest = {
+      enableEmailNotifications: false,
+      enablePushNotifications: false,
+      enableInAppNotifications: false,
+      enableTelegramNotifications: false,
+      notifyOnCompletion: false,
+      notifyOnFailure: false,
+      notifyOnStart: false,
+      notifyOnPause: false,
+      eventChannelPreferences: matrix,
+      frequency: NotificationFrequency.RealTime,
+      retentionDays: 30,
+    };
+
+    const payload = buildSavePayload(form, CAPABLE_CAPABILITIES);
+
+    // The hidden-but-supported PrinterFailure row's push=true must still be
+    // reflected in the master flag...
+    expect(payload.enablePushNotifications).toBe(true);
+    // ...even though the row itself remains omitted from the outbound rows
+    // array (concurrent-write protection is unchanged).
+    expect(payload.eventChannelPreferences?.some(
+      r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
     )).toBe(false);
   });
 });

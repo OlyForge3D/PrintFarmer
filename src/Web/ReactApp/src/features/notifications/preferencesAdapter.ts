@@ -22,7 +22,7 @@ import {
  *    known operator category so the UI can always render the full grid, even
  *    on legacy servers that only know the four job categories.
  *
- * 2. Consume the `GET /notifications/capabilities` probe (introduced by #708)
+ * 2. Consume the `GET /notifications/preferences/capabilities` probe (introduced by #708)
  *    to know exactly which enum tokens the server accepts. A `null`
  *    capabilities response (endpoint 404) is treated as "legacy server:
  *    supportedEventTypes = the classic four job tokens only".
@@ -66,13 +66,21 @@ const DEFAULT_ATTENTION_ROW = (
   telegram: false,
 });
 
-/** Default matrix used when the server returns no preferences at all. */
+/**
+ * Default matrix used when the server returns no preferences at all.
+ *
+ * Job-row email defaults are `false` across the board to match the #708
+ * canonical backend seed (`NotificationPreferencesDefaults.Apply`): a
+ * first-visit user never gets surprise-emailed on a completion without an
+ * explicit opt-in. InApp/push mirror the pre-#708 completion/failure/pause
+ * defaults (start off, others on).
+ */
 export function defaultEventChannelPreferences(): NotificationEventChannelPreferenceDto[] {
   return [
     { eventType: NotificationPreferenceEventType.JobStarted, inApp: false, email: false, push: false, telegram: false },
-    { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: true, push: true, telegram: false },
-    { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: true, push: true, telegram: false },
-    { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: true, push: true, telegram: false },
+    { eventType: NotificationPreferenceEventType.JobCompleted, inApp: true, email: false, push: true, telegram: false },
+    { eventType: NotificationPreferenceEventType.JobFailed, inApp: true, email: false, push: true, telegram: false },
+    { eventType: NotificationPreferenceEventType.JobPaused, inApp: true, email: false, push: true, telegram: false },
     ...OPERATOR_EVENT_TYPES.map(DEFAULT_ATTENTION_ROW),
   ];
 }
@@ -294,12 +302,30 @@ export function withDerivedLegacyFlags(
  * visible rows, so the request cannot fail `JsonStringEnumConverter`
  * deserialization and previously saved job preferences are never corrupted.
  *
- * Legacy master flag derivation (`enablePushNotifications`, etc.) runs on
- * the STRIPPED matrix, not the input matrix. That ordering matters because
- * the operator rows carry `push=true`/`inApp=true` defaults from
- * `DEFAULT_ATTENTION_ROW`; deriving master flags before stripping would let
- * those defaults force `enablePushNotifications=true` on a legacy server
- * even when the user has push off on every job row they can see.
+ * Master flag derivation (`enablePushNotifications`, etc.) runs on the
+ * matrix filtered down to tokens the SERVER ACCEPTS (`supported`) — not the
+ * UI-visible-only matrix, and not the raw unfiltered matrix:
+ *
+ * - Excluding UNSUPPORTED tokens matters on legacy/partial-rollout servers:
+ *   the operator rows carry `push=true`/`inApp=true` defaults from
+ *   `DEFAULT_ATTENTION_ROW` that the user never had a chance to see or
+ *   toggle, and an unsupported server has no persisted column for them at
+ *   all. Deriving master flags from those phantom defaults would force
+ *   e.g. `enablePushNotifications=true` even when the user has push off on
+ *   every row the server actually understands.
+ * - Deliberately KEEPING supported-but-hidden tokens (hidden
+ *   `PrinterFailure`, opaque unknown rows the server itself returned) in
+ *   the derivation matters on capable servers: the backend enforces each
+ *   master flag as a hard delivery gate. If a hidden row the server
+ *   persists still has a channel on, the master flag for that channel must
+ *   stay on too — otherwise the backend's partial-PUT preservation of the
+ *   row's value becomes moot, since the gate would suppress delivery even
+ *   though the row itself survived the PUT untouched.
+ *
+ * The rows actually included in the outbound `eventChannelPreferences`
+ * remain restricted to `visibleTokens` (UI-rendered rows only) — that
+ * concurrent-write protection is unchanged; only the master-flag derivation
+ * source differs from the row-stripping filter.
  *
  * All other state (frequency, retentionDays, digest schedule) is passed
  * through unchanged.
@@ -319,13 +345,27 @@ export function buildSavePayload(
     ...JOB_EVENT_ROWS.map(r => String(r.eventType)),
     ...OPERATOR_EVENT_ROWS.map(r => String(r.eventType)),
   ]);
-  const strippedMatrix = (request.eventChannelPreferences ?? []).filter(row =>
-    supported.has(row.eventType as string) && visibleTokens.has(String(row.eventType)),
+
+  // Derive master/legacy flags from every row the SERVER accepts — not just
+  // the visible ones — before stripping down to the outbound rows. See the
+  // docstring above for why `supported` (not `visibleTokens`, and not the
+  // raw unfiltered matrix) is the correct source for this derivation.
+  const supportedMatrix = (request.eventChannelPreferences ?? []).filter(row =>
+    supported.has(row.eventType as string),
   );
-  return withDerivedLegacyFlags({
+  const derived = withDerivedLegacyFlags({
     ...request,
-    eventChannelPreferences: strippedMatrix,
+    eventChannelPreferences: supportedMatrix,
   });
+
+  const strippedMatrix = (derived.eventChannelPreferences ?? []).filter(row =>
+    visibleTokens.has(String(row.eventType)),
+  );
+
+  return {
+    ...derived,
+    eventChannelPreferences: strippedMatrix,
+  };
 }
 
 /** Re-exported for tests and other adapter consumers. */
