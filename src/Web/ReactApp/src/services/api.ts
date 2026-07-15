@@ -112,6 +112,7 @@ import {
   DispatchHistoryPageDto,
   FailureDetectionEvent,
   NotificationDto,
+  NotificationCapabilitiesResponse,
   NotificationPreferencesDto,
   TelegramSettingsDto,
   TelegramTestResult,
@@ -4492,6 +4493,32 @@ export class ApiClient {
   async updateNotificationPreferences(preferences: UpdateNotificationPreferencesRequest): Promise<NotificationPreferencesDto> {
     const response = await this.client.put('/notifications/preferences', preferences);
     return response.data;
+  }
+
+  /**
+   * Capability probe for the notification preferences enum. Introduced by #708.
+   * Legacy servers respond 404; the client treats that as "supportedEventTypes
+   * = the classic four job tokens only" via the preferences adapter, so
+   * anticipatory operator tokens are never sent on the outbound PUT.
+   */
+  async getNotificationCapabilities(): Promise<NotificationCapabilitiesResponse | null> {
+    try {
+      const response = await this.client.get('/notifications/preferences/capabilities');
+      return response.data as NotificationCapabilitiesResponse;
+    } catch (err: unknown) {
+      // The axios response interceptor above unwraps errors into ApiError
+      // shapes carrying `statusCode`, not raw AxiosError. Treat 404 as the
+      // legacy-server signal per the #708 contract; rethrow everything else
+      // (network, 5xx) so callers/react-query can surface a proper failure
+      // instead of misclassifying an outage as "legacy" and silently
+      // stripping operator tokens on save.
+      const status =
+        typeof err === 'object' && err !== null && 'statusCode' in err
+          ? (err as { statusCode: unknown }).statusCode
+          : undefined;
+      if (status === 404) return null;
+      throw err;
+    }
   }
 
   async getTelegramSettings(): Promise<TelegramSettingsDto> {
