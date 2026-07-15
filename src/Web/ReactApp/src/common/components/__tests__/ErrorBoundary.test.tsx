@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { installConsoleErrorFilter } from '@/test/consoleFilter';
 
 // Component that throws an error for testing
 const ThrowError = ({ error }: { error?: Error }) => {
@@ -11,16 +12,32 @@ const ThrowError = ({ error }: { error?: Error }) => {
 };
 
 describe('ErrorBoundary', () => {
-  // Suppress console.error for these tests
-  const originalConsoleError = console.error;
-  
-  beforeEach(() => {
-    console.error = vi.fn();
-  });
-
-  afterEach(() => {
-    console.error = originalConsoleError;
-  });
+  // Whitelist-based console.error filter (Hicks #7). Previous versions
+  // wholesale-replaced `console.error` with a no-op vi.fn(), which
+  // silenced not just the boundary's own `componentDidCatch` log and
+  // React's paired "The above error occurred in ..." noise, but also
+  // any unexpected act-boundary warnings or render-phase warnings that
+  // would indicate a real regression. We now allow only the patterns
+  // we expect, capture the allowed calls for assertion, and fail the
+  // test on any unexpected call.
+  const consoleFilter = installConsoleErrorFilter([
+    // Our own tagged log from componentDidCatch — the "should log
+    // error to console" test asserts on this exact string.
+    /ErrorBoundary caught an error:/,
+    // React 18/19 error-in-tree noise around a thrown render.
+    /The above error occurred in the/,
+    /Consider adding an error boundary/,
+    /React will try to recreate this component tree/,
+    // React 19 sometimes preserves the raw thrown Error as the first
+    // arg on the second `console.error` call (message is the plain
+    // "Test error" / "Console log test" / "Specific test error" the
+    // test itself threw). We allow only the exact throw strings the
+    // tests below use.
+    /Test error/,
+    /Console log test/,
+    /Specific test error/,
+  ]);
+  afterEach(() => consoleFilter.flushUnexpectedErrors());
 
   it('should render children when no error occurs', () => {
     render(
@@ -45,7 +62,7 @@ describe('ErrorBoundary', () => {
 
   it('should show error details in a collapsible section', () => {
     const testError = new Error('Specific test error');
-    
+
     render(
       <ErrorBoundary>
         <ThrowError error={testError} />
@@ -71,7 +88,6 @@ describe('ErrorBoundary', () => {
   });
 
   it('should log error to console', () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error');
     const testError = new Error('Console log test');
 
     render(
@@ -80,11 +96,14 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'ErrorBoundary caught an error:',
-      testError,
-      expect.anything()
+    // Assert against the captured allow-listed calls rather than a
+    // vi.spyOn, so we only verify the boundary's tagged message and
+    // ignore React's own noise (which the filter also captured).
+    const boundaryLogs = consoleFilter.allowedCalls.filter(
+      call => call[0] === 'ErrorBoundary caught an error:'
     );
+    expect(boundaryLogs).toHaveLength(1);
+    expect(boundaryLogs[0][1]).toBe(testError);
   });
 
   it('should catch errors from nested components', () => {
@@ -113,3 +132,4 @@ describe('ErrorBoundary', () => {
     expect(container?.querySelector('svg')).toBeInTheDocument();
   });
 });
+
