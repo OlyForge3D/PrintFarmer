@@ -31,6 +31,19 @@ public interface IAppSettingsRepository
     Task<AppSettingsEntity?> GetAsync(string key, CancellationToken ct = default);
 
     /// <summary>
+    /// Retrieves a read-only setting snapshot directly from persisted state.
+    /// </summary>
+    /// <param name="key">The setting key to retrieve</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>The untracked AppSettingsEntity snapshot if found; null if not found</returns>
+    /// <remarks>
+    /// Unlike <see cref="GetAsync"/>, this query never resolves an entity from the current
+    /// DbContext identity map. Use it for runtime gates that must observe changes committed
+    /// by another context while the current scope is still active.
+    /// </remarks>
+    Task<AppSettingsEntity?> GetReadOnlyAsync(string key, CancellationToken ct = default);
+
+    /// <summary>
     /// Sets or updates a setting value.
     /// </summary>
     /// <param name="key">The setting key</param>
@@ -67,6 +80,13 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
     public async Task<AppSettingsEntity?> GetAsync(string key, CancellationToken ct = default)
     {
         return await _db.AppSettingsEntities.FirstOrDefaultAsync(s => s.Key == key, ct);
+    }
+
+    public async Task<AppSettingsEntity?> GetReadOnlyAsync(string key, CancellationToken ct = default)
+    {
+        return await _db.AppSettingsEntities
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Key == key, ct);
     }
 
     public async Task SetAsync(string key, string value, CancellationToken ct = default)

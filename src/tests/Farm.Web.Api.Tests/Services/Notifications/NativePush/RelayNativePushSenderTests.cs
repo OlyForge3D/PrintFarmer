@@ -166,35 +166,51 @@ public sealed class RelayNativePushSenderTests
         result.Reason.Should().Be("network");
     }
 
-    /// <summary>
-    /// Hicks #1 regression: an internally-generated <see cref="TaskCanceledException"/>
-    /// (raised by <see cref="HttpClient"/> when its own timeout timer fires, NOT by
-    /// the caller's token) MUST propagate as an <see cref="OperationCanceledException"/>.
-    /// The previous implementation filtered on <c>cancellationToken.IsCancellationRequested</c>
-    /// which was ALWAYS false when the caller passed <see cref="CancellationToken.None"/>,
-    /// so the internal-timeout OCE fell through to a generic catch that mapped it to
-    /// <see cref="NativePushDispatchResult.Transient(string)"/>("timeout"). This
-    /// silently converted a real send failure into a retry candidate that produced
-    /// no real error signal upstream.
-    ///
-    /// The fix removed the OCE catch entirely — OCE propagates naturally past the
-    /// remaining <see cref="HttpRequestException"/> catch.
-    /// </summary>
     [Fact]
-    public async Task SendAsync_InternalTaskCanceledException_PropagatesAsOperationCanceled()
+    public async Task SendAsync_InternalTaskCanceledException_ReturnsTransientTimeout()
     {
         RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
-        {
-            // TaskCanceledException is a subclass of OperationCanceledException;
-            // when raised WITHOUT a triggered cancellation token it models the
-            // HttpClient internal-timeout-timer case.
-            throw new TaskCanceledException("internal HttpClient timeout");
-        });
+            throw new TaskCanceledException("internal HttpClient timeout"));
 
-        Func<Task> act = () => sut.SendAsync(Sample, CancellationToken.None);
+        NativePushDispatchResult result = await sut.SendAsync(Sample, CancellationToken.None);
 
-        await act.Should().ThrowAsync<OperationCanceledException>(
-            "internal-timeout OCE MUST propagate; it must NOT be turned into a Transient result");
+        result.IsTransient.Should().BeTrue();
+        result.Reason.Should().Be("timeout");
+        result.TokenInvalidated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_HttpClientTimeout_ReturnsTransientWithoutCallerCancellation()
+    {
+        using var handler = new BlockingUntilCanceledHandler();
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(100) };
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), client);
+
+        Task<NativePushDispatchResult> send = sut.SendAsync(Sample, CancellationToken.None);
+        await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        NativePushDispatchResult result = await send.WaitAsync(TimeSpan.FromSeconds(5));
+
+        result.IsTransient.Should().BeTrue();
+        result.Reason.Should().Be("timeout");
+        handler.ObservedCancellation.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SendAsync_CallerCancellation_PropagatesFromBlockedHttpRequest()
+    {
+        using var handler = new BlockingUntilCanceledHandler();
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), client);
+        using var cts = new CancellationTokenSource();
+
+        Task<NativePushDispatchResult> send = sut.SendAsync(Sample, cts.Token);
+        await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await send.WaitAsync(TimeSpan.FromSeconds(5)));
+        handler.ObservedCancellation.Should().BeTrue();
     }
 
     private static NativePushSettings MakeRelaySettings() => new()
@@ -219,6 +235,18 @@ public sealed class RelayNativePushSenderTests
         return new RelayNativePushSender(factory, monitor, NullLogger<RelayNativePushSender>.Instance);
     }
 
+    private static RelayNativePushSender CreateSender(
+        NativePushSettings settings,
+        HttpClient client)
+    {
+        var factory = new StubHttpClientFactory(client);
+        IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
+        return new RelayNativePushSender(
+            factory,
+            monitor,
+            NullLogger<RelayNativePushSender>.Instance);
+    }
+
     private sealed class StaticOptionsMonitor(NativePushSettings value) : IOptionsMonitor<NativePushSettings>
     {
         public NativePushSettings CurrentValue { get; } = value;
@@ -226,6 +254,31 @@ public sealed class RelayNativePushSenderTests
         public NativePushSettings Get(string? name) => CurrentValue;
 
         public IDisposable? OnChange(Action<NativePushSettings, string?> listener) => null;
+    }
+
+    private sealed class BlockingUntilCanceledHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool ObservedCancellation { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("The request cancellation token was not signaled.");
+            }
+            catch (OperationCanceledException)
+            {
+                ObservedCancellation = true;
+                throw;
+            }
+        }
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler

@@ -1,6 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
+using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Farm.Infrastructure.Repositories.Notifications;
 
@@ -10,6 +13,9 @@ namespace Farm.Infrastructure.Repositories.Notifications;
 /// </summary>
 public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTokenRepository
 {
+    private const int UpsertMaxAttempts = 3;
+    private const long InitialRegistrationVersion = 1;
+
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
     /// <inheritdoc />
@@ -32,7 +38,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         // Retry loop for concurrent-registration TOCTOU: a race between two
         // (userId, installationId) upserts can produce two "existing is null"
         // observations, and the second SaveChangesAsync trips the unique index.
-        for (int attempt = 0; attempt < 3; attempt++)
+        for (int attempt = 0; attempt < UpsertMaxAttempts; attempt++)
         {
             DeviceToken? existing = await _dbContext.DeviceTokens
                 .FirstOrDefaultAsync(t => t.UserId == userId && t.InstallationId == installationId, cancellationToken);
@@ -42,6 +48,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                 var created = new DeviceToken
                 {
                     UserId = userId,
+                    RegistrationVersion = InitialRegistrationVersion,
                     InstallationId = installationId,
                     Token = token,
                     Platform = platform,
@@ -58,7 +65,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                     await _dbContext.SaveChangesAsync(cancellationToken);
                     return created;
                 }
-                catch (DbUpdateException) when (attempt < 2)
+                catch (DbUpdateException ex) when (attempt < UpsertMaxAttempts - 1 && IsUniqueDeviceTokenConflict(ex))
                 {
                     // Concurrent registration won the race — detach the tracked
                     // ghost entity and retry as an update.
@@ -71,6 +78,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
             existing.Platform = platform;
             existing.Environment = environment;
             existing.AppBundleId = appBundleId;
+            existing.RegistrationVersion = checked(existing.RegistrationVersion + 1);
             existing.IsActive = true;
             existing.ConsecutiveFailureCount = 0;
             existing.LastUsedAt = nowUtc;
@@ -80,7 +88,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 return existing;
             }
-            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            catch (DbUpdateConcurrencyException) when (attempt < UpsertMaxAttempts - 1)
             {
                 _dbContext.Entry(existing).State = EntityState.Detached;
             }
@@ -88,6 +96,52 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
 
         throw new InvalidOperationException(
             $"DeviceToken upsert failed after retries for userId={userId} installationId={installationId}.");
+    }
+
+    internal static bool IsUniqueDeviceTokenConflict(DbUpdateException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        const string indexName = "IX_DeviceTokens_UserId_InstallationId";
+        return exception.InnerException switch
+        {
+            SqliteException sqlite =>
+                sqlite.SqliteErrorCode == 19
+                && sqlite.SqliteExtendedErrorCode == 2067
+                && IsExactSqliteUpsertKey(sqlite.Message),
+            PostgresException postgres =>
+                postgres.SqlState == PostgresErrorCodes.UniqueViolation
+                && string.Equals(postgres.ConstraintName, indexName, StringComparison.Ordinal),
+            SqlException sqlServer =>
+                sqlServer.Number is 2601 or 2627
+                && NamesDelimitedSqlServerIndex(sqlServer.Message, indexName),
+            _ => false,
+        };
+    }
+
+    private static bool IsExactSqliteUpsertKey(string message)
+    {
+        const string sqliteMarker = "UNIQUE constraint failed:";
+        int markerIndex = message.IndexOf(sqliteMarker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return false;
+        }
+
+        string columns = message[(markerIndex + sqliteMarker.Length)..]
+            .Trim()
+            .Trim('\'', '"', '.');
+        return string.Equals(
+            columns,
+            "DeviceTokens.UserId, DeviceTokens.InstallationId",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool NamesDelimitedSqlServerIndex(string message, string indexName)
+    {
+        return message.Contains($"'{indexName}'", StringComparison.OrdinalIgnoreCase)
+            || message.Contains($"\"{indexName}\"", StringComparison.OrdinalIgnoreCase)
+            || message.Contains($"[{indexName}]", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />
@@ -116,6 +170,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         List<DeviceToken> rows = await _dbContext.DeviceTokens
             .AsNoTracking()
             .Where(t => t.UserId == userId && t.IsActive)
+            .OrderBy(t => t.Id)
             .ToListAsync(cancellationToken);
         return rows;
     }
@@ -128,62 +183,62 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
             .Where(t => t.IsActive)
             .Select(t => t.UserId)
             .Distinct()
+            .OrderBy(userId => userId)
             .ToListAsync(cancellationToken);
         return owners;
     }
 
     /// <inheritdoc />
-    public async Task RecordSuccessAsync(Guid deviceTokenId, DateTime nowUtc, CancellationToken cancellationToken = default)
+    public async Task RecordSuccessAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        DateTime nowUtc,
+        CancellationToken cancellationToken = default)
     {
-        DeviceToken? row = await _dbContext.DeviceTokens.FirstOrDefaultAsync(t => t.Id == deviceTokenId, cancellationToken);
-        if (row is null)
-        {
-            return;
-        }
-
-        row.LastUsedAt = nowUtc;
-        row.ConsecutiveFailureCount = 0;
-        row.LastFailureAt = null;
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        _ = await _dbContext.DeviceTokens
+            .Where(token => token.Id == deviceTokenId && token.RegistrationVersion == registrationVersion)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(token => token.LastUsedAt, nowUtc)
+                    .SetProperty(token => token.ConsecutiveFailureCount, 0)
+                    .SetProperty(token => token.LastFailureAt, (DateTime?)null),
+                cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task RecordFailureAsync(Guid deviceTokenId, DateTime nowUtc, int failureThreshold, CancellationToken cancellationToken = default)
+    public async Task RecordFailureAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        DateTime nowUtc,
+        int failureThreshold,
+        CancellationToken cancellationToken = default)
     {
-        DeviceToken? row = await _dbContext.DeviceTokens.FirstOrDefaultAsync(t => t.Id == deviceTokenId, cancellationToken);
-        if (row is null)
-        {
-            return;
-        }
-
-        row.LastFailureAt = nowUtc;
-        row.ConsecutiveFailureCount = checked(row.ConsecutiveFailureCount + 1);
-        if (failureThreshold > 0 && row.ConsecutiveFailureCount >= failureThreshold)
-        {
-            row.IsActive = false;
-        }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        _ = await _dbContext.DeviceTokens
+            .Where(token => token.Id == deviceTokenId && token.RegistrationVersion == registrationVersion)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(token => token.LastFailureAt, nowUtc)
+                    .SetProperty(
+                        token => token.IsActive,
+                        token => failureThreshold > 0
+                            && token.ConsecutiveFailureCount >= failureThreshold - 1
+                                ? false
+                                : token.IsActive)
+                    .SetProperty(
+                        token => token.ConsecutiveFailureCount,
+                        token => token.ConsecutiveFailureCount + 1),
+                cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<int> InvalidateByTokenAsync(string providerToken, CancellationToken cancellationToken = default)
+    public async Task<bool> InvalidateAsync(
+        Guid deviceTokenId,
+        long registrationVersion,
+        CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(providerToken))
-        {
-            return 0;
-        }
-
-        List<DeviceToken> matches = await _dbContext.DeviceTokens
-            .Where(t => t.Token == providerToken)
-            .ToListAsync(cancellationToken);
-        if (matches.Count == 0)
-        {
-            return 0;
-        }
-
-        _dbContext.DeviceTokens.RemoveRange(matches);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return matches.Count;
+        int deleted = await _dbContext.DeviceTokens
+            .Where(token => token.Id == deviceTokenId && token.RegistrationVersion == registrationVersion)
+            .ExecuteDeleteAsync(cancellationToken);
+        return deleted == 1;
     }
 }

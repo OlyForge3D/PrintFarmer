@@ -12,6 +12,17 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 /// </summary>
 public sealed class AttentionPushCategoryPreferences
 {
+    /// <summary>Maximum raw keys accepted in one update request.</summary>
+    public const int MaxKeysPerRequest = 32;
+
+    /// <summary>Maximum category-key length in UTF-16 characters.</summary>
+    public const int MaxKeyLength = 64;
+
+    /// <summary>Maximum unique keys in the merged persisted map.</summary>
+    public const int MaxPersistedKeys = 128;
+
+    /// <summary>Maximum serialized UTF-8 bytes for a request or persisted map.</summary>
+    public const int MaxSerializedUtf8Bytes = 8 * 1024;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

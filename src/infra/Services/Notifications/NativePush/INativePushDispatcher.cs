@@ -18,5 +18,6 @@ public interface INativePushDispatcher
         string attentionItemId,
         AttentionChangeKind changeKind,
         Guid? targetUserId,
+        DateTime? occurredAtUtc = null,
         CancellationToken cancellationToken = default);
 }

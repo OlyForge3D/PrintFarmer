@@ -18,24 +18,29 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
 
         _ = builder.Property(t => t.UserId).IsRequired();
 
+        _ = builder.Property(t => t.RegistrationVersion)
+            .IsRequired()
+            .HasDefaultValue(0L)
+            .IsConcurrencyToken();
+
         _ = builder.Property(t => t.InstallationId)
-            .HasMaxLength(64)
+            .HasMaxLength(NativePushRegistrationContract.InstallationIdMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.Token)
-            .HasMaxLength(256)
+            .HasMaxLength(NativePushRegistrationContract.TokenMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.Platform)
-            .HasMaxLength(16)
+            .HasMaxLength(NativePushRegistrationContract.PlatformMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.Environment)
-            .HasMaxLength(16)
+            .HasMaxLength(NativePushRegistrationContract.EnvironmentMaxLength)
             .IsRequired();
 
         _ = builder.Property(t => t.AppBundleId)
-            .HasMaxLength(128);
+            .HasMaxLength(NativePushRegistrationContract.AppBundleIdMaxLength);
 
         _ = builder.Property(t => t.CreatedAt).IsRequired();
         _ = builder.Property(t => t.LastUsedAt);
@@ -53,7 +58,7 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
             .IsUnique()
             .HasDatabaseName("IX_DeviceTokens_UserId_InstallationId");
 
-        // Reverse lookup for inbound 410 Gone invalidations.
+        // Non-unique provider-token lookup for diagnostics; invalidation uses the row Id.
         _ = builder.HasIndex(t => t.Token)
             .HasDatabaseName("IX_DeviceTokens_Token");
     }

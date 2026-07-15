@@ -110,8 +110,11 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
 
     private OperatorFeatureSettings LoadSettings()
     {
-        // Read the persisted JSON row directly. We block on the async repository because the
-        // gate surface is sync (controllers, worker gate checks) and the wider settings
+        // Read the persisted JSON row through the repository's no-tracking path. This must
+        // query persisted state on every call: long-running fan-outs re-use a scoped gate, and
+        // a tracked AppSettings entity would hide a kill-switch update committed by another
+        // context. We block on the async repository because the gate surface is sync
+        // (controllers, worker gate checks) and the wider settings
         // pipeline uses the same sync-over-async pattern (see SettingsService.Save<T>). No
         // SynchronizationContext exists in ASP.NET Core, so there is no deadlock risk.
         //
@@ -122,7 +125,7 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
         {
 #pragma warning disable VSTHRD002 // Synchronously waiting on tasks — required to keep the gate sync surface
             AppSettingsEntity? row = _repository
-                .GetAsync(OperatorFeatureSettings.SectionName)
+                .GetReadOnlyAsync(OperatorFeatureSettings.SectionName)
                 .GetAwaiter()
                 .GetResult();
 #pragma warning restore VSTHRD002

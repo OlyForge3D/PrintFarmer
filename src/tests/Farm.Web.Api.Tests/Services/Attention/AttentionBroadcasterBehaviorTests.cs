@@ -3,8 +3,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
+using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -78,7 +80,59 @@ public class AttentionBroadcasterBehaviorTests
             Times.Never);
     }
 
-    private static AttentionBroadcaster CreateBroadcaster(Mock<IHubClients> clients, bool gateEnabled)
+    [Fact]
+    public async Task NotifyChangedAsync_NativePushBlocked_RemainsNonBlockingAndPassesVersion()
+    {
+        Mock<IHubClients> clients = new();
+        Mock<IClientProxy> all = new();
+        all.Setup(value => value.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        clients.Setup(value => value.All).Returns(all.Object);
+        var dispatchEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDispatch = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = new Mock<INativePushDispatcher>();
+        dispatcher.Setup(value => value.DispatchAsync(
+                Payload.ItemId,
+                Payload.ChangeKind,
+                null,
+                Payload.OccurredAt,
+                It.IsAny<CancellationToken>()))
+            .Returns<string, AttentionChangeKind, Guid?, DateTime?, CancellationToken>(
+                async (_, _, _, _, cancellationToken) =>
+                {
+                    dispatchEntered.TrySetResult();
+                    await releaseDispatch.Task.WaitAsync(cancellationToken);
+                });
+        AttentionBroadcaster broadcaster = CreateBroadcaster(
+            clients,
+            gateEnabled: true,
+            dispatcher.Object);
+
+        Task notification = broadcaster.NotifyChangedAsync(Payload);
+        await notification.WaitAsync(TimeSpan.FromSeconds(10));
+        await dispatchEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        notification.IsCompletedSuccessfully.Should().BeTrue();
+
+        releaseDispatch.TrySetResult();
+        dispatcher.Verify(value => value.DispatchAsync(
+                Payload.ItemId,
+                Payload.ChangeKind,
+                null,
+                Payload.OccurredAt,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    private static AttentionBroadcaster CreateBroadcaster(
+        Mock<IHubClients> clients,
+        bool gateEnabled,
+        INativePushDispatcher? dispatcher = null)
     {
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
@@ -88,6 +142,7 @@ public class AttentionBroadcasterBehaviorTests
 
         Mock<IServiceProvider> provider = new();
         provider.Setup(p => p.GetService(typeof(IOperatorFeatureGate))).Returns(gate.Object);
+        provider.Setup(p => p.GetService(typeof(INativePushDispatcher))).Returns(dispatcher);
 
         Mock<IServiceScope> scope = new();
         scope.Setup(s => s.ServiceProvider).Returns(provider.Object);

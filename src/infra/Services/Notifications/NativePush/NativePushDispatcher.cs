@@ -27,6 +27,27 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly ConcurrentDictionary<string, DateTime> _dedupe = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<RateLimitKey, RateLimitBucket> _rateLimits = new();
 
+    // Per-recipient pre-resolution snapshots. A user can consume only a snapshot
+    // captured after that same user passed item visibility, role, preference,
+    // token, dedupe, and rate gates. Keying by user prevents one owner's visible
+    // item (especially admin-only maintenance) from authorizing another owner.
+    // Resolved atomically consumes the entry before any send-side checks, making
+    // replay safe even when a later opt-in changes.
+    private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionSnapshot> _snapshots = new();
+
+    // Snapshot capture, consumption, replacement, and transport invocation share this
+    // short critical section. It closes the ownership-check/send race without holding
+    // a lock while awaiting provider I/O.
+    private readonly object _snapshotOwnershipSync = new();
+
+    // One versioned lane per item and delivery audience serializes an active lifecycle
+    // transition, coalesces queued transitions to the newest authoritative timestamp,
+    // and retains a tombstone so delayed Created work cannot follow Resolved.
+    private readonly ConcurrentDictionary<AttentionDispatchKey, AttentionDispatchLane> _attentionDispatchLanes = new();
+    private static readonly TimeSpan AttentionSnapshotTtl = TimeSpan.FromDays(7);
+    private static readonly TimeSpan InformationalAlertTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ActionableAlertTtl = TimeSpan.FromMinutes(30);
+
     private long _lastPruneAtTicks;
 
     private readonly IServiceScopeFactory _scopeFactory;
@@ -34,6 +55,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly IOptionsMonitor<NativePushSettings> _optionsMonitor;
     private readonly NativePushMetrics _metrics;
     private readonly ILogger<NativePushDispatcher> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Constructs the dispatcher.</summary>
     public NativePushDispatcher(
@@ -41,20 +63,25 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         INativePushSender sender,
         IOptionsMonitor<NativePushSettings> optionsMonitor,
         NativePushMetrics metrics,
-        ILogger<NativePushDispatcher> logger)
+        ILogger<NativePushDispatcher> logger,
+        TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
+
+    private DateTime UtcNow => _timeProvider.GetUtcNow().UtcDateTime;
 
     /// <inheritdoc />
     public async Task DispatchAsync(
         string attentionItemId,
         AttentionChangeKind changeKind,
         Guid? targetUserId,
+        DateTime? occurredAtUtc = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(attentionItemId))
@@ -62,19 +89,61 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        // Snapshot the current attention state BEFORE the async gate/scope work runs.
-        // A Resolved event fires after the source has already dropped the item, so a
-        // later FindItemAsync returns null and no dismissal push would ever be built.
-        // Capturing here also freezes the mode for the whole fan-out; a mid-flight
-        // mode flip is picked up on the NEXT dispatch (real-time rollback is a
-        // separate control-plane concern, not a per-envelope one).
+        var dispatchKey = new AttentionDispatchKey(attentionItemId, targetUserId);
+        var version = new AttentionDispatchVersion(
+            NormalizeOccurredAt(occurredAtUtc ?? UtcNow),
+            LifecycleOrder(changeKind));
+        if (!TryObserveDispatch(dispatchKey, version, out AttentionDispatchLane lane))
+        {
+            return;
+        }
+
+        bool entered = false;
+        try
+        {
+            await lane.Gate.WaitAsync(cancellationToken);
+            entered = true;
+            if (!lane.IsLatest(version))
+            {
+                return;
+            }
+
+            await DispatchCoreAsync(attentionItemId, changeKind, targetUserId, cancellationToken);
+        }
+        finally
+        {
+            if (entered)
+            {
+                lane.Gate.Release();
+            }
+
+            lane.Complete();
+        }
+    }
+
+    private async Task DispatchCoreAsync(
+        string attentionItemId,
+        AttentionChangeKind changeKind,
+        Guid? targetUserId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(attentionItemId))
+        {
+            return;
+        }
+
+        // Snapshot the startup-bound settings for a consistent fan-out. The
+        // NativePush section is validated with ValidateOnStart; configuration
+        // changes require a process restart rather than taking effect mid-flight.
+        // Resolved events consume a per-user pre-resolution snapshot and emit a
+        // silent dismissal even after the source removes the live item.
         NativePushSettings settings = _optionsMonitor.CurrentValue;
         if (settings.Mode == NativePushMode.Disabled)
         {
             return;
         }
 
-        PruneCaches(DateTime.UtcNow, settings);
+        PruneCaches(UtcNow, settings);
 
         try
         {
@@ -124,13 +193,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 // lookup, preferences read, token list) would abort every
                 // remaining owner in the current dispatch.
                 //
-                // Hicks #1: rethrow ANY OperationCanceledException — not just
-                // ones whose Token matches the caller's — because an inner
-                // linked/timeout cancellation still means "stop this
-                // pipeline". A guarded catch (when caller.IsCancellationRequested)
-                // would let a linked-CTS OCE fall through into the generic
-                // Exception isolator below, which would swallow it and keep
-                // dispatching. Unconditional rethrow closes that gap.
+                // Cancellation is control flow and is never isolated as an
+                // owner failure. Named-client HttpClient timeouts have already
+                // been converted by the sender into typed transient results;
+                // any OCE that reaches this boundary must stop fan-out.
                 try
                 {
                     await DispatchForOwnerAsync(
@@ -161,11 +227,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         catch (OperationCanceledException)
         {
-            // Hicks #1: unconditional rethrow. A cancellation surfaced from
-            // any inner token — caller, linked, or per-attempt timeout — must
-            // propagate out of DispatchAsync so the caller (broadcaster)
-            // observes it and can shut down cleanly. Guarding on the caller
-            // token alone would swallow legitimate internal cancellations.
+            // Caller/shutdown and unexpected linked cancellation propagate
+            // out of DispatchAsync. HttpClient.Timeout is represented as a
+            // transient result by the concrete sender and never reaches here.
             throw;
         }
         catch (Exception ex)
@@ -186,68 +250,55 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AppDbContext db,
         CancellationToken cancellationToken)
     {
+        var snapshotKey = new AttentionSnapshotKey(userId, attentionItemId);
         AttentionItemDto? item = await attention.FindItemAsync(userId, attentionItemId, cancellationToken);
-        if (item is null)
-        {
-            // Resolved change: the source has already dropped the row so a
-            // targeted find returns null. Skip — the SignalR event already
-            // invalidated in-app; a native "resolved" push is best-effort.
-            // (Snapshot-and-dispatch of resolved items is a future
-            // enhancement; see docs/OPERATOR_NATIVE_PUSH.md rollback notes.)
-            return;
-        }
+        AttentionSnapshot? activeSnapshot = null;
+        AttentionSnapshot? resolvedSnapshot = null;
 
-        string? category = AttentionPushCategories.CategoryFor(item.Kind);
-        if (category is null)
+        if (changeKind == AttentionChangeKind.Resolved)
         {
-            return;
-        }
-
-        // Role gate — maintenance items are admin-only. FindItemAsync does not
-        // filter this by role, so the dispatcher must.
-        if (item.Kind == AttentionKind.Maintenance)
-        {
-            bool isAdmin = await IsFarmAdminAsync(db, userId, cancellationToken);
-            if (!isAdmin)
+            // A dismissal is authorized only by this recipient's pre-resolution
+            // snapshot, even when the source has not removed the live row yet.
+            // This prevents a newly authorized owner from receiving a dismissal
+            // for an alert that was never delivered to that owner.
+            lock (_snapshotOwnershipSync)
             {
-                return;
+                if (!_snapshots.TryRemove(snapshotKey, out resolvedSnapshot))
+                {
+                    return;
+                }
             }
+
+            item = null;
+        }
+        else if (item is null)
+        {
+            return;
         }
 
-        // Per-user category opt-out.
+        AttentionKind kind = item?.Kind ?? resolvedSnapshot!.Kind;
+        Guid printerId = item?.PrinterId ?? resolvedSnapshot!.PrinterId;
+        if (AttentionPushCategories.CategoryFor(kind) is null)
+        {
+            return;
+        }
+
+        // Maintenance is admin-only. Re-check current role even for a snapshot
+        // so revocation before resolution suppresses the dismissal.
+        if (kind == AttentionKind.Maintenance
+            && !await IsFarmAdminAsync(db, userId, cancellationToken))
+        {
+            return;
+        }
+
         NotificationPreferences? prefs = await db.NotificationPreferences
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(prefs?.AttentionPushCategoryPreferencesJson);
-        if (!catPrefs.IsEnabled(item.Kind))
-        {
-            _metrics.SkippedCategoryOptOut.Add(1);
-            return;
-        }
-
-        // Hicks v5 H1 master gate: a persisted preferences row with
-        // EnablePushNotifications=false is the shared "no push at all"
-        // opt-out; every attention native push MUST honour it. Missing
-        // row falls back to CLR default (true) so the pre-#708 opt-in
-        // behaviour is preserved for users who never touched the
-        // preference UI. This gate runs BEFORE the per-kind check so
-        // preserved PushOn{Kind} values cannot leak past a global
-        // opt-out.
-        if (prefs is not null && !prefs.EnablePushNotifications)
-        {
-            _metrics.SkippedCategoryOptOut.Add(1);
-            return;
-        }
-
-        // Hicks v4 blocker 3: the shared web preference matrix exposes
-        // per-kind push toggles (PushOnPrinterFailure / FilamentRunout /
-        // HarvestReady / MaintenanceDue / PrinterOffline) that #716 uses
-        // to opt out of native push per event type. Without gating here
-        // the dispatcher would deliver to users who explicitly disabled
-        // that row in the operator matrix. Missing prefs row falls back
-        // to CLR defaults on NotificationPreferences (push=true), which
-        // preserves the historical opt-in behaviour.
-        if (!IsPushEnabledForKind(prefs, item.Kind))
+        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(
+            prefs?.AttentionPushCategoryPreferencesJson);
+        if (!catPrefs.IsEnabled(kind)
+            || (prefs is not null && !prefs.EnablePushNotifications)
+            || !IsPushEnabledForKind(prefs, kind))
         {
             _metrics.SkippedCategoryOptOut.Add(1);
             return;
@@ -259,54 +310,71 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        // Hicks H2-v5-final: rate-limit ONCE per logical event before device
-        // fan-out. Scope is (userId, printerId, kind) so:
-        //   * a noisy printer/kind cannot suppress unrelated critical alerts
-        //     for the same user (previous per-user scope failed here);
-        //   * a multi-device user does not exhaust their bucket faster than a
-        //     single-device user (previous per-device consumption failed
-        //     here).
-        // If the rate limit rejects the event, we skip ALL devices for this
-        // envelope (a partial delivery would be worse than none — the user
-        // would think their other devices missed the alert).
-        var rateKey = new RateLimitKey(userId, item.PrinterId, item.Kind);
-        if (!TryConsumeRate(rateKey, settings, DateTime.UtcNow))
+        string dedupeKey = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{userId:D}|{attentionItemId}|{changeKind}");
+        if (!ShouldEmit(dedupeKey, settings, UtcNow))
         {
-            _metrics.SkippedRateLimit.Add(1);
+            _metrics.SkippedDedupe.Add(1);
             return;
+        }
+
+        // Charge once per logical alert, never once per device. Silent resolved
+        // dismissals are control messages and bypass the alert budget; otherwise
+        // a just-delivered alert would consume the only slot and prevent its own
+        // timely dismissal. Dedupe still makes the dismissal exactly-once.
+        if (changeKind != AttentionChangeKind.Resolved)
+        {
+            var rateKey = new RateLimitKey(userId, printerId, kind);
+            if (!TryConsumeRate(rateKey, settings, UtcNow))
+            {
+                _metrics.SkippedRateLimit.Add(1);
+                return;
+            }
+
+            // Capture only the minimal routing shape, and only for this owner
+            // after every authorization/preference guard above has passed. The exact
+            // instance is the delivery generation checked before every transport try.
+            activeSnapshot = new AttentionSnapshot(
+                Kind: item!.Kind,
+                PrinterId: item.PrinterId,
+                JobId: item.JobId,
+                ToolheadIndex: item.ToolheadIndex,
+                CapturedAtUtc: UtcNow);
+            lock (_snapshotOwnershipSync)
+            {
+                _snapshots[snapshotKey] = activeSnapshot;
+            }
         }
 
         foreach (DeviceToken deviceToken in userTokens)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Third gate immediately before send: if the flag flipped since
-            // the outer check, drop the rest of this owner's fan-out.
             if (!gate.IsEnabled(OperatorFeature.NativePush))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return;
             }
 
-            // Vasquez v6 B1: isolate the entire per-device send + persist
-            // step so a downstream persistence throw for one token cannot
-            // cost the remaining tokens their delivery attempt.
-            //
-            // Hicks #1: rethrow ANY OperationCanceledException so an internal
-            // linked/timeout cancellation still bubbles out and stops the
-            // dispatch — the caller-token guard swallowed those and let the
-            // generic Exception isolator continue.
             try
             {
-                await SendAndApplyForDeviceAsync(
+                DeviceDispatchOutcome outcome = await SendAndApplyForDeviceAsync(
                     userId,
                     attentionItemId,
                     changeKind,
                     item,
+                    resolvedSnapshot,
+                    snapshotKey,
+                    activeSnapshot,
                     deviceToken,
                     settings,
-                    tokens,
+                    gate,
                     cancellationToken);
+                if (outcome == DeviceDispatchOutcome.DispatchStopped)
+                {
+                    return;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -327,58 +395,72 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
-    private async Task SendAndApplyForDeviceAsync(
+    private async Task<DeviceDispatchOutcome> SendAndApplyForDeviceAsync(
         Guid userId,
         string attentionItemId,
         AttentionChangeKind changeKind,
-        AttentionItemDto item,
+        AttentionItemDto? item,
+        AttentionSnapshot? resolvedSnapshot,
+        AttentionSnapshotKey snapshotKey,
+        AttentionSnapshot? activeSnapshot,
         DeviceToken deviceToken,
         NativePushSettings settings,
-        IDeviceTokenRepository tokens,
+        IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
     {
-        string dedupeKey = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{userId:D}|{deviceToken.Id:D}|{attentionItemId}|{changeKind}");
-        if (!ShouldEmit(dedupeKey, settings, DateTime.UtcNow))
-        {
-            _metrics.SkippedDedupe.Add(1);
-            return;
-        }
-
         // Rate limit consumption has moved to DispatchForOwnerAsync so it
-        // scopes per (userId, printerId, kind) and is charged exactly once
-        // per envelope regardless of how many devices this user has. See
-        // Hicks H2-v5-final.
-        NativePushEnvelope envelope = BuildEnvelope(item, changeKind, deviceToken);
-        _metrics.Attempted.Add(1);
-
-        NativePushDispatchResult result;
+        // runs after logical-event dedupe and is charged exactly once per
+        // envelope regardless of how many devices this user has.
+        NativePushEnvelope envelope = item is not null
+            ? BuildEnvelope(item, changeKind, deviceToken)
+            : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken);
+        NativePushDispatchResult? result;
         try
         {
-            result = await SendWithRetriesAsync(envelope, settings, cancellationToken);
+            result = await SendWithRetriesAsync(
+                envelope,
+                snapshotKey,
+                activeSnapshot,
+                settings,
+                gate,
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            // Hicks #1: any OCE — caller, linked, or internal timeout —
-            // stops the pipeline. Never re-shape cancellation into a
-            // "sender_exception" transient result.
+            // Caller/shutdown or unexpected linked cancellation stops the
+            // pipeline. Concrete senders return HttpClient.Timeout as a typed
+            // transient result, so it remains retryable and isolated.
             throw;
         }
         catch (Exception ex)
         {
+            if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+            {
+                return DeviceDispatchOutcome.DispatchStopped;
+            }
+
             _logger.LogWarning(ex, "[NativePush] Sender threw for deviceTokenId={DeviceTokenId}.", deviceToken.Id);
             result = NativePushDispatchResult.Transient("sender_exception");
         }
 
-        // Vasquez v6 B1: persistence of the send outcome must not be able to
-        // abort the outer fan-out. A transient DB error while recording
-        // success/failure for one token is a per-token concern, not a
-        // pipeline-wide one, so we scope it here with a cancellation-
-        // preserving catch. Hicks #1: any OCE propagates unconditionally.
+        if (result is null)
+        {
+            return DeviceDispatchOutcome.DispatchStopped;
+        }
+
+        // Every result opens its own DI scope/AppDbContext. Besides isolating a
+        // failed token write from later devices, this gives the final result
+        // boundary a fresh persisted kill-switch read immediately before any
+        // delivery/failure attribution or registration mutation.
         try
         {
-            await ApplyResultAsync(tokens, deviceToken, result, settings, cancellationToken);
+            return await ApplyResultAsync(
+                snapshotKey,
+                activeSnapshot,
+                deviceToken,
+                result,
+                settings,
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -395,7 +477,53 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 deviceToken.Id,
                 userId,
                 attentionItemId);
+            return DeviceDispatchOutcome.Completed;
         }
+    }
+
+    private bool TryObserveDispatch(
+        AttentionDispatchKey key,
+        AttentionDispatchVersion version,
+        out AttentionDispatchLane lane)
+    {
+        while (true)
+        {
+            lane = _attentionDispatchLanes.GetOrAdd(key, static _ => new AttentionDispatchLane());
+            AttentionDispatchObserveResult result = lane.TryObserve(version, UtcNow);
+            if (result == AttentionDispatchObserveResult.Accepted)
+            {
+                return true;
+            }
+
+            if (result == AttentionDispatchObserveResult.Stale)
+            {
+                return false;
+            }
+
+            // A pruner retired this lane after GetOrAdd returned it. Retry against
+            // the replacement lane instead of executing against an orphaned tombstone.
+        }
+    }
+
+    private static DateTime NormalizeOccurredAt(DateTime occurredAt)
+    {
+        return occurredAt.Kind switch
+        {
+            DateTimeKind.Utc => occurredAt,
+            DateTimeKind.Local => occurredAt.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(occurredAt, DateTimeKind.Utc),
+        };
+    }
+
+    private static int LifecycleOrder(AttentionChangeKind changeKind)
+    {
+        return changeKind switch
+        {
+            AttentionChangeKind.Created => 0,
+            AttentionChangeKind.Updated => 1,
+            AttentionChangeKind.Resolved => 2,
+            _ => int.MinValue,
+        };
     }
 
     /// <inheritdoc />
@@ -404,16 +532,79 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // No unmanaged resources; kept for future rate-limit timer.
     }
 
-    private async Task<NativePushDispatchResult> SendWithRetriesAsync(
+    private async Task<NativePushDispatchResult?> SendWithRetriesAsync(
         NativePushEnvelope envelope,
+        AttentionSnapshotKey snapshotKey,
+        AttentionSnapshot? activeSnapshot,
         NativePushSettings settings,
+        IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
     {
         int attempts = Math.Max(1, settings.MaxAttempts);
         NativePushDispatchResult last = NativePushDispatchResult.Transient("no_attempt");
+        bool attempted = false;
         for (int i = 0; i < attempts; i++)
         {
-            last = await _sender.SendAsync(envelope, cancellationToken);
+            // This persisted gate read is intentionally adjacent to the transport call.
+            // A retry must never inherit the enabled decision made by an earlier attempt.
+            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            {
+                _metrics.SkippedFeatureDisabled.Add(1);
+                return null;
+            }
+
+            bool transportStarted = false;
+            try
+            {
+                Task<NativePushDispatchResult> sendTask;
+                if (activeSnapshot is null)
+                {
+                    transportStarted = true;
+                    sendTask = _sender.SendAsync(envelope, cancellationToken);
+                }
+                else
+                {
+                    lock (_snapshotOwnershipSync)
+                    {
+                        if (!IsSnapshotCurrentUnderLock(snapshotKey, activeSnapshot))
+                        {
+                            return null;
+                        }
+
+                        // Keep the ownership check and synchronous transport invocation
+                        // in one critical section. Provider I/O is awaited after release.
+                        transportStarted = true;
+                        sendTask = _sender.SendAsync(envelope, cancellationToken);
+                    }
+                }
+
+                last = await sendTask;
+            }
+            finally
+            {
+                if (transportStarted && !attempted)
+                {
+                    _metrics.Attempted.Add(1);
+                    attempted = true;
+                }
+            }
+
+            // A sender may complete after an administrator has committed the
+            // emergency disable or after a resolution/replacement consumed this
+            // alert generation. Discard that provider result before retry or any
+            // result attribution.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!gate.IsEnabled(OperatorFeature.NativePush))
+            {
+                _metrics.SkippedFeatureDisabled.Add(1);
+                return null;
+            }
+
+            if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+            {
+                return null;
+            }
+
             if (last.Success || last.TokenInvalidated || !last.IsTransient)
             {
                 return last;
@@ -422,33 +613,61 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             if (i + 1 < attempts)
             {
                 // Small linear backoff — the outbound HttpClient enforces the hard timeout.
-                await Task.Delay(TimeSpan.FromMilliseconds(200 * (i + 1)), cancellationToken);
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(200 * (i + 1)),
+                    _timeProvider,
+                    cancellationToken);
             }
         }
 
         return last;
     }
 
-    private async Task ApplyResultAsync(
-        IDeviceTokenRepository tokens,
+    private async Task<DeviceDispatchOutcome> ApplyResultAsync(
+        AttentionSnapshotKey snapshotKey,
+        AttentionSnapshot? activeSnapshot,
         DeviceToken deviceToken,
         NativePushDispatchResult result,
         NativePushSettings settings,
         CancellationToken cancellationToken)
     {
-        DateTime nowUtc = DateTime.UtcNow;
+        cancellationToken.ThrowIfCancellationRequested();
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IOperatorFeatureGate gate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
+        if (!gate.IsEnabled(OperatorFeature.NativePush))
+        {
+            _metrics.SkippedFeatureDisabled.Add(1);
+            return DeviceDispatchOutcome.DispatchStopped;
+        }
+
+        // This is the final attribution claim. Resolution/replacement uses the
+        // same lock, so whichever operation enters first defines the ordering.
+        if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+        {
+            return DeviceDispatchOutcome.DispatchStopped;
+        }
+
+        IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
+        DateTime nowUtc = UtcNow;
         if (result.Success)
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
-            await tokens.RecordSuccessAsync(deviceToken.Id, nowUtc, cancellationToken);
-            return;
+            await tokens.RecordSuccessAsync(
+                deviceToken.Id,
+                deviceToken.RegistrationVersion,
+                nowUtc,
+                cancellationToken);
+            return DeviceDispatchOutcome.Completed;
         }
 
         if (result.TokenInvalidated)
         {
             _metrics.TokensInvalidated.Add(1);
-            _ = await tokens.InvalidateByTokenAsync(deviceToken.Token, cancellationToken);
-            return;
+            _ = await tokens.InvalidateAsync(
+                deviceToken.Id,
+                deviceToken.RegistrationVersion,
+                cancellationToken);
+            return DeviceDispatchOutcome.Completed;
         }
 
         // NotConfigured is a config-typo skip, not a device fault. Log-and-drop with
@@ -457,7 +676,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (string.Equals(result.Reason, "notConfigured", StringComparison.Ordinal))
         {
             _metrics.SkippedNotConfigured.Add(1);
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
         if (result.IsTransient)
@@ -472,72 +691,30 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // increment the per-token failure counter — that would deactivate every
             // active token in five outages. Retry orchestration already retried this
             // send N times; the outage is process-wide.
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
-        // Terminal (non-transient, non-invalidating, non-config): reason is
-        // token-specific (e.g., APNs "PayloadTooLarge", "TopicDisallowed") or a
-        // relay 4xx that isn't a rate limit. Count against this token only.
         _metrics.TerminalFailed.Add(
             1,
             new KeyValuePair<string, object?>("mode", _sender.ModeName),
             new KeyValuePair<string, object?>("reason", result.Reason ?? "unknown"));
 
-        // Hicks H5-v5-final: config / payload-shape / topic-mismatch errors
-        // are attributable to the deployment or per-envelope builder, NOT to
-        // the device token. Ticking the failure counter for these would
-        // deactivate every active token in five outages (e.g., wrong .p8,
-        // wrong bundle id) — correcting the config would then require every
-        // client to re-register before delivery resumes. Bail out with the
-        // metric already recorded so operators see the terminal error surface
-        // in dashboards without a token-fleet wipe.
-        if (IsNotTokenAttributable(result.Reason))
+        // Safe default: unknown, relay, configuration, JWT, topic, and payload
+        // failures never poison registrations. Only a sender's explicit typed
+        // attribution may increment/deactivate this token. Known APNs invalid
+        // token responses use TokenInvalidated above and are removed directly.
+        if (result.FailureAttribution != NativePushFailureAttribution.DeviceToken)
         {
-            return;
+            return DeviceDispatchOutcome.Completed;
         }
 
-        await tokens.RecordFailureAsync(deviceToken.Id, nowUtc, settings.FailureDeactivationThreshold, cancellationToken);
-    }
-
-    /// <summary>
-    /// Reasons that indicate a deployment or per-envelope defect, not a bad
-    /// device token. See Hicks H5-v5-final. Kept as an allow-list so any new
-    /// terminal reason emitted by a sender defaults to the safe token-fault
-    /// behavior; add here only after confirming the reason is genuinely
-    /// deployment/payload-scoped.
-    /// </summary>
-    private static bool IsNotTokenAttributable(string? reason)
-    {
-        if (string.IsNullOrEmpty(reason))
-        {
-            return false;
-        }
-
-        return reason switch
-        {
-            // DirectApnsNativePushSender: JWT signing failed (bad .p8, wrong
-            // KeyId/TeamId, malformed key material). Fully deployment-scoped.
-            "jwt_sign_failed" => true,
-
-            // APNs / relay: bundle id or apns-topic does not match the
-            // registered app id. Deployment misconfiguration; the token is
-            // valid for its actual topic.
-            "TopicDisallowed" => true,
-            "BadTopic" => true,
-
-            // APNs: envelope encoding builder produced an oversized payload.
-            // The token is fine; fix the payload constructor.
-            "PayloadTooLarge" => true,
-            "PayloadEmpty" => true,
-
-            // APNs / relay: envelope failed structural validation. Same
-            // rationale — sender-side defect, not the recipient.
-            "BadMessageId" => true,
-            "BadExpirationDate" => true,
-            "BadPriority" => true,
-            "BadCollapseId" => true,
-            _ => false,
-        };
+        await tokens.RecordFailureAsync(
+            deviceToken.Id,
+            deviceToken.RegistrationVersion,
+            nowUtc,
+            settings.FailureDeactivationThreshold,
+            cancellationToken);
+        return DeviceDispatchOutcome.Completed;
     }
 
     private static async Task<bool> IsFarmAdminAsync(AppDbContext db, Guid userId, CancellationToken cancellationToken)
@@ -547,20 +724,38 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             .AnyAsync(u => u.Id == userId && u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), cancellationToken);
     }
 
-    private static NativePushEnvelope BuildEnvelope(AttentionItemDto item, AttentionChangeKind changeKind, DeviceToken deviceToken)
+    private NativePushEnvelope BuildEnvelope(
+        AttentionItemDto item,
+        AttentionChangeKind changeKind,
+        DeviceToken deviceToken)
     {
-        string? category = AttentionPushCategories.CategoryFor(item.Kind);
-        IReadOnlyList<string> actions = AttentionPushCategories.ActionsFor(item.Kind);
-        string threadId = AttentionPushCategories.ThreadIdFor(item.Kind, item.PrinterId, item.ToolheadIndex, item.Id);
-        string deepLink = AttentionDeepLinks.For(item.Kind, item.PrinterId, item.Id, item.ToolheadIndex, item.JobId);
+        bool isResolved = changeKind == AttentionChangeKind.Resolved;
+        string category = AttentionPushCategories.CategoryFor(item.Kind) ?? "PRINTER_FAILURE";
+        string threadId = AttentionPushCategories.ThreadIdFor(
+            item.Kind,
+            item.PrinterId,
+            item.ToolheadIndex,
+            item.Id);
+        string deepLink = AttentionDeepLinks.For(
+            item.Kind,
+            item.PrinterId,
+            item.Id,
+            item.ToolheadIndex,
+            item.JobId);
 
-        NativePushPriority priority = changeKind == AttentionChangeKind.Resolved
-            ? NativePushPriority.Background
-            : NativePushPriority.Alert;
-
-        DateTime? expiresAt = item.DeadlineAt is DateTime deadline
-            ? deadline
-            : DateTime.UtcNow.AddMinutes(30);
+        DateTime nowUtc = UtcNow;
+        TimeSpan alertTtl = item.Severity == AttentionSeverity.Info
+            ? InformationalAlertTtl
+            : ActionableAlertTtl;
+        DateTime ttlExpiration = nowUtc.Add(alertTtl);
+        DateTime expiresAt = isResolved
+            ? nowUtc.Add(InformationalAlertTtl)
+            : item.DeadlineAt is DateTime deadline && deadline < ttlExpiration
+                ? deadline
+                : ttlExpiration;
+        IReadOnlyList<string> actionIds = isResolved
+            ? Array.Empty<string>()
+            : AttentionPushCategories.ActionsFor(item.Kind);
 
         return new NativePushEnvelope(
             DeviceTokenId: deviceToken.Id.ToString("D", CultureInfo.InvariantCulture),
@@ -568,11 +763,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             Platform: deviceToken.Platform,
             Environment: deviceToken.Environment,
             AppBundleId: deviceToken.AppBundleId,
-            Category: category ?? "PRINTER_FAILURE",
+            Category: category,
             ThreadId: threadId,
-            Title: item.PrinterName,
+            Title: isResolved ? null : item.PrinterName,
             Subtitle: null,
-            Body: item.Title,
+            Body: isResolved ? null : item.Title,
             AttentionItemId: item.Id,
             AttentionKind: item.Kind,
             ChangeKind: changeKind,
@@ -580,10 +775,170 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             JobId: item.JobId,
             ToolheadIndex: item.ToolheadIndex,
             DeepLink: deepLink,
-            Priority: priority,
+            Priority: isResolved ? NativePushPriority.Background : NativePushPriority.Alert,
             ExpiresAtUtc: expiresAt,
-            ActionIds: actions);
+            ActionIds: actionIds);
     }
+
+    private NativePushEnvelope BuildSilentEnvelopeFromSnapshot(
+        string attentionItemId,
+        AttentionSnapshot snapshot,
+        DeviceToken deviceToken)
+    {
+        string category = AttentionPushCategories.CategoryFor(snapshot.Kind) ?? "PRINTER_FAILURE";
+        string threadId = AttentionPushCategories.ThreadIdFor(
+            snapshot.Kind,
+            snapshot.PrinterId,
+            snapshot.ToolheadIndex,
+            attentionItemId);
+        string deepLink = AttentionDeepLinks.For(
+            snapshot.Kind,
+            snapshot.PrinterId,
+            attentionItemId,
+            snapshot.ToolheadIndex,
+            snapshot.JobId);
+
+        return new NativePushEnvelope(
+            DeviceTokenId: deviceToken.Id.ToString("D", CultureInfo.InvariantCulture),
+            Token: deviceToken.Token,
+            Platform: deviceToken.Platform,
+            Environment: deviceToken.Environment,
+            AppBundleId: deviceToken.AppBundleId,
+            Category: category,
+            ThreadId: threadId,
+            Title: null,
+            Subtitle: null,
+            Body: null,
+            AttentionItemId: attentionItemId,
+            AttentionKind: snapshot.Kind,
+            ChangeKind: AttentionChangeKind.Resolved,
+            PrinterId: snapshot.PrinterId,
+            JobId: snapshot.JobId,
+            ToolheadIndex: snapshot.ToolheadIndex,
+            DeepLink: deepLink,
+            Priority: NativePushPriority.Background,
+            ExpiresAtUtc: UtcNow.Add(InformationalAlertTtl),
+            ActionIds: Array.Empty<string>());
+    }
+
+    private enum DeviceDispatchOutcome
+    {
+        Completed,
+        DispatchStopped,
+    }
+
+    private readonly record struct AttentionDispatchKey(string AttentionItemId, Guid? TargetUserId);
+
+    private readonly record struct AttentionDispatchVersion(DateTime OccurredAtUtc, int ChangeOrder)
+        : IComparable<AttentionDispatchVersion>
+    {
+        public int CompareTo(AttentionDispatchVersion other)
+        {
+            int timestampOrder = OccurredAtUtc.CompareTo(other.OccurredAtUtc);
+            return timestampOrder != 0 ? timestampOrder : ChangeOrder.CompareTo(other.ChangeOrder);
+        }
+    }
+
+    private enum AttentionDispatchObserveResult
+    {
+        Accepted,
+        Stale,
+        Retired,
+    }
+
+    private sealed class AttentionDispatchLane
+    {
+        private readonly object _sync = new();
+        private AttentionDispatchVersion _latest;
+        private DateTime _lastObservedAtUtc;
+        private int _participants;
+        private bool _hasVersion;
+        private bool _retired;
+
+        public SemaphoreSlim Gate { get; } = new(1, 1);
+
+        public AttentionDispatchObserveResult TryObserve(
+            AttentionDispatchVersion version,
+            DateTime observedAtUtc)
+        {
+            lock (_sync)
+            {
+                if (_retired)
+                {
+                    return AttentionDispatchObserveResult.Retired;
+                }
+
+                if (_hasVersion && version.CompareTo(_latest) <= 0)
+                {
+                    return AttentionDispatchObserveResult.Stale;
+                }
+
+                _latest = version;
+                _lastObservedAtUtc = observedAtUtc;
+                _hasVersion = true;
+                _participants++;
+                return AttentionDispatchObserveResult.Accepted;
+            }
+        }
+
+        public bool IsLatest(AttentionDispatchVersion version)
+        {
+            lock (_sync)
+            {
+                return version == _latest;
+            }
+        }
+
+        public void Complete()
+        {
+            lock (_sync)
+            {
+                _participants--;
+            }
+        }
+
+        public bool TryRetire(DateTime cutoffUtc)
+        {
+            lock (_sync)
+            {
+                if (_retired || _participants != 0 || _lastObservedAtUtc >= cutoffUtc)
+                {
+                    return false;
+                }
+
+                _retired = true;
+                return true;
+            }
+        }
+    }
+
+    private readonly record struct AttentionSnapshotKey(Guid UserId, string AttentionItemId);
+
+    private bool IsSnapshotCurrent(AttentionSnapshotKey key, AttentionSnapshot? expected)
+    {
+        if (expected is null)
+        {
+            return true;
+        }
+
+        lock (_snapshotOwnershipSync)
+        {
+            return IsSnapshotCurrentUnderLock(key, expected);
+        }
+    }
+
+    private bool IsSnapshotCurrentUnderLock(AttentionSnapshotKey key, AttentionSnapshot expected)
+    {
+        return _snapshots.TryGetValue(key, out AttentionSnapshot? current)
+            && ReferenceEquals(current, expected);
+    }
+
+    private sealed record AttentionSnapshot(
+        AttentionKind Kind,
+        Guid PrinterId,
+        Guid? JobId,
+        int? ToolheadIndex,
+        DateTime CapturedAtUtc);
 
     private bool ShouldEmit(string key, NativePushSettings settings, DateTime nowUtc)
     {
@@ -714,6 +1069,33 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 // it acquires the lock and will retry with a fresh bucket.
                 kv.Value.IsDead = true;
                 _ = ((ICollection<KeyValuePair<RateLimitKey, RateLimitBucket>>)_rateLimits).Remove(kv);
+            }
+        }
+
+        // Keep snapshots long enough for real attention lifetimes while bounding
+        // entries whose source never emits Resolved. Value-comparing removal
+        // preserves a concurrently refreshed occurrence.
+        DateTime snapshotCutoff = nowUtc - AttentionSnapshotTtl;
+        lock (_snapshotOwnershipSync)
+        {
+            foreach (KeyValuePair<AttentionSnapshotKey, AttentionSnapshot> kv in _snapshots)
+            {
+                if (kv.Value.CapturedAtUtc < snapshotCutoff)
+                {
+                    _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots).Remove(kv);
+                }
+            }
+        }
+
+        // Lifecycle tombstones reject delayed work for the same seven-day window as
+        // delivery snapshots. Retirement and dictionary removal are coordinated so
+        // a racing observer retries against a live replacement lane.
+        foreach (KeyValuePair<AttentionDispatchKey, AttentionDispatchLane> kv in _attentionDispatchLanes)
+        {
+            if (kv.Value.TryRetire(snapshotCutoff))
+            {
+                _ = ((ICollection<KeyValuePair<AttentionDispatchKey, AttentionDispatchLane>>)_attentionDispatchLanes)
+                    .Remove(kv);
             }
         }
     }

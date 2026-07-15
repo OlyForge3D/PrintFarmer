@@ -396,6 +396,134 @@ public sealed class NativePushSettingsValidatorTests
         joined.Should().NotContain(pem, "sanitized diagnostics MUST NOT echo the raw PEM");
     }
 
+    [Fact]
+    public void Validate_DirectMode_InlinePublicOnlyP256_FailsAsPrivateKeyWithoutLeakingPem()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string publicPem = key.ExportSubjectPublicKeyInfoPem();
+        var settings = new NativePushSettings
+        {
+            Mode = NativePushMode.Direct,
+            Apns = new NativePushApnsSettings
+            {
+                TeamId = "TEAM123",
+                KeyId = "KEY456",
+                BundleId = "com.example.app",
+                P8KeyPem = publicPem,
+            },
+        };
+
+        ValidateOptionsResult result = BuildValidator().Validate(Options.DefaultName, settings);
+
+        result.Failed.Should().BeTrue();
+        string joined = string.Join(" | ", result.Failures ?? Array.Empty<string>());
+        joined.Should().Contain("P8KeyPem");
+        joined.Should().Contain("private key");
+        joined.Should().NotContain(publicPem);
+        joined.Should().NotContain("BEGIN PUBLIC KEY");
+    }
+
+    [Fact]
+    public void Validate_DirectMode_FilePublicOnlyP256_FailsAsPrivateKeyWithoutLeakingSource()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string publicPem = key.ExportSubjectPublicKeyInfoPem();
+        string path = Path.Combine(Path.GetTempPath(), $"farm-tests-public-{Guid.NewGuid():N}.p8");
+        File.WriteAllText(path, publicPem);
+        try
+        {
+            var settings = new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                Apns = new NativePushApnsSettings
+                {
+                    TeamId = "TEAM123",
+                    KeyId = "KEY456",
+                    BundleId = "com.example.app",
+                    P8KeyPath = path,
+                },
+            };
+
+            ValidateOptionsResult result = BuildValidator().Validate(Options.DefaultName, settings);
+
+            result.Failed.Should().BeTrue();
+            string joined = string.Join(" | ", result.Failures ?? Array.Empty<string>());
+            joined.Should().Contain("P8KeyPath");
+            joined.Should().Contain("private key");
+            joined.Should().NotContain(path);
+            joined.Should().NotContain(publicPem);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Validate_DirectMode_FilePrivateP256_Succeeds()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string path = Path.Combine(Path.GetTempPath(), $"farm-tests-private-{Guid.NewGuid():N}.p8");
+        File.WriteAllText(path, key.ExportPkcs8PrivateKeyPem());
+        try
+        {
+            var settings = new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                Apns = new NativePushApnsSettings
+                {
+                    TeamId = "TEAM123",
+                    KeyId = "KEY456",
+                    BundleId = "com.example.app",
+                    P8KeyPath = path,
+                },
+            };
+
+            BuildValidator().Validate(Options.DefaultName, settings).Succeeded.Should().BeTrue();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Validate_DirectMode_PublicInlineWithValidPrivateFile_FailsSelectedInlineSource()
+    {
+        using ECDsa publicKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string publicPem = publicKey.ExportSubjectPublicKeyInfoPem();
+        string path = Path.Combine(Path.GetTempPath(), $"farm-tests-fallback-{Guid.NewGuid():N}.p8");
+        File.WriteAllText(path, privateKey.ExportPkcs8PrivateKeyPem());
+        try
+        {
+            var settings = new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                Apns = new NativePushApnsSettings
+                {
+                    TeamId = "TEAM123",
+                    KeyId = "KEY456",
+                    BundleId = "com.example.app",
+                    P8KeyPem = publicPem,
+                    P8KeyPath = path,
+                },
+            };
+
+            ValidateOptionsResult result = BuildValidator().Validate(Options.DefaultName, settings);
+
+            result.Failed.Should().BeTrue();
+            string joined = string.Join(" | ", result.Failures ?? Array.Empty<string>());
+            joined.Should().Contain("P8KeyPem");
+            joined.Should().NotContain("P8KeyPath");
+            joined.Should().NotContain(path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     /// <summary>
     /// Hicks #7: no inline and no path is the strictest failure — both slots
     /// missing means Direct mode cannot function.
