@@ -45,6 +45,11 @@ public sealed class SnapmakerU1CameraMonitorManager(
             }
 
             state.StopRetryCount = 0;
+            if (!state.IsRunning)
+            {
+                return false;
+            }
+
             ScheduleIdleStop(key, baseUri, state, credential);
             return true;
         }
@@ -130,7 +135,24 @@ public sealed class SnapmakerU1CameraMonitorManager(
         state.StopRetryCount++;
         CancellationTokenSource cts = new();
         state.IdleStopCts = cts;
-        _ = StopAfterDelayAsync(key, baseUri, state, credential, _stopRetryBackoff, cts.Token);
+        _ = RunStopTaskAsync(key, baseUri, state, credential, _stopRetryBackoff, cts.Token);
+    }
+
+    private async Task RunStopTaskAsync(
+        string key,
+        Uri baseUri,
+        MonitorState state,
+        PrinterCredential? credential,
+        TimeSpan delay,
+        CancellationToken ct)
+    {
+        try
+        {
+            await StopAfterDelayAsync(key, baseUri, state, credential, delay, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
     }
 
     private static string GetMonitorKey(Uri baseUri)

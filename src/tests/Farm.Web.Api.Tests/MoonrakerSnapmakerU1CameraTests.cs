@@ -141,6 +141,30 @@ public class MoonrakerSnapmakerU1CameraTests
         rpc.Methods.Should().Equal("camera.start_monitor", "camera.stop_monitor", "camera.stop_monitor");
     }
 
+    [Fact]
+    public async Task EnsureMonitorStartedAsync_WhenRestartIsRateLimitedAndMonitorStopped_ReturnsFalse()
+    {
+        RecordingJsonRpcClient rpc = new();
+        ControlledTimeProvider clock = new(new DateTime(2026, 7, 14, 18, 0, 0, DateTimeKind.Utc));
+        SnapmakerU1CameraMonitorManager manager = new(
+            rpc,
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromMilliseconds(10),
+            TimeSpan.FromMilliseconds(10),
+            timeProvider: clock);
+
+        bool started = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
+        await clock.FirstTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
+        clock.ReleaseLatestTimer();
+        await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        bool restarted = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
+
+        started.Should().BeTrue();
+        restarted.Should().BeFalse();
+        rpc.Methods.Should().Equal("camera.start_monitor", "camera.stop_monitor");
+    }
+
     private static MoonrakerClient CreateClient(
         Func<HttpRequestMessage, HttpResponseMessage> responder,
         ISnapmakerU1CameraMonitorManager manager)
