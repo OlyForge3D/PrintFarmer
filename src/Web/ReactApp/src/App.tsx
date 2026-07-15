@@ -13,8 +13,9 @@ import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
 import { SlicerProvider } from '@/contexts/SlicerContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
-import { Alert } from '@/common/components/ui';
+import { Alert, Spinner } from '@/common/components/ui';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
@@ -139,14 +140,30 @@ function SystemSettingsRoute() {
 /**
  * Route-level gate that blocks access to a feature when platform
  * capabilities report it as disabled (e.g. on ARM / Raspberry Pi).
- * While the capabilities query is loading the children render normally
- * so there is no layout flash on x64.
  */
 function FeatureGate({ feature, children }: { feature: 'modelFiles' | 'slicing'; children: React.ReactNode }) {
-  const { data: capabilities } = useSystemCapabilities();
+  const { data: capabilities, error } = useSystemCapabilities();
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-3xl">
+        <Alert type="error" title="Unable to Check Feature Availability">
+          Platform capabilities could not be loaded.
+        </Alert>
+      </div>
+    );
+  }
+
+  if (!hasResolvedQueryData(capabilities)) {
+    return (
+      <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading platform capabilities">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   const enabledKey = `${feature}Enabled` as const;
-  if (capabilities && !capabilities[enabledKey]) {
+  if (!capabilities[enabledKey]) {
     return (
       <div className="p-6 max-w-3xl">
         <Alert type="warning" title="Feature Not Available">
