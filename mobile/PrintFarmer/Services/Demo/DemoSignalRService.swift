@@ -34,6 +34,12 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         attentionHandler = handler
     }
 
+    func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {
+        // Demo mode never emits fallback-group invalidations; retain a no-op
+        // to satisfy the SignalRServiceProtocol requirement added for #711.
+        _ = handler
+    }
+
     // MARK: - Simulation
 
     private func startSimulation() {

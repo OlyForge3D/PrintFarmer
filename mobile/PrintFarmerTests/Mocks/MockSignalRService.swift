@@ -8,6 +8,7 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     var printerUpdateHandler: (@Sendable (PrinterStatusUpdate) -> Void)?
     var jobQueueUpdateHandler: (@Sendable (JobQueueUpdate) -> Void)?
     var attentionChangedHandler: (@Sendable (AttentionChangedEvent) -> Void)?
+    var fallbackGroupsUpdatedHandler: (@Sendable (FallbackGroupsUpdatedEvent) -> Void)?
     var errorToThrow: Error?
 
     func connect() async throws {
@@ -33,6 +34,10 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         attentionChangedHandler = handler
     }
 
+    func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {
+        fallbackGroupsUpdatedHandler = handler
+    }
+
     /// Simulate an attention-invalidation event for testing. Callers use
     /// this to prove that a listener receives the invalidation and triggers
     /// its own refetch.
@@ -43,5 +48,10 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     /// Simulate a printer status update for testing.
     func simulatePrinterUpdate(_ update: PrinterStatusUpdate) {
         printerUpdateHandler?(update)
+    }
+
+    /// Simulate a fallback-groups invalidation for testing (issue #711).
+    func simulateFallbackGroupsUpdated(_ event: FallbackGroupsUpdatedEvent) {
+        fallbackGroupsUpdatedHandler?(event)
     }
 }

@@ -139,6 +139,8 @@
 		A2FC4CAC97D64CC8E4D8FDED /* LocationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23554EB41DA88AD092EB5C1 /* LocationListView.swift */; };
 		A391E9CBE39F5EAF1A94264D /* SpoolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D305E8384A01A3EBE5866CF /* SpoolPickerView.swift */; };
 		A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */; };
+		F711A0001000000000000002 /* FilamentFallbackGroupModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0001000000000000001 /* FilamentFallbackGroupModels.swift */; };
+		F711A0002000000000000002 /* ToolheadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0002000000000000001 /* ToolheadModels.swift */; };
 		A3E7287000000000000000A2 /* PrinterControlsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E7287000000000000000A1 /* PrinterControlsSection.swift */; };
 		A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */; };
 		A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */; };
@@ -251,6 +253,9 @@
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
 		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
 		F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B011 /* SystemCapabilitiesTests.swift */; };
+		F711A0003000000000000002 /* FilamentFallbackGroupModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0003000000000000001 /* FilamentFallbackGroupModelsTests.swift */; };
+		F711A0004000000000000002 /* ToolheadModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0004000000000000001 /* ToolheadModelsTests.swift */; };
+		F711A0005000000000000002 /* PrinterServiceFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */; };
 		F7060002000000000000C012 /* PrintFarmerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C011 /* PrintFarmerUITests.swift */; };
 		F7060002000000000000C022 /* LoginFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C021 /* LoginFlowUITests.swift */; };
 		F7060002000000000000C032 /* PrinterListUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C031 /* PrinterListUITests.swift */; };
@@ -411,6 +416,8 @@
 		A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroupTests.swift; sourceTree = "<group>"; };
 		A2FA2A4FEFE32F898CA6799D /* JobListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobListView.swift; sourceTree = "<group>"; };
 		A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilities.swift; sourceTree = "<group>"; };
+		F711A0001000000000000001 /* FilamentFallbackGroupModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentFallbackGroupModels.swift; sourceTree = "<group>"; };
+		F711A0002000000000000001 /* ToolheadModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolheadModels.swift; sourceTree = "<group>"; };
 		A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
 		A3E7287000000000000000A1 /* PrinterControlsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsSection.swift; sourceTree = "<group>"; };
 		A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisabledControlStyle.swift; sourceTree = "<group>"; };
@@ -535,6 +542,9 @@
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
 		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
 		F7060001000000000000B011 /* SystemCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesTests.swift; sourceTree = "<group>"; };
+		F711A0003000000000000001 /* FilamentFallbackGroupModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentFallbackGroupModelsTests.swift; sourceTree = "<group>"; };
+		F711A0004000000000000001 /* ToolheadModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolheadModelsTests.swift; sourceTree = "<group>"; };
+		F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterServiceFallbackTests.swift; sourceTree = "<group>"; };
 		F7060002000000000000C011 /* PrintFarmerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintFarmerUITests.swift; sourceTree = "<group>"; };
 		F7060002000000000000C021 /* LoginFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginFlowUITests.swift; sourceTree = "<group>"; };
 		F7060002000000000000C031 /* PrinterListUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListUITests.swift; sourceTree = "<group>"; };
@@ -736,6 +746,8 @@
 				DE816C8D542C6E41C7743FF9 /* PredictiveModels.swift */,
 				1F8B5C6B605BB5B8AE7E1BF3 /* FailureDetectionModels.swift */,
 				A70A710000000000B0000001 /* AttentionModels.swift */,
+				F711A0001000000000000001 /* FilamentFallbackGroupModels.swift */,
+				F711A0002000000000000001 /* ToolheadModels.swift */,
 				D4718F7B97636A2B4E526F17 /* PartsInventoryModels.swift */,
 			);
 			path = Models;
@@ -1057,6 +1069,7 @@
 				1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */,
 				CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */,
 				F7060001000000000000B011 /* SystemCapabilitiesTests.swift */,
+				F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1123,6 +1136,8 @@
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
 				A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */,
 				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
+				F711A0003000000000000001 /* FilamentFallbackGroupModelsTests.swift */,
+				F711A0004000000000000001 /* ToolheadModelsTests.swift */,
 				F07AA8A2045A2F85558A9FC5 /* PartsInventoryConflictTests.swift */,
 			);
 			path = Models;
@@ -1366,6 +1381,9 @@
 				F2C1D2E3F4A5B6C7D8E9F0A1 /* SpoolInventoryViewModelTests.swift in Sources */,
 				F7060001000000000000B002 /* AppRouterTests.swift in Sources */,
 				F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */,
+				F711A0003000000000000002 /* FilamentFallbackGroupModelsTests.swift in Sources */,
+				F711A0004000000000000002 /* ToolheadModelsTests.swift in Sources */,
+				F711A0005000000000000002 /* PrinterServiceFallbackTests.swift in Sources */,
 				8D2EDA47F2053E4ECD46CC15 /* MockPartsInventoryService.swift in Sources */,
 				1BBE2F4594687816DAE0838A /* ScanViewModelTests.swift in Sources */,
 				2686C148AE9D2C643157A837 /* HarvestViewModelTests.swift in Sources */,
@@ -1417,6 +1435,8 @@
 				42EB02BCF9914C6BAF27AD77 /* Models.swift in Sources */,
 				D61000000000000000000002 /* RegisteredServer.swift in Sources */,
 				A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */,
+				F711A0001000000000000002 /* FilamentFallbackGroupModels.swift in Sources */,
+				F711A0002000000000000002 /* ToolheadModels.swift in Sources */,
 				AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */,
 				4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */,
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,

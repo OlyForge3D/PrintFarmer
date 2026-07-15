@@ -19,6 +19,12 @@ actor PrinterService: PrinterServiceProtocol {
         try await apiClient.get("/api/printers/\(id)")
     }
 
+    /// Fetches the extended printer detail envelope with per-toolhead F6
+    /// data. See `PrinterServiceProtocol.getDetails(id:)`.
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        try await apiClient.get("/api/printers/\(id)/details")
+    }
+
     func update(id: UUID, _ request: UpdatePrinterRequest) async throws -> Printer {
         try await apiClient.put("/api/printers/\(id)", body: request)
     }
@@ -190,6 +196,51 @@ actor PrinterService: PrinterServiceProtocol {
             return "/api/printers/\(printerId)/homez"
         }
         return "/api/printers/\(printerId)/home"
+    }
+
+    // MARK: - Fallback groups (issue #711, F6)
+
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] {
+        try await apiClient.get("/api/printers/\(printerId)/fallback-groups")
+    }
+
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        try await apiClient.get("/api/printers/\(printerId)/fallback-groups/\(groupId)")
+    }
+
+    func createFallbackGroup(
+        printerId: UUID,
+        _ request: CreateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        try await apiClient.post("/api/printers/\(printerId)/fallback-groups", body: request)
+    }
+
+    func updateFallbackGroup(
+        printerId: UUID,
+        groupId: UUID,
+        _ request: UpdateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        try await apiClient.put("/api/printers/\(printerId)/fallback-groups/\(groupId)", body: request)
+    }
+
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {
+        try await apiClient.delete("/api/printers/\(printerId)/fallback-groups/\(groupId)")
+    }
+
+    func getAvailableFallback(
+        printerId: UUID,
+        sourceToolheadId: UUID,
+        material: String
+    ) async throws -> AvailableFallbackMember? {
+        // Query-encode `material` so materials with spaces / non-ASCII (e.g.
+        // "PLA-CF", "PET‑G") reach the controller intact. Fallback to the
+        // raw string is safe here — the backend validates `material` and
+        // returns 400 for empty/blank input.
+        let encodedMaterial = material.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? material
+        let path = "/api/printers/\(printerId)/fallback-groups/available"
+            + "?sourceToolheadId=\(sourceToolheadId.uuidString)"
+            + "&material=\(encodedMaterial)"
+        return try await apiClient.get(path) as AvailableFallbackMember?
     }
 }
 

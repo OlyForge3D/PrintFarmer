@@ -28,6 +28,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private var printerUpdateHandlers: [@Sendable (PrinterStatusUpdate) -> Void] = []
     private var jobQueueUpdateHandlers: [@Sendable (JobQueueUpdate) -> Void] = []
     private var attentionChangedHandlers: [@Sendable (AttentionChangedEvent) -> Void] = []
+    private var fallbackGroupsUpdatedHandlers: [@Sendable (FallbackGroupsUpdatedEvent) -> Void] = []
     private let handlerLock = NSLock()
 
     init(serverURL: URL, session: URLSession = .shared, tokenProvider: @escaping @Sendable () async -> String?) {
@@ -89,6 +90,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {
         handlerLock.lock()
         attentionChangedHandlers.append(handler)
+        handlerLock.unlock()
+    }
+
+    func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {
+        handlerLock.lock()
+        fallbackGroupsUpdatedHandlers.append(handler)
         handlerLock.unlock()
     }
 
@@ -322,6 +329,23 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
         case "toolheadupdate", "extruderupdate", "heaterbedupdate":
             break
+
+        // issue #711 F6: `fallbackgroupsupdated` is a lowercase invalidation
+        // event on `/hubs/printers`. Payload is `{ printerId }`; handlers
+        // refetch `GET /api/printers/{printerId}/fallback-groups` and never
+        // persist any field of this payload as canonical state.
+        case "fallbackgroupsupdated":
+            do {
+                let event = try decoder.decode(FallbackGroupsUpdatedEvent.self, from: argData)
+                handlerLock.lock()
+                let handlers = fallbackGroupsUpdatedHandlers
+                handlerLock.unlock()
+                for handler in handlers {
+                    handler(event)
+                }
+            } catch {
+                logger.warning("Failed to decode fallbackgroupsupdated: \(error.localizedDescription)")
+            }
 
         default:
             logger.debug("Unhandled SignalR event: \(target)")
