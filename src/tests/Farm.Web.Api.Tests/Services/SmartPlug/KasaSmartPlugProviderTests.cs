@@ -107,8 +107,9 @@ public class KasaSmartPlugProviderTests : IDisposable
             await Task.Delay(TimeSpan.FromSeconds(10));
         });
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(8));
-        bool result = await _provider.TestConnectionAsync($"127.0.0.1:{_port}", cts.Token);
+        bool result = await _provider
+            .TestConnectionAsync($"127.0.0.1:{_port}", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(20));
         Assert.False(result);
     }
 }

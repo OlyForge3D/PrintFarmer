@@ -63,11 +63,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private long _lastPruneAtTicks;
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly INativePushSender _sender;
+    private readonly INativePushTransportSender _sender;
     private readonly IOptionsMonitor<NativePushSettings> _optionsMonitor;
     private readonly NativePushMetrics _metrics;
     private readonly ILogger<NativePushDispatcher> _logger;
     private readonly TimeProvider _timeProvider;
+
+    // Internal deterministic test seam. Production never assigns this; it
+    // signals only after a resolution has captured a non-empty settlement set
+    // and immediately before it awaits that set outside lifecycle locks.
+    internal Action? OnResolutionSettlementWaitStartedForTests { get; set; }
 
     /// <summary>Constructs the dispatcher.</summary>
     public NativePushDispatcher(
@@ -79,7 +84,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _sender = sender ?? throw new ArgumentNullException(nameof(sender));
+        _sender = sender as INativePushTransportSender
+            ?? throw new ArgumentException(
+                "Native-push dispatch requires a transport-aware sender.",
+                nameof(sender));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -111,7 +119,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // ever under-reject: the tombstone is monotonically non-decreasing,
         // so if this peek already justifies rejecting, the authoritative
         // check below (inside TryObserveLifecycle for targeted dispatches, or
-        // PublishResolvedTombstoneAndEnumerateOwners for global Resolved)
+        // PublishResolvedTombstoneAndFenceLifecycles for global Resolved)
         // would independently reject it too. This just avoids opening a DI
         // scope and querying the database for a dispatch that is definitely
         // stale.
@@ -180,21 +188,30 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
+        // A global resolution's ordering fence is independent from optional
+        // delivery. Publish it before reading configuration, constructing a
+        // scope, or querying the database so a disabled/unavailable dispatcher
+        // can never let an older targeted alert resurrect after recovery.
+        GlobalResolvedFence? globalResolvedFence = changeKind == AttentionChangeKind.Resolved
+            && targetUserId is null
+            ? PublishResolvedTombstoneAndFenceLifecycles(attentionItemId, version)
+            : null;
+
         // Snapshot the startup-bound settings for a consistent fan-out. The
         // NativePush section is validated with ValidateOnStart; configuration
         // changes require a process restart rather than taking effect mid-flight.
         // Resolved events consume a per-user pre-resolution snapshot and emit a
         // silent dismissal even after the source removes the live item.
-        NativePushSettings settings = _optionsMonitor.CurrentValue;
-        if (settings.Mode == NativePushMode.Disabled)
-        {
-            return;
-        }
-
-        PruneCaches(UtcNow, settings);
-
         try
         {
+            NativePushSettings settings = _optionsMonitor.CurrentValue;
+            if (settings.Mode == NativePushMode.Disabled)
+            {
+                return;
+            }
+
+            PruneCaches(UtcNow, settings);
+
             await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
             IServiceProvider sp = scope.ServiceProvider;
             IOperatorFeatureGate gate = sp.GetRequiredService<IOperatorFeatureGate>();
@@ -216,46 +233,21 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             else
             {
                 IReadOnlyList<Guid> activeOwners = await tokens.GetActiveTokenOwnersAsync(cancellationToken);
-                if (changeKind == AttentionChangeKind.Resolved)
+                if (globalResolvedFence is not null)
                 {
-                    // A global resolution must tombstone every recipient that has an
-                    // active lifecycle for this attention item, not only recipients
-                    // that currently hold device tokens. A temporarily tokenless
-                    // recipient (device unregistered between an earlier targeted
-                    // Created/Updated capture and this resolution) still owns an
-                    // in-flight targeted lane; without this union, a later
-                    // re-registration would let that stale targeted work resume and
-                    // send after resolution. DispatchForOwnerAsync advances the
-                    // lifecycle inside TryObserveLifecycle before the token check,
-                    // so a tokenless recipient still receives the version tombstone.
-                    //
-                    // The tombstone publish and this owner enumeration run as ONE
-                    // atomic unit under AttentionItemFence's lock — the SAME lock a
-                    // concurrent targeted dispatch's lifecycle install acquires in
-                    // TryObserveLifecycle. This is required for correctness, not
-                    // just an optimisation: without this atomicity, a targeted
-                    // dispatch that is concurrently mid-flight (already past its
-                    // own now-stale tombstone check, not yet at its lifecycle
-                    // install) could install a lifecycle for a recipient this
-                    // enumeration missed only because it ran first — the P-A-D-R-S
-                    // interleaving. See AttentionItemFence for the full invariant.
-                    List<Guid>? lifecycleOwners = PublishResolvedTombstoneAndEnumerateOwners(
-                        attentionItemId,
-                        version);
-                    if (lifecycleOwners is { Count: > 0 })
+                    // The global fence has already advanced every in-memory
+                    // lifecycle synchronously. Preserve the existing active-owner
+                    // lookup as a delivery dependency, then union its result with
+                    // the captured lifecycle owners. Active-only owners retain
+                    // the established no-snapshot lookup path; only captured
+                    // owners can ultimately emit a dismissal.
+                    var union = new HashSet<Guid>(activeOwners);
+                    foreach (GlobalResolvedParticipant participant in globalResolvedFence.Participants)
                     {
-                        var union = new HashSet<Guid>(activeOwners);
-                        foreach (Guid owner in lifecycleOwners)
-                        {
-                            union.Add(owner);
-                        }
+                        _ = union.Add(participant.UserId);
+                    }
 
-                        owners = union.ToArray();
-                    }
-                    else
-                    {
-                        owners = activeOwners;
-                    }
+                    owners = union.ToArray();
                 }
                 else
                 {
@@ -278,6 +270,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     _metrics.SkippedFeatureDisabled.Add(1);
                     return;
                 }
+
+                GlobalResolvedParticipant? preObservedResolution =
+                    globalResolvedFence?.Take(userId);
 
                 // Vasquez v6 B1: isolate the entire per-owner resolution +
                 // fan-out under a scope that never swallows cancellation but
@@ -302,6 +297,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         tokens,
                         attention,
                         db,
+                        preObservedResolution,
                         cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -331,6 +327,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // Delivery failures must never break the attention broadcast path.
             _logger.LogWarning(ex, "[NativePush] Dispatch failed for attentionItemId={AttentionItemId}", attentionItemId);
         }
+        finally
+        {
+            globalResolvedFence?.Complete();
+        }
     }
 
     private async Task DispatchForOwnerAsync(
@@ -343,50 +343,65 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         IDeviceTokenRepository tokens,
         IAttentionService attention,
         AppDbContext db,
+        GlobalResolvedParticipant? preObservedResolution,
         CancellationToken cancellationToken)
     {
-        var snapshotKey = new AttentionSnapshotKey(userId, attentionItemId);
-        if (!TryObserveLifecycle(
-                snapshotKey,
-                version,
-                changeKind,
-                out AttentionLifecycle lifecycle,
-                out AttentionSnapshot? resolvedSnapshot))
+        AttentionLifecycle lifecycle;
+        ResolutionCapture? resolutionCapture;
+        if (preObservedResolution is null)
         {
-            return;
+            var snapshotKey = new AttentionSnapshotKey(userId, attentionItemId);
+            if (!TryObserveLifecycle(
+                    snapshotKey,
+                    version,
+                    changeKind,
+                    out lifecycle,
+                    out resolutionCapture))
+            {
+                return;
+            }
+        }
+        else
+        {
+            lifecycle = preObservedResolution.Lifecycle;
+            resolutionCapture = preObservedResolution.Capture;
         }
 
         try
         {
-            AttentionItemDto? item = await attention.FindItemAsync(
-                userId,
-                attentionItemId,
-                cancellationToken);
+            AttentionItemDto? item = null;
             AttentionSnapshot? activeSnapshot = null;
 
             if (changeKind == AttentionChangeKind.Resolved)
             {
-                if (resolvedSnapshot is null)
+                // Resolution captures and fences the exact alert generation
+                // under the lifecycle lock, then waits outside every lock and
+                // feature gate for already-started provider calls to settle.
+                // A success that lands after this resolution begins therefore
+                // remains attributed to the consumed snapshot and can still
+                // trigger its required dismissal.
+                if (resolutionCapture is not null)
+                {
+                    await resolutionCapture.WaitForPendingTransportsAsync(
+                        OnResolutionSettlementWaitStartedForTests,
+                        cancellationToken);
+                }
+
+                // Preserve the established resolution lookup boundary after
+                // settlement. The live item is intentionally not used to
+                // construct a dismissal, but the lookup maintains source
+                // sequencing and authorization behavior for no-snapshot
+                // resolutions.
+                _ = await attention.FindItemAsync(
+                    userId,
+                    attentionItemId,
+                    cancellationToken);
+                if (resolutionCapture is null)
                 {
                     return;
                 }
 
-                // #756 semantic on the lifecycle-owned architecture: this
-                // recipient's alert generation exhausted every device without
-                // a single successful delivery (all-transient outage, terminal
-                // failures, or invalidations). The client never received the
-                // alert this dismissal would clear, so treat the dismissal as
-                // a benign no-op rather than send a silent push for an alert
-                // that was never seen. The read is safe here because the
-                // matching MarkDelivered call happens under the same lifecycle
-                // sync as TryObserve's consumption of _snapshot: any success
-                // that races with this Resolved is either fenced (its version
-                // is no longer current) or was applied before TryObserve
-                // returned this snapshot, and the Volatile.Read publishes it.
-                // Partial success (at least one device delivered) still emits
-                // the dismissal to every current device below, preserving
-                // per-recipient behavior.
-                if (!resolvedSnapshot.HasSuccessfulDelivery)
+                if (!resolutionCapture.Snapshot.HasSuccessfulDelivery)
                 {
                     _metrics.SkippedNeverDelivered.Add(1);
                     return;
@@ -394,13 +409,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                 item = null;
             }
-            else if (item is null)
+            else
             {
-                return;
+                item = await attention.FindItemAsync(
+                    userId,
+                    attentionItemId,
+                    cancellationToken);
+                if (item is null)
+                {
+                    return;
+                }
             }
 
-            AttentionKind kind = item?.Kind ?? resolvedSnapshot!.Kind;
-            Guid printerId = item?.PrinterId ?? resolvedSnapshot!.PrinterId;
+            AttentionKind kind = item?.Kind ?? resolutionCapture!.Snapshot.Kind;
+            Guid printerId = item?.PrinterId ?? resolutionCapture!.Snapshot.PrinterId;
             if (AttentionPushCategories.CategoryFor(kind) is null)
             {
                 return;
@@ -465,7 +487,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         attentionItemId,
                         changeKind,
                         item,
-                        resolvedSnapshot,
+                        resolutionCapture?.Snapshot,
                         lifecycle,
                         version,
                         activeSnapshot,
@@ -500,7 +522,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
         finally
         {
-            lifecycle.Complete();
+            if (preObservedResolution is not null)
+            {
+                preObservedResolution.Complete();
+            }
+            else
+            {
+                lifecycle.Complete();
+            }
         }
     }
 
@@ -526,10 +555,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionSnapshot lifecycleSnapshot = activeSnapshot
             ?? resolvedSnapshot
             ?? throw new InvalidOperationException("A lifecycle snapshot is required before native-push transport.");
+        NativePushSendOutcome sendOutcome;
         NativePushDispatchResult? result;
         try
         {
-            result = await SendWithRetriesAsync(
+            sendOutcome = await SendWithRetriesAsync(
                 userId,
                 envelope,
                 lifecycle,
@@ -560,21 +590,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return DeviceDispatchOutcome.DispatchStopped;
             }
 
-            // Pre-transport sender failure — either a synchronous throw, or
-            // an async sender's Task that was already Faulted/Canceled
-            // before any real transport work began. TryBeginSend detects
-            // both cases and rolls back dedupe/rate reservations without
-            // committing _snapshot/_consumedResolutionVersion. IsCurrent
-            // therefore returns false (no snapshot commit at THIS version),
-            // but the lifecycle has NOT advanced past our version. This is a
-            // per-device pre-transport failure, not a supersession: the
-            // outer fan-out must continue to sibling devices in the same
-            // dispatch, and a subsequent exact-version DispatchAsync must
-            // be able to retry every such device.
-            //
-            // Distinguish that state from the post-transport-start
-            // fenced-current case, which routes through the sender_exception
-            // transient result and follows normal token attribution.
+            // A sender that faults before it signals the typed transport
+            // boundary has not committed lifecycle ownership, dedupe, or rate
+            // capacity. Its exact-version retry remains valid and siblings
+            // continue independently.
             if (!lifecycle.IsCurrent(
                     version,
                     lifecycleSnapshot,
@@ -593,12 +612,17 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
 
             _logger.LogWarning(ex, "[NativePush] Sender threw for deviceTokenId={DeviceTokenId}.", deviceToken.Id);
-            result = NativePushDispatchResult.Transient("sender_exception");
+            sendOutcome = new NativePushSendOutcome(
+                NativePushDispatchResult.Transient("sender_exception"),
+                true);
         }
 
+        result = sendOutcome.Result;
         if (result is null)
         {
-            return DeviceDispatchOutcome.DispatchStopped;
+            return sendOutcome.TransportStarted
+                ? DeviceDispatchOutcome.DispatchStopped
+                : DeviceDispatchOutcome.Completed;
         }
 
         // Every result opens its own DI scope/AppDbContext. Besides isolating a
@@ -665,7 +689,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionDispatchVersion version,
         AttentionChangeKind changeKind,
         out AttentionLifecycle lifecycle,
-        out AttentionSnapshot? resolvedSnapshot)
+        out ResolutionCapture? resolutionCapture)
     {
         // Any strictly-newer lifecycle observation (Created / Updated /
         // Resolved) must clear the prior generation's versionless
@@ -695,14 +719,25 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // The item-wide resolved-tombstone check and the per-user
             // lifecycle GetOrAdd/TryObserve run as ONE atomic unit under the
             // fence's lock. This is the P-A-D-R-S linearization point: a
-            // concurrent global resolution's tombstone publish + owner
-            // enumeration (PublishResolvedTombstoneAndEnumerateOwners) uses
+            // concurrent global resolution's tombstone publication + lifecycle
+            // fencing (PublishResolvedTombstoneAndFenceLifecycles) uses
             // the SAME fence and lock, so the two operations can never cross
             // this gap for a given attention item. See AttentionItemFence.
             AttentionItemFenceResult fenceResult = fence.TryAdmitTargeted(
                 version,
                 UtcNow,
-                () => observation = ObserveLifecycleUnderFence(key, version, changeKind, onLifecycleAdvancedOrResolved));
+                () =>
+                {
+                    observation = ObserveLifecycleUnderFence(
+                        key,
+                        version,
+                        changeKind,
+                        onLifecycleAdvancedOrResolved);
+                    if (observation.Lifecycle is AttentionLifecycle observedLifecycle)
+                    {
+                        fence.TrackLifecycle(key.UserId, observedLifecycle);
+                    }
+                });
 
             if (fenceResult == AttentionItemFenceResult.Retired)
             {
@@ -716,15 +751,15 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
 
         lifecycle = observation.Lifecycle!;
-        resolvedSnapshot = observation.ResolvedSnapshot;
+        resolutionCapture = observation.ResolutionCapture;
         return observation.Accepted;
     }
 
     /// <summary>
     /// Installs/advances the per-(recipient, item) lifecycle. Always invoked
     /// from inside <see cref="AttentionItemFence.TryAdmitTargeted"/>'s lock,
-    /// so this never races a concurrent global resolution's owner
-    /// enumeration for the same attention item.
+    /// so this never races a concurrent global resolution's synchronous
+    /// lifecycle fencing for the same attention item.
     /// </summary>
     private LifecycleObservation ObserveLifecycleUnderFence(
         AttentionSnapshotKey key,
@@ -742,10 +777,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 changeKind,
                 UtcNow,
                 onLifecycleAdvancedOrResolved,
-                out AttentionSnapshot? resolved);
+                out ResolutionCapture? resolution);
             if (result == AttentionLifecycleObserveResult.Accepted)
             {
-                return new LifecycleObservation(true, candidate, resolved);
+                return new LifecycleObservation(true, candidate, resolution);
             }
 
             if (result == AttentionLifecycleObserveResult.Stale)
@@ -759,13 +794,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     }
 
     /// <summary>
-    /// Publishes (monotonically bumps) the item-wide resolved tombstone and,
-    /// atomically with the publish under the same <see cref="AttentionItemFence"/>
-    /// lock that a targeted dispatch's lifecycle install uses, enumerates the
-    /// recipients that currently hold a lifecycle for this item. See
-    /// <see cref="AttentionItemFence"/> for why this atomicity is required.
+    /// Publishes the global resolved tombstone and advances every lifecycle already
+    /// installed for this item while the same item fence remains held. This is the
+    /// ordering-only half of a resolution and deliberately runs before optional
+    /// configuration, scope, and database work.
     /// </summary>
-    private List<Guid>? PublishResolvedTombstoneAndEnumerateOwners(
+    private GlobalResolvedFence PublishResolvedTombstoneAndFenceLifecycles(
         string attentionItemId,
         AttentionDispatchVersion version)
     {
@@ -778,16 +812,50 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             if (fence.TryPublishResolvedAndRun(
                     version,
                     UtcNow,
-                    () => GetOwnersWithLifecycleFor(attentionItemId),
-                    out List<Guid>? owners))
+                    () => FenceTrackedLifecyclesForGlobalResolution(
+                        fence,
+                        attentionItemId,
+                        version),
+                    out List<GlobalResolvedParticipant>? participants))
             {
-                return owners;
+                return new GlobalResolvedFence(participants ?? []);
             }
 
             // A pruner retired this fence after GetOrAdd returned it. Retry
             // against the replacement fence instead of publishing to an
             // orphaned tombstone.
         }
+    }
+
+    private List<GlobalResolvedParticipant>? FenceTrackedLifecyclesForGlobalResolution(
+        AttentionItemFence fence,
+        string attentionItemId,
+        AttentionDispatchVersion version)
+    {
+        List<GlobalResolvedParticipant>? participants = null;
+        foreach (TrackedAttentionLifecycle tracked in fence.GetTrackedLifecycles())
+        {
+            AttentionLifecycleObserveResult result = tracked.Lifecycle.TryObserve(
+                version,
+                AttentionChangeKind.Resolved,
+                UtcNow,
+                () => ResetActiveLifecycleDedupe(tracked.UserId, attentionItemId),
+                out ResolutionCapture? resolutionCapture);
+            if (result == AttentionLifecycleObserveResult.Accepted)
+            {
+                participants ??= [];
+                participants.Add(new GlobalResolvedParticipant(
+                    tracked.UserId,
+                    tracked.Lifecycle,
+                    resolutionCapture));
+            }
+            else if (result == AttentionLifecycleObserveResult.Retired)
+            {
+                fence.UntrackLifecycle(tracked.UserId, tracked.Lifecycle);
+            }
+        }
+
+        return participants;
     }
 
     private static DateTime NormalizeOccurredAt(DateTime occurredAt)
@@ -837,7 +905,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // No unmanaged resources; kept for future rate-limit timer.
     }
 
-    private async Task<NativePushDispatchResult?> SendWithRetriesAsync(
+    private async Task<NativePushSendOutcome> SendWithRetriesAsync(
         Guid userId,
         NativePushEnvelope envelope,
         AttentionLifecycle lifecycle,
@@ -851,8 +919,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         CancellationToken cancellationToken)
     {
         int attempts = Math.Max(1, settings.MaxAttempts);
-        NativePushDispatchResult last = NativePushDispatchResult.Transient("no_attempt");
-        bool attempted = false;
+        NativePushDispatchResult? last = null;
+        bool anyTransportStarted = false;
         for (int i = 0; i < attempts; i++)
         {
             // This persisted gate read is intentionally adjacent to the transport call.
@@ -860,82 +928,109 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             if (!gate.IsEnabled(OperatorFeature.NativePush))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
-                return null;
+                return new NativePushSendOutcome(null, anyTransportStarted);
             }
 
-            bool transportStarted = false;
-            try
-            {
-                // Track dedupe / rate reservations for rollback if startSend
-                // throws synchronously. A synchronous throw means transport
-                // never truly started; rolling back the reservations lets an
-                // exact-version retry via a subsequent DispatchAsync proceed.
-                DateTime? dedupeReservedAt = null;
-                DateTime? rateReservedAt = null;
+            // Reserve dedupe / rate capacity before preparation begins, but do
+            // not commit lifecycle ownership until the sender explicitly
+            // crosses its provider boundary. A JWT lock, payload build, or
+            // cancellation before that signal must remain fully recoverable.
+            DateTime? dedupeReservedAt = null;
+            DateTime? rateReservedAt = null;
 
-                Func<bool> shouldEmit = () =>
+            Func<bool> shouldEmit = () =>
+            {
+                DateTime now = UtcNow;
+                DateTime expiresAt = now.Add(settings.DedupeWindow);
+                bool emitted = false;
+                _ = _dedupe.AddOrUpdate(
+                    dedupeKey,
+                    _ =>
+                    {
+                        emitted = true;
+                        return expiresAt;
+                    },
+                    (_, existing) =>
+                    {
+                        if (existing > now)
+                        {
+                            emitted = false;
+                            return existing;
+                        }
+
+                        emitted = true;
+                        return expiresAt;
+                    });
+                if (emitted)
+                {
+                    dedupeReservedAt = expiresAt;
+                }
+
+                return emitted;
+            };
+            Action rollbackDedupe = () =>
+            {
+                if (dedupeReservedAt is DateTime committed)
+                {
+                    _ = ((ICollection<KeyValuePair<string, DateTime>>)_dedupe)
+                        .Remove(new KeyValuePair<string, DateTime>(dedupeKey, committed));
+                    dedupeReservedAt = null;
+                }
+            };
+            Func<bool>? tryConsumeRate = rateKey is RateLimitKey activeRateKey
+                ? () =>
                 {
                     DateTime now = UtcNow;
-                    DateTime expiresAt = now.Add(settings.DedupeWindow);
-                    bool emitted = false;
-                    _ = _dedupe.AddOrUpdate(
-                        dedupeKey,
-                        _ =>
-                        {
-                            emitted = true;
-                            return expiresAt;
-                        },
-                        (_, existing) =>
-                        {
-                            if (existing > now)
-                            {
-                                emitted = false;
-                                return existing;
-                            }
-
-                            emitted = true;
-                            return expiresAt;
-                        });
-                    if (emitted)
+                    if (TryConsumeRate(activeRateKey, settings, now))
                     {
-                        dedupeReservedAt = expiresAt;
+                        rateReservedAt = now;
+                        return true;
                     }
 
-                    return emitted;
-                };
-                Action rollbackDedupe = () =>
+                    return false;
+                }
+            : null;
+            Action? rollbackRate = rateKey is RateLimitKey activeRateKeyForRollback
+                ? () =>
                 {
-                    if (dedupeReservedAt is DateTime committed)
+                    if (rateReservedAt is DateTime consumed)
                     {
-                        ((ICollection<KeyValuePair<string, DateTime>>)_dedupe)
-                            .Remove(new KeyValuePair<string, DateTime>(dedupeKey, committed));
-                        dedupeReservedAt = null;
+                        RollbackRate(activeRateKeyForRollback, consumed);
+                        rateReservedAt = null;
                     }
-                };
-                Func<bool>? tryConsumeRate = rateKey is RateLimitKey activeRateKey
-                    ? () =>
-                    {
-                        DateTime now = UtcNow;
-                        if (TryConsumeRate(activeRateKey, settings, now))
-                        {
-                            rateReservedAt = now;
-                            return true;
-                        }
+                }
+            : null;
 
-                        return false;
-                    }
-                : null;
-                Action? rollbackRate = rateKey is RateLimitKey activeRateKeyForRollback
-                    ? () =>
-                    {
-                        if (rateReservedAt is DateTime consumed)
-                        {
-                            RollbackRate(activeRateKeyForRollback, consumed);
-                            rateReservedAt = null;
-                        }
-                    }
-                : null;
-                Func<Task<NativePushDispatchResult>> startSend = () =>
+            LifecycleSendReservationResult reservationResult = lifecycle.TryReserveSend(
+                version,
+                lifecycleSnapshot,
+                changeKind == AttentionChangeKind.Resolved,
+                shouldEmit,
+                rollbackDedupe,
+                tryConsumeRate,
+                rollbackRate);
+            if (reservationResult.BlockReason == LifecycleSendBlockReason.Dedupe)
+            {
+                _metrics.SkippedDedupe.Add(1);
+                return new NativePushSendOutcome(null, anyTransportStarted);
+            }
+
+            if (reservationResult.BlockReason == LifecycleSendBlockReason.RateLimit)
+            {
+                _metrics.SkippedRateLimit.Add(1);
+                return new NativePushSendOutcome(null, anyTransportStarted);
+            }
+
+            if (reservationResult.Reservation is not LifecycleSendReservation reservation)
+            {
+                return new NativePushSendOutcome(null, anyTransportStarted);
+            }
+
+            var transportStart = new DispatcherTransportStart(
+                lifecycle,
+                reservation,
+                lifecycleSnapshot,
+                () =>
                 {
                     if (changeKind != AttentionChangeKind.Resolved)
                     {
@@ -947,46 +1042,68 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                             out _);
                     }
 
-                    return _sender.SendAsync(envelope, cancellationToken);
-                };
-                LifecycleSendStart sendStart = lifecycle.TryBeginSend(
-                    version,
-                    lifecycleSnapshot,
-                    changeKind == AttentionChangeKind.Resolved,
-                    shouldEmit,
-                    rollbackDedupe,
-                    tryConsumeRate,
-                    rollbackRate,
-                    startSend);
-                if (sendStart.BlockReason == LifecycleSendBlockReason.Dedupe)
-                {
-                    _metrics.SkippedDedupe.Add(1);
-                    return null;
-                }
+                    _metrics.Attempted.Add(1);
+                });
 
-                if (sendStart.BlockReason == LifecycleSendBlockReason.RateLimit)
-                {
-                    _metrics.SkippedRateLimit.Add(1);
-                    return null;
-                }
-
-                Task<NativePushDispatchResult>? sendTask = sendStart.SendTask;
-                if (sendTask is null)
-                {
-                    return null;
-                }
-
-                transportStarted = true;
-                last = await sendTask;
+            NativePushDispatchResult? result = null;
+            try
+            {
+                result = await SendThroughTransportBoundaryAsync(
+                    envelope,
+                    transportStart,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (transportStart.WasStarted)
+            {
+                // The boundary already committed, so retain normal retry and
+                // token-attribution semantics rather than rolling back a real
+                // provider attempt. Cancellation is handled above and never
+                // reaches this conversion.
+                _logger.LogWarning(
+                    ex,
+                    "[NativePush] Sender threw after transport start for attentionItemId={AttentionItemId}.",
+                    envelope.AttentionItemId);
+                result = NativePushDispatchResult.Transient("sender_exception");
             }
             finally
             {
-                if (transportStarted && !attempted)
+                if (transportStart.WasStarted)
                 {
-                    _metrics.Attempted.Add(1);
-                    attempted = true;
+                    transportStart.Settle(result?.Success == true);
+                    anyTransportStarted = true;
+                }
+                else
+                {
+                    transportStart.CompleteWithoutStart();
                 }
             }
+
+            if (!transportStart.WasStarted)
+            {
+                if (result?.Success == true)
+                {
+                    throw new InvalidOperationException(
+                        "A native-push sender reported delivery without crossing the transport-start boundary.");
+                }
+
+                if (string.Equals(result?.Reason, "notConfigured", StringComparison.Ordinal))
+                {
+                    _metrics.SkippedNotConfigured.Add(1);
+                }
+
+                // A no-signal pre-transport result leaves the exact version
+                // recoverable. If an earlier retry already crossed transport,
+                // preserve that earlier provider result for normal attribution.
+                return anyTransportStarted
+                    ? new NativePushSendOutcome(last, true)
+                    : new NativePushSendOutcome(null, false);
+            }
+
+            last = result!;
 
             // A sender may complete after an administrator has committed the
             // emergency disable or after a resolution/replacement consumed this
@@ -996,7 +1113,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             if (!gate.IsEnabled(OperatorFeature.NativePush))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
-                return null;
+                return new NativePushSendOutcome(null, true);
             }
 
             if (!lifecycle.IsCurrent(
@@ -1004,12 +1121,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     lifecycleSnapshot,
                     changeKind == AttentionChangeKind.Resolved))
             {
-                return null;
+                return new NativePushSendOutcome(null, true);
             }
 
             if (last.Success || last.TokenInvalidated || !last.IsTransient)
             {
-                return last;
+                return new NativePushSendOutcome(last, true);
             }
 
             if (i + 1 < attempts)
@@ -1022,7 +1139,99 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        return last;
+        return new NativePushSendOutcome(last, anyTransportStarted);
+    }
+
+    private Task<NativePushDispatchResult> SendThroughTransportBoundaryAsync(
+        NativePushEnvelope envelope,
+        DispatcherTransportStart transportStart,
+        CancellationToken cancellationToken)
+    {
+        return _sender.SendAsync(envelope, transportStart, cancellationToken);
+    }
+
+    private sealed class DispatcherTransportStart(
+        AttentionLifecycle lifecycle,
+        LifecycleSendReservation reservation,
+        AttentionSnapshot snapshot,
+        Action onStarted) : INativePushTransportStart
+    {
+        private readonly object _sync = new();
+        private readonly PendingTransportAttempt _attempt = new();
+        private TransportStartState _state;
+        private bool _settled;
+
+        public bool WasStarted
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _state == TransportStartState.Started;
+                }
+            }
+        }
+
+        public NativePushTransportStartDecision TryStart()
+        {
+            lock (_sync)
+            {
+                if (_state != TransportStartState.Pending)
+                {
+                    return NativePushTransportStartDecision.Veto();
+                }
+
+                if (!lifecycle.TryStartTransport(reservation, _attempt))
+                {
+                    _state = TransportStartState.Closed;
+                    lifecycle.RollbackReservation(reservation);
+                    return NativePushTransportStartDecision.Veto();
+                }
+
+                _state = TransportStartState.Started;
+                onStarted();
+                return NativePushTransportStartDecision.Permit();
+            }
+        }
+
+        public void CompleteWithoutStart()
+        {
+            lock (_sync)
+            {
+                if (_state != TransportStartState.Pending)
+                {
+                    return;
+                }
+
+                _state = TransportStartState.Closed;
+                lifecycle.RollbackReservation(reservation);
+            }
+        }
+
+        public void Settle(bool wasSuccessful)
+        {
+            lock (_sync)
+            {
+                if (_state != TransportStartState.Started || _settled)
+                {
+                    return;
+                }
+
+                _settled = true;
+            }
+
+            if (!reservation.IsResolution)
+            {
+                snapshot.SettleStartedAttempt(_attempt, wasSuccessful);
+            }
+        }
+
+        private enum TransportStartState
+        {
+            Pending,
+            Started,
+            Closed,
+        }
     }
 
     private async Task<DeviceDispatchOutcome> ApplyResultAsync(
@@ -1044,13 +1253,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return DeviceDispatchOutcome.DispatchStopped;
         }
 
-        // Final attribution claim. On delivery success this must atomically
-        // record "this generation has been delivered to at least one device"
-        // under the same lifecycle lock that a racing Resolved uses to
-        // consume the snapshot. Otherwise a Resolved could observe the same
-        // snapshot instance between our IsCurrent check and MarkDelivered
-        // and wrongly conclude the alert was never delivered (#756).
-        if (!lifecycle.TryClaimAttribution(version, activeSnapshot, isResolution, result.Success))
+        // Final persisted-result attribution is fenced independently from the
+        // transport settlement. A racing Resolved may reject this token write,
+        // but it already captured and can await the same snapshot's successful
+        // transport settlement before deciding whether to dismiss.
+        if (!lifecycle.TryClaimAttribution(version, activeSnapshot, isResolution))
         {
             return DeviceDispatchOutcome.DispatchStopped;
         }
@@ -1337,7 +1544,56 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly record struct LifecycleObservation(
         bool Accepted,
         AttentionLifecycle? Lifecycle,
-        AttentionSnapshot? ResolvedSnapshot);
+        ResolutionCapture? ResolutionCapture);
+
+    private readonly record struct TrackedAttentionLifecycle(
+        Guid UserId,
+        AttentionLifecycle Lifecycle);
+
+    private sealed class GlobalResolvedParticipant(
+        Guid userId,
+        AttentionLifecycle lifecycle,
+        ResolutionCapture? capture)
+    {
+        private int _completed;
+
+        public Guid UserId { get; } = userId;
+
+        public AttentionLifecycle Lifecycle { get; } = lifecycle;
+
+        public ResolutionCapture? Capture { get; } = capture;
+
+        public void Complete()
+        {
+            if (Interlocked.Exchange(ref _completed, 1) == 0)
+            {
+                Lifecycle.Complete();
+            }
+        }
+    }
+
+    private sealed class GlobalResolvedFence(IReadOnlyList<GlobalResolvedParticipant> participants)
+    {
+        private readonly Dictionary<Guid, GlobalResolvedParticipant> _participantsByUser =
+            participants.ToDictionary(participant => participant.UserId);
+
+        public IReadOnlyList<GlobalResolvedParticipant> Participants { get; } = participants;
+
+        public GlobalResolvedParticipant? Take(Guid userId)
+        {
+            return _participantsByUser.Remove(userId, out GlobalResolvedParticipant? participant)
+                ? participant
+                : null;
+        }
+
+        public void Complete()
+        {
+            foreach (GlobalResolvedParticipant participant in Participants)
+            {
+                participant.Complete();
+            }
+        }
+    }
 
     /// <summary>
     /// Per-attention-item linearization point between a global resolution's
@@ -1375,6 +1631,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private sealed class AttentionItemFence
     {
         private readonly object _sync = new();
+        private readonly Dictionary<Guid, AttentionLifecycle> _trackedLifecycles = [];
         private AttentionDispatchVersion? _resolvedVersion;
         private DateTime _lastTouchedAtUtc;
         private bool _retired;
@@ -1412,7 +1669,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         /// <summary>
         /// Publishes (monotonically bumps) the item-wide resolved tombstone
         /// and, atomically with the publish under this same lock, runs
-        /// <paramref name="enumerateOwners"/>. Returns false only when this
+        /// <paramref name="fenceLifecycles"/>. Returns false only when this
         /// fence has already been retired by the pruner, so the caller can
         /// retry against a fresh replacement instead of publishing to an
         /// orphaned tombstone.
@@ -1420,14 +1677,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         public bool TryPublishResolvedAndRun(
             AttentionDispatchVersion version,
             DateTime observedAtUtc,
-            Func<List<Guid>?> enumerateOwners,
-            out List<Guid>? owners)
+            Func<List<GlobalResolvedParticipant>?> fenceLifecycles,
+            out List<GlobalResolvedParticipant>? participants)
         {
             lock (_sync)
             {
                 if (_retired)
                 {
-                    owners = null;
+                    participants = null;
                     return false;
                 }
 
@@ -1437,8 +1694,47 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     _resolvedVersion = version;
                 }
 
-                owners = enumerateOwners();
+                participants = fenceLifecycles();
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// Records the lifecycle installed while this item fence is held. Global
+        /// resolution uses this registry instead of weak concurrent-dictionary
+        /// enumeration, so it fences every lifecycle that was admitted before
+        /// its own fence acquisition.
+        /// </summary>
+        public void TrackLifecycle(Guid userId, AttentionLifecycle lifecycle)
+        {
+            lock (_sync)
+            {
+                if (!_retired)
+                {
+                    _trackedLifecycles[userId] = lifecycle;
+                }
+            }
+        }
+
+        public void UntrackLifecycle(Guid userId, AttentionLifecycle lifecycle)
+        {
+            lock (_sync)
+            {
+                if (_trackedLifecycles.TryGetValue(userId, out AttentionLifecycle? tracked)
+                    && ReferenceEquals(tracked, lifecycle))
+                {
+                    _ = _trackedLifecycles.Remove(userId);
+                }
+            }
+        }
+
+        public TrackedAttentionLifecycle[] GetTrackedLifecycles()
+        {
+            lock (_sync)
+            {
+                return _trackedLifecycles
+                    .Select(pair => new TrackedAttentionLifecycle(pair.Key, pair.Value))
+                    .ToArray();
             }
         }
 
@@ -1460,7 +1756,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         {
             lock (_sync)
             {
-                if (_retired || _lastTouchedAtUtc >= cutoffUtc)
+                if (_retired
+                    || _lastTouchedAtUtc >= cutoffUtc
+                    || _trackedLifecycles.Count != 0)
                 {
                     return false;
                 }
@@ -1486,9 +1784,44 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         RateLimit,
     }
 
-    private readonly record struct LifecycleSendStart(
-        Task<NativePushDispatchResult>? SendTask,
+    private readonly record struct LifecycleSendReservationResult(
+        LifecycleSendReservation? Reservation,
         LifecycleSendBlockReason BlockReason);
+
+    private readonly record struct NativePushSendOutcome(
+        NativePushDispatchResult? Result,
+        bool TransportStarted);
+
+    private sealed class LifecycleSendReservation(
+        AttentionDispatchVersion version,
+        AttentionSnapshot expectedSnapshot,
+        bool isResolution,
+        bool requiresLifecycleCommit,
+        Action rollbackDedupe,
+        Action? rollbackRate)
+    {
+        private int _state;
+
+        public AttentionDispatchVersion Version { get; } = version;
+
+        public AttentionSnapshot ExpectedSnapshot { get; } = expectedSnapshot;
+
+        public bool IsResolution { get; } = isResolution;
+
+        public bool RequiresLifecycleCommit { get; } = requiresLifecycleCommit;
+
+        public bool IsPending => Volatile.Read(ref _state) == 0;
+
+        public bool TryMarkStarted() => Interlocked.CompareExchange(ref _state, 1, 0) == 0;
+
+        public bool TryBeginRollback() => Interlocked.CompareExchange(ref _state, 2, 0) == 0;
+
+        public void RollbackExternalReservations()
+        {
+            rollbackRate?.Invoke();
+            rollbackDedupe();
+        }
+    }
 
     private sealed class AttentionLifecycle
     {
@@ -1507,11 +1840,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             AttentionChangeKind changeKind,
             DateTime observedAtUtc,
             Action? onLifecycleAdvancedOrResolved,
-            out AttentionSnapshot? resolvedSnapshot)
+            out ResolutionCapture? resolutionCapture)
         {
             lock (_sync)
             {
-                resolvedSnapshot = null;
+                resolutionCapture = null;
                 if (_retired)
                 {
                     return AttentionLifecycleObserveResult.Retired;
@@ -1535,11 +1868,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 _participants++;
                 if (changeKind == AttentionChangeKind.Resolved)
                 {
-                    resolvedSnapshot = _snapshot;
+                    resolutionCapture = _snapshot?.CaptureResolution();
                 }
 
                 // Fire under the sync lock so any concurrent newer occurrence's
-                // TryBeginSend on this same lifecycle either observes an empty
+                // TryReserveSend on this same lifecycle either observes an empty
                 // dedupe window (legitimate recurrence emits) or is serialised
                 // behind us. Two independent conditions invoke the reset:
                 //   (1) versionOrder > 0 — a strictly-newer legitimate
@@ -1565,39 +1898,43 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        public LifecycleSendStart TryBeginSend(
+        public LifecycleSendReservationResult TryReserveSend(
             AttentionDispatchVersion version,
             AttentionSnapshot expectedSnapshot,
             bool isResolution,
             Func<bool> shouldEmit,
             Action rollbackDedupe,
             Func<bool>? tryConsumeRate,
-            Action? rollbackRate,
-            Func<Task<NativePushDispatchResult>> startSend)
+            Action? rollbackRate)
         {
             lock (_sync)
             {
                 if (_retired || !_hasVersion || version != _latest)
                 {
-                    return new LifecycleSendStart(null, LifecycleSendBlockReason.Stale);
+                    return new LifecycleSendReservationResult(
+                        null,
+                        LifecycleSendBlockReason.Stale);
                 }
 
                 bool alreadyStarted = isResolution
                     ? _consumedResolutionVersion == version
                     : ReferenceEquals(_snapshot, expectedSnapshot);
-                bool reservedThisCall = false;
                 if (!alreadyStarted)
                 {
                     if ((isResolution && !ReferenceEquals(_snapshot, expectedSnapshot))
                         || (!isResolution && _latestCommitted))
                     {
-                        return new LifecycleSendStart(null, LifecycleSendBlockReason.Stale);
+                        return new LifecycleSendReservationResult(
+                            null,
+                            LifecycleSendBlockReason.Stale);
                     }
 
                     if (!shouldEmit())
                     {
                         _latestCommitted = true;
-                        return new LifecycleSendStart(null, LifecycleSendBlockReason.Dedupe);
+                        return new LifecycleSendReservationResult(
+                            null,
+                            LifecycleSendBlockReason.Dedupe);
                     }
 
                     if (tryConsumeRate is not null && !tryConsumeRate())
@@ -1608,103 +1945,113 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         // TryObserve, so the dedupe entry becomes unreachable and
                         // does not need to be rolled back.
                         _latestCommitted = true;
-                        return new LifecycleSendStart(null, LifecycleSendBlockReason.RateLimit);
+                        return new LifecycleSendReservationResult(
+                            null,
+                            LifecycleSendBlockReason.RateLimit);
                     }
-
-                    reservedThisCall = true;
                 }
 
-                Task<NativePushDispatchResult> sendTask;
-                try
+                return new LifecycleSendReservationResult(
+                    new LifecycleSendReservation(
+                        version,
+                        expectedSnapshot,
+                        isResolution,
+                        requiresLifecycleCommit: !alreadyStarted,
+                        rollbackDedupe,
+                        rollbackRate),
+                    LifecycleSendBlockReason.None);
+            }
+        }
+
+        /// <summary>
+        /// Atomically verifies and commits a real provider boundary after the
+        /// sender has completed its preparation. No awaited work runs while
+        /// this lock is held.
+        /// </summary>
+        public bool TryStartTransport(
+            LifecycleSendReservation reservation,
+            PendingTransportAttempt attempt)
+        {
+            lock (_sync)
+            {
+                if (!reservation.IsPending
+                    || _retired
+                    || !_hasVersion
+                    || reservation.Version != _latest)
                 {
-                    sendTask = startSend();
+                    return false;
                 }
-                catch (Exception ex)
+
+                if (reservation.RequiresLifecycleCommit)
                 {
-                    // Transport did not truly start. If this call reserved the
-                    // dedupe / rate slots, roll them back and leave
-                    // _latestCommitted false so an exact-version retry via a
-                    // subsequent DispatchAsync can proceed. Stale provider
-                    // results/retries remain fenced because no snapshot or
-                    // resolution version was committed here.
-                    if (reservedThisCall)
+                    if ((reservation.IsResolution
+                            && !ReferenceEquals(_snapshot, reservation.ExpectedSnapshot))
+                        || (!reservation.IsResolution && _latestCommitted))
                     {
-                        rollbackRate?.Invoke();
-                        rollbackDedupe();
+                        return false;
                     }
-
-                    sendTask = Task.FromException<NativePushDispatchResult>(ex);
-                    return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
+                }
+                else if (!IsCurrentUnderLock(
+                             reservation.Version,
+                             reservation.ExpectedSnapshot,
+                             reservation.IsResolution))
+                {
+                    return false;
                 }
 
-                // An async sender never throws synchronously to this caller:
-                // every concrete INativePushSender implementation is declared
-                // `async Task<...>`, and C#'s async method semantics capture
-                // ANY exception raised before the method's first genuine
-                // await — argument validation, JSON/config errors, an
-                // already-cancelled token observed immediately — into the
-                // returned Task's Faulted/Canceled state rather than throwing
-                // it here. Task.IsCompleted, inspected with zero elapsed time
-                // immediately after startSend() returns control, is the
-                // sound, type-safe boundary for "no real transport attempt
-                // occurred": if the task has not completed yet, the
-                // implementation necessarily yielded at least once (a
-                // genuine transport attempt is in flight), and the
-                // post-transport-start retry / result-attribution path below
-                // applies unchanged — this preserves genuine started-transport
-                // semantics. A task that is ALREADY Faulted or Canceled at
-                // this exact point never reached transport and must be
-                // rolled back exactly like a synchronous throw, so an
-                // exact-version retry and this generation's dedupe/rate
-                // reservations are not poisoned by a send that never truly
-                // started. A task that already completed SUCCESSFULLY (e.g. a
-                // test double's Task.FromResult) is a genuine delivery and
-                // commits normally below.
-                if (sendTask.IsCompleted && !sendTask.IsCompletedSuccessfully)
+                if (!reservation.TryMarkStarted())
                 {
-                    if (reservedThisCall)
-                    {
-                        rollbackRate?.Invoke();
-                        rollbackDedupe();
-                    }
-
-                    return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
+                    return false;
                 }
 
-                if (!alreadyStarted)
+                if (reservation.RequiresLifecycleCommit)
                 {
-                    // Commit lifecycle ownership only after startSend returns a
-                    // Task that has not already completed unsuccessfully.
-                    // From this point the send is considered to have handed
-                    // off to transport; any later failure is an async result
-                    // and follows the normal retry / result-attribution path.
                     _latestCommitted = true;
-                    if (isResolution)
+                    if (reservation.IsResolution)
                     {
                         _snapshot = null;
-                        _consumedResolutionVersion = version;
+                        _consumedResolutionVersion = reservation.Version;
                     }
                     else
                     {
-                        // #756 delivery inheritance: a later generation for the
-                        // same recipient must not "forget" that an earlier
-                        // Created/Updated already reached the client. If the
-                        // next generation fails every retry, Resolved still
-                        // owes that visible alert a dismissal push. Under
-                        // _sync, atomically transfer the delivered bit from
-                        // the displaced snapshot to the incoming one.
                         if (_snapshot is not null && _snapshot.HasSuccessfulDelivery)
                         {
-                            expectedSnapshot.MarkDelivered();
+                            reservation.ExpectedSnapshot.MarkDelivered();
                         }
 
-                        _snapshot = expectedSnapshot;
+                        _snapshot = reservation.ExpectedSnapshot;
                         _consumedResolutionVersion = null;
                     }
                 }
 
-                return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
+                if (!reservation.IsResolution)
+                {
+                    reservation.ExpectedSnapshot.RegisterStartedAttempt(attempt);
+                }
+
+                return true;
             }
+        }
+
+        public void RollbackReservation(LifecycleSendReservation reservation)
+        {
+            if (!reservation.TryBeginRollback())
+            {
+                return;
+            }
+
+            lock (_sync)
+            {
+                if (reservation.RequiresLifecycleCommit
+                    && !_retired
+                    && _hasVersion
+                    && reservation.Version == _latest)
+                {
+                    _latestCommitted = false;
+                }
+            }
+
+            reservation.RollbackExternalReservations();
         }
 
         public bool IsCurrent(
@@ -1739,37 +2086,19 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
 
         /// <summary>
-        /// Atomically validates the caller's (version, snapshot) is still the
-        /// current attribution ownership AND, on delivery success, marks that
-        /// snapshot as having achieved at least one successful device delivery.
-        /// Both decisions must be one lock hold: a racing Resolved's
-        /// TryObserve otherwise could consume the same snapshot instance
-        /// between the ownership check and the mark, and its
-        /// !HasSuccessfulDelivery gate would then wrongly suppress a
-        /// dismissal for an alert the client actually received (#756).
-        /// Returns true when the caller retains ownership; the caller then
-        /// performs its persistence/attribution work. Returns false when a
-        /// resolution/replacement has already fenced this attribution.
+        /// Atomically validates the caller's (version, snapshot) still owns
+        /// persisted result attribution. Provider settlement marks delivery on
+        /// its snapshot before this method runs, allowing a concurrent
+        /// resolution to observe a late success even if it fences persistence.
         /// </summary>
         public bool TryClaimAttribution(
             AttentionDispatchVersion version,
             AttentionSnapshot? expectedSnapshot,
-            bool isResolution,
-            bool wasSuccessfulDelivery)
+            bool isResolution)
         {
             lock (_sync)
             {
-                if (!IsCurrentUnderLock(version, expectedSnapshot, isResolution))
-                {
-                    return false;
-                }
-
-                if (wasSuccessfulDelivery && !isResolution && expectedSnapshot is not null)
-                {
-                    expectedSnapshot.MarkDelivered();
-                }
-
-                return true;
+                return IsCurrentUnderLock(version, expectedSnapshot, isResolution);
             }
         }
 
@@ -1812,15 +2141,44 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
-    // Mutable delivery bit protected by the enclosing AttentionLifecycle's
-    // _sync lock. The lifecycle serializes every observe/begin-send/attribution
-    // transition, so any mark and any read of HasSuccessfulDelivery that
-    // matters for a Resolved's dismissal decision is happens-before-ordered
-    // through that lock. Interlocked/Volatile is used only for defensive
-    // publication of the flag itself. #756 semantics on the lifecycle-owned
-    // architecture (issue #755 decision).
+    private sealed class PendingTransportAttempt
+    {
+        private readonly TaskCompletionSource _settled =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Settlement => _settled.Task;
+
+        public void Complete() => _settled.TrySetResult();
+    }
+
+    private sealed class ResolutionCapture(
+        AttentionSnapshot snapshot,
+        IReadOnlyList<Task> pendingSettlements)
+    {
+        public AttentionSnapshot Snapshot { get; } = snapshot;
+
+        public Task WaitForPendingTransportsAsync(
+            Action? onWaitStarted,
+            CancellationToken cancellationToken)
+        {
+            if (pendingSettlements.Count == 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            onWaitStarted?.Invoke();
+            return Task.WhenAll(pendingSettlements).WaitAsync(cancellationToken);
+        }
+    }
+
+    // Each snapshot owns only its currently pending provider attempts. A
+    // global resolution captures that bounded set while holding the lifecycle
+    // lock, then waits after releasing all locks. Completion removes the task
+    // immediately so old snapshots do not retain unbounded settled attempts.
     private sealed class AttentionSnapshot
     {
+        private readonly object _pendingSync = new();
+        private readonly HashSet<PendingTransportAttempt> _pendingAttempts = [];
         private int _hasSuccessfulDelivery;
 
         public AttentionSnapshot(
@@ -1852,27 +2210,41 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
         /// <summary>Marks this alert generation as having achieved at least one successful delivery.</summary>
         public void MarkDelivered() => Interlocked.Exchange(ref _hasSuccessfulDelivery, 1);
-    }
 
-    private List<Guid>? GetOwnersWithLifecycleFor(string attentionItemId)
-    {
-        // Enumerate users with a live AttentionLifecycle entry for this
-        // attention item. Global resolution unions these with active token
-        // owners so a temporarily tokenless recipient still receives the
-        // lifecycle version tombstone. The dict is ConcurrentDictionary and
-        // iterates a snapshot; retired entries the pruner has not yet removed
-        // resolve themselves via TryObserve's Retired-retry path.
-        List<Guid>? result = null;
-        foreach (KeyValuePair<AttentionSnapshotKey, AttentionLifecycle> kv in _attentionLifecycles)
+        public ResolutionCapture CaptureResolution()
         {
-            if (string.Equals(kv.Key.AttentionItemId, attentionItemId, StringComparison.Ordinal))
+            lock (_pendingSync)
             {
-                result ??= new List<Guid>();
-                result.Add(kv.Key.UserId);
+                return new ResolutionCapture(
+                    this,
+                    _pendingAttempts.Select(attempt => attempt.Settlement).ToArray());
             }
         }
 
-        return result;
+        public void RegisterStartedAttempt(PendingTransportAttempt attempt)
+        {
+            lock (_pendingSync)
+            {
+                _ = _pendingAttempts.Add(attempt);
+            }
+        }
+
+        public void SettleStartedAttempt(
+            PendingTransportAttempt attempt,
+            bool wasSuccessful)
+        {
+            if (wasSuccessful)
+            {
+                MarkDelivered();
+            }
+
+            lock (_pendingSync)
+            {
+                _ = _pendingAttempts.Remove(attempt);
+            }
+
+            attempt.Complete();
+        }
     }
 
     private bool TryConsumeRate(RateLimitKey key, NativePushSettings settings, DateTime nowUtc)
@@ -2005,6 +2377,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             {
                 _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionLifecycle>>)_attentionLifecycles)
                     .Remove(kv);
+                if (_attentionItemFences.TryGetValue(
+                        kv.Key.AttentionItemId,
+                        out AttentionItemFence? fence))
+                {
+                    fence.UntrackLifecycle(kv.Key.UserId, kv.Value);
+                }
             }
         }
 
@@ -2026,7 +2404,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // racing publish/admission that touches the fence between the
         // enumeration snapshot and this removal is handled by the fence's
         // own retry-on-Retired loops (TryObserveLifecycle,
-        // PublishResolvedTombstoneAndEnumerateOwners), which retry against a
+        // PublishResolvedTombstoneAndFenceLifecycles), which retry against a
         // fresh replacement fence rather than operate on the orphaned one.
         foreach (KeyValuePair<string, AttentionItemFence> kv in _attentionItemFences)
         {

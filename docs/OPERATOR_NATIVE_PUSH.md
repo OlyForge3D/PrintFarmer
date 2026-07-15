@@ -319,6 +319,12 @@ currently active device for that recipient, preserving per-recipient/per-device
 behavior; the never-delivered check only ever suppresses the whole recipient,
 never a subset of their devices.
 
+When a resolution races an already-started alert transport, it captures and
+fences that exact recipient snapshot, then waits for its pending provider
+attempts to settle before applying the never-delivered rule. A late successful
+provider result therefore still produces the required dismissal; all failed
+pending attempts remain a benign no-op.
+
 ## 7. Observability
 
 Meter name: `Farm.Infrastructure.Services.Notifications.NativePush`.
@@ -338,6 +344,11 @@ Meter name: `Farm.Infrastructure.Services.Notifications.NativePush`.
 | `native_push.skipped_never_delivered`  | counter | (none)                       |
 | `native_push.isolated_device_failure`   | counter | `stage` (`device`/`persist`) |
 | `native_push.isolated_owner_failure`    | counter | (none)                       |
+
+`native_push.attempted` increments only when a sender crosses the typed
+transport-start boundary immediately before its provider call. JWT/key
+preparation, dedupe or rate reservations, vetoed starts, and cancellation
+before that boundary do not increment it.
 
 The two `native_push.isolated_*_failure` counters (added under Vasquez v6 B1
 remediation) surface fan-out isolation activity in the dispatcher. Each

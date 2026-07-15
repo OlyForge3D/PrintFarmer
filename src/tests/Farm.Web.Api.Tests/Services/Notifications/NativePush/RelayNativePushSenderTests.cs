@@ -51,6 +51,25 @@ public sealed class RelayNativePushSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_TransportStartVetoedAfterPreparation_DoesNotCallRelay()
+    {
+        int requests = 0;
+        var transportStart = new RecordingTransportStart(permit: false);
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        NativePushDispatchResult result = await sut.SendAsync(Sample, transportStart);
+
+        result.Reason.Should().Be("transportStartVetoed");
+        transportStart.Calls.Should().Be(1);
+        Volatile.Read(ref requests).Should().Be(0,
+            "a denied start signal must prevent the relay HTTP call");
+    }
+
+    [Fact]
     public async Task SendAsync_Http2xx_ReturnsDelivered_AndSendsBearerAuth()
     {
         var settings = MakeRelaySettings();
@@ -290,5 +309,20 @@ public sealed class RelayNativePushSenderTests
     private sealed class StubHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;
+    }
+
+    private sealed class RecordingTransportStart(bool permit) : INativePushTransportStart
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public NativePushTransportStartDecision TryStart()
+        {
+            Interlocked.Increment(ref _calls);
+            return permit
+                ? NativePushTransportStartDecision.Permit()
+                : NativePushTransportStartDecision.Veto();
+        }
     }
 }

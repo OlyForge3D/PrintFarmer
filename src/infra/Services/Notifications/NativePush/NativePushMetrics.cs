@@ -13,7 +13,11 @@ public sealed class NativePushMetrics : IDisposable
 
     private readonly Meter _meter;
 
-    /// <summary>Counter of envelopes attempted (before dedupe / rate limit).</summary>
+    /// <summary>
+    /// Counter of provider transports that crossed the typed transport-start boundary.
+    /// Preparation, dedupe/rate reservations, vetoes, and pre-transport cancellation do
+    /// not increment this counter.
+    /// </summary>
     public Counter<long> Attempted { get; }
 
     /// <summary>Counter of successful deliveries. Tag: <c>mode</c>.</summary>

@@ -859,7 +859,7 @@ public sealed class NativePushDispatcherTests
 
             using var sut = new NativePushDispatcher(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                sender.Object,
+                AsTransportAwareForTests(sender.Object),
                 new StaticOptionsMonitor(new NativePushSettings
                 {
                     Mode = NativePushMode.Direct,
@@ -986,7 +986,7 @@ public sealed class NativePushDispatcherTests
             var logger = new RecordingDispatcherLogger();
             using var sut = new NativePushDispatcher(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                sender.Object,
+                AsTransportAwareForTests(sender.Object),
                 new StaticOptionsMonitor(new NativePushSettings { Mode = NativePushMode.Direct }),
                 new NativePushMetrics(),
                 logger);
@@ -1383,7 +1383,7 @@ public sealed class NativePushDispatcherTests
                         : NativePushDispatchResult.Delivered()));
             using var sut = new NativePushDispatcher(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                sender.Object,
+                AsTransportAwareForTests(sender.Object),
                 new StaticOptionsMonitor(new NativePushSettings { Mode = NativePushMode.Direct }),
                 new NativePushMetrics(),
                 NullLogger<NativePushDispatcher>.Instance);
@@ -1706,7 +1706,7 @@ public sealed class NativePushDispatcherTests
         });
         var sut = new NativePushDispatcher(
             scopeFactory,
-            sender.Object,
+            AsTransportAwareForTests(sender.Object),
             monitor,
             new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance);
@@ -1791,7 +1791,7 @@ public sealed class NativePushDispatcherTests
         await using ServiceProvider provider = services.BuildServiceProvider();
         var sut = new NativePushDispatcher(
             provider.GetRequiredService<IServiceScopeFactory>(),
-            sender.Object,
+            AsTransportAwareForTests(sender.Object),
             new StaticOptionsMonitor(new NativePushSettings { Mode = NativePushMode.Direct }),
             new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance);
@@ -1881,7 +1881,7 @@ public sealed class NativePushDispatcherTests
         });
         var sut = new NativePushDispatcher(
             scopeFactory,
-            sender.Object,
+            AsTransportAwareForTests(sender.Object),
             monitor,
             new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance);
@@ -1968,7 +1968,7 @@ public sealed class NativePushDispatcherTests
         });
         using var sut = new NativePushDispatcher(
             provider.GetRequiredService<IServiceScopeFactory>(),
-            sender.Object,
+            AsTransportAwareForTests(sender.Object),
             monitor,
             new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance);
@@ -2046,7 +2046,7 @@ public sealed class NativePushDispatcherTests
                 });
             using var sut = new NativePushDispatcher(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                sender.Object,
+                AsTransportAwareForTests(sender.Object),
                 new StaticOptionsMonitor(new NativePushSettings
                 {
                     Mode = NativePushMode.Direct,
@@ -2943,18 +2943,16 @@ public sealed class NativePushDispatcherTests
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
         int attemptCount = 0;
-        var sender = new Mock<INativePushSender>();
-        sender.SetupGet(s => s.ModeName).Returns("direct");
-        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
-            .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
+        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        {
+            if (Interlocked.Increment(ref attemptCount) == 1)
             {
-                if (Interlocked.Increment(ref attemptCount) == 1)
-                {
-                    throw new InvalidOperationException("simulated synchronous sender failure before transport");
-                }
+                throw new InvalidOperationException("simulated synchronous sender failure before transport");
+            }
 
-                return Task.FromResult(NativePushDispatchResult.Delivered());
-            });
+            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            return Task.FromResult(NativePushDispatchResult.Delivered());
+        });
 
         NativePushDispatcher sut = BuildWithScope(
             sender, gate.Object, tokens.Object, attention.Object, db,
@@ -3122,26 +3120,22 @@ public sealed class NativePushDispatcherTests
 
         var attemptedDevices = new ConcurrentQueue<Guid>();
         var perDeviceCounts = new ConcurrentDictionary<Guid, int>();
-        var sender = new Mock<INativePushSender>();
-        sender.SetupGet(s => s.ModeName).Returns("direct");
-        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
-            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+        var sender = new DelegateTransportSender((envelope, transportStart, _) =>
+        {
+            Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
+            attemptedDevices.Enqueue(tokenId);
+            int attempt = perDeviceCounts.AddOrUpdate(tokenId, 1, (_, prev) => prev + 1);
+            if (attempt == 1)
             {
-                Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
-                attemptedDevices.Enqueue(tokenId);
-                int attempt = perDeviceCounts.AddOrUpdate(tokenId, 1, (_, prev) => prev + 1);
-                if (attempt == 1)
-                {
-                    // Synchronous throw BEFORE any awaitable transport work
-                    // has started. Simulates typed-transport guard rejection,
-                    // HttpClient factory construction failure, or any
-                    // pre-await invariant violation inside the sender.
-                    throw new InvalidOperationException(
-                        $"kane #755 cycle 3: simulated synchronous sender failure before transport (device={tokenId})");
-                }
+                // This typed sender intentionally throws before it signals
+                // TryStart, modeling a pre-transport preparation failure.
+                throw new InvalidOperationException(
+                    $"kane #755 cycle 3: simulated synchronous sender failure before transport (device={tokenId})");
+            }
 
-                return Task.FromResult(NativePushDispatchResult.Delivered());
-            });
+            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            return Task.FromResult(NativePushDispatchResult.Delivered());
+        });
 
         NativePushDispatcher sut = BuildWithScope(
             sender, gate.Object, tokens.Object, attention.Object, db,
@@ -3206,22 +3200,19 @@ public sealed class NativePushDispatcherTests
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
         int attemptCount = 0;
-        var sender = new Mock<INativePushSender>();
-        sender.SetupGet(s => s.ModeName).Returns("direct");
-        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
-            .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
+        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        {
+            if (Interlocked.Increment(ref attemptCount) == 1)
             {
-                if (Interlocked.Increment(ref attemptCount) == 1)
-                {
-                    // No synchronous throw here — the failure is captured
-                    // into the returned Task, exactly like a real `async`
-                    // sender whose exception occurs before its first await.
-                    return Task.FromException<NativePushDispatchResult>(
-                        new InvalidOperationException("simulated pre-transport async failure"));
-                }
+                // A completed fault is not a transport fact. The typed
+                // sender has deliberately not signaled the boundary.
+                return Task.FromException<NativePushDispatchResult>(
+                    new InvalidOperationException("simulated pre-transport async failure"));
+            }
 
-                return Task.FromResult(NativePushDispatchResult.Delivered());
-            });
+            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            return Task.FromResult(NativePushDispatchResult.Delivered());
+        });
 
         NativePushDispatcher sut = BuildWithScope(
             sender, gate.Object, tokens.Object, attention.Object, db,
@@ -3276,26 +3267,21 @@ public sealed class NativePushDispatcherTests
 
         var attemptedDevices = new ConcurrentQueue<Guid>();
         var perDeviceCounts = new ConcurrentDictionary<Guid, int>();
-        var sender = new Mock<INativePushSender>();
-        sender.SetupGet(s => s.ModeName).Returns("direct");
-        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
-            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+        var sender = new DelegateTransportSender((envelope, transportStart, _) =>
+        {
+            Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
+            attemptedDevices.Enqueue(tokenId);
+            int attempt = perDeviceCounts.AddOrUpdate(tokenId, 1, (_, prev) => prev + 1);
+            if (attempt == 1)
             {
-                Guid tokenId = Guid.Parse(envelope.DeviceTokenId);
-                attemptedDevices.Enqueue(tokenId);
-                int attempt = perDeviceCounts.AddOrUpdate(tokenId, 1, (_, prev) => prev + 1);
-                if (attempt == 1)
-                {
-                    // Already-Faulted Task, not a synchronous throw — models
-                    // a real `async` sender whose failure occurs before its
-                    // first await.
-                    return Task.FromException<NativePushDispatchResult>(
-                        new InvalidOperationException(
-                            $"simulated pre-transport async failure (device={tokenId})"));
-                }
+                return Task.FromException<NativePushDispatchResult>(
+                    new InvalidOperationException(
+                        $"simulated pre-transport async failure (device={tokenId})"));
+            }
 
-                return Task.FromResult(NativePushDispatchResult.Delivered());
-            });
+            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            return Task.FromResult(NativePushDispatchResult.Delivered());
+        });
 
         NativePushDispatcher sut = BuildWithScope(
             sender, gate.Object, tokens.Object, attention.Object, db,
@@ -3377,22 +3363,19 @@ public sealed class NativePushDispatcherTests
         innerCts.Cancel();
 
         int attemptCount = 0;
-        var sender = new Mock<INativePushSender>();
-        sender.SetupGet(s => s.ModeName).Returns("direct");
-        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
-            .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
+        var sender = new DelegateTransportSender((_, transportStart, _) =>
+        {
+            if (Interlocked.Increment(ref attemptCount) == 1)
             {
-                if (Interlocked.Increment(ref attemptCount) == 1)
-                {
-                    // A genuinely CANCELED task (Task.IsCanceled == true,
-                    // distinct from Task.FromException's Faulted state),
-                    // using an internal token unrelated to the caller's —
-                    // models an unexpected linked-cancellation return.
-                    return Task.FromCanceled<NativePushDispatchResult>(innerCts.Token);
-                }
+                // The sender returns a canceled task without signaling the
+                // transport boundary; the dispatcher must roll back first,
+                // then preserve the established cancellation contract.
+                return Task.FromCanceled<NativePushDispatchResult>(innerCts.Token);
+            }
 
-                return Task.FromResult(NativePushDispatchResult.Delivered());
-            });
+            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            return Task.FromResult(NativePushDispatchResult.Delivered());
+        });
 
         NativePushDispatcher sut = BuildWithScope(
             sender, gate.Object, tokens.Object, attention.Object, db,
@@ -4062,7 +4045,7 @@ public sealed class NativePushDispatcherTests
             new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
         var sut = new NativePushDispatcher(
             gatedFactory,
-            sender.Object,
+            AsTransportAwareForTests(sender.Object),
             monitor,
             new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance);
@@ -4112,6 +4095,496 @@ public sealed class NativePushDispatcherTests
             s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "no envelope may reach the sender once the resolution has published its tombstone, even if it published it while the targeted dispatch was already mid-flight");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_GlobalResolvedWaitsForInFlightSuccessfulTransportAndDismissesExactlyOnce()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                item.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+
+        var firstTransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstTransport = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            sent.Enqueue(envelope);
+            if (Interlocked.Increment(ref sendCount) == 1)
+            {
+                firstTransportStarted.TrySetResult(envelope);
+                return await releaseFirstTransport.Task.WaitAsync(cancellationToken);
+            }
+
+            return NativePushDispatchResult.Delivered();
+        });
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        var settlementWaitStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        sut.OnResolutionSettlementWaitStartedForTests =
+            () => settlementWaitStarted.TrySetResult();
+        DateTime createdAt = new(2026, 7, 15, 1, 0, 0, DateTimeKind.Utc);
+
+        Task created = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await firstTransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Task resolved = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: createdAt.AddSeconds(1));
+
+        try
+        {
+            await settlementWaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            resolved.IsCompleted.Should().BeFalse(
+                "global resolution must await the captured in-flight alert transport");
+            sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+                AttentionChangeKind.Created);
+
+            releaseFirstTransport.TrySetResult(NativePushDispatchResult.Delivered());
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+                AttentionChangeKind.Created,
+                AttentionChangeKind.Resolved);
+            sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Resolved)
+                .Should().Be(1);
+        }
+        finally
+        {
+            releaseFirstTransport.TrySetResult(NativePushDispatchResult.Transient("test-cleanup"));
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
+    public async Task DispatchAsync_GlobalResolvedWaitsForInFlightFailedTransportAndSkipsDismissal()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                item.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+
+        var firstTransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstTransport = new TaskCompletionSource<NativePushDispatchResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        int sendCount = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (!transportStart.TryStart().IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            sent.Enqueue(envelope);
+            if (Interlocked.Increment(ref sendCount) == 1)
+            {
+                firstTransportStarted.TrySetResult(envelope);
+                return await releaseFirstTransport.Task.WaitAsync(cancellationToken);
+            }
+
+            return NativePushDispatchResult.Delivered();
+        });
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        var settlementWaitStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        sut.OnResolutionSettlementWaitStartedForTests =
+            () => settlementWaitStarted.TrySetResult();
+        DateTime createdAt = new(2026, 7, 15, 1, 5, 0, DateTimeKind.Utc);
+
+        Task created = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await firstTransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Task resolved = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: createdAt.AddSeconds(1));
+
+        try
+        {
+            await settlementWaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            resolved.IsCompleted.Should().BeFalse(
+                "resolution must wait for the captured failed transport before deciding no dismissal is needed");
+            sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+                AttentionChangeKind.Created);
+
+            releaseFirstTransport.TrySetResult(NativePushDispatchResult.Transient("provider_unavailable"));
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+                AttentionChangeKind.Created);
+        }
+        finally
+        {
+            releaseFirstTransport.TrySetResult(NativePushDispatchResult.Transient("test-cleanup"));
+            await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
+    public async Task DispatchAsync_CancellationBeforeTransportStart_RollsBackDedupeRateAndAttemptMetricForExactRetry()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+        var preparationEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int senderCalls = 0;
+        int startedTransports = 0;
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
+        {
+            if (Interlocked.Increment(ref senderCalls) == 1)
+            {
+                preparationEntered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+
+            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            Interlocked.Increment(ref startedTransports);
+            return NativePushDispatchResult.Delivered();
+        });
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+        });
+        meterListener.Start();
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 1,
+                DedupeWindow = TimeSpan.FromMinutes(5),
+                RateLimitPerUser = 1,
+                RateLimitWindow = TimeSpan.FromMinutes(5),
+            },
+            metrics: metrics);
+        DateTime occurredAt = new(2026, 7, 15, 1, 10, 0, DateTimeKind.Utc);
+        using var cts = new CancellationTokenSource();
+
+        Task first = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt,
+            cts.Token);
+        await preparationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await first.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt).WaitAsync(TimeSpan.FromSeconds(10));
+
+        senderCalls.Should().Be(2);
+        Volatile.Read(ref startedTransports).Should().Be(1);
+        Volatile.Read(ref attempted).Should().Be(1,
+            "only the retry crossed the actual transport boundary");
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_RapidFailureAfterTransportStart_CommitsAttemptAndContinuesSiblingDevices()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken firstDevice = MakeToken(userId, "post-start-fault-a");
+        DeviceToken secondDevice = MakeToken(userId, "post-start-fault-b");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid> { userId });
+        tokens.Setup(repository => repository.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { firstDevice, secondDevice });
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        tokens.Setup(repository => repository.RecordFailureAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+        var attemptedDevices = new ConcurrentQueue<Guid>();
+        var sender = new DelegateTransportSender((envelope, transportStart, _) =>
+        {
+            transportStart.TryStart().IsPermitted.Should().BeTrue();
+            Guid deviceId = Guid.Parse(envelope.DeviceTokenId);
+            attemptedDevices.Enqueue(deviceId);
+            return deviceId == firstDevice.Id
+                ? Task.FromException<NativePushDispatchResult>(
+                    new InvalidOperationException("simulated rapid post-start provider fault"))
+                : Task.FromResult(NativePushDispatchResult.Delivered());
+        });
+        using var metrics = new NativePushMetrics();
+        long attempted = 0;
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+        {
+            if (ReferenceEquals(instrument, metrics.Attempted))
+            {
+                Interlocked.Add(ref attempted, measurement);
+            }
+        });
+        meterListener.Start();
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 },
+            metrics: metrics);
+        DateTime occurredAt = new(2026, 7, 15, 1, 15, 0, DateTimeKind.Utc);
+
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt).WaitAsync(TimeSpan.FromSeconds(10));
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAt).WaitAsync(TimeSpan.FromSeconds(10));
+
+        attemptedDevices.Should().Equal(
+            new[] { firstDevice.Id, secondDevice.Id },
+            "the started fault is committed, but the sibling still receives its own attempt");
+        Volatile.Read(ref attempted).Should().Be(2);
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                secondDevice.Id,
+                secondDevice.RegistrationVersion,
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData(GlobalResolutionEarlyExit.DispatcherDisabled)]
+    [InlineData(GlobalResolutionEarlyExit.FeatureDisabled)]
+    [InlineData(GlobalResolutionEarlyExit.ScopeCreationFailure)]
+    [InlineData(GlobalResolutionEarlyExit.ActiveOwnerLookupFailure)]
+    public async Task DispatchAsync_GlobalResolvedEarlyExit_FencesOlderTargetedCreatedAfterRecovery(
+        GlobalResolutionEarlyExit earlyExit)
+    {
+        Guid userId = Guid.NewGuid();
+        Guid staleUserId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        bool featureEnabled = true;
+        var gate = new Mock<IOperatorFeatureGate>();
+        gate.Setup(value => value.IsEnabled(OperatorFeature.NativePush))
+            .Returns(() => featureEnabled);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        int activeOwnerLookups = 0;
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (earlyExit == GlobalResolutionEarlyExit.ActiveOwnerLookupFailure
+                    && Interlocked.Increment(ref activeOwnerLookups) == 1)
+                {
+                    return Task.FromException<IReadOnlyList<Guid>>(
+                        new InvalidOperationException("simulated active-owner lookup failure"));
+                }
+
+                return Task.FromResult<IReadOnlyList<Guid>>(new[] { userId });
+            });
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        DeviceToken staleUserToken = MakeToken(staleUserId, "early-exit-stale-recipient");
+        tokens.Setup(repository => repository.GetActiveByUserAsync(
+                staleUserId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DeviceToken> { staleUserToken });
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                item.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+        attention.Setup(service => service.FindItemAsync(
+                staleUserId,
+                item.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("test");
+        sender.Setup(value => value.SendAsync(
+                It.IsAny<NativePushEnvelope>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => sent.Enqueue(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        IServiceScopeFactory scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        var faultingScopeFactory = new ToggleFailingServiceScopeFactory(scopeFactory);
+        var settings = new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 };
+        var monitor = new MutableOptionsMonitor(settings);
+        var sut = new NativePushDispatcher(
+            faultingScopeFactory,
+            AsTransportAwareForTests(sender.Object),
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance);
+        DateTime createdAt = new(2026, 7, 15, 1, 20, 0, DateTimeKind.Utc);
+
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            createdAt).WaitAsync(TimeSpan.FromSeconds(10));
+        sent.Select(envelope => envelope.ChangeKind).Should().Equal(AttentionChangeKind.Created);
+
+        switch (earlyExit)
+        {
+            case GlobalResolutionEarlyExit.DispatcherDisabled:
+                settings.Mode = NativePushMode.Disabled;
+                break;
+            case GlobalResolutionEarlyExit.FeatureDisabled:
+                featureEnabled = false;
+                break;
+            case GlobalResolutionEarlyExit.ScopeCreationFailure:
+                faultingScopeFactory.FailNext = true;
+                break;
+            case GlobalResolutionEarlyExit.ActiveOwnerLookupFailure:
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(earlyExit), earlyExit, null);
+        }
+
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: createdAt.AddSeconds(1)).WaitAsync(TimeSpan.FromSeconds(10));
+
+        settings.Mode = NativePushMode.Direct;
+        featureEnabled = true;
+        faultingScopeFactory.FailNext = false;
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            staleUserId,
+            createdAt).WaitAsync(TimeSpan.FromSeconds(10));
+
+        sent.Select(envelope => envelope.ChangeKind).Should().Equal(
+            new[] { AttentionChangeKind.Created },
+            "the global resolution tombstone must outlive every skipped or failed delivery path");
+        sender.Verify(
+            value => value.SendAsync(
+                It.IsAny<NativePushEnvelope>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     private static async Task AssertPostSendDisableDiscardsResultAsync(
@@ -4297,7 +4770,7 @@ public sealed class NativePushDispatcherTests
 
             using var sut = new NativePushDispatcher(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                sender.Object,
+                AsTransportAwareForTests(sender.Object),
                 new StaticOptionsMonitor(new NativePushSettings
                 {
                     Mode = mode,
@@ -4438,7 +4911,7 @@ public sealed class NativePushDispatcherTests
         IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(new NativePushSettings { Mode = mode });
         return new NativePushDispatcher(
             scopes,
-            sender,
+            AsTransportAwareForTests(sender),
             monitor,
             new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance);
@@ -4451,7 +4924,29 @@ public sealed class NativePushDispatcherTests
         IAttentionService attention,
         AppDbContext db,
         NativePushSettings? settings = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        NativePushMetrics? metrics = null)
+    {
+        return BuildWithScope(
+            sender.Object,
+            gate,
+            tokens,
+            attention,
+            db,
+            settings,
+            timeProvider,
+            metrics);
+    }
+
+    private static NativePushDispatcher BuildWithScope(
+        INativePushSender sender,
+        IOperatorFeatureGate gate,
+        IDeviceTokenRepository tokens,
+        IAttentionService attention,
+        AppDbContext db,
+        NativePushSettings? settings = null,
+        TimeProvider? timeProvider = null,
+        NativePushMetrics? metrics = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(gate);
@@ -4464,9 +4959,9 @@ public sealed class NativePushDispatcherTests
             settings ?? new NativePushSettings { Mode = NativePushMode.Relay });
         return new NativePushDispatcher(
             scopeFactory,
-            sender.Object,
+            AsTransportAwareForTests(sender),
             monitor,
-            new NativePushMetrics(),
+            metrics ?? new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance,
             timeProvider);
     }
@@ -4691,6 +5186,80 @@ public sealed class NativePushDispatcherTests
         }
     }
 
+    private sealed class DelegateTransportSender(
+        Func<NativePushEnvelope, INativePushTransportStart, CancellationToken, Task<NativePushDispatchResult>> send)
+        : INativePushTransportSender
+    {
+        public string ModeName => "test";
+
+        public Task<NativePushDispatchResult> SendAsync(
+            NativePushEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException(
+                "Dispatcher tests must use the typed transport-start overload.");
+        }
+
+        public Task<NativePushDispatchResult> SendAsync(
+            NativePushEnvelope envelope,
+            INativePushTransportStart transportStart,
+            CancellationToken cancellationToken = default)
+        {
+            return send(envelope, transportStart, cancellationToken);
+        }
+    }
+
+    private static INativePushTransportSender AsTransportAwareForTests(INativePushSender sender)
+    {
+        return sender as INativePushTransportSender ?? new AtomicTestTransportSender(sender);
+    }
+
+    private sealed class AtomicTestTransportSender(INativePushSender inner) : INativePushTransportSender
+    {
+        public string ModeName => inner.ModeName;
+
+        public Task<NativePushDispatchResult> SendAsync(
+            NativePushEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            return inner.SendAsync(envelope, cancellationToken);
+        }
+
+        public Task<NativePushDispatchResult> SendAsync(
+            NativePushEnvelope envelope,
+            INativePushTransportStart transportStart,
+            CancellationToken cancellationToken = default)
+        {
+            return transportStart.TryStart().IsPermitted
+                ? inner.SendAsync(envelope, cancellationToken)
+                : Task.FromResult(NativePushDispatchResult.TransportStartVetoed());
+        }
+    }
+
+    public enum GlobalResolutionEarlyExit
+    {
+        DispatcherDisabled,
+        FeatureDisabled,
+        ScopeCreationFailure,
+        ActiveOwnerLookupFailure,
+    }
+
+    private sealed class ToggleFailingServiceScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
+    {
+        public bool FailNext { get; set; }
+
+        public IServiceScope CreateScope()
+        {
+            if (FailNext)
+            {
+                FailNext = false;
+                throw new InvalidOperationException("simulated scope creation failure");
+            }
+
+            return inner.CreateScope();
+        }
+    }
+
     /// <summary>
     /// Wraps a real <see cref="IServiceScopeFactory"/> and deterministically
     /// blocks the FIRST call to <see cref="CreateScope"/> until released,
@@ -4805,6 +5374,15 @@ public sealed class NativePushDispatcherTests
     private sealed class StaticOptionsMonitor(NativePushSettings value) : IOptionsMonitor<NativePushSettings>
     {
         public NativePushSettings CurrentValue { get; } = value;
+
+        public NativePushSettings Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<NativePushSettings, string?> listener) => null;
+    }
+
+    private sealed class MutableOptionsMonitor(NativePushSettings value) : IOptionsMonitor<NativePushSettings>
+    {
+        public NativePushSettings CurrentValue { get; set; } = value;
 
         public NativePushSettings Get(string? name) => CurrentValue;
 

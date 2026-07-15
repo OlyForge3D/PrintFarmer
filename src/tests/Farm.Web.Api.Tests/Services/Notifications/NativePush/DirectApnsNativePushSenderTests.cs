@@ -54,6 +54,60 @@ public sealed class DirectApnsNativePushSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_TransportStartVetoedAfterPreparation_DoesNotCallApns()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        int requests = 0;
+        var transportStart = new RecordingTransportStart(permit: false);
+        using DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        try
+        {
+            NativePushDispatchResult result = await sut.SendAsync(Sample, transportStart);
+
+            result.Reason.Should().Be("transportStartVetoed");
+            transportStart.Calls.Should().Be(1);
+            Volatile.Read(ref requests).Should().Be(0,
+                "a denied start signal must prevent the APNs HTTP call");
+        }
+        finally
+        {
+            key.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_CancellationDuringJwtPreparation_DoesNotSignalTransportStart()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        var transportStart = new RecordingTransportStart(permit: true);
+        using DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+            throw new InvalidOperationException("APNs must not run before JWT preparation completes."));
+        using var cts = new CancellationTokenSource();
+        try
+        {
+            await sut.JwtLockForTests.WaitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Task<NativePushDispatchResult> send = sut.SendAsync(Sample, transportStart, cts.Token);
+            await Task.Yield();
+            send.IsCompleted.Should().BeFalse(
+                "the sender must still be waiting for JWT preparation before it can signal transport start");
+
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await send.WaitAsync(TimeSpan.FromSeconds(5)));
+            transportStart.Calls.Should().Be(0);
+        }
+        finally
+        {
+            _ = sut.JwtLockForTests.Release();
+            key.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task SendAsync_Alert_EmitsExactHeadersPayloadAndValidProviderJwt()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
@@ -800,6 +854,21 @@ public sealed class DirectApnsNativePushSenderTests
     private sealed class StubHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;
+    }
+
+    private sealed class RecordingTransportStart(bool permit) : INativePushTransportStart
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public NativePushTransportStartDecision TryStart()
+        {
+            Interlocked.Increment(ref _calls);
+            return permit
+                ? NativePushTransportStartDecision.Permit()
+                : NativePushTransportStartDecision.Veto();
+        }
     }
 
     [Fact]

@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 /// build with a self-issued .p8 key (never OlyForge3D's key). See
 /// <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
 /// </summary>
-public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
+public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDisposable
 {
     /// <summary>Named HTTP client the direct sender resolves.</summary>
     public const string HttpClientName = "NativePushDirect";
@@ -102,9 +102,24 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
     public string ModeName => "direct";
 
     /// <inheritdoc />
-    public async Task<NativePushDispatchResult> SendAsync(NativePushEnvelope envelope, CancellationToken cancellationToken = default)
+    public Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        CancellationToken cancellationToken = default)
+    {
+        return SendAsync(
+            envelope,
+            AlwaysPermittedNativePushTransportStart.Instance,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        INativePushTransportStart transportStart,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(transportStart);
 
         NativePushSettings settings = _optionsMonitor.CurrentValue;
         NativePushApnsSettings apns = settings.Apns;
@@ -171,6 +186,14 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             request.Headers.TryAddWithoutValidation(
                 "apns-expiration",
                 unix.ToString(CultureInfo.InvariantCulture));
+        }
+
+        // JWT acquisition and request construction are pre-transport work. The
+        // dispatcher decides whether this still-current lifecycle may cross into
+        // APNs only at the final boundary immediately below.
+        if (!transportStart.TryStart().IsPermitted)
+        {
+            return NativePushDispatchResult.TransportStartVetoed();
         }
 
         // HttpClient.Timeout and caller/shutdown cancellation both surface as

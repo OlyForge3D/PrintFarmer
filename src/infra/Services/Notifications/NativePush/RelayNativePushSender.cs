@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 public sealed class RelayNativePushSender(
     IHttpClientFactory httpClientFactory,
     IOptionsMonitor<NativePushSettings> optionsMonitor,
-    ILogger<RelayNativePushSender> logger) : INativePushSender
+    ILogger<RelayNativePushSender> logger) : INativePushTransportSender
 {
     /// <summary>Named HTTP client the relay sender resolves.</summary>
     public const string HttpClientName = "NativePushRelay";
@@ -35,9 +35,24 @@ public sealed class RelayNativePushSender(
     public string ModeName => "relay";
 
     /// <inheritdoc />
-    public async Task<NativePushDispatchResult> SendAsync(NativePushEnvelope envelope, CancellationToken cancellationToken = default)
+    public Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        CancellationToken cancellationToken = default)
+    {
+        return SendAsync(
+            envelope,
+            AlwaysPermittedNativePushTransportStart.Instance,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        INativePushTransportStart transportStart,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(transportStart);
 
         NativePushSettings settings = _optionsMonitor.CurrentValue;
         NativePushRelaySettings relay = settings.Relay;
@@ -75,6 +90,14 @@ public sealed class RelayNativePushSender(
         using var request = new HttpRequestMessage(HttpMethod.Post, relay.Endpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", relay.ApiKey);
         request.Content = new StringContent(JsonSerializer.Serialize(body, PayloadOptions), Encoding.UTF8, "application/json");
+
+        // Serialization and request construction are pre-transport work. The
+        // dispatcher can still veto this exact lifecycle immediately before the
+        // relay HTTP request starts.
+        if (!transportStart.TryStart().IsPermitted)
+        {
+            return NativePushDispatchResult.TransportStartVetoed();
+        }
 
         // HttpClient.Timeout and caller/shutdown cancellation both surface as
         // OperationCanceledException. The caller token is authoritative: when it
