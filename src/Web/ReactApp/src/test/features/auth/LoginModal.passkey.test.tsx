@@ -48,16 +48,22 @@ vi.mock('@/common/components/ui', () => ({
     onClick,
     disabled,
     type,
+    iconLeft,
+    iconRight,
+    iconCenter,
     ...rest
   }: {
     children: React.ReactNode;
     onClick?: () => void;
     disabled?: boolean;
     type?: string;
+    iconLeft?: React.ReactNode;
+    iconRight?: React.ReactNode;
+    iconCenter?: React.ReactNode;
     [key: string]: unknown;
   }) => (
     <button type={(type as 'button' | 'submit' | 'reset') ?? 'button'} onClick={onClick} disabled={disabled} {...rest}>
-      {children}
+      {iconLeft}{iconCenter}{children}{iconRight}
     </button>
   ),
   Input: ({

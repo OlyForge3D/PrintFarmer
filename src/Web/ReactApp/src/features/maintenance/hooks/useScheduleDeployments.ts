@@ -11,6 +11,7 @@ import type {
   DeployMaintenancePlanDto,
   UpdateScheduleDeploymentDto,
 } from '@/types/maintenance';
+import { maintenanceQueryKeys } from '../queryKeys';
 
 // ──────────────────────── Query Keys ────────────────────────
 export const scheduleKeys = {
@@ -48,6 +49,13 @@ export function useDeployPlan() {
       maintenancePlanService.deployPlan(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: scheduleKeys.all });
+      // Deploying a new schedule inserts a row the upcoming feed will
+      // surface as soon as its computed due-date lands in the lookahead
+      // window (or immediately if `includeOverdue` is set). Invalidate
+      // by prefix — react-query matches every variant of the feed key
+      // (`[key, { lookaheadDays, includeOverdue, printerId }]`) with a
+      // partial prefix match, so this reaches all filters at once.
+      qc.invalidateQueries({ queryKey: maintenanceQueryKeys.upcomingMaintenance() });
     },
   });
 }
@@ -59,6 +67,10 @@ export function useUpdateScheduleDeployment() {
       maintenancePlanService.updateScheduleDeployment(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: scheduleKeys.all });
+      // Updating a deployment (interval, active toggle, notes) changes
+      // the schedule engine's next-due computation — the upcoming feed
+      // must be re-derived.
+      qc.invalidateQueries({ queryKey: maintenanceQueryKeys.upcomingMaintenance() });
     },
   });
 }
@@ -70,6 +82,10 @@ export function useDeleteScheduleDeployment() {
       maintenancePlanService.deleteScheduleDeployment(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: scheduleKeys.all });
+      // Undeploying (delete) removes a source row for the upcoming feed;
+      // any due-soon entries backed by this deployment must drop out of
+      // the operator's view immediately, not on the next 2-minute poll.
+      qc.invalidateQueries({ queryKey: maintenanceQueryKeys.upcomingMaintenance() });
     },
   });
 }
