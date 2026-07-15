@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Diagnostics.Metrics;
+using System.Reflection;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
@@ -610,6 +611,128 @@ public sealed class NativePushDispatcherTests
         NativePushEnvelope resolved = captured.Last();
         resolved.ChangeKind.Should().Be(AttentionChangeKind.Resolved);
         resolved.Token.Should().Be(deviceToken.Token);
+    }
+
+    [Fact]
+    public async Task ReplaceSnapshot_ConsumedBetweenReadAndTryUpdate_DoesNotLeakDeliveryFlagToRetriedReplacement()
+    {
+        // Hicks round-3 #756 regression: if ReplaceSnapshot reads a delivered
+        // snapshot, then a concurrent consume removes that snapshot before the
+        // compare-and-swap executes, the retried replacement must NOT carry a
+        // stale inherited delivery bit into its later TryAdd.
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+        var scopes = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
+        using NativePushDispatcher sut = Build(sender.Object, scopes.Object, NativePushMode.Disabled);
+
+        Type dispatcherType = typeof(NativePushDispatcher);
+        Type snapshotKeyType = dispatcherType.GetNestedType("AttentionSnapshotKey", BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("AttentionSnapshotKey reflection lookup failed.");
+        Type snapshotType = dispatcherType.GetNestedType("AttentionSnapshot", BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("AttentionSnapshot reflection lookup failed.");
+        MethodInfo replaceSnapshot = dispatcherType.GetMethod(
+                "ReplaceSnapshot",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ReplaceSnapshot reflection lookup failed.");
+        MethodInfo tryConsumeSnapshot = dispatcherType.GetMethod(
+                "TryConsumeSnapshot",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("TryConsumeSnapshot reflection lookup failed.");
+        PropertyInfo syncProperty = snapshotType.GetProperty("Sync")
+            ?? throw new InvalidOperationException("AttentionSnapshot.Sync reflection lookup failed.");
+        PropertyInfo deliveredProperty = snapshotType.GetProperty("HasSuccessfulDelivery")
+            ?? throw new InvalidOperationException("AttentionSnapshot.HasSuccessfulDelivery reflection lookup failed.");
+        MethodInfo markDelivered = snapshotType.GetMethod("MarkDelivered")
+            ?? throw new InvalidOperationException("AttentionSnapshot.MarkDelivered reflection lookup failed.");
+
+        object key = Activator.CreateInstance(
+                snapshotKeyType,
+                Guid.NewGuid(),
+                "attention:replace-snapshot-race")
+            ?? throw new InvalidOperationException("AttentionSnapshotKey construction failed.");
+        object deliveredSnapshot = Activator.CreateInstance(
+                snapshotType,
+                AttentionKind.Offline,
+                Guid.NewGuid(),
+                null,
+                null,
+                new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc))
+            ?? throw new InvalidOperationException("Delivered AttentionSnapshot construction failed.");
+        markDelivered.Invoke(deliveredSnapshot, null);
+        replaceSnapshot.Invoke(sut, new[] { key, deliveredSnapshot });
+
+        object replacement = Activator.CreateInstance(
+                snapshotType,
+                AttentionKind.Offline,
+                Guid.NewGuid(),
+                null,
+                null,
+                new DateTime(2026, 7, 14, 12, 0, 1, DateTimeKind.Utc))
+            ?? throw new InvalidOperationException("Replacement AttentionSnapshot construction failed.");
+        object sync = syncProperty.GetValue(deliveredSnapshot)
+            ?? throw new InvalidOperationException("Delivered snapshot sync lock was null.");
+
+        var replaceCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Thread replaceThread = new(() =>
+        {
+            try
+            {
+                replaceSnapshot.Invoke(sut, new[] { key, replacement });
+                replaceCompleted.TrySetResult();
+            }
+            catch (TargetInvocationException exception) when (exception.InnerException is not null)
+            {
+                replaceCompleted.TrySetException(exception.InnerException);
+            }
+            catch (Exception exception)
+            {
+                replaceCompleted.TrySetException(exception);
+            }
+        });
+        replaceThread.IsBackground = true;
+
+        bool replaceThreadBlockedOnStaleSnapshot;
+        object? consumedDeliveredSnapshot;
+        lock (sync)
+        {
+            replaceThread.Start();
+            replaceThreadBlockedOnStaleSnapshot = SpinWait.SpinUntil(
+                () => (replaceThread.ThreadState & ThreadState.WaitSleepJoin) != 0,
+                TimeSpan.FromSeconds(10));
+            if (replaceThreadBlockedOnStaleSnapshot)
+            {
+                object?[] consumeArgs = { key, null };
+                bool consumed = (bool)(tryConsumeSnapshot.Invoke(sut, consumeArgs)
+                    ?? throw new InvalidOperationException("TryConsumeSnapshot returned null."));
+                consumed.Should().BeTrue("the stale delivered snapshot must be consumed before ReplaceSnapshot retries");
+                consumedDeliveredSnapshot = consumeArgs[1];
+            }
+            else
+            {
+                consumedDeliveredSnapshot = null;
+            }
+        }
+
+        replaceThreadBlockedOnStaleSnapshot.Should().BeTrue(
+            "the regression harness must block ReplaceSnapshot after its unguarded read but before it can swap");
+        consumedDeliveredSnapshot.Should().BeSameAs(
+            deliveredSnapshot,
+            "the race harness must remove the originally delivered resident snapshot");
+
+        await replaceCompleted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        object?[] consumeReplacementArgs = { key, null };
+        bool consumedReplacement = (bool)(tryConsumeSnapshot.Invoke(sut, consumeReplacementArgs)
+            ?? throw new InvalidOperationException("TryConsumeSnapshot returned null."));
+        consumedReplacement.Should().BeTrue("ReplaceSnapshot should retry and publish the replacement snapshot");
+        consumeReplacementArgs[1].Should().BeSameAs(
+            replacement,
+            "the retried replacement should be the snapshot later consumed by Resolved");
+        ((bool)(deliveredProperty.GetValue(replacement)
+            ?? throw new InvalidOperationException("Replacement delivery flag was null.")))
+            .Should().BeFalse("a failed compare-and-swap must not leave the retried replacement permanently marked as delivered");
+        ((bool)(deliveredProperty.GetValue(consumeReplacementArgs[1]!)
+            ?? throw new InvalidOperationException("Consumed replacement delivery flag was null.")))
+            .Should().BeFalse("Resolved must observe the retried replacement as never delivered and skip the silent dismissal");
     }
 
     [Fact]

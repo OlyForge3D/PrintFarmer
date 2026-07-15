@@ -978,18 +978,36 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
             lock (current.Sync)
             {
+                // Re-validate that 'current' is still the dictionary-resident instance for this
+                // key now that we hold its lock. A concurrent TryConsumeSnapshot/ReplaceSnapshot
+                // may have already removed/replaced it between our unguarded TryGetValue above and
+                // acquiring this lock; in that case this lock object is orphaned and any decision
+                // made while holding it would be based on stale state. Retry against a fresh read.
+                if (!_snapshots.TryGetValue(key, out AttentionSnapshot? confirmedCurrent)
+                    || !ReferenceEquals(confirmedCurrent, current))
+                {
+                    continue;
+                }
+
                 // A later generation for the same recipient must not "forget" that an
                 // earlier Created/Updated already reached the client (#756). If the next
                 // generation fails every retry, Resolved still owes that visible alert a
-                // dismissal push.
-                if (current.HasSuccessfulDelivery)
+                // dismissal push. Capture that inheritance decision locally and only apply it
+                // once this exact replacement has actually become the resident snapshot; a
+                // failed swap must not leak a one-way delivery bit onto a fresh generation that
+                // never truly displaced the delivered one.
+                bool inheritsDelivery = current.HasSuccessfulDelivery;
+                lock (replacement.Sync)
                 {
-                    replacement.MarkDelivered();
-                }
+                    if (_snapshots.TryUpdate(key, replacement, current))
+                    {
+                        if (inheritsDelivery)
+                        {
+                            replacement.MarkDelivered();
+                        }
 
-                if (_snapshots.TryUpdate(key, replacement, current))
-                {
-                    return;
+                        return;
+                    }
                 }
             }
         }
