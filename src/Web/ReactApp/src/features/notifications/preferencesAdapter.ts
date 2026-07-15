@@ -9,6 +9,8 @@ import {
 import {
   JOB_EVENT_TYPES,
   OPERATOR_EVENT_TYPES,
+  JOB_EVENT_ROWS,
+  OPERATOR_EVENT_ROWS,
   isOperatorEventType,
 } from './operatorCategories';
 
@@ -165,6 +167,14 @@ export function hydratePreferences(
 
   const serverMatrix = preferences.eventChannelPreferences ?? [];
 
+  // Bishop L3: when a compliant server returns non-null preferences but an
+  // empty matrix, hydrate every known row from the rich defaults instead of
+  // `DEFAULT_MATRIX_ROW` (all-false). Compliant upgraded backends always
+  // materialize all nine rows on GET, so this path is degenerate — but a
+  // partially-broken server should not silently downgrade the user to an
+  // all-off matrix that diverges from the null-preferences experience.
+  const isEmptyMatrix = serverMatrix.length === 0;
+
   const known = new Set<NotificationPreferenceEventType>([
     ...JOB_EVENT_TYPES,
     ...OPERATOR_EVENT_TYPES,
@@ -181,11 +191,17 @@ export function hydratePreferences(
       unknownRows.push(row);
     }
   }
-  for (const eventType of JOB_EVENT_TYPES) {
-    if (!byType.has(eventType)) byType.set(eventType, DEFAULT_MATRIX_ROW(eventType));
-  }
-  for (const eventType of OPERATOR_EVENT_TYPES) {
-    if (!byType.has(eventType)) byType.set(eventType, DEFAULT_ATTENTION_ROW(eventType));
+  if (isEmptyMatrix) {
+    for (const defaultRow of defaultEventChannelPreferences()) {
+      byType.set(defaultRow.eventType, defaultRow);
+    }
+  } else {
+    for (const eventType of JOB_EVENT_TYPES) {
+      if (!byType.has(eventType)) byType.set(eventType, DEFAULT_MATRIX_ROW(eventType));
+    }
+    for (const eventType of OPERATOR_EVENT_TYPES) {
+      if (!byType.has(eventType)) byType.set(eventType, DEFAULT_ATTENTION_ROW(eventType));
+    }
   }
 
   // Enforce JobFailed in-app always-on invariant defensively.
@@ -262,19 +278,28 @@ export function withDerivedLegacyFlags(
 /**
  * Prepare the payload sent to `PUT /notifications/preferences`.
  *
- * Filters the outbound matrix to only tokens the server advertised in
- * `GET /notifications/preferences/capabilities.supportedEventTypes`, and
- * ONLY THEN derives the legacy master flags (`enablePushNotifications`,
- * etc.). This ordering matters because the operator rows carry
- * `push=true`/`inApp=true` defaults from `DEFAULT_ATTENTION_ROW`, matching
- * the backend persistence defaults; deriving master flags before stripping
- * would let those defaults force `enablePushNotifications=true` on a legacy
- * server even when the user has push off on every job row they can see.
+ * Sends only rows the UI actually renders — the four visible job rows plus
+ * the four visible operator rows (from `JOB_EVENT_ROWS`/`OPERATOR_EVENT_ROWS`).
+ * Hidden `PrinterFailure` and any opaque server-returned unknown tokens are
+ * intentionally OMITTED from the outbound payload. The #708 backend contract
+ * guarantees that a partial PUT preserves persisted values for any attention
+ * row not present in the request (`NotificationsController.UpdatePreferences`
+ * legacy-preservation gate). Sending back rows the user could not have
+ * touched would risk clobbering concurrent writes from mobile or a second
+ * browser tab, which was the reviewer's HIGH-severity concern.
  *
- * Legacy servers (capabilities probe 404 → `capabilities === null`) accept
- * only the four classic job tokens; every operator or unknown token is
- * stripped so the request cannot fail JsonStringEnumConverter
- * deserialization.
+ * On legacy servers (capabilities probe 404 → `capabilities === null`) the
+ * outbound matrix is filtered to only the four job tokens the server
+ * accepts. Operator tokens are stripped regardless of whether they map to
+ * visible rows, so the request cannot fail `JsonStringEnumConverter`
+ * deserialization and previously saved job preferences are never corrupted.
+ *
+ * Legacy master flag derivation (`enablePushNotifications`, etc.) runs on
+ * the STRIPPED matrix, not the input matrix. That ordering matters because
+ * the operator rows carry `push=true`/`inApp=true` defaults from
+ * `DEFAULT_ATTENTION_ROW`; deriving master flags before stripping would let
+ * those defaults force `enablePushNotifications=true` on a legacy server
+ * even when the user has push off on every job row they can see.
  *
  * All other state (frequency, retentionDays, digest schedule) is passed
  * through unchanged.
@@ -284,8 +309,18 @@ export function buildSavePayload(
   capabilities: NotificationCapabilitiesResponse | null | undefined,
 ): UpdateNotificationPreferencesRequest {
   const supported = resolveSupportedEventTypes(capabilities);
+  // Only the tokens the UI actually renders participate in the outbound
+  // payload. This is a tighter filter than "everything the server accepts":
+  // it deliberately excludes the hidden `PrinterFailure` row and any opaque
+  // unknown rows the server echoed back, so a concurrent write from mobile
+  // or another tab is not clobbered. The backend #708 contract preserves
+  // any attention row absent from the request.
+  const visibleTokens = new Set<string>([
+    ...JOB_EVENT_ROWS.map(r => String(r.eventType)),
+    ...OPERATOR_EVENT_ROWS.map(r => String(r.eventType)),
+  ]);
   const strippedMatrix = (request.eventChannelPreferences ?? []).filter(row =>
-    supported.has(row.eventType as string),
+    supported.has(row.eventType as string) && visibleTokens.has(String(row.eventType)),
   );
   return withDerivedLegacyFlags({
     ...request,

@@ -296,7 +296,7 @@ describe('NotificationPreferencesPage', () => {
       expect((screen.getByLabelText('Harvest Ready email') as HTMLInputElement).checked).toBe(false);
     });
 
-    it('does not render a printerFailure row (kept out of #716 UI scope) but preserves it on save', async () => {
+    it('does not render a printerFailure row (kept out of #716 UI scope) and OMITS it from the save payload for concurrent-write safety', async () => {
       const capable = createCapablePreferences();
       capable.eventChannelPreferences.push({
         eventType: NotificationPreferenceEventType.PrinterFailure,
@@ -323,7 +323,8 @@ describe('NotificationPreferencesPage', () => {
       expect(screen.queryByLabelText(/printer failure in-app/i)).not.toBeInTheDocument();
 
       // Toggle something visible to force the save through, then confirm the
-      // server-returned printerFailure row is echoed back verbatim.
+      // hidden printerFailure row is OMITTED so the backend preserves the
+      // persisted value (per #708 partial-PUT contract).
       fireEvent.click(screen.getByLabelText('Harvest Ready push'));
       fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
 
@@ -333,13 +334,7 @@ describe('NotificationPreferencesPage', () => {
       const printerFailure = payload.eventChannelPreferences?.find(
         r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
       );
-      expect(printerFailure).toEqual({
-        eventType: NotificationPreferenceEventType.PrinterFailure,
-        inApp: true,
-        email: true,
-        push: true,
-        telegram: false,
-      });
+      expect(printerFailure).toBeUndefined();
     });
   });
 

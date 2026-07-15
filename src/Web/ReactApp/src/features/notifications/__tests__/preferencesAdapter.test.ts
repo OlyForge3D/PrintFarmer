@@ -201,6 +201,40 @@ describe('preferencesAdapter.hydratePreferences', () => {
     expect(echoed).toEqual(unknownRow);
   });
 
+  it('hydrates rich defaults when non-null preferences carry an empty matrix (Bishop L3 defence)', () => {
+    // Degenerate response: server returned a full preferences DTO but with
+    // an empty eventChannelPreferences array. Compliant #708 backends never
+    // do this, but a partially-broken deployment should not silently
+    // downgrade the user to an all-off matrix that diverges from the
+    // null-preferences experience.
+    const dto: NotificationPreferencesDto = {
+      ...baseLegacyServerResponse(),
+      eventChannelPreferences: [],
+    };
+    const { form } = hydratePreferences(dto, CAPABLE_CAPABILITIES);
+    const completed = form.eventChannelPreferences?.find(
+      r => r.eventType === NotificationPreferenceEventType.JobCompleted,
+    );
+    // Rich defaults, not DEFAULT_MATRIX_ROW (which would be all-false).
+    expect(completed).toEqual({
+      eventType: NotificationPreferenceEventType.JobCompleted,
+      inApp: true,
+      email: true,
+      push: true,
+      telegram: false,
+    });
+    const harvest = form.eventChannelPreferences?.find(
+      r => r.eventType === NotificationPreferenceEventType.HarvestReady,
+    );
+    expect(harvest).toEqual({
+      eventType: NotificationPreferenceEventType.HarvestReady,
+      inApp: true,
+      email: false,
+      push: true,
+      telegram: false,
+    });
+  });
+
   it('coerces the JobFailed in-app row back on defensively', () => {
     const tampered = baseLegacyServerResponse();
     const failedIndex = tampered.eventChannelPreferences.findIndex(
@@ -309,31 +343,36 @@ describe('preferencesAdapter.buildSavePayload', () => {
     expect(tokens).not.toContain(NotificationPreferenceEventType.PrinterOffline);
   });
 
-  it('sends the exact PascalCase wire tokens the #708 contract publishes', () => {
+  it('sends the exact PascalCase wire tokens the #708 contract publishes (visible rows only)', () => {
     const payload = buildSavePayload(formWithOperatorChanges(), CAPABLE_CAPABILITIES);
     const wireTokens = (payload.eventChannelPreferences ?? []).map(r => String(r.eventType));
     // Sanity: enum members carry the exact PascalCase wire string values.
     // Backend uses JsonStringEnumConverter without a naming policy, so
-    // camelCase would 400.
+    // camelCase would 400. PrinterFailure is advertised by the server but
+    // OMITTED from the outbound payload (see the concurrent-write test
+    // above) — backend partial-PUT preserves the persisted value.
     expect(wireTokens).toEqual(
       expect.arrayContaining([
         'JobStarted',
         'JobCompleted',
         'JobFailed',
         'JobPaused',
-        'PrinterFailure',
         'FilamentRunout',
         'HarvestReady',
         'MaintenanceDue',
         'PrinterOffline',
       ]),
     );
+    expect(wireTokens).not.toContain('PrinterFailure');
   });
 
-  it('forwards a server-returned printerFailure row verbatim even though the UI does not render it', () => {
-    // Legacy-server matrix that already contains a printerFailure row from a
-    // partially-upgraded backend. The UI does not render it, but hydrate must
-    // preserve it and buildSavePayload must forward it when advertised.
+  it('OMITS printerFailure from the outbound payload even when advertised (backend preserves via partial PUT)', () => {
+    // Prior behaviour echoed a server-returned printerFailure row back
+    // verbatim on save; the reviewer flagged that as concurrent-write
+    // clobber. #708 backend guarantees partial-PUT preservation for any
+    // attention row absent from the request, so the safer behaviour is to
+    // omit hidden rows entirely — a concurrent mobile write to
+    // PrinterFailure cannot be silently overwritten.
     const preferences = baseLegacyServerResponse();
     preferences.eventChannelPreferences.push(
       row(NotificationPreferenceEventType.PrinterFailure, { inApp: true, email: true, push: true, telegram: false }),
@@ -348,6 +387,8 @@ describe('preferencesAdapter.buildSavePayload', () => {
       ],
     };
     const { form } = hydratePreferences(preferences, partial);
+    // Hydration still keeps the row internally so any future UI surface can
+    // read it — only the outbound PUT filter excludes it.
     const printerFailure = form.eventChannelPreferences?.find(
       r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
     );
@@ -363,13 +404,36 @@ describe('preferencesAdapter.buildSavePayload', () => {
     const echoed = payload.eventChannelPreferences?.find(
       r => r.eventType === NotificationPreferenceEventType.PrinterFailure,
     );
-    expect(echoed).toEqual({
-      eventType: NotificationPreferenceEventType.PrinterFailure,
-      inApp: true,
-      email: true,
-      push: true,
-      telegram: false,
-    });
+    expect(echoed).toBeUndefined();
+  });
+
+  it('OMITS opaque server-returned unknown tokens from the outbound payload (concurrent-write safety)', () => {
+    const withUnknown = baseLegacyServerResponse();
+    withUnknown.eventChannelPreferences.push(
+      row('SomeFuturePrefToken' as NotificationPreferenceEventType, { email: true }),
+    );
+    const capable: NotificationCapabilitiesResponse = {
+      supportedEventTypes: [
+        NotificationPreferenceEventType.JobStarted,
+        NotificationPreferenceEventType.JobCompleted,
+        NotificationPreferenceEventType.JobFailed,
+        NotificationPreferenceEventType.JobPaused,
+        NotificationPreferenceEventType.FilamentRunout,
+        NotificationPreferenceEventType.HarvestReady,
+        NotificationPreferenceEventType.MaintenanceDue,
+        NotificationPreferenceEventType.PrinterOffline,
+        'SomeFuturePrefToken' as NotificationPreferenceEventType,
+      ],
+    };
+    const { form } = hydratePreferences(withUnknown, capable);
+    const payload = buildSavePayload(form, capable);
+    const tokens = payload.eventChannelPreferences?.map(r => String(r.eventType)) ?? [];
+    // Unknown tokens are OMITTED from PUT even when the server advertises
+    // them; only visible UI rows are sent so a concurrent writer keeps
+    // ownership of tokens the user could not have touched.
+    expect(tokens).not.toContain('SomeFuturePrefToken');
+    // Visible tokens still ride the PUT.
+    expect(tokens).toContain(NotificationPreferenceEventType.HarvestReady);
   });
 
   it('keeps operator rows when the capabilities probe advertises them', () => {
