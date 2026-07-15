@@ -164,7 +164,39 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
             else
             {
-                owners = await tokens.GetActiveTokenOwnersAsync(cancellationToken);
+                IReadOnlyList<Guid> activeOwners = await tokens.GetActiveTokenOwnersAsync(cancellationToken);
+                if (changeKind == AttentionChangeKind.Resolved)
+                {
+                    // A global resolution must tombstone every recipient that has an
+                    // active lifecycle for this attention item, not only recipients
+                    // that currently hold device tokens. A temporarily tokenless
+                    // recipient (device unregistered between an earlier targeted
+                    // Created/Updated capture and this resolution) still owns an
+                    // in-flight targeted lane; without this union, a later
+                    // re-registration would let that stale targeted work resume and
+                    // send after resolution. DispatchForOwnerAsync advances the
+                    // lifecycle inside TryObserveLifecycle before the token check,
+                    // so a tokenless recipient still receives the version tombstone.
+                    List<Guid>? lifecycleOwners = GetOwnersWithLifecycleFor(attentionItemId);
+                    if (lifecycleOwners is { Count: > 0 })
+                    {
+                        var union = new HashSet<Guid>(activeOwners);
+                        foreach (Guid owner in lifecycleOwners)
+                        {
+                            union.Add(owner);
+                        }
+
+                        owners = union.ToArray();
+                    }
+                    else
+                    {
+                        owners = activeOwners;
+                    }
+                }
+                else
+                {
+                    owners = activeOwners;
+                }
             }
 
             if (owners.Count == 0)
@@ -270,7 +302,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
             if (changeKind == AttentionChangeKind.Resolved)
             {
-                ResetActiveLifecycleDedupe(userId, attentionItemId);
                 if (resolvedSnapshot is null)
                 {
                     return;
@@ -518,6 +549,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         out AttentionLifecycle lifecycle,
         out AttentionSnapshot? resolvedSnapshot)
     {
+        // Resolved observations must clear stale Created/Updated dedupe entries
+        // atomically with the lifecycle version bump. Running the reset here
+        // (under the lifecycle sync lock via TryObserve) prevents a delayed
+        // reset from wiping a newer occurrence's freshly-added dedupe state and
+        // prevents an in-flight newer Created from being suppressed by a stale
+        // dedupe entry that resolution had not yet cleared.
+        Action? onResolvedObserved = changeKind == AttentionChangeKind.Resolved
+            ? () => ResetActiveLifecycleDedupe(key.UserId, key.AttentionItemId)
+            : null;
+
         while (true)
         {
             lifecycle = _attentionLifecycles.GetOrAdd(
@@ -527,6 +568,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 version,
                 changeKind,
                 UtcNow,
+                onResolvedObserved,
                 out resolvedSnapshot);
             if (result == AttentionLifecycleObserveResult.Accepted)
             {
@@ -619,9 +661,75 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             bool transportStarted = false;
             try
             {
+                // Track dedupe / rate reservations for rollback if startSend
+                // throws synchronously. A synchronous throw means transport
+                // never truly started; rolling back the reservations lets an
+                // exact-version retry via a subsequent DispatchAsync proceed.
+                DateTime? dedupeReservedAt = null;
+                DateTime? rateReservedAt = null;
+
+                Func<bool> shouldEmit = () =>
+                {
+                    DateTime now = UtcNow;
+                    DateTime expiresAt = now.Add(settings.DedupeWindow);
+                    bool emitted = false;
+                    _ = _dedupe.AddOrUpdate(
+                        dedupeKey,
+                        _ =>
+                        {
+                            emitted = true;
+                            return expiresAt;
+                        },
+                        (_, existing) =>
+                        {
+                            if (existing > now)
+                            {
+                                emitted = false;
+                                return existing;
+                            }
+
+                            emitted = true;
+                            return expiresAt;
+                        });
+                    if (emitted)
+                    {
+                        dedupeReservedAt = expiresAt;
+                    }
+
+                    return emitted;
+                };
+                Action rollbackDedupe = () =>
+                {
+                    if (dedupeReservedAt is DateTime committed)
+                    {
+                        ((ICollection<KeyValuePair<string, DateTime>>)_dedupe)
+                            .Remove(new KeyValuePair<string, DateTime>(dedupeKey, committed));
+                        dedupeReservedAt = null;
+                    }
+                };
                 Func<bool>? tryConsumeRate = rateKey is RateLimitKey activeRateKey
-                    ? () => TryConsumeRate(activeRateKey, settings, UtcNow)
-                    : null;
+                    ? () =>
+                    {
+                        DateTime now = UtcNow;
+                        if (TryConsumeRate(activeRateKey, settings, now))
+                        {
+                            rateReservedAt = now;
+                            return true;
+                        }
+
+                        return false;
+                    }
+                : null;
+                Action? rollbackRate = rateKey is RateLimitKey activeRateKeyForRollback
+                    ? () =>
+                    {
+                        if (rateReservedAt is DateTime consumed)
+                        {
+                            RollbackRate(activeRateKeyForRollback, consumed);
+                            rateReservedAt = null;
+                        }
+                    }
+                : null;
                 Func<Task<NativePushDispatchResult>> startSend = () =>
                 {
                     if (changeKind != AttentionChangeKind.Resolved)
@@ -640,8 +748,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     version,
                     lifecycleSnapshot,
                     changeKind == AttentionChangeKind.Resolved,
-                    () => ShouldEmit(dedupeKey, settings, UtcNow),
+                    shouldEmit,
+                    rollbackDedupe,
                     tryConsumeRate,
+                    rollbackRate,
                     startSend);
                 if (sendStart.BlockReason == LifecycleSendBlockReason.Dedupe)
                 {
@@ -1043,6 +1153,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             AttentionDispatchVersion version,
             AttentionChangeKind changeKind,
             DateTime observedAtUtc,
+            Action? onResolvedObserved,
             out AttentionSnapshot? resolvedSnapshot)
         {
             lock (_sync)
@@ -1072,6 +1183,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 if (changeKind == AttentionChangeKind.Resolved)
                 {
                     resolvedSnapshot = _snapshot;
+
+                    // Fire under the sync lock so any concurrent newer occurrence's
+                    // TryBeginSend on this same lifecycle either observes an empty
+                    // dedupe window (legitimate recurrence emits) or is serialised
+                    // behind us. This eliminates the pre-fix race where a delayed
+                    // reset erased newer dedupe state or suppressed a legitimate
+                    // recurrence.
+                    onResolvedObserved?.Invoke();
                 }
 
                 return AttentionLifecycleObserveResult.Accepted;
@@ -1083,7 +1202,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             AttentionSnapshot expectedSnapshot,
             bool isResolution,
             Func<bool> shouldEmit,
+            Action rollbackDedupe,
             Func<bool>? tryConsumeRate,
+            Action? rollbackRate,
             Func<Task<NativePushDispatchResult>> startSend)
         {
             lock (_sync)
@@ -1096,6 +1217,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 bool alreadyStarted = isResolution
                     ? _consumedResolutionVersion == version
                     : ReferenceEquals(_snapshot, expectedSnapshot);
+                bool reservedThisCall = false;
                 if (!alreadyStarted)
                 {
                     if ((isResolution && !ReferenceEquals(_snapshot, expectedSnapshot))
@@ -1112,10 +1234,48 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                     if (tryConsumeRate is not null && !tryConsumeRate())
                     {
+                        // The dedupe reservation is intentionally retained on the
+                        // rate-blocked path: the rate block sets _latestCommitted,
+                        // which fences a subsequent same-version dispatch through
+                        // TryObserve, so the dedupe entry becomes unreachable and
+                        // does not need to be rolled back.
                         _latestCommitted = true;
                         return new LifecycleSendStart(null, LifecycleSendBlockReason.RateLimit);
                     }
 
+                    reservedThisCall = true;
+                }
+
+                Task<NativePushDispatchResult> sendTask;
+                try
+                {
+                    sendTask = startSend();
+                }
+                catch (Exception ex)
+                {
+                    // Transport did not truly start. If this call reserved the
+                    // dedupe / rate slots, roll them back and leave
+                    // _latestCommitted false so an exact-version retry via a
+                    // subsequent DispatchAsync can proceed. Stale provider
+                    // results/retries remain fenced because no snapshot or
+                    // resolution version was committed here.
+                    if (reservedThisCall)
+                    {
+                        rollbackRate?.Invoke();
+                        rollbackDedupe();
+                    }
+
+                    sendTask = Task.FromException<NativePushDispatchResult>(ex);
+                    return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
+                }
+
+                if (!alreadyStarted)
+                {
+                    // Commit lifecycle ownership only after startSend returns a
+                    // Task without throwing. From this point the send is
+                    // considered to have handed off to transport; any later
+                    // failure is an async result and follows the normal
+                    // retry / result-attribution path.
                     _latestCommitted = true;
                     if (isResolution)
                     {
@@ -1127,16 +1287,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         _snapshot = expectedSnapshot;
                         _consumedResolutionVersion = null;
                     }
-                }
-
-                Task<NativePushDispatchResult> sendTask;
-                try
-                {
-                    sendTask = startSend();
-                }
-                catch (Exception ex)
-                {
-                    sendTask = Task.FromException<NativePushDispatchResult>(ex);
                 }
 
                 return new LifecycleSendStart(sendTask, LifecycleSendBlockReason.None);
@@ -1200,33 +1350,25 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         int? ToolheadIndex,
         DateTime CapturedAtUtc);
 
-    private bool ShouldEmit(string key, NativePushSettings settings, DateTime nowUtc)
+    private List<Guid>? GetOwnersWithLifecycleFor(string attentionItemId)
     {
-        DateTime expiresAt = nowUtc.Add(settings.DedupeWindow);
-
-        // AddOrUpdate is the only atomic option on ConcurrentDictionary that lets us
-        // both observe the previous value and conditionally emit exactly once under
-        // concurrent lookups.
-        bool emit = false;
-        _ = _dedupe.AddOrUpdate(
-            key,
-            _ =>
+        // Enumerate users with a live AttentionLifecycle entry for this
+        // attention item. Global resolution unions these with active token
+        // owners so a temporarily tokenless recipient still receives the
+        // lifecycle version tombstone. The dict is ConcurrentDictionary and
+        // iterates a snapshot; retired entries the pruner has not yet removed
+        // resolve themselves via TryObserve's Retired-retry path.
+        List<Guid>? result = null;
+        foreach (KeyValuePair<AttentionSnapshotKey, AttentionLifecycle> kv in _attentionLifecycles)
+        {
+            if (string.Equals(kv.Key.AttentionItemId, attentionItemId, StringComparison.Ordinal))
             {
-                emit = true;
-                return expiresAt;
-            },
-            (_, existing) =>
-            {
-                if (existing > nowUtc)
-                {
-                    emit = false;
-                    return existing;
-                }
+                result ??= new List<Guid>();
+                result.Add(kv.Key.UserId);
+            }
+        }
 
-                emit = true;
-                return expiresAt;
-            });
-        return emit;
+        return result;
     }
 
     private bool TryConsumeRate(RateLimitKey key, NativePushSettings settings, DateTime nowUtc)
@@ -1261,6 +1403,24 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                 bucket.Timestamps.Add(nowUtc);
                 return true;
+            }
+        }
+    }
+
+    private void RollbackRate(RateLimitKey key, DateTime consumedAtUtc)
+    {
+        // Roll back a rate reservation that was atomically consumed but whose
+        // startSend threw synchronously. Removing the first matching timestamp
+        // returns the user's slot; retries via a subsequent DispatchAsync do
+        // not lose capacity to the failed pre-transport attempt.
+        if (_rateLimits.TryGetValue(key, out RateLimitBucket? bucket))
+        {
+            lock (bucket)
+            {
+                if (!bucket.IsDead)
+                {
+                    bucket.Timestamps.Remove(consumedAtUtc);
+                }
             }
         }
     }

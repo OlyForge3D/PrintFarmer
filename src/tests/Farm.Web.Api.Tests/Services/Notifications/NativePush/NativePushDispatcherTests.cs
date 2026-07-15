@@ -2277,6 +2277,379 @@ public sealed class NativePushDispatcherTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task DispatchAsync_GlobalResolvedWithTokenlessLifecycleOwner_FencesInFlightTargetedRetry()
+    {
+        // #755 remediation blocker 1: a global resolution must establish the
+        // lifecycle tombstone for every recipient with an active lifecycle,
+        // not only recipients that currently hold device tokens. Otherwise a
+        // temporarily tokenless recipient's in-flight targeted lane can resume
+        // after re-registration and send a stale alert past the resolution.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+
+        DeviceToken activeToken = MakeToken(userId, "install-a");
+        bool userHasTokens = true;
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(r => r.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<IReadOnlyList<Guid>>(
+                userHasTokens ? new List<Guid> { userId } : new List<Guid>()));
+        tokens.Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<IReadOnlyList<DeviceToken>>(
+                userHasTokens ? new List<DeviceToken> { activeToken } : new List<DeviceToken>()));
+        tokens.Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        int lookupCount = 0;
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(s => s.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref lookupCount) == 1 ? item : null);
+
+        var sent = new ConcurrentQueue<AttentionChangeKind>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((envelope, _) =>
+            {
+                sent.Enqueue(envelope.ChangeKind);
+                return Task.FromResult(envelope.ChangeKind == AttentionChangeKind.Updated
+                    ? NativePushDispatchResult.Transient("timeout")
+                    : NativePushDispatchResult.Delivered());
+            });
+
+        DateTime updatedAt = new(2026, 7, 14, 22, 0, 0, DateTimeKind.Utc);
+        var clock = new ControlledRetryTimeProvider(updatedAt);
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Direct,
+                MaxAttempts = 2,
+            },
+            clock);
+
+        Task updated = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Updated,
+            userId,
+            occurredAtUtc: updatedAt);
+        try
+        {
+            await clock.RetryDelayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Simulate the user losing all device tokens between the transient
+            // response and the retry — the recipient's lifecycle is still live
+            // in _attentionLifecycles even though GetActiveTokenOwnersAsync
+            // now returns an empty list.
+            userHasTokens = false;
+
+            await sut.DispatchAsync(
+                    item.Id,
+                    AttentionChangeKind.Resolved,
+                    targetUserId: null,
+                    occurredAtUtc: updatedAt.AddSeconds(1))
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Should().Equal(
+                new[] { AttentionChangeKind.Updated },
+                "resolution has no tokens to dispatch a silent dismissal to, but must still tombstone the lifecycle");
+
+            clock.ReleaseRetry();
+            await updated.WaitAsync(TimeSpan.FromSeconds(10));
+
+            sent.Should().Equal(
+                new[] { AttentionChangeKind.Updated },
+                "the tokenless recipient's lifecycle was tombstoned by the global resolution; the pending targeted retry must not resend the stale alert");
+            tokens.Verify(repository => repository.RecordSuccessAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<long>(),
+                    It.IsAny<DateTime>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+            tokens.Verify(repository => repository.RecordFailureAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<long>(),
+                    It.IsAny<DateTime>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+        finally
+        {
+            clock.ReleaseRetry();
+            await updated.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResolvedDedupeResetIsAtomicWithObservation_LegitimateNewerCreatedEmits()
+    {
+        // #755 remediation blocker 2: ResetActiveLifecycleDedupe must run
+        // under the lifecycle sync lock at TryObserve time for Resolved.
+        // If it ran later (outside the lock after an async lookup) an in-flight
+        // newer Created would race the reset — either the reset erased newer
+        // dedupe state, or the newer Created was suppressed by an old dedupe
+        // entry that resolution had not yet cleared. This test proves the
+        // second failure mode is fixed: a newer Created that arrives while
+        // Resolved is blocked on FindItemAsync still emits.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto initial = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto recurrence = initial with
+        {
+            PrinterId = Guid.NewGuid(),
+            PrinterName = "Recurrent printer",
+        };
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var resolvedLookupEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseResolvedLookup = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int lookupCount = 0;
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                initial.Id,
+                It.IsAny<CancellationToken>()))
+            .Returns<Guid, string, CancellationToken>(async (_, _, ct) =>
+            {
+                int call = Interlocked.Increment(ref lookupCount);
+                if (call == 1)
+                {
+                    return initial;
+                }
+
+                if (call == 2)
+                {
+                    resolvedLookupEntered.TrySetResult();
+                    await releaseResolvedLookup.Task.WaitAsync(ct);
+                    return null;
+                }
+
+                return recurrence;
+            });
+
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((env, _) => sent.Enqueue(env))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Relay,
+                DedupeWindow = TimeSpan.FromMinutes(5),
+                RateLimitPerUser = 5,
+                RateLimitWindow = TimeSpan.FromMinutes(5),
+            });
+        DateTime t1 = new(2026, 7, 14, 23, 0, 0, DateTimeKind.Utc);
+
+        // Step 1: Created v1 delivers; a dedupe entry for (user, item, Created)
+        // is committed and would suppress a subsequent Created for the same key.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1);
+
+        // Step 2: Global Resolved v2 is dispatched (target=null) but blocks
+        // inside FindItemAsync. With the fix, ResetActiveLifecycleDedupe ran
+        // synchronously under the lifecycle sync lock at TryObserve time
+        // (before FindItemAsync), so the Created dedupe entry is already
+        // cleared. With the bug, the reset ran later — after the async lookup
+        // — leaving the stale dedupe active during the window a newer
+        // targeted Created might arrive. Global (target=null) uses a
+        // different AttentionDispatchLane than the targeted (target=userId)
+        // Created v3 dispatched next, so step 3 is not serialised behind step
+        // 2's blocked lookup.
+        Task resolved = sut.DispatchAsync(initial.Id, AttentionChangeKind.Resolved, targetUserId: null, occurredAtUtc: t1.AddSeconds(1));
+        await resolvedLookupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Step 3: While Resolved is blocked, a newer Created arrives.
+        // With the fix, the Created dedupe was cleared under the lock, so this
+        // legitimate recurrence emits. With the bug, it is suppressed by the
+        // stale v1 dedupe entry that Resolved has not yet cleared.
+        await sut.DispatchAsync(initial.Id, AttentionChangeKind.Created, userId, occurredAtUtc: t1.AddSeconds(2));
+
+        // Step 4: Release Resolved. Its own TryBeginSend now sees a superseded
+        // lifecycle version (v3 > v2) and returns Stale, so it does not send.
+        releaseResolvedLookup.TrySetResult();
+        await resolved.WaitAsync(TimeSpan.FromSeconds(10));
+
+        NativePushEnvelope[] captured = sent.ToArray();
+        captured.Select(e => e.ChangeKind).Should().Equal(
+            AttentionChangeKind.Created,
+            AttentionChangeKind.Created);
+        captured[0].PrinterId.Should().Be(initial.PrinterId);
+        captured[1].PrinterId.Should().Be(recurrence.PrinterId);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_SyncSenderExceptionBeforeTransport_AllowsSameVersionRetry()
+    {
+        // #755 remediation blocker 3: when the sender throws synchronously
+        // before transport truly starts, the lifecycle must NOT commit
+        // _latestCommitted / _snapshot / dedupe / rate. Otherwise an
+        // exact-version retry via a subsequent DispatchAsync would find the
+        // lifecycle already committed at the same version and short-circuit
+        // with Stale, poisoning legitimate replay of the same event.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int attemptCount = 0;
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
+            {
+                if (Interlocked.Increment(ref attemptCount) == 1)
+                {
+                    throw new InvalidOperationException("simulated synchronous sender failure before transport");
+                }
+
+                return Task.FromResult(NativePushDispatchResult.Delivered());
+            });
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        DateTime occurredAt = new(2026, 7, 14, 20, 30, 0, DateTimeKind.Utc);
+
+        // First dispatch: the sender throws synchronously. With the fix, the
+        // lifecycle rolls back dedupe + rate reservations and leaves
+        // _latestCommitted false. With the bug, the pre-startSend commit
+        // fences same-version retries.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+
+        // Second dispatch with the same version. With the fix this proceeds
+        // through TryObserveLifecycle (not stale) and delivers. With the bug
+        // it short-circuits at TryObserveLifecycle because _latestCommitted is
+        // true, and the sender is never called a second time.
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, userId, occurredAtUtc: occurredAt);
+
+        attemptCount.Should().Be(
+            2,
+            "the exact-version retry must proceed after the first attempt's transport never started");
+        tokens.Verify(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData(AttentionChangeKind.Created)]
+    [InlineData(AttentionChangeKind.Updated)]
+    public async Task DispatchAsync_TargetedChangeRecurrenceAfterGlobalResolution_EmitsAsNewOccurrence(
+        AttentionChangeKind recurrenceKind)
+    {
+        // #755 remediation blocker 4: #708 public contracts permit targeted
+        // Created and Updated. Both must obey cross-lane ordering and honour a
+        // legitimate recurrence after a global resolution — even though the
+        // targeted lane is a different AttentionDispatchKey, the shared
+        // per-(recipient, item) lifecycle must still admit the newer version.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto initial = BuildAttentionItem(AttentionKind.Offline);
+        AttentionItemDto recurrence = initial with
+        {
+            PrinterId = Guid.NewGuid(),
+            PrinterName = "Recurrent printer",
+        };
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        tokens.Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        int lookupCount = 0;
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(
+                userId,
+                initial.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                int call = Interlocked.Increment(ref lookupCount);
+                if (call == 1)
+                {
+                    return initial;
+                }
+
+                if (call == 2)
+                {
+                    return null;
+                }
+
+                return recurrence;
+            });
+
+        var sent = new ConcurrentQueue<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(s => s.ModeName).Returns("direct");
+        sender.Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((env, _) => sent.Enqueue(env))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db,
+            new NativePushSettings
+            {
+                Mode = NativePushMode.Relay,
+                DedupeWindow = TimeSpan.FromMinutes(5),
+                RateLimitPerUser = 5,
+                RateLimitWindow = TimeSpan.FromMinutes(5),
+            });
+        DateTime t1 = new(2026, 7, 14, 21, 0, 0, DateTimeKind.Utc);
+
+        // 1. Global Created v1 — active alert dispatched.
+        await sut.DispatchAsync(
+            initial.Id,
+            AttentionChangeKind.Created,
+            targetUserId: null,
+            occurredAtUtc: t1);
+
+        // 2. Global Resolved v2 — silent dismissal dispatched.
+        await sut.DispatchAsync(
+            initial.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: t1.AddSeconds(1));
+
+        // 3. Targeted recurrence (Created OR Updated) v3 — must emit as a new
+        // occurrence. Cross-lane ordering + dedupe reset atomicity must not
+        // suppress the legitimate recurrence.
+        await sut.DispatchAsync(
+            initial.Id,
+            recurrenceKind,
+            targetUserId: userId,
+            occurredAtUtc: t1.AddSeconds(2));
+
+        NativePushEnvelope[] captured = sent.ToArray();
+        captured.Select(e => e.ChangeKind).Should().Equal(
+            AttentionChangeKind.Created,
+            AttentionChangeKind.Resolved,
+            recurrenceKind);
+        captured[0].PrinterId.Should().Be(initial.PrinterId);
+        captured[2].PrinterId.Should().Be(recurrence.PrinterId);
+        captured[2].AttentionItemId.Should().Be(initial.Id);
+    }
+
     private static async Task AssertPostSendDisableDiscardsResultAsync(
         NativePushMode mode,
         NativePushDispatchResult completedResult)
