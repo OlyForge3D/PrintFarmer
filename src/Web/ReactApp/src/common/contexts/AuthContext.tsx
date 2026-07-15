@@ -3,6 +3,8 @@ import React, { createContext, useEffect, useState, ReactNode, useCallback } fro
 import { apiClient } from '@/services/api';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
+import { queryClient } from '@/services/queryClient';
+import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
 import type { AuthContextType } from './AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -65,6 +67,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (result.success && result.token && result.user) {
         localStorage.setItem('auth-token', result.token);
+        // Purge any previous identity's sensitive cache before the
+        // authenticated UI renders for this user (#762).
+        await clearSensitiveUserQueries(queryClient);
         setUser(result.user);
         return true;
       } else {
@@ -94,6 +99,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (result.success && result.token && result.user) {
         localStorage.setItem('auth-token', result.token);
+        // Purge any previous identity's sensitive cache before the
+        // authenticated UI renders for this user (#762).
+        await clearSensitiveUserQueries(queryClient);
         setUser(result.user);
         return true;
       } else {
@@ -118,6 +126,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       if (result.success && result.token && result.user) {
         localStorage.setItem('auth-token', result.token);
+        // Purge any previous identity's sensitive cache before the
+        // authenticated UI renders for this user (#762).
+        await clearSensitiveUserQueries(queryClient);
         setUser(result.user);
         return true;
       } else {
@@ -144,6 +155,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       localStorage.removeItem('auth-token');
       setUser(null);
       setError(null);
+      // Purge sensitive cache immediately on logout so it cannot leak into
+      // the next identity, even if that identity never calls login() (e.g.
+      // another tab, or a future flow that swaps identity without this
+      // AuthContext's login path) (#762).
+      await clearSensitiveUserQueries(queryClient);
       setIsLoading(false);
     }
   };

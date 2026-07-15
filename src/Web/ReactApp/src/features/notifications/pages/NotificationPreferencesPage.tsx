@@ -9,6 +9,7 @@ import {
   useUpdateNotificationPreferences,
 } from '@/features/notifications/hooks/useNotificationPreferences';
 import { usePushSubscription } from '@/features/notifications/hooks/usePushSubscription';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { NotificationFrequency, NotificationPreferenceEventType } from '@/types/api';
 import type { UpdateNotificationPreferencesRequest } from '@/types/api';
 import {
@@ -65,17 +66,33 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const isDirtyRef = useRef(false);
 
   // The capability probe explicitly resolves to `null` on legacy servers
-  // (endpoint 404). Any other unresolved state — still loading, or a
-  // non-404 network/server error — must NOT be interpreted as legacy or the
-  // save path silently strips operator edits. `capabilitiesResolved` is
-  // the single source of truth for "safe to build a save payload".
-  const capabilitiesResolved = !isCapsLoading && capsError == null;
+  // (endpoint 404). Any other unresolved state — still loading, paused
+  // (auth not ready), or a non-404 network/server error — must NOT be
+  // interpreted as legacy or the save path silently strips operator edits.
+  // `capabilitiesResolved` is the single source of truth for
+  // "safe to build a save payload". Requires `hasResolvedQueryData` too so
+  // a paused query (isFetching:false, data:undefined) can't slip past.
+  const capabilitiesResolved =
+    !isCapsLoading && capsError == null && hasResolvedQueryData(capabilities);
+
+  // The preferences query may be paused (auth not ready) — TanStack v5
+  // reports `isLoading: false` in that state while `preferences` is still
+  // `undefined`. Only a `hasResolvedQueryData` check reliably distinguishes
+  // "no data yet" (undefined) from the legitimate resolved-null case
+  // (queryFn returned null on a 404). See #766.
+  const preferencesResolved = hasResolvedQueryData(preferences);
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
 
   useEffect(() => {
+    // Guard against paused/first-load undefined preferences: without this,
+    // hydratePreferences would receive `null` and treat the server as legacy
+    // before real data arrives, then overwrite the local form on the very
+    // next tick. See #766.
+    if (!preferencesResolved) return;
+
     const { form, serverSupportsOperatorCategories: supports } = hydratePreferences(
       preferences ?? null,
       capabilities ?? null,
@@ -89,7 +106,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
     setFormState(withDerivedLegacyFlags(form));
     setIsDirty(false);
-  }, [preferences, capabilities]);
+  }, [preferences, capabilities, preferencesResolved]);
 
   // Per-row capability gate for the operator block. `serverSupportsOperatorCategories`
   // only tells us the server advertised AT LEAST ONE operator token — during a
@@ -129,7 +146,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
       return { ...item, [key]: value };
     });
 
-    setFormState(prev => withDerivedLegacyFlags({ ...prev, eventChannelPreferences: nextMatrix }));
+    setFormState(withDerivedLegacyFlags({ ...formState, eventChannelPreferences: nextMatrix }));
     setIsDirty(true);
   };
 
@@ -137,12 +154,17 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     key: K,
     value: UpdateNotificationPreferencesRequest[K],
   ) => {
-    setFormState(prev => ({ ...prev, [key]: value }));
+    if (formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
+    setFormState({ ...formState, [key]: value });
     setIsDirty(true);
   };
 
   const getEventPreference = (eventType: NotificationPreferenceEventType) =>
-    (formState.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
+    (formState?.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
 
   const handleSave = async () => {
     // Refuse to build a save payload from unresolved capability state.
@@ -151,6 +173,13 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     // user — a silent data-loss bug. Guarded by `capabilitiesResolved`.
     if (!capabilitiesResolved) {
       toast.error('Still checking notification capabilities — please retry in a moment');
+      return;
+    }
+    // Refuse to save if preferences are still unresolved (paused first
+    // load): saving a synthetic default over the yet-unfetched authoritative
+    // preferences would silently overwrite the user's real settings. See #766.
+    if (!preferencesResolved) {
+      toast.error('Notification preferences are still loading');
       return;
     }
     try {
@@ -171,7 +200,24 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     }
   };
 
-  if (isPrefsLoading || isCapsLoading) {
+  // Error must be checked before the loading gate: a failed preferences
+  // request leaves `preferences === undefined` (so `preferencesResolved`
+  // is false), which would otherwise pin the spinner forever instead of
+  // surfacing the failure. See #766.
+  if (prefsError) {
+    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
+    if (embedded) return errorContent;
+    return (
+      <PageTemplate title="Notification Preferences" icon={BellIcon}>
+        {errorContent}
+      </PageTemplate>
+    );
+  }
+
+  // Loading also blocks on `!preferencesResolved` so a paused first-load
+  // query (auth not ready) does not fall through to the form with only
+  // synthetic defaults. See #766.
+  if (isPrefsLoading || isCapsLoading || !preferencesResolved) {
     const loadingContent = (
       <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
         <Spinner size="lg" />
@@ -181,16 +227,6 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     return (
       <PageTemplate title="Notification Preferences" icon={BellIcon}>
         {loadingContent}
-      </PageTemplate>
-    );
-  }
-
-  if (prefsError) {
-    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
-    if (embedded) return errorContent;
-    return (
-      <PageTemplate title="Notification Preferences" icon={BellIcon}>
-        {errorContent}
       </PageTemplate>
     );
   }
