@@ -357,6 +357,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 CapturedAtUtc: UtcNow);
             lock (_snapshotOwnershipSync)
             {
+                // A later generation for the same recipient must not "forget"
+                // that an earlier Created/Updated already reached the client.
+                // If the next generation fails every retry, Resolved still owes
+                // that visible alert a dismissal push.
+                if (_snapshots.TryGetValue(snapshotKey, out AttentionSnapshot? previous)
+                    && previous.HasSuccessfulDelivery)
+                {
+                    activeSnapshot.MarkDelivered();
+                }
+
                 _snapshots[snapshotKey] = activeSnapshot;
             }
         }
@@ -654,11 +664,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return DeviceDispatchOutcome.DispatchStopped;
         }
 
-        // This is the final attribution claim. Resolution/replacement uses the
-        // same lock, so whichever operation enters first defines the ordering.
-        if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+        // This is the final attribution claim. For Created/Updated sends the
+        // "is this still the current generation?" check and the transition to
+        // "at least one device delivered" must be one atomic ownership
+        // decision. Otherwise a racing Resolved could consume the snapshot in
+        // the gap and observe HasSuccessfulDelivery=false before this success
+        // is recorded.
+        if (activeSnapshot is not null)
         {
-            return DeviceDispatchOutcome.DispatchStopped;
+            lock (_snapshotOwnershipSync)
+            {
+                if (!IsSnapshotCurrentUnderLock(snapshotKey, activeSnapshot))
+                {
+                    return DeviceDispatchOutcome.DispatchStopped;
+                }
+
+                if (result.Success)
+                {
+                    activeSnapshot.MarkDelivered();
+                }
+            }
         }
 
         IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
@@ -666,13 +691,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (result.Success)
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
-
-            // Mark the shared per-owner generation delivered BEFORE persisting
-            // the token outcome. activeSnapshot is null for the Resolved silent
-            // dismissal itself (nothing to mark), and non-null only for a
-            // Created/Updated alert send whose IsSnapshotCurrent check above
-            // already confirmed this instance is still the authoritative entry.
-            activeSnapshot?.MarkDelivered();
 
             await tokens.RecordSuccessAsync(
                 deviceToken.Id,
