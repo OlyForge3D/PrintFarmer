@@ -50,14 +50,19 @@ describe('HarvestJobDialog', () => {
     configurePartsHarvestClient(null);
   });
 
-  it('is a labelled dialog when opened', () => {
+  it('is a labelled dialog when opened', async () => {
     renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
     const dialog = screen.getByRole('dialog');
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAttribute('aria-labelledby');
+    // The dialog kicks off a `listParts()` fetch on mount for the manual
+    // fallback rows; let that microtask (and its `setParts` state update)
+    // settle inside `act(...)` before the test ends, otherwise it resolves
+    // after the test body returns and React logs an act() warning.
+    await waitFor(() => expect(stub.get).toHaveBeenCalled());
   });
 
-  it('renders already-harvested view when the job carries harvestedAt', () => {
+  it('renders already-harvested view when the job carries harvestedAt', async () => {
     renderDialog({
       isOpen: true,
       onClose: vi.fn(),
@@ -68,6 +73,9 @@ describe('HarvestJobDialog', () => {
     // Footer close button — scope by exact name to avoid the modal's own
     // top-right "Close modal" button.
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    // See note above: let the mount-time `listParts()` fetch settle inside
+    // `act(...)` before the test ends.
+    await waitFor(() => expect(stub.get).toHaveBeenCalled());
   });
 
   it('submits a mapped harvest and shows the success view with outputs', async () => {
