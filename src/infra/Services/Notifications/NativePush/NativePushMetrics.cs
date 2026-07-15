@@ -45,6 +45,14 @@ public sealed class NativePushMetrics : IDisposable
     public Counter<long> SkippedNotConfigured { get; }
 
     /// <summary>
+    /// Counter of resolution dismissals skipped because the alert generation
+    /// they would clear never achieved a single successful device delivery
+    /// (issue #756). A benign no-op: the client never received the alert, so
+    /// there is nothing to dismiss.
+    /// </summary>
+    public Counter<long> SkippedNeverDelivered { get; }
+
+    /// <summary>
     /// Counter of exceptions that were safely attributable to a single device
     /// send/persist step and therefore isolated so the fan-out continued for
     /// remaining devices/owners. Tag <c>stage</c> distinguishes send vs persist.
@@ -75,6 +83,7 @@ public sealed class NativePushMetrics : IDisposable
         SkippedRateLimit = _meter.CreateCounter<long>("native_push.skipped_rate_limit");
         SkippedCategoryOptOut = _meter.CreateCounter<long>("native_push.skipped_category_opt_out");
         SkippedNotConfigured = _meter.CreateCounter<long>("native_push.skipped_not_configured");
+        SkippedNeverDelivered = _meter.CreateCounter<long>("native_push.skipped_never_delivered");
         IsolatedDeviceFailure = _meter.CreateCounter<long>("native_push.isolated_device_failure");
         IsolatedOwnerFailure = _meter.CreateCounter<long>("native_push.isolated_owner_failure");
     }

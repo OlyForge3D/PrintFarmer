@@ -262,6 +262,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
 
             item = null;
+
+            // #756: the alert generation this snapshot represents exhausted
+            // every device without a single successful delivery (all-transient
+            // outage, terminal failures, or invalidations). The client never
+            // received the alert this dismissal would clear, so treat the
+            // dismissal as a benign no-op rather than send a silent push for
+            // an alert that was never seen. Partial success (at least one
+            // device delivered) still emits the dismissal to every current
+            // device below, preserving per-recipient behavior.
+            if (!resolvedSnapshot!.HasSuccessfulDelivery)
+            {
+                _metrics.SkippedNeverDelivered.Add(1);
+                return;
+            }
         }
         else if (item is null)
         {
@@ -333,6 +347,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 item.JobId,
                 item.ToolheadIndex,
                 UtcNow);
+
+            // ReplaceSnapshot inherits HasSuccessfulDelivery from the generation it
+            // displaces (#756): a later generation for the same recipient must not
+            // "forget" that an earlier Created/Updated already reached the client. If
+            // the next generation fails every retry, Resolved still owes that visible
+            // alert a dismissal push.
             ReplaceSnapshot(snapshotKey, activeSnapshot);
         }
 
@@ -630,11 +650,29 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return DeviceDispatchOutcome.DispatchStopped;
         }
 
-        // This is the final attribution claim. Resolution/replacement uses the
-        // same snapshot lock, so whichever operation enters first defines the ordering.
-        if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+        // This is the final attribution claim. For Created/Updated sends the
+        // "is this still the current generation?" check and the transition to
+        // "at least one device delivered" must be one atomic ownership
+        // decision (#756). Otherwise a racing Resolved could consume the
+        // snapshot in the gap and observe HasSuccessfulDelivery=false before
+        // this success is recorded. Locking on this snapshot's own Sync — the
+        // same lock ReplaceSnapshot/TryConsumeSnapshot acquire before
+        // touching it — keeps that decision atomic without serializing
+        // unrelated snapshots.
+        if (activeSnapshot is not null)
         {
-            return DeviceDispatchOutcome.DispatchStopped;
+            lock (activeSnapshot.Sync)
+            {
+                if (!IsSnapshotCurrentUnderSnapshotLock(snapshotKey, activeSnapshot))
+                {
+                    return DeviceDispatchOutcome.DispatchStopped;
+                }
+
+                if (result.Success)
+                {
+                    activeSnapshot.MarkDelivered();
+                }
+            }
         }
 
         IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
@@ -642,6 +680,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (result.Success)
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
+
             await tokens.RecordSuccessAsync(
                 deviceToken.Id,
                 deviceToken.RegistrationVersion,
@@ -939,9 +978,36 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
             lock (current.Sync)
             {
-                if (_snapshots.TryUpdate(key, replacement, current))
+                // Re-validate that 'current' is still the dictionary-resident instance for this
+                // key now that we hold its lock. A concurrent TryConsumeSnapshot/ReplaceSnapshot
+                // may have already removed/replaced it between our unguarded TryGetValue above and
+                // acquiring this lock; in that case this lock object is orphaned and any decision
+                // made while holding it would be based on stale state. Retry against a fresh read.
+                if (!_snapshots.TryGetValue(key, out AttentionSnapshot? confirmedCurrent)
+                    || !ReferenceEquals(confirmedCurrent, current))
                 {
-                    return;
+                    continue;
+                }
+
+                // A later generation for the same recipient must not "forget" that an
+                // earlier Created/Updated already reached the client (#756). If the next
+                // generation fails every retry, Resolved still owes that visible alert a
+                // dismissal push. Capture that inheritance decision locally and only apply it
+                // once this exact replacement has actually become the resident snapshot; a
+                // failed swap must not leak a one-way delivery bit onto a fresh generation that
+                // never truly displaced the delivered one.
+                bool inheritsDelivery = current.HasSuccessfulDelivery;
+                lock (replacement.Sync)
+                {
+                    if (_snapshots.TryUpdate(key, replacement, current))
+                    {
+                        if (inheritsDelivery)
+                        {
+                            replacement.MarkDelivered();
+                        }
+
+                        return;
+                    }
                 }
             }
         }
@@ -973,6 +1039,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         int? toolheadIndex,
         DateTime capturedAtUtc)
     {
+        // Set once any device in this alert generation is attributed a
+        // successful delivery. Resolved consumes this same instance out of
+        // the dictionary, so the flag survives independent of ownership
+        // checks/removal timing (#756). A generation that never flips this
+        // (all-transient exhaustion, terminal failures, or invalidations
+        // across every device) never actually reached the client, so its
+        // resolution dismissal is skipped as a benign no-op rather than
+        // sent for an alert the device never saw.
+        private int _hasSuccessfulDelivery;
+
         public object Sync { get; } = new();
 
         public AttentionKind Kind { get; } = kind;
@@ -984,6 +1060,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         public int? ToolheadIndex { get; } = toolheadIndex;
 
         public DateTime CapturedAtUtc { get; } = capturedAtUtc;
+
+        /// <summary>True once at least one device attempt for this alert generation succeeded.</summary>
+        public bool HasSuccessfulDelivery => Volatile.Read(ref _hasSuccessfulDelivery) != 0;
+
+        /// <summary>Marks this alert generation as having achieved at least one successful delivery.</summary>
+        public void MarkDelivered() => Interlocked.Exchange(ref _hasSuccessfulDelivery, 1);
     }
 
     private bool ShouldEmit(string key, NativePushSettings settings, DateTime nowUtc)
