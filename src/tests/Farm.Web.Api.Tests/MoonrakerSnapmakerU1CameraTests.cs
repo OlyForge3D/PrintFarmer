@@ -210,17 +210,27 @@ public class MoonrakerSnapmakerU1CameraTests
         r2.Should().BeTrue();
         r3.Should().BeTrue();
         rpc.Count("camera.start_monitor").Should().Be(1);
+        await clock.TimerCreatedAt(2).WaitAsync(TimeSpan.FromSeconds(1));
 
         // Firing obsolete timers is a no-op because their backing CancellationTokenSource was
         // cancelled (not merely disposed), so Task.Delay disposed those timers already.
-        clock.ReleaseTimerAt(0);
-        clock.ReleaseTimerAt(1);
+        ControlledTimeProvider.TimerFireResult stale0 = await clock.ReleaseTimerAtAndAwaitAsync(0);
+        ControlledTimeProvider.TimerFireResult stale1 = await clock.ReleaseTimerAtAndAwaitAsync(1);
+        stale0.CallbackInvoked.Should().BeFalse("stale timer[0] is cancelled/disposed and must not execute its callback");
+        stale1.CallbackInvoked.Should().BeFalse("stale timer[1] is cancelled/disposed and must not execute its callback");
+        stale0.WasAlreadyCompleted.Should().BeTrue("stale timer[0] should already be completed by cancellation disposal");
+        stale1.WasAlreadyCompleted.Should().BeTrue("stale timer[1] should already be completed by cancellation disposal");
+        rpc.StopInvocationCount.Should().Be(0, "no stale timer callback should reach camera.stop_monitor");
         rpc.Count("camera.stop_monitor").Should().Be(0, "stale timers must not stop the monitor");
 
         // Only the authoritative latest idle-stop timer should stop the monitor.
-        clock.ReleaseLatestTimer();
+        Task<RecordingJsonRpcClient.StopInvocation> firstStopAttempt = rpc.StopInvocationAt(0);
+        ControlledTimeProvider.TimerFireResult latest = await clock.ReleaseLatestTimerAndAwaitAsync();
+        latest.CallbackInvoked.Should().BeTrue("the latest authoritative timer must execute");
+        RecordingJsonRpcClient.StopInvocation stop = await firstStopAttempt.WaitAsync(TimeSpan.FromSeconds(1));
+        stop.Succeeded.Should().BeTrue("the first observed stop attempt should be the successful authoritative stop");
         await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
-        rpc.Count("camera.stop_monitor").Should().Be(1);
+        rpc.Count("camera.stop_monitor").Should().Be(1, "exactly one stop must be issued by the authoritative latest timer");
     }
 
     [Fact]
@@ -250,13 +260,20 @@ public class MoonrakerSnapmakerU1CameraTests
         // Access camera before retry fires; ScheduleIdleStop cancels timer[1] and creates timer[2].
         bool restarted = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
         restarted.Should().BeTrue();
+        await clock.TimerCreatedAt(2).WaitAsync(TimeSpan.FromSeconds(1));
 
         // timer[1] (retry) is now disposed; firing it must be a no-op.
-        clock.ReleaseTimerAt(1);
+        ControlledTimeProvider.TimerFireResult staleRetry = await clock.ReleaseTimerAtAndAwaitAsync(1);
+        staleRetry.CallbackInvoked.Should().BeFalse("superseded retry timer must be cancelled/disposed before firing");
+        staleRetry.WasAlreadyCompleted.Should().BeTrue("superseded retry timer should already be completed via cancellation disposal");
         rpc.Count("camera.stop_monitor").Should().Be(1, "only the failed idle-stop attempt has run so far");
 
         // Fire the new authoritative idle-stop timer[2]; stop succeeds.
-        clock.ReleaseLatestTimer();
+        Task<RecordingJsonRpcClient.StopInvocation> secondStopAttempt = rpc.StopInvocationAt(1);
+        ControlledTimeProvider.TimerFireResult authoritative = await clock.ReleaseLatestTimerAndAwaitAsync();
+        authoritative.CallbackInvoked.Should().BeTrue("the latest authoritative timer must execute");
+        RecordingJsonRpcClient.StopInvocation successfulStop = await secondStopAttempt.WaitAsync(TimeSpan.FromSeconds(1));
+        successfulStop.Succeeded.Should().BeTrue("the second observed stop attempt should be the successful authoritative stop");
         await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
 
         rpc.Methods.Should().Equal("camera.start_monitor", "camera.stop_monitor", "camera.stop_monitor");
@@ -283,6 +300,10 @@ public class MoonrakerSnapmakerU1CameraTests
 
     private sealed class RecordingJsonRpcClient : IMoonrakerJsonRpcClient
     {
+        private readonly object _stopSync = new();
+        private readonly List<StopInvocation> _stopInvocations = [];
+        private readonly List<TaskCompletionSource<StopInvocation>> _stopSignals = [];
+
         public List<string> Methods { get; } = [];
 
         public TaskCompletionSource StopObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -295,11 +316,40 @@ public class MoonrakerSnapmakerU1CameraTests
 
         public TimeSpan StartDelay { get; set; }
 
+        public int StopInvocationCount
+        {
+            get
+            {
+                lock (_stopSync)
+                {
+                    return _stopInvocations.Count;
+                }
+            }
+        }
+
         public int Count(string method)
         {
             lock (Methods)
             {
                 return Methods.Count(m => m == method);
+            }
+        }
+
+        public Task<StopInvocation> StopInvocationAt(int index)
+        {
+            lock (_stopSync)
+            {
+                while (_stopSignals.Count <= index)
+                {
+                    _stopSignals.Add(new(TaskCreationOptions.RunContinuationsAsynchronously));
+                }
+
+                if (index < _stopInvocations.Count)
+                {
+                    return Task.FromResult(_stopInvocations[index]);
+                }
+
+                return _stopSignals[index].Task;
             }
         }
 
@@ -327,9 +377,16 @@ public class MoonrakerSnapmakerU1CameraTests
 
             if (method == "camera.stop_monitor")
             {
-                if (StopFailuresBeforeSuccess > 0)
+                bool shouldFail = StopFailuresBeforeSuccess > 0;
+                if (shouldFail)
                 {
                     StopFailuresBeforeSuccess--;
+                }
+
+                RecordStopInvocation(!shouldFail);
+
+                if (shouldFail)
+                {
                     throw new MoonrakerJsonRpcException("stop failed", requestSent: true);
                 }
 
@@ -347,6 +404,25 @@ public class MoonrakerSnapmakerU1CameraTests
                 throw new MoonrakerJsonRpcException("reply failed", requestSent: true);
             }
         }
+
+        private void RecordStopInvocation(bool succeeded)
+        {
+            lock (_stopSync)
+            {
+                int idx = _stopInvocations.Count;
+                StopInvocation invocation = new(idx, succeeded);
+                _stopInvocations.Add(invocation);
+
+                while (_stopSignals.Count <= idx)
+                {
+                    _stopSignals.Add(new(TaskCreationOptions.RunContinuationsAsynchronously));
+                }
+
+                _stopSignals[idx].TrySetResult(invocation);
+            }
+        }
+
+        public sealed record StopInvocation(int Index, bool Succeeded);
     }
 
     private sealed class ControlledTimeProvider(DateTime nowUtc) : TimeProvider
@@ -423,6 +499,22 @@ public class MoonrakerSnapmakerU1CameraTests
             timer?.Fire();
         }
 
+        public async Task<TimerFireResult> ReleaseLatestTimerAndAwaitAsync()
+        {
+            ControlledTimer? timer;
+            lock (_sync)
+            {
+                timer = _timers.LastOrDefault();
+            }
+
+            if (timer is null)
+            {
+                return new TimerFireResult(CallbackInvoked: false, WasAlreadyCompleted: true);
+            }
+
+            return await timer.FireAndAwaitAsync().ConfigureAwait(false);
+        }
+
         /// <summary>Fires the timer at <paramref name="index"/> (0-based). No-op if the timer has already been disposed.</summary>
         public void ReleaseTimerAt(int index)
         {
@@ -435,9 +527,29 @@ public class MoonrakerSnapmakerU1CameraTests
             timer?.Fire();
         }
 
+        public async Task<TimerFireResult> ReleaseTimerAtAndAwaitAsync(int index)
+        {
+            ControlledTimer? timer;
+            lock (_sync)
+            {
+                timer = index < _timers.Count ? _timers[index] : null;
+            }
+
+            if (timer is null)
+            {
+                return new TimerFireResult(CallbackInvoked: false, WasAlreadyCompleted: true);
+            }
+
+            return await timer.FireAndAwaitAsync().ConfigureAwait(false);
+        }
+
+        public readonly record struct TimerFireResult(bool CallbackInvoked, bool WasAlreadyCompleted);
+
         private sealed class ControlledTimer(TimerCallback callback, object? state) : ITimer
         {
             private int _completed;
+            private readonly TaskCompletionSource _fireSettled =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public bool Change(TimeSpan dueTime, TimeSpan period) => Volatile.Read(ref _completed) == 0;
 
@@ -451,10 +563,27 @@ public class MoonrakerSnapmakerU1CameraTests
 
             public void Fire()
             {
-                if (Interlocked.Exchange(ref _completed, 1) == 0)
+                _ = FireAndAwaitAsync().GetAwaiter().GetResult();
+            }
+
+            public async Task<TimerFireResult> FireAndAwaitAsync()
+            {
+                int previous = Interlocked.Exchange(ref _completed, 1);
+                bool callbackInvoked = previous == 0;
+                try
                 {
-                    callback(state);
+                    if (callbackInvoked)
+                    {
+                        callback(state);
+                    }
                 }
+                finally
+                {
+                    _fireSettled.TrySetResult();
+                }
+
+                await _fireSettled.Task.ConfigureAwait(false);
+                return new TimerFireResult(CallbackInvoked: callbackInvoked, WasAlreadyCompleted: previous != 0);
             }
         }
     }
