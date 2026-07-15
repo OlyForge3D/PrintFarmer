@@ -105,7 +105,6 @@ public sealed class SnapmakerU1CameraMonitorManager(
                 await _jsonRpcClient.SendMethodAsync(baseUri, "camera.stop_monitor", credential ?? state.Credential, stopCts.Token).ConfigureAwait(false);
                 state.IsRunning = false;
                 state.StopRetryCount = 0;
-                _states.TryRemove(key, out _);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
