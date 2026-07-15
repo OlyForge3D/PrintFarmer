@@ -5,6 +5,7 @@ import { Card, Toggle, Select, Alert, Button, Spinner } from '@/common/component
 import { BellIcon } from '@/common/components/icons/MdiIcons';
 import { useNotificationPreferences, useUpdateNotificationPreferences } from '@/features/notifications/hooks/useNotificationPreferences';
 import { usePushSubscription } from '@/features/notifications/hooks/usePushSubscription';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { NotificationFrequency, NotificationPreferenceEventType } from '@/types/api';
 import type { NotificationEventChannelPreferenceDto, UpdateNotificationPreferencesRequest } from '@/types/api';
 import { toast } from 'sonner';
@@ -82,7 +83,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const updateMutation = useUpdateNotificationPreferences();
   const pushSubscription = usePushSubscription();
 
-  const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest>(DEFAULT_PREFERENCES);
+  const [formState, setFormState] = useState<UpdateNotificationPreferencesRequest | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
 
@@ -91,11 +92,11 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   }, [isDirty]);
 
   useEffect(() => {
-    if (isDirtyRef.current) {
+    if (isDirtyRef.current || !hasResolvedQueryData(preferences)) {
       return;
     }
 
-    if (!preferences) {
+    if (preferences === null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync server preferences into local form state
       setFormState(DEFAULT_PREFERENCES);
       setIsDirty(false);
@@ -123,11 +124,16 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   }, [preferences]);
 
   const isAnyPushEnabled = useMemo(
-    () => (formState.eventChannelPreferences ?? []).some(item => item.push),
-    [formState.eventChannelPreferences],
+    () => (formState?.eventChannelPreferences ?? []).some(item => item.push),
+    [formState?.eventChannelPreferences],
   );
 
   const updateMatrixField = (eventType: NotificationPreferenceEventType, key: 'inApp' | 'email' | 'push' | 'telegram', value: boolean) => {
+    if (formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
     const current = formState.eventChannelPreferences ?? DEFAULT_EVENT_CHANNEL_PREFERENCES;
     const nextMatrix = current.map(item => {
       if (item.eventType !== eventType) return item;
@@ -137,7 +143,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
       return { ...item, [key]: value };
     });
 
-    setFormState(prev => withDerivedLegacyFlags({ ...prev, eventChannelPreferences: nextMatrix }));
+    setFormState(withDerivedLegacyFlags({ ...formState, eventChannelPreferences: nextMatrix }));
     setIsDirty(true);
   };
 
@@ -145,14 +151,24 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     key: K,
     value: UpdateNotificationPreferencesRequest[K],
   ) => {
-    setFormState(prev => ({ ...prev, [key]: value }));
+    if (formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
+    setFormState({ ...formState, [key]: value });
     setIsDirty(true);
   };
 
   const getEventPreference = (eventType: NotificationPreferenceEventType) =>
-    (formState.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
+    (formState?.eventChannelPreferences ?? []).find(item => item.eventType === eventType);
 
   const handleSave = async () => {
+    if (!hasResolvedQueryData(preferences) || formState === null) {
+      toast.error('Notification preferences are still loading');
+      return;
+    }
+
     try {
       await updateMutation.mutateAsync(withDerivedLegacyFlags(formState));
       setIsDirty(false);
@@ -171,7 +187,17 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     }
   };
 
-  if (isLoading) {
+  if (error) {
+    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
+    if (embedded) return errorContent;
+    return (
+      <PageTemplate title="Notification Preferences" icon={BellIcon}>
+        {errorContent}
+      </PageTemplate>
+    );
+  }
+
+  if (isLoading || !hasResolvedQueryData(preferences) || formState === null) {
     const loadingContent = (
       <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
         <Spinner size="lg" />
@@ -181,16 +207,6 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     return (
       <PageTemplate title="Notification Preferences" icon={BellIcon}>
         {loadingContent}
-      </PageTemplate>
-    );
-  }
-
-  if (error) {
-    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
-    if (embedded) return errorContent;
-    return (
-      <PageTemplate title="Notification Preferences" icon={BellIcon}>
-        {errorContent}
       </PageTemplate>
     );
   }
