@@ -350,6 +350,27 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     return;
                 }
 
+                // #756 semantic on the lifecycle-owned architecture: this
+                // recipient's alert generation exhausted every device without
+                // a single successful delivery (all-transient outage, terminal
+                // failures, or invalidations). The client never received the
+                // alert this dismissal would clear, so treat the dismissal as
+                // a benign no-op rather than send a silent push for an alert
+                // that was never seen. The read is safe here because the
+                // matching MarkDelivered call happens under the same lifecycle
+                // sync as TryObserve's consumption of _snapshot: any success
+                // that races with this Resolved is either fenced (its version
+                // is no longer current) or was applied before TryObserve
+                // returned this snapshot, and the Volatile.Read publishes it.
+                // Partial success (at least one device delivered) still emits
+                // the dismissal to every current device below, preserving
+                // per-recipient behavior.
+                if (!resolvedSnapshot.HasSuccessfulDelivery)
+                {
+                    _metrics.SkippedNeverDelivered.Add(1);
+                    return;
+                }
+
                 item = null;
             }
             else if (item is null)
@@ -399,11 +420,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             {
                 rateKey = new RateLimitKey(userId, printerId, kind);
                 activeSnapshot = new AttentionSnapshot(
-                    Kind: item!.Kind,
-                    PrinterId: item.PrinterId,
-                    JobId: item.JobId,
-                    ToolheadIndex: item.ToolheadIndex,
-                    CapturedAtUtc: UtcNow);
+                    kind: item!.Kind,
+                    printerId: item.PrinterId,
+                    jobId: item.JobId,
+                    toolheadIndex: item.ToolheadIndex,
+                    capturedAtUtc: UtcNow);
             }
 
             foreach (DeviceToken deviceToken in userTokens)
@@ -921,9 +942,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return DeviceDispatchOutcome.DispatchStopped;
         }
 
-        // This is the final attribution claim. Resolution/replacement uses the
-        // same lock, so whichever operation enters first defines the ordering.
-        if (!lifecycle.IsCurrent(version, activeSnapshot, isResolution))
+        // Final attribution claim. On delivery success this must atomically
+        // record "this generation has been delivered to at least one device"
+        // under the same lifecycle lock that a racing Resolved uses to
+        // consume the snapshot. Otherwise a Resolved could observe the same
+        // snapshot instance between our IsCurrent check and MarkDelivered
+        // and wrongly conclude the alert was never delivered (#756).
+        if (!lifecycle.TryClaimAttribution(version, activeSnapshot, isResolution, result.Success))
         {
             return DeviceDispatchOutcome.DispatchStopped;
         }
@@ -1381,6 +1406,18 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     }
                     else
                     {
+                        // #756 delivery inheritance: a later generation for the
+                        // same recipient must not "forget" that an earlier
+                        // Created/Updated already reached the client. If the
+                        // next generation fails every retry, Resolved still
+                        // owes that visible alert a dismissal push. Under
+                        // _sync, atomically transfer the delivered bit from
+                        // the displaced snapshot to the incoming one.
+                        if (_snapshot is not null && _snapshot.HasSuccessfulDelivery)
+                        {
+                            expectedSnapshot.MarkDelivered();
+                        }
+
                         _snapshot = expectedSnapshot;
                         _consumedResolutionVersion = null;
                     }
@@ -1418,6 +1455,41 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return !_retired
                     && _hasVersion
                     && version.CompareTo(_latest) < 0;
+            }
+        }
+
+        /// <summary>
+        /// Atomically validates the caller's (version, snapshot) is still the
+        /// current attribution ownership AND, on delivery success, marks that
+        /// snapshot as having achieved at least one successful device delivery.
+        /// Both decisions must be one lock hold: a racing Resolved's
+        /// TryObserve otherwise could consume the same snapshot instance
+        /// between the ownership check and the mark, and its
+        /// !HasSuccessfulDelivery gate would then wrongly suppress a
+        /// dismissal for an alert the client actually received (#756).
+        /// Returns true when the caller retains ownership; the caller then
+        /// performs its persistence/attribution work. Returns false when a
+        /// resolution/replacement has already fenced this attribution.
+        /// </summary>
+        public bool TryClaimAttribution(
+            AttentionDispatchVersion version,
+            AttentionSnapshot? expectedSnapshot,
+            bool isResolution,
+            bool wasSuccessfulDelivery)
+        {
+            lock (_sync)
+            {
+                if (!IsCurrentUnderLock(version, expectedSnapshot, isResolution))
+                {
+                    return false;
+                }
+
+                if (wasSuccessfulDelivery && !isResolution && expectedSnapshot is not null)
+                {
+                    expectedSnapshot.MarkDelivered();
+                }
+
+                return true;
             }
         }
 
@@ -1460,12 +1532,47 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
-    private sealed record AttentionSnapshot(
-        AttentionKind Kind,
-        Guid PrinterId,
-        Guid? JobId,
-        int? ToolheadIndex,
-        DateTime CapturedAtUtc);
+    // Mutable delivery bit protected by the enclosing AttentionLifecycle's
+    // _sync lock. The lifecycle serializes every observe/begin-send/attribution
+    // transition, so any mark and any read of HasSuccessfulDelivery that
+    // matters for a Resolved's dismissal decision is happens-before-ordered
+    // through that lock. Interlocked/Volatile is used only for defensive
+    // publication of the flag itself. #756 semantics on the lifecycle-owned
+    // architecture (issue #755 decision).
+    private sealed class AttentionSnapshot
+    {
+        private int _hasSuccessfulDelivery;
+
+        public AttentionSnapshot(
+            AttentionKind kind,
+            Guid printerId,
+            Guid? jobId,
+            int? toolheadIndex,
+            DateTime capturedAtUtc)
+        {
+            Kind = kind;
+            PrinterId = printerId;
+            JobId = jobId;
+            ToolheadIndex = toolheadIndex;
+            CapturedAtUtc = capturedAtUtc;
+        }
+
+        public AttentionKind Kind { get; }
+
+        public Guid PrinterId { get; }
+
+        public Guid? JobId { get; }
+
+        public int? ToolheadIndex { get; }
+
+        public DateTime CapturedAtUtc { get; }
+
+        /// <summary>True once at least one device attempt for this alert generation succeeded.</summary>
+        public bool HasSuccessfulDelivery => Volatile.Read(ref _hasSuccessfulDelivery) != 0;
+
+        /// <summary>Marks this alert generation as having achieved at least one successful delivery.</summary>
+        public void MarkDelivered() => Interlocked.Exchange(ref _hasSuccessfulDelivery, 1);
+    }
 
     private List<Guid>? GetOwnersWithLifecycleFor(string attentionItemId)
     {
