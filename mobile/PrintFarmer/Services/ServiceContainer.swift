@@ -21,6 +21,7 @@ final class ServiceContainer: @unchecked Sendable {
     var barcodeIntakeService: any BarcodeIntakeServiceProtocol
     var maintenanceService: any MaintenanceServiceProtocol
     var attentionService: any AttentionServiceProtocol
+    var partsInventoryService: any PartsInventoryServiceProtocol
     var autoPrintService: any AutoDispatchServiceProtocol
     var jobAnalyticsService: any JobAnalyticsServiceProtocol
     var predictiveService: any PredictiveServiceProtocol
@@ -98,6 +99,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
         self.attentionService = AttentionService(apiClient: client)
+        self.partsInventoryService = PartsInventoryService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
         self.jobAnalyticsService = JobAnalyticsService(apiClient: client)
         self.predictiveService = PredictiveService(apiClient: client)
@@ -138,6 +140,7 @@ final class ServiceContainer: @unchecked Sendable {
             barcodeIntakeService: DemoBarcodeIntakeService(),
             maintenanceService: DemoMaintenanceService(),
             attentionService: DemoAttentionService(),
+            partsInventoryService: DemoPartsInventoryService(),
             autoPrintService: DemoAutoDispatchService(),
             jobAnalyticsService: DemoJobAnalyticsService(),
             predictiveService: DemoPredictiveService(),
@@ -161,6 +164,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeIntakeService = DemoBarcodeIntakeService()
         self.maintenanceService = DemoMaintenanceService()
         self.attentionService = DemoAttentionService()
+        self.partsInventoryService = DemoPartsInventoryService()
         self.autoPrintService = DemoAutoDispatchService()
         self.jobAnalyticsService = DemoJobAnalyticsService()
         self.predictiveService = DemoPredictiveService()
@@ -287,6 +291,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
         self.attentionService = AttentionService(apiClient: client)
+        self.partsInventoryService = PartsInventoryService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
         self.jobAnalyticsService = JobAnalyticsService(apiClient: client)
         self.predictiveService = PredictiveService(apiClient: client)
@@ -336,6 +341,7 @@ final class ServiceContainer: @unchecked Sendable {
         barcodeIntakeService: any BarcodeIntakeServiceProtocol,
         maintenanceService: any MaintenanceServiceProtocol,
         attentionService: any AttentionServiceProtocol,
+        partsInventoryService: any PartsInventoryServiceProtocol,
         autoPrintService: any AutoDispatchServiceProtocol,
         jobAnalyticsService: any JobAnalyticsServiceProtocol,
         predictiveService: any PredictiveServiceProtocol,
@@ -372,6 +378,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeIntakeService = barcodeIntakeService
         self.maintenanceService = maintenanceService
         self.attentionService = attentionService
+        self.partsInventoryService = partsInventoryService
         self.autoPrintService = autoPrintService
         self.jobAnalyticsService = jobAnalyticsService
         self.predictiveService = predictiveService

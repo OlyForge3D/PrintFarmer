@@ -5,6 +5,8 @@ struct JobDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel: JobDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
+    @State private var partsInventoryEnabled = true
+    @State private var showingHarvestSheet = false
 
     init(jobId: UUID) {
         _viewModel = State(initialValue: JobDetailViewModel(jobId: jobId))
@@ -58,6 +60,16 @@ struct JobDetailView: View {
             viewModel.isViewActive = true
             viewModel.configure(jobService: services.jobService)
             await viewModel.loadJob()
+            await services.capabilitiesService.refresh()
+            partsInventoryEnabled = services.capabilitiesService.resolved.printedPartsInventoryEnabled
+        }
+        .sheet(isPresented: $showingHarvestSheet) {
+            if let job = viewModel.job {
+                HarvestSheetView(job: job) {
+                    let task = Task { await viewModel.loadJob() }
+                    activeTasks.append(task)
+                }
+            }
         }
         .onDisappear {
             activeTasks.forEach { $0.cancel() }
@@ -373,6 +385,23 @@ struct JobDetailView: View {
                         .fullWidthActionButton()
                 }
                 .buttonStyle(.bordered)
+            }
+
+            // Completed: offer to harvest printed parts into inventory
+            // (#714, F9). Gated on the shared feature flag (#725) so the
+            // action disappears cleanly if printed-parts inventory is
+            // disabled for this deployment.
+            if job.status == .completed && partsInventoryEnabled {
+                Button {
+                    showingHarvestSheet = true
+                } label: {
+                    Label("Harvest to Inventory", systemImage: "shippingbox.fill")
+                        .fullWidthActionButton(prominence: .prominent)
+                        .fontWeight(.semibold)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.pfSuccess)
+                .accessibilityIdentifier("jobDetail.harvestToInventory")
             }
         }
         .disabled(viewModel.isPerformingAction)
