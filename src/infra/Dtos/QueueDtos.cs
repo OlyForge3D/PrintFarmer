@@ -298,4 +298,14 @@ public class JobQueuePrintJobDto
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when this completed job was harvested into printed-part
+    /// stock (#714). Null when the job has not been harvested yet. Harvest is
+    /// orthogonal to lifecycle: harvested jobs remain <see cref="PrintJobStatus.Completed"/>,
+    /// and this timestamp is the durable discriminator used by mobile clients
+    /// to gate the Harvest action and filter already-harvested jobs from the
+    /// scan-station picker.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
 }
