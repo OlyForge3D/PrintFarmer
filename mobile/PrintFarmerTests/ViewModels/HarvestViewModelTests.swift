@@ -94,6 +94,147 @@ final class HarvestViewModelTests: XCTestCase {
         XCTAssertEqual(sentOutputs?.first?.quantity, 3)
     }
 
+    // MARK: - B1: unedited-mapping harvest must send nil outputs
+
+    @MainActor
+    func testSubmitWithUneditedResolvedMappingSendsNilOutputsAndNoOverrideReason() async {
+        // The server (PartHarvestService.ResolveOutputsAsync) unconditionally
+        // rejects any request with a non-empty `outputs` array unless
+        // `overrideReason` is also non-blank — even when nothing was actually
+        // overridden. A normal harvest of an auto-resolved, UNEDITED mapping
+        // must therefore send `outputs: nil` so the server resolves it,
+        // rather than tripping that validation for no reason.
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        XCTAssertEqual(viewModel.outputs.count, 1, "sanity: mapping resolved a row")
+        XCTAssertFalse(viewModel.hasManualOutputEdits, "unedited resolved mapping must not count as an edit")
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertEqual(service.harvestCalls.count, 1)
+        XCTAssertNil(service.harvestCalls.first?.request.outputs, "unedited outputs must be sent as nil so the server resolves them")
+        XCTAssertNil(service.harvestCalls.first?.request.overrideReason, "no override reason should be required when nothing was overridden")
+        XCTAssertNotNil(viewModel.result)
+    }
+
+    @MainActor
+    func testSubmitWithEditedQuantityOnResolvedMappingSendsExplicitOutputsAndRequiresReason() async {
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        viewModel.outputs[0].quantity = 5 // operator edits the auto-resolved quantity
+
+        XCTAssertTrue(viewModel.hasManualOutputEdits)
+        XCTAssertFalse(viewModel.canSubmit, "editing without a reason must block submit")
+
+        viewModel.overrideReason = "Recounted plate, five parts not two"
+        XCTAssertTrue(viewModel.canSubmit)
+
+        await viewModel.submit(partsInventoryService: service)
+
+        let sent = service.harvestCalls.first?.request
+        XCTAssertEqual(sent?.outputs?.first?.quantity, 5)
+        XCTAssertEqual(sent?.overrideReason, "Recounted plate, five parts not two")
+    }
+
+    @MainActor
+    func testManuallyAddedRowWithNoBaselineCountsAsEditAndRequiresReason() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.partsToReturn = [makePart(sku: "SKU-Z", name: "Widget")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        XCTAssertTrue(viewModel.outputs.isEmpty, "sanity: no mapping matched")
+
+        viewModel.addManualOutputRow()
+        XCTAssertTrue(viewModel.outputs.first?.isManuallyAdded ?? false)
+        XCTAssertTrue(viewModel.hasManualOutputEdits)
+        XCTAssertFalse(viewModel.canSubmit, "manual row requires a reason before submit")
+
+        viewModel.overrideReason = "No mapping configured; adding SKU manually"
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertNotNil(service.harvestCalls.first?.request.outputs)
+        XCTAssertEqual(service.harvestCalls.first?.request.overrideReason, "No mapping configured; adding SKU manually")
+    }
+
+    // MARK: - B2: exclusive project-first mapping precedence
+
+    @MainActor
+    func testLoadContextUsesProjectMappingExclusivelyWhenBothSourcesResolveDifferingSkuAndQuantity() async {
+        // Matches the server's PartOutputMappingResolver.ResolveCurrentMappingsAsync:
+        // project mappings are checked first and used EXCLUSIVELY when
+        // present — gcode mappings are never unioned in, even if they'd also
+        // match this job. Regression guard against the prior OR-union bug.
+        let projectFileId = UUID()
+        let job = makeJob(gcodeFileId: gcodeFileId, projectFileId: projectFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [
+            makeMapping(sku: "SKU-GCODE", gcodeFileId: gcodeFileId, quantity: 9),
+            makeMapping(sku: "SKU-PROJECT", printProjectFileId: projectFileId, quantity: 3)
+        ]
+        service.partsToReturn = []
+
+        await viewModel.loadContext(partsInventoryService: service)
+
+        XCTAssertEqual(viewModel.outputs.map(\.sku), ["SKU-PROJECT"], "project mapping must win exclusively, not union with gcode")
+        XCTAssertEqual(viewModel.outputs.first?.quantity, 3)
+    }
+
+    @MainActor
+    func testLoadContextFallsBackToGcodeMappingWhenNoProjectMappingExists() async {
+        let projectFileId = UUID()
+        let job = makeJob(gcodeFileId: gcodeFileId, projectFileId: projectFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [
+            makeMapping(sku: "SKU-GCODE", gcodeFileId: gcodeFileId, quantity: 7)
+        ]
+        service.partsToReturn = []
+
+        await viewModel.loadContext(partsInventoryService: service)
+
+        XCTAssertEqual(viewModel.outputs.map(\.sku), ["SKU-GCODE"])
+        XCTAssertEqual(viewModel.outputs.first?.quantity, 7)
+    }
+
+    // MARK: - H5: malformed wrongBin payload must not type as wrongBin
+
+    @MainActor
+    func testSubmitWithWrongBinCodeButEmptyMismatchesFallsBackToGenericConflict() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        let malformed = PartsInventoryConflict(
+            code: PartsInventoryConflict.wrongBinCode,
+            title: "Wrong Bin",
+            detail: "Scanned bin does not match expected bin.",
+            mismatches: [], // malformed: coded wrongBin but no mismatch detail
+            jobId: nil, projectFileId: nil, gcodeFileId: nil, guidance: nil
+        )
+        service.harvestError = NetworkError.partsInventoryConflict(malformed)
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertFalse(viewModel.hasWrongBinConflict, "empty mismatches must not present the override sheet")
+        XCTAssertFalse(viewModel.hasMappingRequiredConflict)
+        XCTAssertNotNil(viewModel.errorMessage, "must fall back to a generic error instead of a blind override")
+    }
+
     @MainActor
     func testSubmitUsesJobIdAsIdempotencyKey() async {
         let job = makeJob()

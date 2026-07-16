@@ -187,7 +187,15 @@ struct PartsInventoryConflict: Codable, Sendable, Equatable {
     let gcodeFileId: UUID?
     let guidance: String?
 
-    var isWrongBin: Bool { code == Self.wrongBinCode }
+    /// `true` only when the payload is typed `wrongBin` AND carries at least one
+    /// well-formed mismatch entry (non-blank `partSku`/`scannedBinCode`). A
+    /// malformed, missing, or empty `mismatches` extension must NOT be treated
+    /// as a wrong-bin conflict — it falls back to the generic-conflict path so
+    /// the UI never shows a blind override affordance for an unverified claim.
+    var isWrongBin: Bool {
+        guard code == Self.wrongBinCode, let mismatches, !mismatches.isEmpty else { return false }
+        return mismatches.allSatisfy { !$0.partSku.isEmpty && !$0.scannedBinCode.isEmpty }
+    }
     var isPartMappingRequired: Bool { code == Self.partMappingRequiredCode }
 }
 

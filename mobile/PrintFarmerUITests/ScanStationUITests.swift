@@ -60,4 +60,48 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.staticTexts["Log Maintenance Part"].exists,
                        "Maintenance-part quick action is out of #714's mobile scope and must not appear")
     }
+
+    /// H6 (remediation): "Log Printed Parts" must be a real quick action
+    /// that opens a lookup list of printed-part SKUs and forwards a
+    /// selection into the existing part-adjustment flow.
+    func testLogPrintedPartsQuickActionOpensPartLookup() {
+        openScanTab()
+
+        let quickAction = app.buttons["scan.quickAction.parts"]
+        XCTAssertTrue(quickAction.waitForExistence(timeout: 5),
+                      "Log Printed Parts quick action should be reachable from the Scan tab")
+        quickAction.tap()
+
+        let lookupTitle = app.navigationBars["Printed Parts"]
+        XCTAssertTrue(lookupTitle.waitForExistence(timeout: 5),
+                      "Log Printed Parts should present the printed-parts lookup list")
+    }
+
+    /// H6 (remediation): "Printer Lookup" must be a real quick action that
+    /// opens a lookup list of registered printers and, on selection,
+    /// navigates to that printer's detail view. Uses the seeded demo
+    /// printer "Prusa MK4 #1" for a deterministic assertion.
+    func testPrinterLookupQuickActionOpensPrinterLookupAndNavigatesToDetail() {
+        openScanTab()
+
+        let quickAction = app.buttons["scan.quickAction.printerLookup"]
+        XCTAssertTrue(quickAction.waitForExistence(timeout: 5),
+                      "Printer Lookup quick action should be reachable from the Scan tab")
+        quickAction.tap()
+
+        let lookupTitle = app.navigationBars["Printer Lookup"]
+        XCTAssertTrue(lookupTitle.waitForExistence(timeout: 5),
+                      "Printer Lookup should present the printer lookup list")
+
+        let printerRowPredicate = NSPredicate(format: "label CONTAINS %@", "Prusa MK4 #1")
+        let printerRow = app.descendants(matching: .any).matching(printerRowPredicate).firstMatch
+        XCTAssertTrue(printerRow.waitForExistence(timeout: 5),
+                      "Seeded demo printer should render in the Printer Lookup list")
+        printerRow.tap()
+
+        XCTAssertFalse(app.navigationBars["Printer Lookup"].exists,
+                       "Selecting a printer should dismiss the lookup list")
+        XCTAssertTrue(app.staticTexts["Prusa MK4 #1"].waitForExistence(timeout: 5),
+                      "Selecting a printer should navigate to that printer's detail view")
+    }
 }

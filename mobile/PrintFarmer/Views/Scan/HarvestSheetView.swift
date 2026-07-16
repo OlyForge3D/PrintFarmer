@@ -10,6 +10,7 @@ struct HarvestSheetView: View {
     @State private var viewModel: HarvestViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var showOverrideSheet = false
+    @State private var showBinPicker = false
 
     /// Called after a successful (or already-harvested) result so the
     /// presenter can refresh job/bin/inventory state.
@@ -48,6 +49,12 @@ struct HarvestSheetView: View {
             }
             .sheet(isPresented: $showOverrideSheet) {
                 wrongBinOverrideSheet
+            }
+            .sheet(isPresented: $showBinPicker) {
+                BinPickerView(bins: viewModel.availableBins) { bin in
+                    viewModel.sharedBinCode = bin.code
+                    showBinPicker = false
+                }
             }
             .task {
                 await viewModel.loadContext(partsInventoryService: services.partsInventoryService)
@@ -115,6 +122,14 @@ struct HarvestSheetView: View {
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("harvest.binCode")
 
+                Button {
+                    let task = Task { await scanBin() }
+                    activeTasks.append(task)
+                } label: {
+                    Label("Scan or Select Bin", systemImage: "barcode.viewfinder")
+                }
+                .accessibilityIdentifier("harvest.scanBin")
+
                 if viewModel.outputs.count > 1 {
                     Toggle("Different bin per SKU", isOn: $viewModel.usePerOutputBins)
                         .accessibilityIdentifier("harvest.perOutputBinsToggle")
@@ -133,6 +148,17 @@ struct HarvestSheetView: View {
                 Text("Destination Bin")
             } footer: {
                 Text("Scan or enter the bin code where these parts were placed. Leave blank to use each SKU's default bin.")
+            }
+
+            if viewModel.hasManualOutputEdits && !viewModel.outputs.isEmpty {
+                Section {
+                    TextField("Reason for edited outputs", text: $viewModel.overrideReason, axis: .vertical)
+                        .accessibilityIdentifier("harvest.outputOverrideReason")
+                } header: {
+                    Text("Reason Required")
+                } footer: {
+                    Text("You've changed the auto-resolved SKUs/quantities. Provide a reason before submitting.")
+                }
             }
 
             Section {
@@ -165,19 +191,23 @@ struct HarvestSheetView: View {
 
     private func outputRow(_ output: Binding<HarvestOutputDraft>) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(output.wrappedValue.name ?? output.wrappedValue.sku)
-                    .font(.subheadline.weight(.medium))
-                if output.wrappedValue.name != nil {
-                    Text(output.wrappedValue.sku)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            if output.wrappedValue.isManuallyAdded {
+                skuPicker(output)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(output.wrappedValue.name ?? output.wrappedValue.sku)
+                        .font(.subheadline.weight(.medium))
+                    if output.wrappedValue.name != nil {
+                        Text(output.wrappedValue.sku)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
             Spacer()
 
-            Stepper(value: output.quantity, in: 0...9999) {
+            Stepper(value: output.quantity, in: 1...10000) {
                 Text("\(output.wrappedValue.quantity)")
                     .font(.body.monospacedDigit())
                     .frame(minWidth: 32)
@@ -186,6 +216,49 @@ struct HarvestSheetView: View {
             .accessibilityValue("\(output.wrappedValue.quantity)")
         }
         .frame(minHeight: 44)
+    }
+
+    /// SKU picker shown only for manually-added rows (no server-resolved
+    /// mapping backs them) — auto-resolved rows keep the static label so
+    /// operators can't accidentally retarget a mapped SKU by mis-tapping.
+    private func skuPicker(_ output: Binding<HarvestOutputDraft>) -> some View {
+        Picker("SKU", selection: Binding(
+            get: { output.wrappedValue.sku },
+            set: { newSku in
+                output.wrappedValue.sku = newSku
+                output.wrappedValue.name = viewModel.availableParts.first { $0.sku == newSku }?.name
+            }
+        )) {
+            if viewModel.availableParts.isEmpty {
+                Text(output.wrappedValue.sku).tag(output.wrappedValue.sku)
+            }
+            ForEach(viewModel.availableParts) { part in
+                Text("\(part.name) (\(part.sku))").tag(part.sku)
+            }
+        }
+        // The row's `id` is a stable, collision-free UUID (unlike its
+        // editable `sku`), so tests match this with a BEGINSWITH predicate
+        // rather than a predicted literal identifier.
+        .accessibilityIdentifier("harvest.output.skuPicker.\(output.wrappedValue.id.uuidString)")
+    }
+
+    /// Scans a bin barcode via the shared scanner service when available;
+    /// otherwise presents `BinPickerView` so operators without a working
+    /// scanner (or on a device without camera access) can still select a
+    /// destination bin. Preserves the existing `presetBinCode` scan-first
+    /// shortcut flow unchanged — this affordance is additive.
+    private func scanBin() async {
+        guard let scanner = services.barcodeScannerService, scanner.isAvailable else {
+            showBinPicker = true
+            return
+        }
+        let result = await scanner.scanBarcode()
+        guard case .barcode(let code) = result else { return }
+        if let bin = try? await services.partsInventoryService.resolveBinByBarcode(code) {
+            viewModel.sharedBinCode = bin.code
+        } else {
+            viewModel.sharedBinCode = code
+        }
     }
 
     private var mappingRequiredSection: some View {
@@ -322,5 +395,53 @@ struct HarvestSheetView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Fallback destination-bin selector for the H3 scan/select affordance when
+/// no scanner is available. Lists bins loaded by `HarvestViewModel
+/// .loadContext()` so operators can pick a bin without a working camera.
+private struct BinPickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    let bins: [BinResponse]
+    let onSelect: (BinResponse) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if bins.isEmpty {
+                    ContentUnavailableView(
+                        "No Bins Available",
+                        systemImage: "shippingbox",
+                        description: Text("No printed-part bins are registered yet.")
+                    )
+                } else {
+                    List(bins) { bin in
+                        Button {
+                            onSelect(bin)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(bin.name)
+                                    .font(.subheadline.weight(.medium))
+                                Text(bin.code)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("harvest.binPicker.row.\(bin.code)")
+                    }
+                }
+            }
+            .navigationTitle("Select Bin")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }

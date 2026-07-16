@@ -17,6 +17,9 @@ struct ScanView: View {
     @State private var viewModel = ScanViewModel()
     @State private var showBarcodeIntake = false
     @State private var partsInventoryEnabled = true
+    @State private var showPartLookup = false
+    @State private var showPrinterLookup = false
+    @State private var partLookupSelection: PartInventoryResponse?
 
     var body: some View {
         @Bindable var router = router
@@ -64,6 +67,21 @@ struct ScanView: View {
             )) {
                 if let barcode = viewModel.pendingSpoolBarcode {
                     BarcodeIntakeView(initialBarcode: barcode)
+                }
+            }
+            .sheet(isPresented: $showPartLookup) {
+                PartLookupView(partsInventoryService: services.partsInventoryService) { part in
+                    partLookupSelection = part
+                    showPartLookup = false
+                }
+            }
+            .sheet(item: $partLookupSelection) { part in
+                PartScanResultView(part: part)
+            }
+            .sheet(isPresented: $showPrinterLookup) {
+                PrinterLookupView(printerService: services.printerService) { printer in
+                    showPrinterLookup = false
+                    router.navigate(to: .printerDetail(id: printer.id))
                 }
             }
             .onChange(of: viewModel.pendingPrinterDestination) { _, destination in
@@ -131,6 +149,24 @@ struct ScanView: View {
                 identifier: "scan.quickAction.spool"
             ) {
                 showBarcodeIntake = true
+            }
+
+            quickActionRow(
+                icon: "cube.box",
+                title: "Log Printed Parts",
+                description: "Look up a printed-part SKU and record a manual stock adjustment.",
+                identifier: "scan.quickAction.parts"
+            ) {
+                showPartLookup = true
+            }
+
+            quickActionRow(
+                icon: "printer",
+                title: "Printer Lookup",
+                description: "Find a printer by name and open its detail view.",
+                identifier: "scan.quickAction.printerLookup"
+            ) {
+                showPrinterLookup = true
             }
         } header: {
             Text("Quick Actions")
@@ -253,6 +289,164 @@ private struct UnrecognizedScanView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+}
+
+/// "Log Printed Parts" quick-action lookup list (#714 H6). Lists active
+/// printed-part SKUs and forwards the selection into the existing
+/// `PartScanResultView` sheet — same manual-adjustment flow reached by
+/// scanning a part's barcode directly.
+private struct PartLookupView: View {
+    let partsInventoryService: any PartsInventoryServiceProtocol
+    let onSelect: (PartInventoryResponse) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var parts: [PartInventoryResponse] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var searchText = ""
+
+    private var filteredParts: [PartInventoryResponse] {
+        guard !searchText.isEmpty else { return parts }
+        return parts.filter {
+            $0.name.localizedCaseInsensitiveContains(searchText) || $0.sku.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading parts…")
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("Unable to Load Parts", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(errorMessage)
+                    }
+                } else if parts.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Printed Parts", systemImage: "cube.box")
+                    } description: {
+                        Text("No printed-part SKUs are configured yet.")
+                    }
+                } else {
+                    List(filteredParts) { part in
+                        Button {
+                            onSelect(part)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(part.name)
+                                    .font(.subheadline.weight(.medium))
+                                Text("SKU \(part.sku) • On hand \(part.onHand)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("scan.partLookup.row.\(part.sku)")
+                    }
+                    .searchable(text: $searchText, prompt: "Search SKU or name")
+                }
+            }
+            .navigationTitle("Printed Parts")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .task {
+                isLoading = true
+                do {
+                    parts = try await partsInventoryService.listParts()
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+                isLoading = false
+            }
+        }
+    }
+}
+
+/// "Printer Lookup" quick-action list (#714 H6). Lists registered printers
+/// and, on selection, dismisses itself and reuses `AppRouter.navigate(to:)`
+/// — the same navigation call already used for scanned printer QR codes —
+/// to open the printer's detail view.
+private struct PrinterLookupView: View {
+    let printerService: any PrinterServiceProtocol
+    let onSelect: (Printer) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var printers: [Printer] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var searchText = ""
+
+    private var filteredPrinters: [Printer] {
+        guard !searchText.isEmpty else { return printers }
+        return printers.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading printers…")
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("Unable to Load Printers", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(errorMessage)
+                    }
+                } else if printers.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Printers", systemImage: "printer")
+                    } description: {
+                        Text("No printers are registered yet.")
+                    }
+                } else {
+                    List(filteredPrinters) { printer in
+                        Button {
+                            onSelect(printer)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(printer.name)
+                                    .font(.subheadline.weight(.medium))
+                                if let notes = printer.notes, !notes.isEmpty {
+                                    Text(notes)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("scan.printerLookup.row.\(printer.id.uuidString)")
+                    }
+                    .searchable(text: $searchText, prompt: "Search printers")
+                }
+            }
+            .navigationTitle("Printer Lookup")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .task {
+                isLoading = true
+                do {
+                    printers = try await printerService.list(includeDisabled: false)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+                isLoading = false
             }
         }
     }
