@@ -258,4 +258,32 @@ describe('CompactPrinterCard memoization', () => {
     expect(screen.getByTestId('print-progress')).toHaveTextContent('11');
     expect(progressBarRender).toHaveBeenCalledTimes(2);
   });
+
+  it('rerenders when only onEdit changes while all other props stay equal', () => {
+    const onExpand = vi.fn();
+    const { rerender } = render(
+      <CompactPrinterCard
+        printer={createPrinter({ progress: 7, state: 'Printing' })}
+        onExpand={onExpand}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(progressBarRender).toHaveBeenCalledTimes(1);
+
+    // New onEdit reference; printer (compared by shallowEqualPrinter) and onExpand
+    // remain equal. The memoized component must rerender because onEdit changed.
+    // Deleting `previous.onEdit === next.onEdit` from areCompactPrinterCardPropsEqual
+    // causes the comparator to return true here, suppressing the rerender and
+    // failing the assertion below.
+    rerender(
+      <CompactPrinterCard
+        printer={createPrinter({ progress: 7, state: 'Printing' })}
+        onExpand={onExpand}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(progressBarRender).toHaveBeenCalledTimes(2);
+  });
 });
