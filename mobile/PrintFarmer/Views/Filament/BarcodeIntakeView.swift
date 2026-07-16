@@ -5,6 +5,17 @@ struct BarcodeIntakeView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = BarcodeIntakeViewModel()
 
+    /// A code already resolved by the unified scan station (#714) as a
+    /// known spool barcode. When set, this view auto-processes it once on
+    /// appearance instead of waiting for another manual "Scan Next" tap —
+    /// this reuses the existing intake flow as-is rather than duplicating
+    /// its resolve/import logic in `ScanViewModel`.
+    var initialBarcode: String?
+
+    init(initialBarcode: String? = nil) {
+        self.initialBarcode = initialBarcode
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -104,6 +115,9 @@ struct BarcodeIntakeView: View {
                     barcodeService: services.barcodeIntakeService,
                     scanner: services.barcodeScannerService
                 )
+                if let initialBarcode {
+                    await viewModel.handleScannedBarcode(initialBarcode)
+                }
             }
             .onAppear { viewModel.isViewActive = true }
             .onDisappear { viewModel.isViewActive = false }
