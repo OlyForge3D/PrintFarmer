@@ -184,7 +184,7 @@ final class PartAdjustmentViewModelTests: XCTestCase {
         _ = await task.value
 
         XCTAssertNil(viewModel.errorMessage, "a cancelled submission must not surface an error to a dismissed view")
-        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertTrue(viewModel.isSubmitting, "cancellation must never write isSubmitting either — it's dismissed-child observable state, same as errorMessage/successMessage")
     }
 
     @MainActor
@@ -202,7 +202,7 @@ final class PartAdjustmentViewModelTests: XCTestCase {
         _ = await task.value
 
         XCTAssertNil(viewModel.successMessage, "a cancelled submission must not write success state into a dismissed view")
-        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertTrue(viewModel.isSubmitting, "cancellation must never write isSubmitting either — it's dismissed-child observable state, same as errorMessage/successMessage")
     }
 
     // MARK: - Replacement remediation Item B: commit-then-response-loss causal proof
@@ -251,7 +251,7 @@ final class PartAdjustmentViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelDeterministicallyAfterCommitButBeforeResponseDeliveryLeavesNoStaleWriteAndAllowsFreshRetry() async {
+    func testCancelDeterministicallyAfterCommitButBeforeResponseDeliveryLeavesNoStaleWriteAndFreshInstanceCanSubmitIndependently() async {
         let viewModel = PartAdjustmentViewModel(part: makePart())
         viewModel.delta = -2
         viewModel.reason = .qcReject
@@ -273,25 +273,31 @@ final class PartAdjustmentViewModelTests: XCTestCase {
 
         task.cancel()
         await gate.open()
-        _ = await task.value
+        let result = await task.value
 
+        XCTAssertEqual(result?.resultingBalance, 9, "the committed adjustment is still returned to the caller despite the task's own cancellation")
         XCTAssertNil(viewModel.errorMessage, "a cancelled submission must not surface an error to a dismissed view")
         XCTAssertNil(viewModel.successMessage, "a cancelled submission must not write success state into a dismissed view")
-        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertTrue(viewModel.isSubmitting, "cancellation must never write isSubmitting either — it's dismissed-child observable state, same as errorMessage/successMessage")
         XCTAssertEqual(service.appliedMutationCount, 1, "cancellation after commit must never trigger a second mutation")
 
-        // The commit DID succeed server-side before cancellation, so the
-        // key/snapshot are cleared (this intent is done) — a further
-        // submit mints a genuinely fresh key rather than retrying/
-        // replaying the cancelled-but-succeeded one.
-        let firstKey = service.adjustPartCalls[0].request.operationKey
-        XCTAssertTrue(viewModel.beginSubmit(), "cancellation after a successful commit must not block a fresh submit")
-        _ = await viewModel.submit(partsInventoryService: service)
+        // This VM instance belongs to the now-dismissed PartScanResultView
+        // sheet; production never reuses it — a re-presented sheet always
+        // constructs a brand new `PartAdjustmentViewModel(part:)`. That
+        // fresh instance mints its own operationKey and is never blocked by
+        // the discarded instance's (intentionally frozen) isSubmitting
+        // state, so it can submit independently.
+        let freshViewModel = PartAdjustmentViewModel(part: makePart())
+        freshViewModel.delta = -2
+        freshViewModel.reason = .qcReject
+        XCTAssertTrue(freshViewModel.beginSubmit(), "a freshly-constructed view model for a re-presented sheet must be able to submit independently")
+        _ = await freshViewModel.submit(partsInventoryService: service)
 
         XCTAssertEqual(service.adjustPartCalls.count, 2)
+        let firstKey = service.adjustPartCalls[0].request.operationKey
         let secondKey = service.adjustPartCalls[1].request.operationKey
-        XCTAssertNotEqual(firstKey, secondKey, "the cancelled-but-succeeded intent's key must never be reused for a new submission")
-        XCTAssertEqual(service.appliedMutationCount, 2, "the fresh key commits as a genuinely new mutation")
+        XCTAssertNotEqual(firstKey, secondKey, "the cancelled-but-succeeded intent's key must never be reused by a subsequent submission")
+        XCTAssertEqual(service.appliedMutationCount, 2, "the fresh instance's key commits as a genuinely new mutation")
     }
 
     // MARK: - Final trio Item 2: post-commit cancellation callback proof
@@ -358,9 +364,87 @@ final class PartAdjustmentViewModelTests: XCTestCase {
         XCTAssertEqual(service.appliedMutationCount, 1, "exactly one server mutation")
         XCTAssertNil(viewModel.errorMessage, "cancellation-safe: no error write to the dismissed child view model")
         XCTAssertNil(viewModel.successMessage, "cancellation-safe: no success write to the dismissed child view model")
-        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertTrue(viewModel.isSubmitting, "cancellation-safe: isSubmitting must not be written either — flipping it would itself be a dismissed-child state write")
         XCTAssertEqual(onAdjustedCallCount, 1, "the committed adjustment must still be delivered to the callback exactly once")
         XCTAssertEqual(parentLoadPartsCallCount, 1, "the still-alive parent must refresh exactly once")
+    }
+
+    // MARK: - Cancellation shield causal proof (post-review recovery)
+    //
+    // A real `URLSession`-backed transport observes cancellation of the
+    // task it's running on and throws `CancellationError`/`URLError
+    // .cancelled` once that task is cancelled — even if the server has
+    // already committed the mutation. The tests above only proved
+    // cancellation-safety against a mock that never actually threw on
+    // cancellation, so they could pass even if `submit()` never shielded
+    // the network call at all. `MockPartsInventoryService.adjustPart` now
+    // performs a real `Task.checkCancellation()` after the commit/gate
+    // point, matching that real transport behavior. These two tests prove
+    // both halves of the fix: an UNSHIELDED call (the mock invoked
+    // directly, on the same task the view cancels) genuinely loses the
+    // response to cancellation, while `submit()`'s SHIELDED transport
+    // `Task` still delivers the committed result despite the exact same
+    // cancellation timing.
+
+    @MainActor
+    func testUnshieldedCallDirectlyOnTheMockLosesTheResponseToCancellationAfterCommit() async throws {
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 42)
+        let gate = AdjustmentAsyncGate()
+        service.adjustPartGate = { await gate.wait() }
+        let request = AdjustPartInventoryRequest(
+            delta: -1, reason: .qcReject, jobId: nil, binCode: nil, notes: nil,
+            operationKey: "unshielded-proof-key"
+        )
+
+        // Call the mock directly — no ViewModel, no shielding `Task` in
+        // between — on the SAME task the test is about to cancel. This is
+        // the "unshielded control" that `submit()` used to be equivalent
+        // to before the fix.
+        let task = Task {
+            try await service.adjustPart(sku: "SKU-A", request: request)
+        }
+
+        while await !gate.hasWaiters { await Task.yield() }
+        XCTAssertEqual(service.appliedMutationCount, 1, "the mutation commits before the cancellation-aware check")
+
+        task.cancel()
+        await gate.open()
+
+        do {
+            _ = try await task.value
+            XCTFail("an unshielded call on a cancelled task must lose its response to CancellationError, matching real transport behavior")
+        } catch is CancellationError {
+            // Expected: this is exactly the failure mode the production
+            // shield in `submit()` exists to prevent.
+        }
+        XCTAssertEqual(service.appliedMutationCount, 1, "the server-side commit still only happened once even though the caller lost the response")
+    }
+
+    @MainActor
+    func testShieldedSubmitStillDeliversTheCommittedAdjustmentUnderTheSameCancellationTiming() async {
+        let viewModel = PartAdjustmentViewModel(part: makePart())
+        viewModel.delta = -2
+        viewModel.reason = .qcReject
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 42)
+        let gate = AdjustmentAsyncGate()
+        service.adjustPartGate = { await gate.wait() }
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        let task = Task {
+            await viewModel.submit(partsInventoryService: service)
+        }
+
+        while await !gate.hasWaiters { await Task.yield() }
+        XCTAssertEqual(service.appliedMutationCount, 1, "the mutation commits before cancellation, identical timing to the unshielded proof above")
+
+        task.cancel()
+        await gate.open()
+        let result = await task.value
+
+        XCTAssertEqual(result?.resultingBalance, 42, "the shielded transport Task is not cancelled with its caller, so submit() still returns the committed adjustment")
+        XCTAssertEqual(service.appliedMutationCount, 1, "exactly one mutation, never a duplicate")
     }
 
     // MARK: - Fixtures

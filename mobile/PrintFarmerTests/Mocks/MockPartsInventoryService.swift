@@ -118,6 +118,16 @@ final class MockPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
         // assert the commit already happened server-side.
         await adjustPartGate?()
 
+        // Real URLSession-backed transports observe cooperative
+        // cancellation of the task they're running on and throw once it's
+        // cancelled, even after the server has already committed the
+        // mutation — this single check makes the mock behave the same
+        // way, so a test can prove that an UNSHIELDED call loses the
+        // response to `CancellationError` while a call shielded in its own
+        // unstructured `Task` (as production `submit()` now does) does
+        // not, because that transport task is never itself cancelled.
+        try Task.checkCancellation()
+
         if simulateResponseLossOnFirstCommit {
             // Only the first commit simulates a lost response; a
             // subsequent distinct key (new intent) commits normally.

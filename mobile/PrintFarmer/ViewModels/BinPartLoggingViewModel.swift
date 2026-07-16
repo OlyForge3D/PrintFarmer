@@ -99,29 +99,41 @@ final class BinPartLoggingViewModel {
         )
 
         do {
-            let adjustment = try await partsInventoryService.adjustPart(sku: requestSku, request: request)
-            isSubmitting = false
+            // Shielded from cancellation for the same reason documented
+            // in `PartAdjustmentViewModel.submit()`: a real transport
+            // observes cancellation of its own task and could otherwise
+            // throw away an already-committed server response if the
+            // presenting view is dismissed mid-request. The unstructured
+            // `Task` below is not automatically cancelled when this
+            // `submit()` call's own task is, so it always runs the
+            // request to completion.
+            let transport = Task {
+                try await partsInventoryService.adjustPart(sku: requestSku, request: request)
+            }
+            let adjustment = try await transport.value
+
             guard !Task.isCancelled else {
                 // The presenting view disappeared and cancelled this task
                 // while the request was in flight. The adjustment still
                 // applied server-side, so clear the key (this intent
-                // succeeded) but don't write success state into a view
-                // that's already gone.
+                // succeeded) — but don't touch `isSubmitting` or write
+                // success state into a view that's already gone.
                 operationKey = nil
                 return adjustment
             }
+            isSubmitting = false
             operationKey = nil
             successMessage = "Logged \(requestQuantity) × \(requestSku) — new balance \(adjustment.resultingBalance)"
             return adjustment
         } catch {
-            isSubmitting = false
             guard !Task.isCancelled else {
                 // Cancellation, not a genuine failure — the key is left
                 // intact so a future retry of the same intent still
-                // dedupes correctly, and no error is written to a
-                // dismissed view.
+                // dedupes correctly. Don't touch `isSubmitting` and don't
+                // write an error into a dismissed view.
                 return nil
             }
+            isSubmitting = false
             logger.warning("Log-parts adjustment failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
             return nil

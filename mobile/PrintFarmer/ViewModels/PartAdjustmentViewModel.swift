@@ -120,18 +120,35 @@ final class PartAdjustmentViewModel {
         )
 
         do {
-            let adjustment = try await partsInventoryService.adjustPart(sku: part.sku, request: request)
-            isSubmitting = false
+            // A real network transport (URLSession) watches for
+            // cancellation of the task it runs on and throws once that
+            // task is cancelled — so calling `adjustPart` directly here
+            // would risk losing an already-committed server response if
+            // the presenting view is dismissed (and this `submit()` task
+            // cancelled) while the request is in flight. Running the call
+            // in its own unstructured `Task` shields it from that
+            // cancellation: an unstructured `Task` does not automatically
+            // inherit cancellation from the task that created it, so it
+            // keeps running to completion and still delivers the
+            // committed result below even after `submit()`'s own task has
+            // been cancelled.
+            let transport = Task {
+                try await partsInventoryService.adjustPart(sku: part.sku, request: request)
+            }
+            let adjustment = try await transport.value
+
             guard !Task.isCancelled else {
                 // The presenting view disappeared and cancelled this task
                 // while the request was in flight. The adjustment still
-                // applied server-side, so clear the key/snapshot (this
-                // intent succeeded) but don't write success state into a
-                // view that's already gone.
+                // applied server-side (the shielded transport above
+                // completed regardless), so clear the key/snapshot (this
+                // intent succeeded) — but don't touch `isSubmitting` or
+                // write success state into a view that's already gone.
                 operationKey = nil
                 pendingSnapshot = nil
                 return adjustment
             }
+            isSubmitting = false
             latestOnHand = adjustment.resultingBalance
             successMessage = "New balance: \(adjustment.resultingBalance)"
             operationKey = nil
@@ -140,14 +157,15 @@ final class PartAdjustmentViewModel {
             notes = ""
             return adjustment
         } catch {
-            isSubmitting = false
             guard !Task.isCancelled else {
                 // Cancellation, not a genuine failure — the key and
                 // snapshot are left intact so a future retry of the same
-                // intent still dedupes correctly with the identical body,
-                // and no error is written to a dismissed view.
+                // intent still dedupes correctly with the identical body.
+                // Don't touch `isSubmitting` and don't write an error into
+                // a dismissed view.
                 return nil
             }
+            isSubmitting = false
             logger.warning("Adjustment failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
             return nil
