@@ -24,6 +24,7 @@ public sealed class MaintenanceAttentionSourceTests
         bool enabled = true;
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(() => enabled);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).Returns(() => Task.FromResult(enabled));
         MaintenanceAttentionSource source = new(repository.Object, gate.Object);
 
         IReadOnlyList<AttentionItemDto> visible = await source.GetItemsAsync(CancellationToken.None);

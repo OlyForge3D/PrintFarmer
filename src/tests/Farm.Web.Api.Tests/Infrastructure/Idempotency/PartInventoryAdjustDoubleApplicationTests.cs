@@ -129,6 +129,7 @@ public class PartInventoryAdjustDoubleApplicationTests : IDisposable
     {
         Mock<IOperatorFeatureGate> gate = new();
         _ = gate.Setup(g => g.IsEnabled(OperatorFeature.OfflineWriteReplay)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.OfflineWriteReplay, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         return new IdempotencyFilter(_store, gate.Object, NullLogger<IdempotencyFilter>.Instance);
     }
 

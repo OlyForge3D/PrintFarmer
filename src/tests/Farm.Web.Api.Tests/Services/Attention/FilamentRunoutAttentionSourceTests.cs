@@ -160,6 +160,7 @@ public class FilamentRunoutAttentionSourceTests
         Mock<IFilamentRunoutSwitchEvaluator> evaluator = new(MockBehavior.Strict);
         Mock<IOperatorFeatureGate> gate = new(MockBehavior.Strict);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         FilamentRunoutAttentionSource source = new(coverage.Object, evaluator.Object, gate.Object);
 
         AttentionItemDto item = (await source.GetItemsAsync(CancellationToken.None)).Should().ContainSingle().Which;
@@ -222,6 +223,7 @@ public class FilamentRunoutAttentionSourceTests
     {
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         return gate.Object;
     }
 

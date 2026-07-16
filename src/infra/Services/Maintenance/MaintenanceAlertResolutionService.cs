@@ -96,7 +96,7 @@ public sealed class MaintenanceAlertResolutionService(
 
         try
         {
-            EnsureAlertMutationEnabled(alert);
+            await EnsureAlertMutationEnabledAsync(alert, cancellationToken).ConfigureAwait(false);
 
             if (useTransaction)
             {
@@ -141,7 +141,7 @@ public sealed class MaintenanceAlertResolutionService(
                     return terminalResult;
                 }
 
-                EnsureAlertMutationEnabled(trackedAlert);
+                await EnsureAlertMutationEnabledAsync(trackedAlert, cancellationToken).ConfigureAwait(false);
                 trackedAlert.Status = MaintenanceAlertStatus.Resolved;
                 trackedAlert.ResolvedAt = resolvedAt;
                 trackedAlert.ResolvedBy = resolvedBy;
@@ -325,10 +325,10 @@ public sealed class MaintenanceAlertResolutionService(
             .OrderByDescending(l => l.PerformedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
-    private void EnsureAlertMutationEnabled(MaintenanceAlert alert)
+    private async Task EnsureAlertMutationEnabledAsync(MaintenanceAlert alert, CancellationToken cancellationToken)
     {
-        bool perToolMaintenanceEnabled =
-            _operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
+        bool perToolMaintenanceEnabled = _operatorFeatureGate is null
+            || await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, cancellationToken).ConfigureAwait(false);
         if (alert.ToolheadId.HasValue && !perToolMaintenanceEnabled)
         {
             throw new PerToolMaintenanceDisabledException();

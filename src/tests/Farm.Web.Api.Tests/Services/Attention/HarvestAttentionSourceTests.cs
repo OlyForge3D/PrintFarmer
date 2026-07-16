@@ -85,6 +85,7 @@ public class HarvestAttentionSourceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var source = new HarvestAttentionSource(_factory, gate.Object);
 
         AttentionItemDto item = Assert.Single(await source.GetItemsAsync(CancellationToken.None));
@@ -101,6 +102,7 @@ public class HarvestAttentionSourceTests : IDisposable
         var factory = new Mock<IDbContextFactory<AppDbContext>>(MockBehavior.Strict);
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(false);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         var source = new HarvestAttentionSource(factory.Object, gate.Object);
 
         IReadOnlyList<AttentionItemDto> items = await source.GetItemsAsync(CancellationToken.None);
@@ -143,6 +145,7 @@ public class HarvestAttentionSourceTests : IDisposable
                 null));
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var service = new AttentionService(
             [source.Object],
             new Mock<IAttentionSnoozeRepository>().Object,

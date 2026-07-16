@@ -27,6 +27,7 @@ public class FilamentFallbackGroupsControllerGateTests
     private FilamentFallbackGroupsController CreateController(bool enabled)
     {
         _gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(enabled);
+        _gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(enabled);
         _gate.Setup(g => g.GetFlagName(OperatorFeature.MultiSlotFallback)).Returns("multiSlotFallbackEnabled");
         return new FilamentFallbackGroupsController(
             _service.Object,

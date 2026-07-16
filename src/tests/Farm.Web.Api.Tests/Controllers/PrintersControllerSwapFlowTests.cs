@@ -71,6 +71,7 @@ public class PrintersControllerSwapFlowTests
     {
         var gate = new Mock<IOperatorFeatureGate>();
         gate.Setup(g => g.IsEnabled(OperatorFeature.GuidedSwap)).Returns(guidedSwapEnabled);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.GuidedSwap, It.IsAny<CancellationToken>())).ReturnsAsync(guidedSwapEnabled);
         gate.Setup(g => g.GetFlagName(OperatorFeature.GuidedSwap)).Returns("guidedSwapEnabled");
         return gate.Object;
     }

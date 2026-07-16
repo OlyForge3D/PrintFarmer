@@ -169,9 +169,11 @@ public sealed class AttentionControllerActionTests
         var broadcaster = new Mock<IAttentionBroadcaster>(MockBehavior.Strict);
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.Attention)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.Attention, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         if (harvestAction)
         {
             gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+            gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         }
 
         var controller = new AttentionController(

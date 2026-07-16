@@ -85,6 +85,7 @@ public class AttentionServiceTests
     {
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         return new AttentionService(
             [new StubSource("harvest", [item])],
             _snoozeRepo.Object,
@@ -626,6 +627,7 @@ public class AttentionServiceTests
                 null));
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var svc = new AttentionService(
             [new StubSource("s", [item])],
             _snoozeRepo.Object,

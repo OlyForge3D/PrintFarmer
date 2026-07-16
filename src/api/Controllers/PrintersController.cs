@@ -907,7 +907,7 @@ public class PrintersController(
         // backend). When either condition fails, both the capability flag and the odometer
         // values collapse to their unset defaults (false / null) so #719 UI consumers see a
         // deterministic "not applicable" shape rather than stale or fabricated wear.
-        bool multiSlotFallbackEnabled = featureGate.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback);
+        bool multiSlotFallbackEnabled = await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
         bool perToolAttributionActive = multiSlotFallbackEnabled && p.SupportsPerToolAttribution;
 
         // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
@@ -2840,8 +2840,8 @@ public class PrintersController(
         // Guided-swap gate (#725): the server-enforced material check and override audit
         // only apply when guidedSwapEnabled is on. When disabled, revert to the pre-#710
         // blind assignment so the direct spool-binding control remains usable.
-        bool guidedSwapEnabled = featureGate.IsEnabled(
-            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap);
+        bool guidedSwapEnabled = await featureGate.IsEnabledAsync(
+            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false);
 
         // Audit context is built ONLY for an authorized mismatch override and passed to the
         // service so the durable record commits atomically with the binding (B6). Null on
@@ -3015,7 +3015,7 @@ public class PrintersController(
     {
         // Guided-swap gate (#725): when disabled, return the standard featureDisabled 404
         // ProblemDetails before any read/validation/telemetry.
-        if (!featureGate.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap))
+        if (!await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false))
         {
             return Farm.Web.Api.Infrastructure.OperatorFeatures.OperatorFeatureProblemDetails.NotFound(
                 featureGate,

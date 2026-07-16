@@ -278,6 +278,7 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
     {
         SetupSettings(minIdleMinutes: 5, leadMinutes: 0);
         _featureGate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        _featureGate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         DateTime now = DateTime.UtcNow;
         IdleWindow goodWindow = new(
@@ -307,6 +308,7 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
     {
         SetupSettings(minIdleMinutes: 5, leadMinutes: 0);
         _featureGate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        _featureGate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         DateTime now = DateTime.UtcNow;
         IdleWindow goodWindow = new(

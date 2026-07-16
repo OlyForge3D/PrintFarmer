@@ -51,6 +51,52 @@ public sealed class RelayNativePushSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_TransportStartVetoedAfterPreparation_DoesNotCallRelay()
+    {
+        int requests = 0;
+        var transportStart = new RecordingTransportStart(permit: false);
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        NativePushDispatchResult result = await sut.SendAsync(Sample, transportStart);
+
+        result.Reason.Should().Be("transportStartVetoed");
+        transportStart.Calls.Should().Be(1);
+        Volatile.Read(ref requests).Should().Be(0,
+            "a denied start signal must prevent the relay HTTP call");
+    }
+
+    [Fact]
+    public async Task SendAsync_CancellationAlreadyRequestedAfterPreparation_DoesNotCallTryStartOrRelay()
+    {
+        // Hicks blocker 2: preparation (envelope serialization, request
+        // construction) has no await point that observes cancellation, so
+        // without an explicit check the sender would reach TryStart()
+        // regardless of a token cancelled in the meantime — committing
+        // dispatcher-owned lifecycle/dedupe/rate state and Attempted for an
+        // attempt that will never reach the relay.
+        int requests = 0;
+        var transportStart = new RecordingTransportStart(permit: true);
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await sut.SendAsync(Sample, transportStart, cts.Token));
+
+        transportStart.Calls.Should().Be(0,
+            "a pre-cancelled attempt must never reach the transport-start boundary, even though preparation already completed");
+        Volatile.Read(ref requests).Should().Be(0);
+    }
+
+    [Fact]
     public async Task SendAsync_Http2xx_ReturnsDelivered_AndSendsBearerAuth()
     {
         var settings = MakeRelaySettings();
@@ -290,5 +336,21 @@ public sealed class RelayNativePushSenderTests
     private sealed class StubHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;
+    }
+
+    private sealed class RecordingTransportStart(bool permit) : INativePushTransportStart
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task<NativePushTransportStartDecision> TryStartAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _calls);
+            NativePushTransportStartDecision decision = permit
+                ? NativePushTransportStartDecision.Permit()
+                : NativePushTransportStartDecision.Veto();
+            return Task.FromResult(decision);
+        }
     }
 }

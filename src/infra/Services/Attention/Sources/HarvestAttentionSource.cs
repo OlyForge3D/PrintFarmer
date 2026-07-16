@@ -19,7 +19,7 @@ public sealed class HarvestAttentionSource(
     /// <inheritdoc />
     public async Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken)
     {
-        if (!featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        if (!await featureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, cancellationToken).ConfigureAwait(false))
         {
             return [];
         }

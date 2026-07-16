@@ -181,6 +181,7 @@ public sealed class PartOutputSnapshotServiceTests : IDisposable
     {
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(enabled);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(enabled);
         return new PartOutputSnapshotService(db, gate.Object);
     }
 

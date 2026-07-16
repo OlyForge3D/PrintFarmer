@@ -100,6 +100,7 @@ public class PrintStatsExternalBaselineTests
 
         var gateMock = new Mock<IOperatorFeatureGate>();
         gateMock.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gateMock.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var settings = new PrintStatsSyncSettings { IncludePrintFarmerJobs = true, ApiTimeoutSeconds = 30 };
 
@@ -479,6 +480,7 @@ public class PrintStatsExternalBaselineTests
         factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
         Mock<IOperatorFeatureGate> featureGate = new();
         featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        featureGate.Setup(gate => gate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var clock = new ManualTimeProvider();
         var accumulator = new ToolheadActivityAccumulator(TimeSpan.FromMinutes(10), clock);
@@ -597,6 +599,7 @@ public class PrintStatsExternalBaselineTests
         factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
         Mock<IOperatorFeatureGate> featureGate = new();
         featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        featureGate.Setup(gate => gate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var clock = new ManualTimeProvider();
         var accumulator = new ToolheadActivityAccumulator(TimeSpan.FromMinutes(10), clock);
@@ -718,6 +721,7 @@ public class PrintStatsExternalBaselineTests
         factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
         Mock<IOperatorFeatureGate> featureGate = new();
         featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        featureGate.Setup(gate => gate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var clock = new ManualTimeProvider();
         var accumulator = new ToolheadActivityAccumulator(TimeSpan.FromMinutes(10), clock);
@@ -846,6 +850,7 @@ public class PrintStatsExternalBaselineTests
         factory.Setup(candidate => candidate.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
         Mock<IOperatorFeatureGate> featureGate = new();
         featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        featureGate.Setup(gate => gate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var clock = new ManualTimeProvider();
         // Max segment must cover the full 1h sampling interval below (the default 10-minute test cap
@@ -955,6 +960,7 @@ public class PrintStatsExternalBaselineTests
 
         Mock<IOperatorFeatureGate> featureGate = new();
         featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        featureGate.Setup(gate => gate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         ServiceCollection services = new();
         services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(dbName));

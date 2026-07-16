@@ -342,7 +342,7 @@ public class JobQueueController(
         [FromBody] HarvestJobRequest? request,
         CancellationToken ct)
     {
-        if (!operatorFeatureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        if (!await operatorFeatureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, ct).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(
                 operatorFeatureGate,

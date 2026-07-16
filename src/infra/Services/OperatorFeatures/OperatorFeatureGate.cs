@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Settings;
@@ -89,6 +91,58 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
         return Resolve(descriptor, LoadSettings());
     }
 
+    public async Task<bool> IsEnabledAsync(OperatorFeature feature, CancellationToken cancellationToken = default)
+    {
+        // General fallback path (controllers, filters, hosted services, capability
+        // gating). Async and cancellation-aware so callers never block a thread-pool
+        // worker on the repository read. Failure semantics MIRROR the synchronous
+        // <see cref="IsEnabled(OperatorFeature)"/>: a repository/DB failure logs and
+        // degrades to the documented configured/default result rather than propagating
+        // (which would turn a transient outage into an HTTP 500 for every migrated
+        // caller). Caller-requested cancellation is control flow and is rethrown, never
+        // swallowed into a fallback answer. Security/correctness boundaries that must
+        // fail closed use <see cref="IsEnabledStrictAsync"/> instead.
+        FeatureDescriptor descriptor = FindDescriptor(feature);
+        try
+        {
+            OperatorFeatureSettings settings = await LoadSettingsStrictAsync(cancellationToken).ConfigureAwait(false);
+            return Resolve(descriptor, settings);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Do not swallow caller-requested cancellation: propagate so shutdown/abort
+            // is observed as control flow rather than a spurious feature answer.
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // Scoped strictly to persisted-settings acquisition so a DB outage, provider
+            // startup race, or missing table degrades to defaults instead of a 500. The
+            // environment hard-disable override is still applied by Resolve below.
+            _logger.LogWarning(
+                ex,
+                "Unable to read persisted OperatorFeatureSettings for {FlagName}; falling back to defaults",
+                descriptor.FlagName);
+            return Resolve(descriptor, new OperatorFeatureSettings());
+        }
+    }
+
+    public async Task<bool> IsEnabledStrictAsync(OperatorFeature feature, CancellationToken cancellationToken = default)
+    {
+        // Strict, fail-closed companion used only by security/correctness boundaries —
+        // currently the native-push transport reservation/authorization path. Never
+        // blocks a thread on the async repository read, and DELIBERATELY does NOT
+        // swallow repository/DB exceptions: dispatchers depend on the caller-scoped
+        // catch site to log fail-closed (with delivery/lifecycle context) and roll back
+        // reservations in one place, so an outage can never silently authorize a send.
+        // A malformed persisted JSON row still degrades to defaults (mirrors the general
+        // and sync paths): that is a data-shape failure the gate can safely absorb
+        // without hiding an infrastructure outage. Cancellation propagates unchanged.
+        FeatureDescriptor descriptor = FindDescriptor(feature);
+        OperatorFeatureSettings settings = await LoadSettingsStrictAsync(cancellationToken).ConfigureAwait(false);
+        return Resolve(descriptor, settings);
+    }
+
     public bool IsHardDisabledByEnvironment(OperatorFeature feature)
         => IsEnvironmentHardDisable(FindDescriptor(feature).FlagName);
 
@@ -121,6 +175,12 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
         // Every failure mode — DB down, provider misconfigured, malformed JSON — falls back
         // to class defaults. Configuration-section binding is intentionally NOT consulted
         // here so that `OperatorFeatures__<flag>=true` cannot force-enable a feature.
+        //
+        // Callers that hold in-memory locks (native-push dispatcher/lifecycle/transport)
+        // must use <see cref="LoadSettingsStrictAsync"/> via
+        // <see cref="IsEnabledStrictAsync"/> to avoid pinning a thread-pool worker on the
+        // underlying EF round-trip; see the documented contract on
+        // <see cref="IOperatorFeatureGate.IsEnabledStrictAsync"/>.
         try
         {
 #pragma warning disable VSTHRD002 // Synchronously waiting on tasks — required to keep the gate sync surface
@@ -130,13 +190,7 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
                 .GetResult();
 #pragma warning restore VSTHRD002
 
-            if (row is null || string.IsNullOrWhiteSpace(row.SettingsJson))
-            {
-                return new OperatorFeatureSettings();
-            }
-
-            OperatorFeatureSettings? parsed = JsonSerializer.Deserialize<OperatorFeatureSettings>(row.SettingsJson);
-            return parsed ?? new OperatorFeatureSettings();
+            return ParseSettingsRow(row);
         }
         catch (JsonException ex)
         {
@@ -152,6 +206,58 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
             _logger.LogWarning(ex, "Unable to read persisted OperatorFeatureSettings; falling back to defaults");
             return new OperatorFeatureSettings();
         }
+    }
+
+    private async Task<OperatorFeatureSettings> LoadSettingsStrictAsync(CancellationToken cancellationToken)
+    {
+        // Shared strict loader for both async paths. Used directly by
+        // <see cref="IsEnabledStrictAsync"/> (fail-closed) and wrapped by the
+        // fallback try/catch in <see cref="IsEnabledAsync"/>. The native-push
+        // dispatcher reads the gate at its authorization linearization point (see docs
+        // on <see cref="IOperatorFeatureGate.IsEnabledStrictAsync"/>), outside every
+        // dispatcher/lifecycle/item/transport lock. Cancellation propagates via
+        // <paramref name="cancellationToken"/> so a shutdown/caller cancel is observed
+        // promptly and the caller can roll back reservations without waiting on the DB.
+        //
+        // Repository/DB exceptions PROPAGATE (unlike <see cref="LoadSettings"/>) so the
+        // strict caller can log fail-closed with delivery/lifecycle context and roll
+        // back its reservations at the same site; the general fallback caller converts
+        // them to defaults. A malformed persisted JSON row still degrades to class
+        // defaults: that is a data-shape issue and matches the capability endpoint's
+        // contract.
+        AppSettingsEntity? row;
+        try
+        {
+            row = await _repository
+                .GetReadOnlyAsync(OperatorFeatureSettings.SectionName, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "OperatorFeatureSettings row is malformed JSON; falling back to defaults");
+            return new OperatorFeatureSettings();
+        }
+
+        try
+        {
+            return ParseSettingsRow(row);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "OperatorFeatureSettings row is malformed JSON; falling back to defaults");
+            return new OperatorFeatureSettings();
+        }
+    }
+
+    private static OperatorFeatureSettings ParseSettingsRow(AppSettingsEntity? row)
+    {
+        if (row is null || string.IsNullOrWhiteSpace(row.SettingsJson))
+        {
+            return new OperatorFeatureSettings();
+        }
+
+        OperatorFeatureSettings? parsed = JsonSerializer.Deserialize<OperatorFeatureSettings>(row.SettingsJson);
+        return parsed ?? new OperatorFeatureSettings();
     }
 
     private bool Resolve(FeatureDescriptor descriptor, OperatorFeatureSettings settings)

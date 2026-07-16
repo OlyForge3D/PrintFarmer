@@ -48,4 +48,11 @@ public sealed record NativePushDispatchResult(
     /// <summary>Convenience: sender is not configured; caller should treat as skip.</summary>
     public static NativePushDispatchResult NotConfigured()
         => new(Success: false, IsTransient: false, Reason: "notConfigured");
+
+    /// <summary>
+    /// Convenience: the dispatcher vetoed transport because the lifecycle was superseded.
+    /// No provider call occurred.
+    /// </summary>
+    public static NativePushDispatchResult TransportStartVetoed()
+        => new(Success: false, IsTransient: false, Reason: "transportStartVetoed");
 }

@@ -384,7 +384,7 @@ public class NotificationsController(INotificationService notificationService) :
         ArgumentNullException.ThrowIfNull(operatorFeatures);
         ArgumentNullException.ThrowIfNull(deviceTokens);
 
-        if (!operatorFeatures.IsEnabled(OperatorFeature.NativePush))
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
         }
@@ -432,7 +432,7 @@ public class NotificationsController(INotificationService notificationService) :
         ArgumentNullException.ThrowIfNull(operatorFeatures);
         ArgumentNullException.ThrowIfNull(deviceTokens);
 
-        if (!operatorFeatures.IsEnabled(OperatorFeature.NativePush))
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
         }
@@ -506,7 +506,7 @@ public class NotificationsController(INotificationService notificationService) :
     {
         ArgumentNullException.ThrowIfNull(operatorFeatures);
         ArgumentNullException.ThrowIfNull(dbContext);
-        if (!operatorFeatures.IsEnabled(OperatorFeature.NativePush))
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
         }
@@ -538,7 +538,7 @@ public class NotificationsController(INotificationService notificationService) :
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operatorFeatures);
-        if (!operatorFeatures.IsEnabled(OperatorFeature.NativePush))
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
         }

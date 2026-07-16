@@ -74,7 +74,7 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
         // per-toolhead maintenance must not leak into the shift plan. Drop any
         // alert scoped to a specific toolhead so only printer-wide maintenance is
         // projected. Printer-wide alerts (ToolheadId == null) always flow through.
-        bool perToolEnabled = _featureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+        bool perToolEnabled = await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
         if (!perToolEnabled)
         {
             active = active.Where(a => !a.ToolheadId.HasValue).ToList();
