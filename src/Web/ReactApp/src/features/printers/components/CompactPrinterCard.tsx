@@ -40,6 +40,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { TagDto } from '@/services/tagService';
+import { areCompactPrinterCardPropsEqual } from '@/features/printers/utils/compactPrinterCardMemo';
 
 interface CompactPrinterCardProps {
   printer: Printer | PrinterDisplay;
@@ -412,7 +413,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                 </>
               );
             }
-
             if (printer.spoolInfo?.hasActiveSpool) {
               const color = printer.spoolInfo.colorHex ?? '#888';
               const remaining = printer.spoolInfo.remainingWeightG;
@@ -585,4 +585,4 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
       {/* end card body */}
     </article>
   );
-});
+}, areCompactPrinterCardPropsEqual);
