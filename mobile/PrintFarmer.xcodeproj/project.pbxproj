@@ -194,6 +194,7 @@
 		CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */; };
 		CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */; };
 		CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */; };
+		D03264A0F5F62252FDBA4E5B /* BinPartLoggingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BB420C7D1448757457238B5 /* BinPartLoggingViewModelTests.swift */; };
 		D08B97AB1E4FC1A905AA95DB /* MaintenanceAlertRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF9ACFBFE1D96FCCB90261DF /* MaintenanceAlertRow.swift */; };
 		D0C9B8A7F6E5D4C3B2A1F2E1 /* NFCTagParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParser.swift */; };
 		D1A6C200000000000000F001 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D1A6C200000000000000F005 /* SnapshotTesting */; };
@@ -226,6 +227,7 @@
 		E1E5F6A7B8C9D0E1F2A3B4C5 /* NFCWriteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F6A7B8C9D0E1F2A3B4C5D6 /* NFCWriteView.swift */; };
 		E36958254468F349BCE07693 /* JobAnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9E5245051668A52E97EA4A9 /* JobAnalyticsService.swift */; };
 		E46139D1458EC8E0E1D8E832 /* NotificationServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820455561ACB377B99D56057 /* NotificationServiceProtocol.swift */; };
+		E55D8957A384592EA598761B /* BinPartLoggingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FC5DA3A29833B7C3CCD9C38 /* BinPartLoggingViewModel.swift */; };
 		E6B5C07C74F94339C65677B7 /* PartsInventoryConflictTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07AA8A2045A2F85558A9FC5 /* PartsInventoryConflictTests.swift */; };
 		E9DC782356C902A24D0D9172 /* PartsInventoryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F17A591BE794A57D83307E /* PartsInventoryViewModelTests.swift */; };
 		EA1637E6E57AC07CE7EBCF2D /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A04E921C5D66B7F4B5F80B3C /* KeychainSwift */; };
@@ -311,6 +313,7 @@
 		1A2B3C4D5E6F7A8B9C0D1E2F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1B26779E9FB15EA54BD99B43 /* PartsInventoryListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartsInventoryListView.swift; sourceTree = "<group>"; };
 		1B96F411A0F4B4EA6AABB11B /* DemoAutoDispatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAutoDispatchService.swift; sourceTree = "<group>"; };
+		1BB420C7D1448757457238B5 /* BinPartLoggingViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BinPartLoggingViewModelTests.swift; sourceTree = "<group>"; };
 		1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFixtures.swift; sourceTree = "<group>"; };
 		1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterServiceTests.swift; sourceTree = "<group>"; };
 		1F8B5C6B605BB5B8AE7E1BF3 /* FailureDetectionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureDetectionModels.swift; sourceTree = "<group>"; };
@@ -368,6 +371,7 @@
 		6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecodingTests.swift; sourceTree = "<group>"; };
 		6EE23E12C23FE0D3C5476AD0 /* AutoDispatchServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchServiceProtocol.swift; sourceTree = "<group>"; };
 		6F6608F46256F5914589FD48 /* HarvestSheetView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HarvestSheetView.swift; sourceTree = "<group>"; };
+		6FC5DA3A29833B7C3CCD9C38 /* BinPartLoggingViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BinPartLoggingViewModel.swift; sourceTree = "<group>"; };
 		7624589C7329A2C995FAE40D /* PartAdjustmentViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartAdjustmentViewModel.swift; sourceTree = "<group>"; };
 		7B2964C5D45A5CE3875411C5 /* DemoDispatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoDispatchService.swift; sourceTree = "<group>"; };
 		7BFFF06BB67FE01E4DADD88E /* DemoSpoolService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSpoolService.swift; sourceTree = "<group>"; };
@@ -800,6 +804,7 @@
 				32DEA03A8035CAB7B908215E /* HarvestViewModelTests.swift */,
 				27F17A591BE794A57D83307E /* PartsInventoryViewModelTests.swift */,
 				976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */,
+				1BB420C7D1448757457238B5 /* BinPartLoggingViewModelTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1105,6 +1110,7 @@
 				87B9A481D27DFAD0954FDBB7 /* HarvestViewModel.swift */,
 				09DC3371C5396DF28C087A78 /* PartsInventoryViewModel.swift */,
 				7624589C7329A2C995FAE40D /* PartAdjustmentViewModel.swift */,
+				6FC5DA3A29833B7C3CCD9C38 /* BinPartLoggingViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1363,6 +1369,7 @@
 				E9DC782356C902A24D0D9172 /* PartsInventoryViewModelTests.swift in Sources */,
 				E6B5C07C74F94339C65677B7 /* PartsInventoryConflictTests.swift in Sources */,
 				C168511ECD1BDBD8B1E68370 /* PartAdjustmentViewModelTests.swift in Sources */,
+				D03264A0F5F62252FDBA4E5B /* BinPartLoggingViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1551,6 +1558,7 @@
 				AAA6CE79BF9D8D28AB9DEB7D /* PartsInventoryListView.swift in Sources */,
 				8132EE7A42B14BE4C6AF7527 /* InventoryView.swift in Sources */,
 				60F61ECE0CCE4FD024E2A99C /* PartAdjustmentViewModel.swift in Sources */,
+				E55D8957A384592EA598761B /* BinPartLoggingViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

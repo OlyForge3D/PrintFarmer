@@ -6,19 +6,27 @@ import SwiftUI
 /// the harvest flow for an outstanding completed job.
 struct BinScanResultView: View {
     let bin: BinResponse
+    /// Called with the successful log-parts adjustment so a presenting
+    /// parent with an owned parts-inventory list can refresh its on-hand
+    /// state instead of showing stale data after this sheet dismisses.
+    /// Mirrors `PartScanResultView.onAdjusted`; `ScanView`'s current call
+    /// site has no owned list to refresh, so it passes none.
+    var onAdjusted: ((PartAdjustmentResponse) -> Void)?
 
     @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
+    @State private var viewModel: BinPartLoggingViewModel
     @State private var availableParts: [PartInventoryResponse] = []
-    @State private var selectedSku: String = ""
-    @State private var quantity: Int = 1
     @State private var isLoadingParts = false
-    @State private var isSubmitting = false
-    @State private var errorMessage: String?
-    @State private var successMessage: String?
     @State private var showJobPicker = false
     @State private var harvestJob: PrintJob?
     @State private var activeTasks: [Task<Void, Never>] = []
+
+    init(bin: BinResponse, onAdjusted: ((PartAdjustmentResponse) -> Void)? = nil) {
+        self.bin = bin
+        self.onAdjusted = onAdjusted
+        _viewModel = State(initialValue: BinPartLoggingViewModel(bin: bin))
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,29 +49,44 @@ struct BinScanResultView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("SKU", selection: $selectedSku) {
+                        Picker("SKU", selection: $viewModel.selectedSku) {
                             ForEach(availableParts) { part in
                                 Text("\(part.name) (\(part.sku))").tag(part.sku)
                             }
                         }
+                        .disabled(viewModel.isSubmitting)
                         .accessibilityIdentifier("binScan.skuPicker")
+                        .onChange(of: viewModel.selectedSku) { _, _ in viewModel.noteIntentChanged() }
 
-                        Stepper(value: $quantity, in: 1...9999) {
+                        Stepper(value: $viewModel.quantity, in: 1...9999) {
                             HStack {
                                 Text("Quantity")
                                 Spacer()
-                                Text("\(quantity)")
+                                Text("\(viewModel.quantity)")
                                     .font(.body.monospacedDigit())
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .disabled(viewModel.isSubmitting)
                         .accessibilityIdentifier("binScan.quantityStepper")
+                        .onChange(of: viewModel.quantity) { _, _ in viewModel.noteIntentChanged() }
 
                         Button {
-                            let task = Task { await logParts() }
+                            // Synchronous re-entrancy guard runs BEFORE the
+                            // Task is created, on the same run-loop turn as
+                            // the tap — this is what actually prevents rapid
+                            // duplicate mutations (an async guard inside
+                            // submit() would leave a race window between two
+                            // fast taps).
+                            guard viewModel.beginSubmit() else { return }
+                            let task = Task {
+                                if let adjustment = await viewModel.submit(partsInventoryService: services.partsInventoryService) {
+                                    onAdjusted?(adjustment)
+                                }
+                            }
                             activeTasks.append(task)
                         } label: {
-                            if isSubmitting {
+                            if viewModel.isSubmitting {
                                 HStack {
                                     Spacer()
                                     ProgressView()
@@ -76,7 +99,7 @@ struct BinScanResultView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(Color.pfAccent)
-                        .disabled(isSubmitting || selectedSku.isEmpty)
+                        .disabled(!viewModel.canSubmit)
                         .frame(minHeight: 44)
                         .accessibilityIdentifier("binScan.logParts")
                     }
@@ -98,7 +121,7 @@ struct BinScanResultView: View {
                     Text("Harvest Shortcut")
                 }
 
-                if let successMessage {
+                if let successMessage = viewModel.successMessage {
                     Section {
                         Label(successMessage, systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
@@ -112,12 +135,17 @@ struct BinScanResultView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                        .disabled(viewModel.isSubmitting)
                 }
             }
-            .alert("Error", isPresented: .constant(errorMessage != nil)) {
-                Button("OK") { errorMessage = nil }
+            // Blocks swipe-to-dismiss / tap-outside while a log-parts
+            // submission is in flight, matching the disabled Done button —
+            // an in-flight adjustment must not be abandoned mid-request.
+            .interactiveDismissDisabled(viewModel.isSubmitting)
+            .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
+                Button("OK") { viewModel.errorMessage = nil }
             } message: {
-                if let errorMessage {
+                if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage)
                 }
             }
@@ -139,38 +167,13 @@ struct BinScanResultView: View {
         isLoadingParts = true
         do {
             availableParts = try await services.partsInventoryService.listParts()
-            if selectedSku.isEmpty {
-                selectedSku = availableParts.first?.sku ?? ""
+            if viewModel.selectedSku.isEmpty {
+                viewModel.selectedSku = availableParts.first?.sku ?? ""
             }
         } catch {
-            errorMessage = error.localizedDescription
+            viewModel.errorMessage = error.localizedDescription
         }
         isLoadingParts = false
-    }
-
-    private func logParts() async {
-        guard !selectedSku.isEmpty else { return }
-        isSubmitting = true
-        errorMessage = nil
-        successMessage = nil
-
-        let request = AdjustPartInventoryRequest(
-            delta: quantity,
-            reason: .manual,
-            jobId: nil,
-            binCode: bin.code,
-            notes: "Logged at bin \(bin.code) via scan station",
-            operationKey: UUID().uuidString
-        )
-
-        do {
-            let adjustment = try await services.partsInventoryService.adjustPart(sku: selectedSku, request: request)
-            successMessage = "Logged \(quantity) × \(selectedSku) — new balance \(adjustment.resultingBalance)"
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-
-        isSubmitting = false
     }
 }
 
