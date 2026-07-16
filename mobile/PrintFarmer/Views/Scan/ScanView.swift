@@ -84,10 +84,10 @@ struct ScanView: View {
                     router.navigate(to: .printerDetail(id: printer.id))
                 }
             }
-            .onChange(of: viewModel.pendingPrinterDestination) { _, destination in
+            .onChange(of: viewModel.pendingDeepLinkDestination) { _, destination in
                 guard let destination else { return }
                 router.navigate(to: destination)
-                viewModel.pendingPrinterDestination = nil
+                viewModel.pendingDeepLinkDestination = nil
             }
             .task {
                 viewModel.configure(

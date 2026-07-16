@@ -51,12 +51,13 @@ final class ScanViewModel {
     var isScanning = false
     var errorMessage: String?
     var pendingOutcome: ScanOutcome?
-    /// Set when a scanned code parses as a `printfarmer://printer/...`
-    /// deep link. The view observes this and forwards it to
-    /// `AppRouter.navigate(to:)` (the same entry point used for NFC/URL
-    /// deep links) then clears it — printers are never presented as a
-    /// sheet.
-    var pendingPrinterDestination: DeepLinkDestination?
+    /// Set when a scanned code parses as a `printfarmer://printer/...` or
+    /// `printfarmer://spool/...`-style deep link (including a structured
+    /// spool URL/JSON QR payload resolved via `QRCodeParser`). The view
+    /// observes this and forwards it to `AppRouter.navigate(to:)` (the same
+    /// entry point used for NFC/URL deep links) then clears it — printers
+    /// and spools are never presented as a sheet from this view-model.
+    var pendingDeepLinkDestination: DeepLinkDestination?
     /// Set when a scanned code resolves to a known filament barcode so the
     /// view can forward it into the existing `BarcodeIntakeView` flow
     /// (reused as-is per #714's frozen scope) instead of re-implementing
@@ -120,10 +121,17 @@ final class ScanViewModel {
             switch destination {
             case .printerDetail, .printerReady:
                 recordRecentScan(icon: "printer", title: "Printer", subtitle: trimmed)
-                pendingPrinterDestination = destination
+                pendingDeepLinkDestination = destination
                 return
-            case .spoolDetail:
-                break // Not produced by a scan; fall through to resolution below.
+            case .spoolDetail(let id):
+                // CAN be produced by a scan: a printed or NFC-written
+                // `printfarmer://spool/{id}` tag parses as exactly this
+                // deep link. Route directly to spool detail, matching the
+                // printer case above, rather than falling through to
+                // bin/part/barcode resolution.
+                recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(id)")
+                pendingDeepLinkDestination = destination
+                return
             }
         }
 
@@ -163,6 +171,21 @@ final class ScanViewModel {
             return
         }
 
+        // Structured spool payloads (URL or JSON forms — e.g.
+        // `https://host/spools/42`, `{"spoolId": 42}`) are unambiguous and
+        // must never be registered as a raw barcode, even if Barcode
+        // Intake is unavailable. A bare positive-integer code is
+        // deliberately NOT treated as structured here (see
+        // `QRCodeParser.parseStructured`) since genuine EAN/UPC barcodes
+        // are also numeric — those get first crack via Barcode Intake
+        // below, falling back to a spool ID only on a definitive miss.
+        guard isViewActive else { return }
+        if let spoolId = QRCodeParser.parseStructured(trimmed) {
+            recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(spoolId)")
+            pendingDeepLinkDestination = .spoolDetail(id: spoolId)
+            return
+        }
+
         guard let barcodeIntakeService else {
             pendingOutcome = .unknownCode(trimmed)
             return
@@ -175,8 +198,17 @@ final class ScanViewModel {
                 pendingSpoolBarcode = trimmed
             } else {
                 guard isViewActive else { return }
-                recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
-                pendingOutcome = .unknownCode(trimmed)
+                // Known raw barcodes retain Barcode Intake (handled above);
+                // an unresolved bare positive-integer code that Barcode
+                // Intake doesn't recognize falls back to being treated as
+                // an (unresolved) spool ID rather than an unknown code.
+                if let spoolId = QRCodeParser.parse(trimmed) {
+                    recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(spoolId)")
+                    pendingDeepLinkDestination = .spoolDetail(id: spoolId)
+                } else {
+                    recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
+                    pendingOutcome = .unknownCode(trimmed)
+                }
             }
         } catch {
             logger.warning("Spool resolution failed: \(error.localizedDescription)")
