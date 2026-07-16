@@ -121,4 +121,37 @@ final class HarvestUITests: PrintFarmerUITestCase {
         XCTAssertTrue(binPickerTitle.waitForExistence(timeout: 5),
                       "Without a scanner, the bin affordance should fall back to a bin selection list")
     }
+
+    /// Dispute C (#714): "Done" must only dismiss the sheet — `onHarvested`
+    /// now fires immediately on the server response via `.onChange(of:
+    /// viewModel.result)`, not from this button. The demo harvest service
+    /// responds without artificial delay and doesn't track harvested state
+    /// on the job itself, so this test covers the reachable, deterministic
+    /// piece: submitting successfully reaches the success view and Done
+    /// dismisses the sheet.
+    func testSubmittingHarvestShowsSuccessAndDoneDismissesSheet() {
+        openCompletedJobDetail()
+
+        let harvestButton = app.buttons["jobDetail.harvestToInventory"]
+        XCTAssertTrue(harvestButton.waitForExistence(timeout: 5))
+        harvestButton.tap()
+        XCTAssertTrue(app.navigationBars["Harvest Plate"].waitForExistence(timeout: 5))
+
+        let binField = app.textFields["harvest.binCode"]
+        XCTAssertTrue(binField.waitForExistence(timeout: 3))
+        binField.tap()
+        binField.typeText("BIN-1")
+
+        let submitButton = app.buttons["harvest.submit"]
+        XCTAssertTrue(submitButton.waitForExistence(timeout: 3))
+        submitButton.tap()
+
+        let doneButton = app.buttons["Done"]
+        XCTAssertTrue(doneButton.waitForExistence(timeout: 5),
+                      "A successful harvest should present the success view with a Done action")
+        doneButton.tap()
+
+        XCTAssertFalse(app.navigationBars["Harvest Plate"].exists,
+                       "Done should dismiss the harvest sheet")
+    }
 }

@@ -177,6 +177,15 @@ struct BinScanResultView: View {
     }
 }
 
+/// Bin-scan harvest shortcut eligibility (Dispute C, #714): a candidate must
+/// be `Completed` and not yet harvested. Extracted to file scope (rather
+/// than a private computed property on the picker view) so it has
+/// deterministic, direct unit coverage independent of any UI/demo-data
+/// rendering path.
+func isHarvestEligible(_ candidate: QueuedPrintJobResponse) -> Bool {
+    candidate.job.status.caseInsensitiveCompare("Completed") == .orderedSame && candidate.job.harvestedAt == nil
+}
+
 /// Lightweight picker listing completed jobs, used by the bin-scan harvest
 /// shortcut (#714). Fetches the compact queue list, filters to completed
 /// jobs client-side, then resolves the selected job's full detail (needed
@@ -191,8 +200,11 @@ private struct HarvestEligibleJobPickerView: View {
     @State private var isResolving = false
     @State private var errorMessage: String?
 
+    /// Completed jobs not yet harvested (Dispute C, #714) — once
+    /// `harvestedAt` is set the job drops out of this picker even though it
+    /// remains visible elsewhere in Recent/Tasks.
     private var completedCandidates: [QueuedPrintJobResponse] {
-        candidates.filter { $0.job.status.caseInsensitiveCompare("Completed") == .orderedSame }
+        candidates.filter(isHarvestEligible)
     }
 
     var body: some View {

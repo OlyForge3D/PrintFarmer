@@ -249,6 +249,19 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(job.priority, 1)
         XCTAssertEqual(job.queuePosition, 1)
         XCTAssertEqual(job.assignedPrinterName, "Prusa MK4")
+        XCTAssertNil(job.harvestedAt, "harvestedAt is absent from the JSON and must decode as nil")
+    }
+
+    /// Dispute C (#714): `harvestedAt` must decode when present on a
+    /// completed, already-harvested job.
+    func testPrintJobDecodesHarvestedAtWhenPresent() throws {
+        let job = try decoder.decode(
+            PrintJob.self,
+            from: TestJSON.printJobHarvested.data(using: .utf8)!
+        )
+
+        XCTAssertEqual(job.status, .completed)
+        XCTAssertNotNil(job.harvestedAt)
     }
 
     func testPrintJobDecodesTimestamps() throws {
@@ -322,6 +335,45 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(jobs.count, 2)
         XCTAssertEqual(jobs[0].status, .printing)
         XCTAssertEqual(jobs[1].status, .queued)
+    }
+
+    // MARK: - QueuedJobInfo (QueuedPrintJobWithFileMetaDto, Dispute C harvestedAt)
+
+    func testQueuedJobInfoDecodesNilHarvestedAtWhenAbsent() throws {
+        let response = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompleted
+        )
+
+        XCTAssertEqual(response.job.jobStatus, .completed)
+        XCTAssertNil(response.job.harvestedAt, "harvestedAt is absent from the JSON and must decode as nil")
+    }
+
+    func testQueuedJobInfoDecodesHarvestedAtWhenPresent() throws {
+        let response = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompletedHarvested
+        )
+
+        XCTAssertEqual(response.job.jobStatus, .completed)
+        XCTAssertNotNil(response.job.harvestedAt)
+    }
+
+    /// Dispute C (#714): the bin-scan harvest picker's eligibility predicate
+    /// (`isHarvestEligible` in BinScanResultView.swift) must admit only
+    /// completed, not-yet-harvested jobs.
+    func testHarvestEligiblePredicateExcludesAlreadyHarvestedJobs() throws {
+        let notHarvested = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompleted
+        )
+        let alreadyHarvested = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompletedHarvested
+        )
+        let stillPrinting = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponsePrinting
+        )
+
+        XCTAssertTrue(isHarvestEligible(notHarvested))
+        XCTAssertFalse(isHarvestEligible(alreadyHarvested), "Already-harvested jobs must not reappear in the picker")
+        XCTAssertFalse(isHarvestEligible(stillPrinting), "Only Completed jobs are eligible")
     }
 
     // MARK: - Location (LocationDto)
