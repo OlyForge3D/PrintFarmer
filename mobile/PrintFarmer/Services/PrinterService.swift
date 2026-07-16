@@ -232,15 +232,50 @@ actor PrinterService: PrinterServiceProtocol {
         sourceToolheadId: UUID,
         material: String
     ) async throws -> AvailableFallbackMember? {
-        // Query-encode `material` so materials with spaces / non-ASCII (e.g.
-        // "PLA-CF", "PET‑G") reach the controller intact. Fallback to the
-        // raw string is safe here — the backend validates `material` and
-        // returns 400 for empty/blank input.
-        let encodedMaterial = material.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? material
+        // Strict RFC 3986 encoding for `material`: only unreserved characters
+        // (ALPHA / DIGIT / "-" / "." / "_" / "~") pass through. This is
+        // deliberately narrower than `.urlQueryAllowed`, which leaves the
+        // sub-delims (`&`, `=`, `+`, etc.) unescaped and lets a free-text
+        // material like `PLA&x=1` inject a spurious query parameter or
+        // `PLA+` decode to `PLA ` on the server. `sourceToolheadId` is a
+        // UUID string composed entirely of unreserved characters, so it is
+        // safe to interpolate directly.
+        let encodedMaterial = Self.rfc3986Encode(material)
         let path = "/api/printers/\(printerId)/fallback-groups/available"
             + "?sourceToolheadId=\(sourceToolheadId.uuidString)"
             + "&material=\(encodedMaterial)"
         return try await apiClient.get(path) as AvailableFallbackMember?
+    }
+
+    /// RFC 3986 unreserved characters — the only characters that are safe
+    /// unescaped in a URL query component. Any other character (including
+    /// the sub-delimiters `& = + ? # / , ; :` and the space) is percent
+    /// encoded.
+    private static let rfc3986Unreserved: CharacterSet = {
+        var set = CharacterSet()
+        set.insert(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        set.insert(charactersIn: "abcdefghijklmnopqrstuvwxyz")
+        set.insert(charactersIn: "0123456789")
+        set.insert(charactersIn: "-._~")
+        return set
+    }()
+
+    /// Percent-encodes `value` for use as a URL query value under RFC 3986.
+    /// The `addingPercentEncoding` call cannot fail for this allowed set
+    /// (all UTF-8 byte sequences are representable), but if it ever did we
+    /// fall back to a defensively double-escaped placeholder rather than
+    /// emitting the raw value.
+    private static func rfc3986Encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: rfc3986Unreserved)
+            ?? value.unicodeScalars.reduce(into: "") { acc, scalar in
+                if rfc3986Unreserved.contains(scalar) {
+                    acc.append(Character(scalar))
+                } else {
+                    for byte in String(scalar).utf8 {
+                        acc.append(String(format: "%%%02X", byte))
+                    }
+                }
+            }
     }
 }
 

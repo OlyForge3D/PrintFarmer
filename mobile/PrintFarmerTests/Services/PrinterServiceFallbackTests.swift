@@ -216,7 +216,12 @@ final class PrinterServiceFallbackTests: XCTestCase {
     }
 
     func testGetAvailableFallback_204ReturnsNil() async throws {
-        MockAPIClient.stubEmptySuccess()
+        // Emit a literal 204 (not 200 + empty body) so this test actually
+        // exercises the "204 → nil" branch of the Optional-decoding path.
+        MockURLProtocol.requestHandler = { request in
+            let response = TestData.httpResponse(url: request.url, statusCode: 204)
+            return (response, Data())
+        }
 
         let member = try await printerService.getAvailableFallback(
             printerId: printerId,
@@ -225,5 +230,118 @@ final class PrinterServiceFallbackTests: XCTestCase {
         )
 
         XCTAssertNil(member)
+    }
+
+    // MARK: - getAvailableFallback: reserved-character encoding (adversarial)
+    //
+    // Regression coverage for the RFC 3986 fix: sub-delimiters `& = + ? #`
+    // in a free-text `material` must not leak into the query as separators
+    // or (in the case of `+`) decode server-side as a space. The three
+    // tests below drive real `PrinterService` → `APIClient` → URL
+    // construction, parse the emitted URL with `URLComponents`, and
+    // assert the server-visible `material` round-trips exactly and no
+    // extra query item appears.
+
+    private func stubOKAndCaptureURL() {
+        let json = """
+        {"groupId":"\(groupId.uuidString)","memberId":"\(TestData.testUUID3.uuidString)","toolheadId":"\(toolheadId.uuidString)","position":1,"loadedMaterial":"PLA","loadedSpoolId":null}
+        """
+        MockAPIClient.stubResponse(json: json)
+    }
+
+    /// Parses the single captured request URL and returns
+    /// `(sourceToolheadId, material, allNames)` from its query, treating
+    /// values as percent-decoded strings. Returns `nil` if the capture is
+    /// missing or malformed so the caller can fail loudly.
+    private func decodedQueryOfCapturedRequest() -> (sourceToolheadId: String?, material: String?, names: [String])? {
+        guard let url = MockURLProtocol.capturedRequests.first?.url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        // `URLComponents.queryItems.value` returns the percent-decoded
+        // string, so this is exactly what a well-behaved server (or
+        // ASP.NET Core's model binder) would see.
+        let items = components.queryItems ?? []
+        let sourceToolheadId = items.first(where: { $0.name == "sourceToolheadId" })?.value
+        let material = items.first(where: { $0.name == "material" })?.value
+        return (sourceToolheadId, material, items.map(\.name))
+    }
+
+    func testGetAvailableFallback_ampersandAndEquals_doNotInjectExtraParam() async throws {
+        stubOKAndCaptureURL()
+
+        _ = try await printerService.getAvailableFallback(
+            printerId: printerId,
+            sourceToolheadId: toolheadId,
+            material: "PLA&x=1"
+        )
+
+        // Raw wire form: `&` MUST be `%26` and `=` MUST be `%3D`, otherwise
+        // the server would parse an injected `x=1` parameter.
+        let rawURL = MockURLProtocol.capturedRequests.first?.url?.absoluteString ?? ""
+        XCTAssertTrue(rawURL.contains("material=PLA%26x%3D1"),
+                      "raw URL must percent-encode `&` and `=` in material; got: \(rawURL)")
+        XCTAssertFalse(rawURL.contains("&x=1"),
+                       "raw URL must not contain an injected `&x=1` parameter; got: \(rawURL)")
+
+        // Round-trip: server-visible `material` decodes back to the exact
+        // input and no spurious `x` parameter exists.
+        let decoded = decodedQueryOfCapturedRequest()
+        XCTAssertEqual(decoded?.material, "PLA&x=1")
+        XCTAssertEqual(decoded?.sourceToolheadId, toolheadId.uuidString)
+        XCTAssertEqual(decoded?.names.sorted(), ["material", "sourceToolheadId"],
+                       "no extra query parameters may be injected")
+    }
+
+    func testGetAvailableFallback_plusSign_encodesAsPercent2B_notSpace() async throws {
+        stubOKAndCaptureURL()
+
+        _ = try await printerService.getAvailableFallback(
+            printerId: printerId,
+            sourceToolheadId: toolheadId,
+            material: "PLA+"
+        )
+
+        // Raw wire form: `+` MUST be `%2B`. If it is emitted literally,
+        // ASP.NET Core (and every RFC 1738 form parser) will bind it as a
+        // space, so `PLA+` would be received as `PLA `.
+        let rawURL = MockURLProtocol.capturedRequests.first?.url?.absoluteString ?? ""
+        XCTAssertTrue(rawURL.contains("material=PLA%2B"),
+                      "raw URL must encode `+` as `%2B`; got: \(rawURL)")
+        XCTAssertFalse(rawURL.contains("material=PLA+"),
+                       "raw URL must not contain a literal `+` in material; got: \(rawURL)")
+
+        let decoded = decodedQueryOfCapturedRequest()
+        XCTAssertEqual(decoded?.material, "PLA+",
+                       "server-visible material must round-trip exactly, not become `PLA `")
+        XCTAssertEqual(decoded?.sourceToolheadId, toolheadId.uuidString)
+        XCTAssertEqual(decoded?.names.sorted(), ["material", "sourceToolheadId"])
+    }
+
+    func testGetAvailableFallback_questionMarkAndHash_stayInsideMaterialValue() async throws {
+        stubOKAndCaptureURL()
+
+        // `?` starts a query and `#` starts a fragment — both must be
+        // percent-encoded when they appear inside a value.
+        _ = try await printerService.getAvailableFallback(
+            printerId: printerId,
+            sourceToolheadId: toolheadId,
+            material: "PLA?y=1#frag"
+        )
+
+        let rawURL = MockURLProtocol.capturedRequests.first?.url?.absoluteString ?? ""
+        XCTAssertTrue(rawURL.contains("material=PLA%3Fy%3D1%23frag"),
+                      "raw URL must percent-encode `?`, `=`, and `#` inside material; got: \(rawURL)")
+        // There is only one `?` in the raw URL: the one that starts the
+        // query string. Any additional `?` would be a bug.
+        XCTAssertEqual(rawURL.filter { $0 == "?" }.count, 1,
+                       "there must be exactly one `?` in the URL (the query separator); got: \(rawURL)")
+        XCTAssertFalse(rawURL.contains("#"),
+                       "raw URL must not contain a literal `#` — that would start a fragment; got: \(rawURL)")
+
+        let decoded = decodedQueryOfCapturedRequest()
+        XCTAssertEqual(decoded?.material, "PLA?y=1#frag")
+        XCTAssertEqual(decoded?.sourceToolheadId, toolheadId.uuidString)
+        XCTAssertEqual(decoded?.names.sorted(), ["material", "sourceToolheadId"])
     }
 }
