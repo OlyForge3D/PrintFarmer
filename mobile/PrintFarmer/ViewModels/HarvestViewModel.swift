@@ -57,6 +57,17 @@ final class HarvestViewModel {
     var errorMessage: String?
     var result: HarvestJobResponse?
 
+    /// Invoked exactly once, immediately upon the first successful (or
+    /// idempotently replayed `alreadyHarvested`) response — the single
+    /// production seam through which "once per sheet" callback delivery is
+    /// both driven and unit-testable. Owned here (rather than left to a
+    /// SwiftUI `.onChange(of: result)` side effect in `HarvestSheetView`)
+    /// so a barrier-controlled unit test can deterministically prove
+    /// exactly-one-POST + exactly-one-callback through the real delivery
+    /// path, not a test-only reimplementation of the guard.
+    var onHarvested: (() -> Void)?
+    private var hasInvokedOnHarvested = false
+
     /// Populated when the harvest is blocked by a `wrongBin` 409 —
     /// mismatches must be shown verbatim (SKU, expected bin, scanned bin)
     /// per Dallas's adjudication, never a synthesized message.
@@ -379,6 +390,17 @@ final class HarvestViewModel {
             // including a delayed duplicate `Task` from an earlier tap that
             // hadn't yet observed `result != nil` — can ever fire a second
             // POST for this presented sheet.
+            //
+            // The callback fires exactly once here, immediately upon this
+            // (first and only) successful response — including a stale-sheet
+            // `alreadyHarvested == true` replay — rather than deferring to a
+            // later UI event. `hasInvokedOnHarvested` is defense-in-depth
+            // against this success branch somehow running twice (it cannot,
+            // given the `result == nil` guard above, but costs nothing).
+            if !hasInvokedOnHarvested {
+                hasInvokedOnHarvested = true
+                onHarvested?()
+            }
         } catch NetworkError.partsInventoryConflict(let conflict) {
             isSubmitting = false
             if conflict.isWrongBin {

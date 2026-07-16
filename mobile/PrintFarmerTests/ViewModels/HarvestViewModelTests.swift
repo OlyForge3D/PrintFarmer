@@ -630,6 +630,126 @@ final class HarvestViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.beginSubmit(), "the guard must release after a genuine failure so the operator can retry")
     }
 
+    // MARK: - Replacement remediation Item A: barrier-controlled causal proof
+    //
+    // The tests above this section only exercise `beginSubmit()`'s guard
+    // booleans and sequential `await submit()` calls — they never prove
+    // the "exactly once per sheet" contract through a genuine concurrent
+    // in-flight window. These tests hold the mock's harvest response
+    // behind an `AsyncGate` (a real suspension point, not a sleep/yield
+    // poll) so a rapid AND a delayed second submission attempt can be
+    // driven while the first request is still outstanding, then assert
+    // the actual production delivery path — `HarvestViewModel.submit()`
+    // calling the real `MockPartsInventoryService.harvestJob()` and
+    // invoking the real `onHarvested` closure — produced exactly one POST
+    // and exactly one callback.
+
+    @MainActor
+    func testRapidAndDelayedDoubleSubmitWhileInFlightProduceExactlyOnePostAndOneCallback() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        // alreadyHarvested=true exercises the stale-sheet-replay release
+        // case specifically, per Dallas's "first successful 200 per
+        // presented sheet, including alreadyHarvested replay" ruling.
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id, alreadyHarvested: true)
+        let gate = AsyncGate()
+        service.harvestGate = { await gate.wait() }
+        let callbacks = CallbackCounter()
+        viewModel.onHarvested = { callbacks.count += 1 }
+
+        // First tap: mirrors HarvestSheetView's exact call site —
+        // `guard viewModel.beginSubmit() else { return }` then
+        // `Task { await viewModel.submit(...) }`.
+        XCTAssertTrue(viewModel.beginSubmit())
+        async let firstSubmit: Void = viewModel.submit(partsInventoryService: service)
+
+        // Deterministically wait until the first request is blocked at
+        // the gate (a real suspension point inside `harvestJob()`), not a
+        // fixed sleep.
+        while await !gate.hasWaiters { await Task.yield() }
+        XCTAssertEqual(service.harvestCalls.count, 1, "the first request must have reached the mock before release")
+
+        // Rapid second submission attempt while the first is in flight —
+        // the same-run-loop-turn tap the reviewers described.
+        XCTAssertFalse(viewModel.beginSubmit(), "a rapid second tap while the first is in flight must be rejected")
+
+        // Delayed second submission attempt — still while the first is
+        // in flight, but after additional scheduler turns have elapsed.
+        await Task.yield()
+        await Task.yield()
+        XCTAssertFalse(viewModel.beginSubmit(), "a delayed second tap while the first is still in flight must also be rejected")
+
+        // Release the held response and let the first submission finish.
+        await gate.open()
+        await firstSubmit
+
+        XCTAssertEqual(service.harvestCalls.count, 1, "exactly one POST must have reached the server")
+        XCTAssertEqual(callbacks.count, 1, "exactly one callback must have fired")
+        XCTAssertNotNil(viewModel.result)
+        XCTAssertEqual(viewModel.result?.alreadyHarvested, true)
+    }
+
+    @MainActor
+    func testPostSuccessAttemptsAddNoAdditionalPostOrCallback() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+        let callbacks = CallbackCounter()
+        viewModel.onHarvested = { callbacks.count += 1 }
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertEqual(service.harvestCalls.count, 1)
+        XCTAssertEqual(callbacks.count, 1)
+
+        // A further tap attempt after success must never even create a Task.
+        XCTAssertFalse(viewModel.beginSubmit(), "no further submit may ever start once a result exists")
+
+        // A delayed duplicate `submit()` call bypassing `beginSubmit()`
+        // entirely (e.g. a stale Task from an earlier tap that hadn't yet
+        // observed `result != nil`) must also add nothing.
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertEqual(service.harvestCalls.count, 1, "a post-success attempt must add no POST")
+        XCTAssertEqual(callbacks.count, 1, "a post-success attempt must add no callback")
+    }
+
+    @MainActor
+    func testFailedFirstAttemptReleasesGuardAndPermitsExactlyOneRetryAndCallback() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.harvestError = NetworkError.serverError(500)
+        let callbacks = CallbackCounter()
+        viewModel.onHarvested = { callbacks.count += 1 }
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertNil(viewModel.result, "sanity: the first attempt failed")
+        XCTAssertEqual(service.harvestCalls.count, 1)
+        XCTAssertEqual(callbacks.count, 0, "a failed attempt must never invoke the callback")
+
+        // The guard released on failure, permitting exactly one retry.
+        service.harvestError = nil
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+        XCTAssertTrue(viewModel.beginSubmit(), "the guard must release after a genuine failure so the operator can retry")
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertEqual(service.harvestCalls.count, 2, "the retry is the second POST, following the failed first")
+        XCTAssertEqual(callbacks.count, 1, "the retry's success must invoke the callback exactly once")
+        XCTAssertNotNil(viewModel.result)
+
+        // A further attempt after the retry succeeded must add nothing.
+        XCTAssertFalse(viewModel.beginSubmit())
+        await viewModel.submit(partsInventoryService: service)
+        XCTAssertEqual(service.harvestCalls.count, 2)
+        XCTAssertEqual(callbacks.count, 1)
+    }
+
     // MARK: - H5: malformed wrongBin payload must not type as wrongBin
 
     @MainActor
@@ -798,10 +918,10 @@ final class HarvestViewModelTests: XCTestCase {
         )
     }
 
-    private func makeHarvestResponse(jobId: UUID) -> HarvestJobResponse {
+    private func makeHarvestResponse(jobId: UUID, alreadyHarvested: Bool = false) -> HarvestJobResponse {
         HarvestJobResponse(
             printJobId: jobId, harvestedAt: .now, binId: nil, binCode: "BIN-1",
-            alreadyHarvested: false, adjustments: [], outputs: []
+            alreadyHarvested: alreadyHarvested, adjustments: [], outputs: []
         )
     }
 
@@ -811,4 +931,39 @@ final class HarvestViewModelTests: XCTestCase {
             isActive: true, createdAt: .now, updatedAt: .now
         )
     }
+}
+
+// MARK: - Blocker A test-gate helpers
+
+/// Deterministic suspension-point gate for barrier-controlled concurrency
+/// tests — mirrors the identical helper already established in
+/// `PrinterControlsViewModelTests.swift`. Callers `await wait()` inside the
+/// code under test and the test `await open()`s it once it has observed
+/// `hasWaiters` via a real-state busy-poll (`while await !gate.hasWaiters {
+/// await Task.yield() }`), never a fixed sleep.
+private actor AsyncGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var opened = false
+
+    var hasWaiters: Bool { !waiters.isEmpty || opened }
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { c in waiters.append(c) }
+    }
+
+    func open() {
+        opened = true
+        let toResume = waiters
+        waiters.removeAll()
+        for c in toResume { c.resume() }
+    }
+}
+
+/// `@MainActor`-isolated counter for asserting exactly-once callback
+/// delivery from `HarvestViewModel.onHarvested`, which is always invoked
+/// on the main actor (from within `submit()`).
+@MainActor
+private final class CallbackCounter {
+    var count = 0
 }

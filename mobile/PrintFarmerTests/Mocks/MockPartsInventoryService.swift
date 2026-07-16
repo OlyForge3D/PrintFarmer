@@ -8,9 +8,28 @@ final class MockPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
     var binToResolve: BinResponse?
     var binToRegister: BinResponse?
     var adjustmentToReturn: PartAdjustmentResponse?
+    /// When true, the FIRST `adjustPart` call for a given `operationKey`
+    /// still "commits" (records) the mutation exactly once — proving the
+    /// server-side idempotent-dedupe contract — but the client simulates
+    /// losing the response by throwing `responseLossError` instead of
+    /// returning it. A SAME-key retry must then replay the already-
+    /// committed result rather than applying a second mutation. See
+    /// Blocker B commit-then-response-loss causal-proof tests.
+    var simulateResponseLossOnFirstCommit = false
+    var responseLossError: Error = NetworkError.timeout
+    /// Optional async hook (see `harvestGate`) letting a test hold an
+    /// `adjustPart` call in flight at a real suspension point to
+    /// deterministically cancel between "commit" and "response delivery".
+    var adjustPartGate: (() async -> Void)?
     var reorderCandidatesToReturn: [ReorderCandidateResponse] = []
     var mappingsToReturn: [PartOutputMappingResponse] = []
     var harvestResponseToReturn: HarvestJobResponse?
+    /// Optional async hook invoked (after the call is recorded, before
+    /// resolving success/error) so a test can hold a harvest response in
+    /// flight via a real suspension point (e.g. an `AsyncGate`) — used to
+    /// deterministically prove "exactly one POST" under rapid/delayed
+    /// double-submit rather than a sequential-call reimplementation.
+    var harvestGate: (() async -> Void)?
 
     var listPartsError: Error?
     var resolvePartError: Error?
@@ -30,6 +49,16 @@ final class MockPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
     private(set) var adjustPartCalls: [(sku: String, request: AdjustPartInventoryRequest)] = []
     private(set) var mappingsSkuCalls: [String?] = []
     private(set) var harvestCalls: [(jobId: UUID, request: HarvestJobRequest)] = []
+    /// Committed adjustment results keyed by `operationKey`, used to
+    /// replay same-key retries without applying a second mutation (see
+    /// `simulateResponseLossOnFirstCommit`).
+    private var committedAdjustments: [String: PartAdjustmentResponse] = [:]
+    /// Incremented only when a NEW mutation is actually committed
+    /// (distinct from `adjustPartCalls.count`, which also counts replayed
+    /// same-key retries) — lets Blocker B tests assert "exactly one
+    /// applied mutation" independent of how many network round trips the
+    /// retry took.
+    private(set) var appliedMutationCount = 0
 
     func listParts(includeInactive: Bool) async throws -> [PartInventoryResponse] {
         listPartsCalls.append(includeInactive)
@@ -66,8 +95,36 @@ final class MockPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
 
     func adjustPart(sku: String, request: AdjustPartInventoryRequest) async throws -> PartAdjustmentResponse {
         adjustPartCalls.append((sku, request))
+
+        if let key = request.operationKey, let committed = committedAdjustments[key] {
+            // Same-key retry after a prior commit: replay the already-
+            // committed result. No second mutation, and no re-throw of
+            // `adjustPartError`/`responseLossError` — the server already
+            // resolved this operationKey.
+            return committed
+        }
+
         if let adjustPartError { throw adjustPartError }
         guard let adjustmentToReturn else { throw NetworkError.notFound }
+
+        if let key = request.operationKey {
+            committedAdjustments[key] = adjustmentToReturn
+        }
+        appliedMutationCount += 1
+
+        // The gate sits AFTER the mutation is committed but BEFORE the
+        // response is "delivered" back to the caller — lets a test cancel
+        // deterministically in exactly that window (Blocker B) and then
+        // assert the commit already happened server-side.
+        await adjustPartGate?()
+
+        if simulateResponseLossOnFirstCommit {
+            // Only the first commit simulates a lost response; a
+            // subsequent distinct key (new intent) commits normally.
+            simulateResponseLossOnFirstCommit = false
+            throw responseLossError
+        }
+
         return adjustmentToReturn
     }
 
@@ -87,6 +144,7 @@ final class MockPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
 
     func harvestJob(jobId: UUID, request: HarvestJobRequest) async throws -> HarvestJobResponse {
         harvestCalls.append((jobId, request))
+        await harvestGate?()
         if let harvestError { throw harvestError }
         guard let harvestResponseToReturn else { throw NetworkError.notFound }
         return harvestResponseToReturn
