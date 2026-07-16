@@ -36,6 +36,67 @@ final class QRCodeParserTests: XCTestCase {
         XCTAssertEqual(result, 55)
     }
 
+    // MARK: - Final remediation Blocker 5: singular /spool/ and printfarmer:// forms
+
+    func testURLFormatSingularSpoolPath() {
+        let result = QRCodeParser.parse("https://spoolman.example.com/spool/42")
+        XCTAssertEqual(result, 42)
+    }
+
+    func testURLFormatSingularSpoolPathOnly() {
+        let result = QRCodeParser.parse("/spool/17")
+        XCTAssertEqual(result, 17)
+    }
+
+    func testDeepLinkSchemeSingularSpoolHost() {
+        // `printfarmer://spool/{id}` — "spool" lands in the URL's host
+        // position (there's no path segment before it), not a path
+        // component, so a purely path-component-based scan would miss it.
+        let result = QRCodeParser.parse("printfarmer://spool/42")
+        XCTAssertEqual(result, 42)
+    }
+
+    func testDeepLinkSchemePluralSpoolsHost() {
+        let result = QRCodeParser.parse("printfarmer://spools/42")
+        XCTAssertEqual(result, 42)
+    }
+
+    func testDeepLinkSchemeEmbeddedHostIsIgnoredWhenNotSpool() {
+        XCTAssertNil(QRCodeParser.parse("printfarmer://printer/42"))
+    }
+
+    // MARK: - Final remediation Blocker 5: parseStructured excludes bare numeric
+
+    func testParseStructuredRejectsBarePositiveInteger() {
+        // A bare numeric string is ambiguous with a genuine EAN/UPC barcode
+        // — `parseStructured` must never treat it as a spool ID; only
+        // `parse` (the QR-only-scanner umbrella) does.
+        XCTAssertNil(QRCodeParser.parseStructured("42"))
+        XCTAssertNotNil(QRCodeParser.parse("42"))
+    }
+
+    func testParseStructuredAcceptsURLForm() {
+        XCTAssertEqual(QRCodeParser.parseStructured("https://host/spools/42"), 42)
+    }
+
+    func testParseStructuredAcceptsSingularSpoolURLForm() {
+        XCTAssertEqual(QRCodeParser.parseStructured("https://host/spool/42"), 42)
+    }
+
+    func testParseStructuredAcceptsDeepLinkForm() {
+        XCTAssertEqual(QRCodeParser.parseStructured("printfarmer://spool/42"), 42)
+    }
+
+    func testParseStructuredAcceptsJSONForm() {
+        XCTAssertEqual(QRCodeParser.parseStructured("""
+        {"spoolId": 42}
+        """), 42)
+    }
+
+    func testParseStructuredRejectsRandomText() {
+        XCTAssertNil(QRCodeParser.parseStructured("hello world"))
+    }
+
     // MARK: - Plain Numeric
 
     func testPlainNumeric() {
