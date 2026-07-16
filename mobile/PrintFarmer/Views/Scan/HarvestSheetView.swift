@@ -11,6 +11,7 @@ struct HarvestSheetView: View {
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var showOverrideSheet = false
     @State private var showBinPicker = false
+    @State private var hasInvokedOnHarvested = false
 
     /// Called after a successful (or already-harvested) result so the
     /// presenter can refresh job/bin/inventory state.
@@ -67,12 +68,16 @@ struct HarvestSheetView: View {
             // `alreadyHarvested == true` replay — rather than deferring it to
             // the "Done" tap. `result` only ever transitions from `nil` to a
             // value once per sheet instance (both `submit()` and
-            // `confirmWrongBinOverride()` funnel into the same property), so
-            // this fires exactly once regardless of which path produced it.
+            // `confirmWrongBinOverride()` funnel into the same property,
+            // and `beginSubmit()`'s synchronous guard prevents any second
+            // request once `result` is set), so this fires exactly once
+            // regardless of which path produced it. `hasInvokedOnHarvested`
+            // is defense-in-depth against a duplicate `.onChange` firing
+            // (e.g. from a SwiftUI re-render replaying the transition).
             .onChange(of: viewModel.result) { _, newResult in
-                if newResult != nil {
-                    onHarvested?()
-                }
+                guard newResult != nil, !hasInvokedOnHarvested else { return }
+                hasInvokedOnHarvested = true
+                onHarvested?()
             }
             .interactiveDismissDisabled(viewModel.isSubmitting)
         }
@@ -180,6 +185,12 @@ struct HarvestSheetView: View {
 
             Section {
                 Button {
+                    // Once-per-sheet contract: the synchronous re-entrancy
+                    // guard must run BEFORE Task creation, on the same
+                    // run-loop turn as the tap, so a rapid or delayed
+                    // double-tap (or a race with the wrong-bin override
+                    // button) can never schedule a second submit `Task`.
+                    guard viewModel.beginSubmit() else { return }
                     let task = Task { await viewModel.submit(partsInventoryService: services.partsInventoryService) }
                     activeTasks.append(task)
                 } label: {
@@ -362,6 +373,12 @@ struct HarvestSheetView: View {
 
                 Section {
                     Button(role: .destructive) {
+                        // Same synchronous re-entrancy guard as the primary
+                        // submit button — shares `isSubmitting`/`result`
+                        // state, so it must be equally atomic against a
+                        // rapid double-tap or a race with the primary
+                        // submit button.
+                        guard viewModel.beginSubmit() else { return }
                         let task = Task {
                             await viewModel.confirmWrongBinOverride(partsInventoryService: services.partsInventoryService)
                             if viewModel.result != nil {
