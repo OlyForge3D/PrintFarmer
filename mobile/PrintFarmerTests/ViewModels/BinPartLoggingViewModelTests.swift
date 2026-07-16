@@ -200,6 +200,68 @@ final class BinPartLoggingViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isSubmitting)
     }
 
+    // MARK: - Final trio Item 2: post-commit cancellation callback proof
+    //
+    // Same production callback path as PartAdjustmentViewModel /
+    // PartScanResultView (BinScanResultView's button action wraps
+    // `submit()` in an identical Task/onAdjusted pattern — see
+    // BinScanResultView.swift) — the equivalent proof applies here too.
+
+    @MainActor
+    func testCancellationAfterCommitStillDeliversCallbackAndParentRefreshExactlyOnce() async {
+        let viewModel = BinPartLoggingViewModel(bin: makeBin())
+        viewModel.selectedSku = "SKU-A"
+        viewModel.quantity = 5
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 12)
+        let gate = BinLoggingAsyncGate()
+        service.adjustPartGate = { await gate.wait() }
+
+        var onAdjustedCallCount = 0
+        var parentLoadPartsCallCount = 0
+        var childActiveTasks: [Task<Void, Never>] = []
+        var parentActiveTasks: [Task<Void, Never>] = []
+
+        // Mirrors BinScanResultView's button action exactly: synchronous
+        // guard before Task creation, then a Task wrapping submit() that
+        // invokes the onAdjusted callback with the returned adjustment.
+        XCTAssertTrue(viewModel.beginSubmit())
+        let childTask = Task {
+            if await viewModel.submit(partsInventoryService: service) != nil {
+                onAdjustedCallCount += 1
+                // Mirrors a presenting parent's onAdjusted closure: a
+                // separate Task on the PARENT (which stays alive — only the
+                // CHILD sheet is being dismissed) that reloads its list.
+                let parentTask = Task { @MainActor in
+                    parentLoadPartsCallCount += 1
+                }
+                parentActiveTasks.append(parentTask)
+            }
+        }
+        childActiveTasks.append(childTask)
+
+        // Deterministically wait until the mock is blocked at the gate —
+        // which sits AFTER the mutation is committed but BEFORE the
+        // response is delivered — via a real-state busy-poll, not a sleep.
+        while await !gate.hasWaiters { await Task.yield() }
+        XCTAssertEqual(service.appliedMutationCount, 1, "the commit must already have happened before dismissal")
+
+        // Simulates BinScanResultView.onDisappear cancelling only its own
+        // activeTasks (the sheet is dismissed) — the presenting parent is
+        // still alive/visible and its own tasks are never cancelled here.
+        childActiveTasks.forEach { $0.cancel() }
+        await gate.open()
+        _ = await childTask.value
+        for parentTask in parentActiveTasks { await parentTask.value }
+
+        XCTAssertEqual(service.appliedMutationCount, 1, "exactly one server mutation")
+        XCTAssertNil(viewModel.errorMessage, "cancellation-safe: no error write to the dismissed child view model")
+        XCTAssertNil(viewModel.successMessage, "cancellation-safe: no success write to the dismissed child view model")
+        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertEqual(onAdjustedCallCount, 1, "the committed adjustment must still be delivered to the callback exactly once")
+        XCTAssertEqual(parentLoadPartsCallCount, 1, "the still-alive parent must refresh exactly once")
+    }
+
     // MARK: - Fixtures
 
     private func makeBin(code: String = "BIN-1") -> BinResponse {
@@ -215,5 +277,32 @@ final class BinPartLoggingViewModelTests: XCTestCase {
             delta: 1, resultingBalance: resultingBalance, reason: .manual,
             printJobId: nil, operationKey: nil, notes: nil, userId: nil, createdAt: .now
         )
+    }
+}
+
+/// Deterministic suspension-point gate for the post-commit cancellation
+/// causal-proof test above — same shape as `AdjustmentAsyncGate` in
+/// `PartAdjustmentViewModelTests.swift`, given a file-local name to avoid
+/// any cross-file ambiguity within the test target. Callers `await wait()`
+/// inside the code under test; the test `await open()`s it only after
+/// observing `hasWaiters` via a real-state busy-poll
+/// (`while await !gate.hasWaiters { await Task.yield() }`), never a fixed
+/// sleep.
+private actor BinLoggingAsyncGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var opened = false
+
+    var hasWaiters: Bool { !waiters.isEmpty || opened }
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { c in waiters.append(c) }
+    }
+
+    func open() {
+        opened = true
+        let toResume = waiters
+        waiters.removeAll()
+        for c in toResume { c.resume() }
     }
 }

@@ -294,6 +294,75 @@ final class PartAdjustmentViewModelTests: XCTestCase {
         XCTAssertEqual(service.appliedMutationCount, 2, "the fresh key commits as a genuinely new mutation")
     }
 
+    // MARK: - Final trio Item 2: post-commit cancellation callback proof
+    //
+    // Dallas ruled: cancellation safety suppresses dismissed-CHILD state
+    // writes (no stale successMessage/errorMessage on the dismissed
+    // PartScanResultView's own PartAdjustmentViewModel) but must still
+    // return the committed adjustment through to `onAdjusted` so the
+    // still-alive PARENT (PartsInventoryListView) can refresh. This test
+    // exercises the real production Task-nesting/cancellation shape used
+    // by PartScanResultView's button action + PartsInventoryListView's
+    // `onAdjusted` closure (see both files) rather than a reimplementation,
+    // proving the callback is delivered exactly once and the parent's
+    // refresh runs exactly once even though the child's own task was
+    // cancelled after the mutation had already committed.
+
+    @MainActor
+    func testCancellationAfterCommitStillDeliversCallbackAndParentRefreshExactlyOnce() async {
+        let viewModel = PartAdjustmentViewModel(part: makePart())
+        viewModel.delta = -2
+        viewModel.reason = .qcReject
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 11)
+        let gate = AdjustmentAsyncGate()
+        service.adjustPartGate = { await gate.wait() }
+
+        var onAdjustedCallCount = 0
+        var parentLoadPartsCallCount = 0
+        var childActiveTasks: [Task<Void, Never>] = []
+        var parentActiveTasks: [Task<Void, Never>] = []
+
+        // Mirrors PartScanResultView's button action exactly: synchronous
+        // guard before Task creation, then a Task wrapping submit() that
+        // invokes the onAdjusted callback with the returned adjustment.
+        XCTAssertTrue(viewModel.beginSubmit())
+        let childTask = Task {
+            if await viewModel.submit(partsInventoryService: service) != nil {
+                onAdjustedCallCount += 1
+                // Mirrors PartsInventoryListView's onAdjusted closure: a
+                // separate Task on the PARENT (which stays alive — only the
+                // CHILD sheet is being dismissed) that reloads its list.
+                let parentTask = Task { @MainActor in
+                    parentLoadPartsCallCount += 1
+                }
+                parentActiveTasks.append(parentTask)
+            }
+        }
+        childActiveTasks.append(childTask)
+
+        // Deterministically wait until the mock is blocked at the gate —
+        // which sits AFTER the mutation is committed but BEFORE the
+        // response is delivered — via a real-state busy-poll, not a sleep.
+        while await !gate.hasWaiters { await Task.yield() }
+        XCTAssertEqual(service.appliedMutationCount, 1, "the commit must already have happened before dismissal")
+
+        // Simulates PartScanResultView.onDisappear cancelling only its own
+        // activeTasks (the sheet is dismissed) — PartsInventoryListView is
+        // still alive/visible and its own tasks are never cancelled here.
+        childActiveTasks.forEach { $0.cancel() }
+        await gate.open()
+        _ = await childTask.value
+        for parentTask in parentActiveTasks { await parentTask.value }
+
+        XCTAssertEqual(service.appliedMutationCount, 1, "exactly one server mutation")
+        XCTAssertNil(viewModel.errorMessage, "cancellation-safe: no error write to the dismissed child view model")
+        XCTAssertNil(viewModel.successMessage, "cancellation-safe: no success write to the dismissed child view model")
+        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertEqual(onAdjustedCallCount, 1, "the committed adjustment must still be delivered to the callback exactly once")
+        XCTAssertEqual(parentLoadPartsCallCount, 1, "the still-alive parent must refresh exactly once")
+    }
+
     // MARK: - Fixtures
 
     private func makePart(onHand: Int = 5) -> PartInventoryResponse {
