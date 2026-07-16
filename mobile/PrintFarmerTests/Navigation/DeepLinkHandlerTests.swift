@@ -55,4 +55,26 @@ final class DeepLinkHandlerTests: XCTestCase {
         let result = DeepLinkHandler.parse(url: url)
         XCTAssertEqual(result, .printerReady(id: testId))
     }
+
+    // MARK: - #714 Item C: spool ID must be a positive integer
+
+    func testParseValidPositiveSpoolURL() {
+        let url = URL(string: "printfarmer://spool/42")!
+        XCTAssertEqual(DeepLinkHandler.parse(url: url), .spoolDetail(id: 42))
+    }
+
+    func testParseZeroSpoolIDIsRejected() {
+        let url = URL(string: "printfarmer://spool/0")!
+        XCTAssertNil(DeepLinkHandler.parse(url: url), "a zero spool ID must never be treated as a valid destination")
+    }
+
+    func testParseNegativeSpoolIDIsRejected() {
+        let url = URL(string: "printfarmer://spool/-5")!
+        XCTAssertNil(DeepLinkHandler.parse(url: url), "a negative spool ID must never be treated as a valid destination")
+    }
+
+    func testParseNonNumericSpoolPathIsRejected() {
+        let url = URL(string: "printfarmer://spool/not-a-number")!
+        XCTAssertNil(DeepLinkHandler.parse(url: url))
+    }
 }
