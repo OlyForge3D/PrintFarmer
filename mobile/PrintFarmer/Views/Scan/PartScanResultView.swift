@@ -62,6 +62,7 @@ struct PartScanResultView: View {
                     }
                     .accessibilityIdentifier("partScan.deltaStepper")
                     .onChange(of: viewModel.delta) { _, _ in viewModel.noteIntentChanged() }
+                    .disabled(viewModel.isSubmitting)
 
                     Picker("Reason", selection: $viewModel.reason) {
                         Text("QC Reject").tag(PartAdjustmentReason.qcReject)
@@ -69,9 +70,11 @@ struct PartScanResultView: View {
                     }
                     .accessibilityIdentifier("partScan.reasonPicker")
                     .onChange(of: viewModel.reason) { _, _ in viewModel.noteIntentChanged() }
+                    .disabled(viewModel.isSubmitting)
 
                     TextField("Notes (optional)", text: $viewModel.notes, axis: .vertical)
                         .onChange(of: viewModel.notes) { _, _ in viewModel.noteIntentChanged() }
+                        .disabled(viewModel.isSubmitting)
 
                     Button {
                         // Synchronous re-entrancy guard runs BEFORE the Task
@@ -123,6 +126,7 @@ struct PartScanResultView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                        .disabled(viewModel.isSubmitting)
                 }
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
@@ -132,6 +136,11 @@ struct PartScanResultView: View {
                     Text(errorMessage)
                 }
             }
+            // Interactive dismissal (swipe-down) must be blocked while a
+            // submission is in flight, matching the disabled Done button —
+            // otherwise the sheet could vanish mid-request and the caller
+            // would lose track of an in-flight mutation.
+            .interactiveDismissDisabled(viewModel.isSubmitting)
             .onDisappear { activeTasks.forEach { $0.cancel() } }
         }
     }
