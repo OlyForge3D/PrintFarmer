@@ -308,6 +308,17 @@ priority `5`, and an APS object containing only `{ "content-available": 1 }`; no
 category, thread, or mutable-content keys are present. A user without an authorized
 snapshot receives no dismissal.
 
+The snapshot also tracks whether *any* device for that recipient achieved a
+successful delivery before resolution (#756). If every device attempt for that
+recipient's alert generation ended in transient exhaustion, a terminal failure,
+or a token invalidation — i.e. the client never actually received the alert —
+the resolution dismissal is skipped as a benign no-op and
+`native_push.skipped_never_delivered` is incremented. Partial success (at least
+one of the recipient's devices delivered) still emits the dismissal to every
+currently active device for that recipient, preserving per-recipient/per-device
+behavior; the never-delivered check only ever suppresses the whole recipient,
+never a subset of their devices.
+
 ## 7. Observability
 
 Meter name: `Farm.Infrastructure.Services.Notifications.NativePush`.
@@ -324,6 +335,7 @@ Meter name: `Farm.Infrastructure.Services.Notifications.NativePush`.
 | `native_push.skipped_rate_limit`        | counter | (none)                       |
 | `native_push.skipped_category_opt_out`  | counter | (none)                       |
 | `native_push.skipped_not_configured`    | counter | (none)                       |
+| `native_push.skipped_never_delivered`  | counter | (none)                       |
 | `native_push.isolated_device_failure`   | counter | `stage` (`device`/`persist`) |
 | `native_push.isolated_owner_failure`    | counter | (none)                       |
 

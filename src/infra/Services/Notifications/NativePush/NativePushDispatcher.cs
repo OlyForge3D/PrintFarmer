@@ -35,11 +35,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     // replay safe even when a later opt-in changes.
     private readonly ConcurrentDictionary<AttentionSnapshotKey, AttentionSnapshot> _snapshots = new();
 
-    // Snapshot capture, consumption, replacement, and transport invocation share this
-    // short critical section. It closes the ownership-check/send race without holding
-    // a lock while awaiting provider I/O.
-    private readonly object _snapshotOwnershipSync = new();
-
     // One versioned lane per item and delivery audience serializes an active lifecycle
     // transition, coalesces queued transitions to the newest authoritative timestamp,
     // and retains a tombstone so delayed Created work cannot follow Resolved.
@@ -261,15 +256,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // snapshot, even when the source has not removed the live row yet.
             // This prevents a newly authorized owner from receiving a dismissal
             // for an alert that was never delivered to that owner.
-            lock (_snapshotOwnershipSync)
+            if (!TryConsumeSnapshot(snapshotKey, out resolvedSnapshot))
             {
-                if (!_snapshots.TryRemove(snapshotKey, out resolvedSnapshot))
-                {
-                    return;
-                }
+                return;
             }
 
             item = null;
+
+            // #756: the alert generation this snapshot represents exhausted
+            // every device without a single successful delivery (all-transient
+            // outage, terminal failures, or invalidations). The client never
+            // received the alert this dismissal would clear, so treat the
+            // dismissal as a benign no-op rather than send a silent push for
+            // an alert that was never seen. Partial success (at least one
+            // device delivered) still emits the dismissal to every current
+            // device below, preserving per-recipient behavior.
+            if (!resolvedSnapshot!.HasSuccessfulDelivery)
+            {
+                _metrics.SkippedNeverDelivered.Add(1);
+                return;
+            }
         }
         else if (item is null)
         {
@@ -336,15 +342,18 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // after every authorization/preference guard above has passed. The exact
             // instance is the delivery generation checked before every transport try.
             activeSnapshot = new AttentionSnapshot(
-                Kind: item!.Kind,
-                PrinterId: item.PrinterId,
-                JobId: item.JobId,
-                ToolheadIndex: item.ToolheadIndex,
-                CapturedAtUtc: UtcNow);
-            lock (_snapshotOwnershipSync)
-            {
-                _snapshots[snapshotKey] = activeSnapshot;
-            }
+                item!.Kind,
+                item.PrinterId,
+                item.JobId,
+                item.ToolheadIndex,
+                UtcNow);
+
+            // ReplaceSnapshot inherits HasSuccessfulDelivery from the generation it
+            // displaces (#756): a later generation for the same recipient must not
+            // "forget" that an earlier Created/Updated already reached the client. If
+            // the next generation fails every retry, Resolved still owes that visible
+            // alert a dismissal push.
+            ReplaceSnapshot(snapshotKey, activeSnapshot);
         }
 
         foreach (DeviceToken deviceToken in userTokens)
@@ -564,15 +573,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 }
                 else
                 {
-                    lock (_snapshotOwnershipSync)
+                    lock (activeSnapshot.Sync)
                     {
-                        if (!IsSnapshotCurrentUnderLock(snapshotKey, activeSnapshot))
+                        if (!IsSnapshotCurrentUnderSnapshotLock(snapshotKey, activeSnapshot))
                         {
                             return null;
                         }
 
                         // Keep the ownership check and synchronous transport invocation
-                        // in one critical section. Provider I/O is awaited after release.
+                        // in this snapshot's critical section. Provider I/O is awaited
+                        // after release, so unrelated snapshots never serialize startup.
                         transportStarted = true;
                         sendTask = _sender.SendAsync(envelope, cancellationToken);
                     }
@@ -640,11 +650,29 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return DeviceDispatchOutcome.DispatchStopped;
         }
 
-        // This is the final attribution claim. Resolution/replacement uses the
-        // same lock, so whichever operation enters first defines the ordering.
-        if (!IsSnapshotCurrent(snapshotKey, activeSnapshot))
+        // This is the final attribution claim. For Created/Updated sends the
+        // "is this still the current generation?" check and the transition to
+        // "at least one device delivered" must be one atomic ownership
+        // decision (#756). Otherwise a racing Resolved could consume the
+        // snapshot in the gap and observe HasSuccessfulDelivery=false before
+        // this success is recorded. Locking on this snapshot's own Sync — the
+        // same lock ReplaceSnapshot/TryConsumeSnapshot acquire before
+        // touching it — keeps that decision atomic without serializing
+        // unrelated snapshots.
+        if (activeSnapshot is not null)
         {
-            return DeviceDispatchOutcome.DispatchStopped;
+            lock (activeSnapshot.Sync)
+            {
+                if (!IsSnapshotCurrentUnderSnapshotLock(snapshotKey, activeSnapshot))
+                {
+                    return DeviceDispatchOutcome.DispatchStopped;
+                }
+
+                if (result.Success)
+                {
+                    activeSnapshot.MarkDelivered();
+                }
+            }
         }
 
         IDeviceTokenRepository tokens = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
@@ -652,6 +680,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (result.Success)
         {
             _metrics.Delivered.Add(1, new KeyValuePair<string, object?>("mode", _sender.ModeName));
+
             await tokens.RecordSuccessAsync(
                 deviceToken.Id,
                 deviceToken.RegistrationVersion,
@@ -921,24 +950,123 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return true;
         }
 
-        lock (_snapshotOwnershipSync)
+        lock (expected.Sync)
         {
-            return IsSnapshotCurrentUnderLock(key, expected);
+            return IsSnapshotCurrentUnderSnapshotLock(key, expected);
         }
     }
 
-    private bool IsSnapshotCurrentUnderLock(AttentionSnapshotKey key, AttentionSnapshot expected)
+    private bool IsSnapshotCurrentUnderSnapshotLock(AttentionSnapshotKey key, AttentionSnapshot expected)
     {
         return _snapshots.TryGetValue(key, out AttentionSnapshot? current)
             && ReferenceEquals(current, expected);
     }
 
-    private sealed record AttentionSnapshot(
-        AttentionKind Kind,
-        Guid PrinterId,
-        Guid? JobId,
-        int? ToolheadIndex,
-        DateTime CapturedAtUtc);
+    private void ReplaceSnapshot(AttentionSnapshotKey key, AttentionSnapshot replacement)
+    {
+        while (true)
+        {
+            if (!_snapshots.TryGetValue(key, out AttentionSnapshot? current))
+            {
+                if (_snapshots.TryAdd(key, replacement))
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            lock (current.Sync)
+            {
+                // Re-validate that 'current' is still the dictionary-resident instance for this
+                // key now that we hold its lock. A concurrent TryConsumeSnapshot/ReplaceSnapshot
+                // may have already removed/replaced it between our unguarded TryGetValue above and
+                // acquiring this lock; in that case this lock object is orphaned and any decision
+                // made while holding it would be based on stale state. Retry against a fresh read.
+                if (!_snapshots.TryGetValue(key, out AttentionSnapshot? confirmedCurrent)
+                    || !ReferenceEquals(confirmedCurrent, current))
+                {
+                    continue;
+                }
+
+                // A later generation for the same recipient must not "forget" that an
+                // earlier Created/Updated already reached the client (#756). If the next
+                // generation fails every retry, Resolved still owes that visible alert a
+                // dismissal push. Capture that inheritance decision locally and only apply it
+                // once this exact replacement has actually become the resident snapshot; a
+                // failed swap must not leak a one-way delivery bit onto a fresh generation that
+                // never truly displaced the delivered one.
+                bool inheritsDelivery = current.HasSuccessfulDelivery;
+                lock (replacement.Sync)
+                {
+                    if (_snapshots.TryUpdate(key, replacement, current))
+                    {
+                        if (inheritsDelivery)
+                        {
+                            replacement.MarkDelivered();
+                        }
+
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    private bool TryConsumeSnapshot(AttentionSnapshotKey key, out AttentionSnapshot? snapshot)
+    {
+        while (_snapshots.TryGetValue(key, out AttentionSnapshot? current))
+        {
+            lock (current.Sync)
+            {
+                if (((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots)
+                    .Remove(new KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>(key, current)))
+                {
+                    snapshot = current;
+                    return true;
+                }
+            }
+        }
+
+        snapshot = null;
+        return false;
+    }
+
+    private sealed class AttentionSnapshot(
+        AttentionKind kind,
+        Guid printerId,
+        Guid? jobId,
+        int? toolheadIndex,
+        DateTime capturedAtUtc)
+    {
+        // Set once any device in this alert generation is attributed a
+        // successful delivery. Resolved consumes this same instance out of
+        // the dictionary, so the flag survives independent of ownership
+        // checks/removal timing (#756). A generation that never flips this
+        // (all-transient exhaustion, terminal failures, or invalidations
+        // across every device) never actually reached the client, so its
+        // resolution dismissal is skipped as a benign no-op rather than
+        // sent for an alert the device never saw.
+        private int _hasSuccessfulDelivery;
+
+        public object Sync { get; } = new();
+
+        public AttentionKind Kind { get; } = kind;
+
+        public Guid PrinterId { get; } = printerId;
+
+        public Guid? JobId { get; } = jobId;
+
+        public int? ToolheadIndex { get; } = toolheadIndex;
+
+        public DateTime CapturedAtUtc { get; } = capturedAtUtc;
+
+        /// <summary>True once at least one device attempt for this alert generation succeeded.</summary>
+        public bool HasSuccessfulDelivery => Volatile.Read(ref _hasSuccessfulDelivery) != 0;
+
+        /// <summary>Marks this alert generation as having achieved at least one successful delivery.</summary>
+        public void MarkDelivered() => Interlocked.Exchange(ref _hasSuccessfulDelivery, 1);
+    }
 
     private bool ShouldEmit(string key, NativePushSettings settings, DateTime nowUtc)
     {
@@ -1076,11 +1204,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // entries whose source never emits Resolved. Value-comparing removal
         // preserves a concurrently refreshed occurrence.
         DateTime snapshotCutoff = nowUtc - AttentionSnapshotTtl;
-        lock (_snapshotOwnershipSync)
+        foreach (KeyValuePair<AttentionSnapshotKey, AttentionSnapshot> kv in _snapshots)
         {
-            foreach (KeyValuePair<AttentionSnapshotKey, AttentionSnapshot> kv in _snapshots)
+            if (kv.Value.CapturedAtUtc < snapshotCutoff)
             {
-                if (kv.Value.CapturedAtUtc < snapshotCutoff)
+                lock (kv.Value.Sync)
                 {
                     _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionSnapshot>>)_snapshots).Remove(kv);
                 }

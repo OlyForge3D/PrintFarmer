@@ -3671,10 +3671,45 @@ export enum NotificationFrequency {
 }
 
 export enum NotificationPreferenceEventType {
+  // Wire tokens are PascalCase per #708 shared web preference contract.
+  // Backend uses `new JsonStringEnumConverter()` with NO naming policy
+  // override (src/api/Startup/ControllerStartup.cs), so enum members
+  // serialize as their raw C# names. Sending camelCase would 400.
+  // Adding new tokens requires updating operatorCategories.ts + the
+  // backend enum in NotificationsController.cs simultaneously — see #708.
   JobStarted = 'JobStarted',
   JobCompleted = 'JobCompleted',
   JobFailed = 'JobFailed',
-  JobPaused = 'JobPaused'
+  JobPaused = 'JobPaused',
+  // Operator alert categories introduced by F3 (#708). Legacy servers that do
+  // not advertise these tokens in
+  // GET /notifications/preferences/capabilities must never receive them —
+  // see features/notifications/preferencesAdapter.
+  //
+  // PrinterFailure is intentionally NOT rendered as a visible row in the
+  // #716 UI scope (see OPERATOR_EVENT_ROWS in operatorCategories.ts), but is
+  // enumerated here so hydrate can pass its server-returned row through
+  // opaquely and buildSavePayload will forward it back verbatim when the
+  // server advertises support.
+  PrinterFailure = 'PrinterFailure',
+  FilamentRunout = 'FilamentRunout',
+  HarvestReady = 'HarvestReady',
+  MaintenanceDue = 'MaintenanceDue',
+  PrinterOffline = 'PrinterOffline'
+}
+
+/**
+ * Capability probe response from `GET /notifications/capabilities` (introduced
+ * by #708). Legacy servers respond 404, which the client treats as
+ * "supportedEventTypes = the classic four job tokens only" so that unknown
+ * operator strings are never sent back on `PUT /notifications/preferences`.
+ *
+ * The `supportedEventTypes` array is a bag of raw enum strings so a
+ * forward-compatible client that has not yet updated its
+ * `NotificationPreferenceEventType` union does not lose values.
+ */
+export interface NotificationCapabilitiesResponse {
+  supportedEventTypes: string[];
 }
 
 export interface NotificationEventChannelPreferenceDto {
