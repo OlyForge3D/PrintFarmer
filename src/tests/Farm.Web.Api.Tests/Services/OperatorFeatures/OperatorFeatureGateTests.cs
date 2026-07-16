@@ -302,4 +302,150 @@ public class OperatorFeatureGateTests
 
         repo.Verify(r => r.GetReadOnlyAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
+
+    // ------------------------------------------------------------------
+    // Async fallback vs strict paths (issue #755 Hicks blocker 1)
+    //
+    // IsEnabledAsync is the general fallback path used by migrated
+    // controllers/services/filters/hosted services: a repository/DB failure
+    // must degrade to the documented default (never 500), mirroring the sync
+    // IsEnabled, while caller-requested cancellation still propagates.
+    // IsEnabledStrictAsync is the fail-closed path used only by the native-push
+    // transport authorization boundary: repository/DB failures propagate so the
+    // caller can fail closed and roll back.
+    // ------------------------------------------------------------------
+
+    private static Mock<IAppSettingsRepository> RepoThrows(Exception ex)
+    {
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetReadOnlyAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(ex);
+        return repo;
+    }
+
+    private static Mock<IAppSettingsRepository> RepoMalformed()
+    {
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetReadOnlyAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AppSettingsEntity
+            {
+                Key = OperatorFeatureSettings.SectionName,
+                SettingsJson = "{ not-json",
+                UpdatedAt = DateTime.UtcNow,
+            });
+        return repo;
+    }
+
+    private static Mock<IAppSettingsRepository> RepoHonorsCancellation()
+    {
+        Mock<IAppSettingsRepository> repo = new();
+        repo.Setup(r => r.GetReadOnlyAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken ct) => Task.FromCanceled<AppSettingsEntity?>(ct));
+        return repo;
+    }
+
+    [Fact]
+    public async Task IsEnabledAsync_WhenRepositoryThrows_ReturnsDocumentedDefault()
+    {
+        OperatorFeatureGate gate = new(
+            RepoThrows(new InvalidOperationException("cold start / DB unavailable")).Object,
+            EmptyConfig(),
+            NullLogger<OperatorFeatureGate>.Instance);
+
+        (await gate.IsEnabledAsync(OperatorFeature.FilamentCoverage)).Should().BeTrue(
+            "FilamentCoverage defaults to enabled when persisted settings are unavailable, so a migrated controller must not 500");
+        (await gate.IsEnabledAsync(OperatorFeature.NativePush)).Should().BeFalse(
+            "NativePush defaults to disabled when persisted settings are unavailable");
+    }
+
+    [Fact]
+    public async Task IsEnabledAsync_WhenRepositoryThrows_StillAppliesEnvironmentHardDisable()
+    {
+        IConfiguration config = ConfigWith(("OperatorFeatures:attentionEnabled", "false"));
+        OperatorFeatureGate gate = new(
+            RepoThrows(new InvalidOperationException("DB unavailable")).Object,
+            config,
+            NullLogger<OperatorFeatureGate>.Instance);
+
+        (await gate.IsEnabledAsync(OperatorFeature.Attention)).Should().BeFalse(
+            "explicit-false env override still hard-disables even when the DB itself is the incident");
+        (await gate.IsEnabledAsync(OperatorFeature.FilamentCoverage)).Should().BeTrue(
+            "only the overridden flag flips");
+    }
+
+    [Fact]
+    public async Task IsEnabledAsync_WhenPersistedRowIsMalformedJson_ReturnsDefault()
+    {
+        OperatorFeatureGate gate = new(RepoMalformed().Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
+
+        (await gate.IsEnabledAsync(OperatorFeature.Attention)).Should().BeTrue(
+            "a malformed row is a data-shape failure and degrades to defaults on the fallback path");
+    }
+
+    [Fact]
+    public async Task IsEnabledAsync_WhenRepositorySucceeds_ReturnsPersistedValue()
+    {
+        OperatorFeatureSettings persisted = new() { NativePushEnabled = true, AttentionEnabled = false };
+        IOperatorFeatureGate gate = CreateGate(persisted);
+
+        (await gate.IsEnabledAsync(OperatorFeature.NativePush)).Should().BeTrue();
+        (await gate.IsEnabledAsync(OperatorFeature.Attention)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsEnabledAsync_WhenCallerTokenCanceled_PropagatesOperationCanceled()
+    {
+        OperatorFeatureGate gate = new(RepoHonorsCancellation().Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Func<Task> act = async () => await gate.IsEnabledAsync(OperatorFeature.NativePush, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "caller-requested cancellation is control flow and must never be swallowed into a fallback answer");
+    }
+
+    [Fact]
+    public async Task IsEnabledStrictAsync_WhenRepositoryThrows_PropagatesException()
+    {
+        OperatorFeatureGate gate = new(
+            RepoThrows(new InvalidOperationException("DB unavailable")).Object,
+            EmptyConfig(),
+            NullLogger<OperatorFeatureGate>.Instance);
+
+        Func<Task> act = async () => await gate.IsEnabledStrictAsync(OperatorFeature.NativePush);
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "the strict/fail-closed path must not swallow an infrastructure outage into a default answer");
+    }
+
+    [Fact]
+    public async Task IsEnabledStrictAsync_WhenPersistedRowIsMalformedJson_ReturnsDefault()
+    {
+        OperatorFeatureGate gate = new(RepoMalformed().Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
+
+        (await gate.IsEnabledStrictAsync(OperatorFeature.Attention)).Should().BeTrue(
+            "a malformed row is a data-shape failure, not an outage, so the strict path still degrades to defaults");
+    }
+
+    [Fact]
+    public async Task IsEnabledStrictAsync_WhenRepositorySucceeds_ReturnsPersistedValue()
+    {
+        OperatorFeatureSettings persisted = new() { NativePushEnabled = true };
+        IOperatorFeatureGate gate = CreateGate(persisted);
+
+        (await gate.IsEnabledStrictAsync(OperatorFeature.NativePush)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IsEnabledStrictAsync_WhenCallerTokenCanceled_PropagatesOperationCanceled()
+    {
+        OperatorFeatureGate gate = new(RepoHonorsCancellation().Object, EmptyConfig(), NullLogger<OperatorFeatureGate>.Instance);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Func<Task> act = async () => await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
 }

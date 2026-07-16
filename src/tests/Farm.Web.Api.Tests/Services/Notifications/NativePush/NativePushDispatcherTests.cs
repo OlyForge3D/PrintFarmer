@@ -5188,6 +5188,8 @@ public sealed class NativePushDispatcherTests
             .Returns(() => Volatile.Read(ref gateEnabled) == 1);
         gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
+        gate.Setup(g => g.IsEnabledStrictAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
@@ -5347,6 +5349,8 @@ public sealed class NativePushDispatcherTests
             .Returns(() => Volatile.Read(ref gateEnabled) == 1);
         gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
+        gate.Setup(g => g.IsEnabledStrictAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
@@ -5431,6 +5435,8 @@ public sealed class NativePushDispatcherTests
         gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush))
             .Returns(() => Volatile.Read(ref gateEnabled) == 1);
         gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
+        gate.Setup(g => g.IsEnabledStrictAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(Volatile.Read(ref gateEnabled) == 1));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
@@ -5992,6 +5998,8 @@ public sealed class NativePushDispatcherTests
         gate.Setup(value => value.IsEnabled(OperatorFeature.NativePush))
             .Returns(() => featureEnabled);
         gate.Setup(value => value.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(featureEnabled));
+        gate.Setup(value => value.IsEnabledStrictAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(featureEnabled));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         int activeOwnerLookups = 0;
@@ -6724,7 +6732,7 @@ public sealed class NativePushDispatcherTests
         // Deterministic:
         //   * gate initially enabled; async read paused via ControllableAsyncGate.
         //   * Sender prepares, then calls TryStartAsync.
-        //   * Dispatcher's TryStartAsync awaits gate.IsEnabledAsync — the fake
+        //   * Dispatcher's TryStartAsync awaits gate.IsEnabledStrictAsync — the fake
         //     stalls on a TCS held by the test.
         //   * Test flips SetEnabled(false) then Release()s the paused gate.
         //   * Paused gate completes returning false — TryStartAsync vetoes,
@@ -7309,8 +7317,12 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_OptionsFailurePruneRetainsLastValidRateLimitWindowAfterRecovery()
+    public async Task DispatchAsync_OptionsFailureSkipsRateExpiry_LongWindowBucketSurvivesAndRateLimitsAfterRecovery()
     {
+        // Retained long-window failure/recovery guard. A single configured window
+        // (ten minutes) is in effect throughout, so an options-read failure must not
+        // drop the live bucket. Under the fixed design this holds because an options
+        // failure skips settings-dependent rate-bucket expiry entirely.
         Guid userId = Guid.NewGuid();
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
         await using AppDbContext db = BuildDbContext();
@@ -7379,13 +7391,166 @@ public sealed class NativePushDispatcherTests
             occurredAtUtc: timeProvider.GetUtcNow().UtcDateTime);
 
         Volatile.Read(ref providerCalls).Should().Be(1,
-            "options failure pruning must retain the last valid ten-minute rate window instead of substituting the default thirty seconds and dropping an active bucket");
+            "an options-read failure must skip settings-dependent rate-bucket expiry so the live ten-minute bucket survives and the post-recovery send stays rate-limited");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_OptionsFailureWithStaleShortEntryWindow_DoesNotEvictLiveLongWindowBucket_RecoveryStaysRateLimited()
+    {
+        // Hicks r2 blocker 2 discriminating regression. Reproduces the unsafe
+        // retained-window interleaving deterministically: a live rate bucket is
+        // created under the authoritative long (ten-minute) window; a later dispatch
+        // reads a stale shorter (thirty-second) window at its entry snapshot and then
+        // fails its authoritative options read at the dispatch-core boundary. The
+        // prior implementation pruned rate buckets on that options failure using the
+        // stale shorter retained window, evicting the live bucket and permitting a
+        // send after recovery. The fixed design skips settings-dependent rate expiry
+        // on any options failure, so the live bucket survives and the recovery send
+        // stays rate-limited. Fails on b5f5; passes fixed.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int providerCalls = 0;
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
+        {
+            NativePushTransportStartDecision decision =
+                await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+
+        static NativePushSettings WithWindow(TimeSpan window) => new()
+        {
+            Mode = NativePushMode.Direct,
+            MaxAttempts = 1,
+            RateLimitPerUser = 1,
+            RateLimitWindow = window,
+            DedupeWindow = TimeSpan.FromMinutes(1),
+        };
+
+        using var monitor = new ScriptedOptionsMonitor(WithWindow(TimeSpan.FromMinutes(10)));
+        var timeProvider = new AdvancingTimeProvider(
+            new DateTime(2026, 7, 15, 20, 0, 0, DateTimeKind.Utc));
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        using var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            sender,
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance,
+            timeProvider);
+
+        // 1) Establish the live bucket under the authoritative ten-minute window.
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: timeProvider.GetUtcNow().UtcDateTime);
+        Volatile.Read(ref providerCalls).Should().Be(1, "the first send establishes the rate bucket");
+
+        // 2) Ninety seconds later a dispatch reads a stale thirty-second window at its
+        //    entry snapshot, then fails its authoritative options read at the core
+        //    boundary. The options-failure finally prune runs (past the 30s internal
+        //    prune cadence). Under b5f5 this evicts the live bucket with the stale 30s
+        //    window; under the fix it skips rate-bucket expiry entirely.
+        timeProvider.Advance(TimeSpan.FromSeconds(90));
+        monitor.EnqueueValue(WithWindow(TimeSpan.FromSeconds(30))); // entry snapshot (Mode=Direct)
+        monitor.EnqueueThrow();                                     // core read fails -> finally prune
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: timeProvider.GetUtcNow().UtcDateTime);
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "the options-failure dispatch throws before crossing transport");
+
+        // 3) Recovery one second later. The bucket timestamp is ~91s old: within the
+        //    ten-minute window (so a correct implementation stays rate-limited) but
+        //    beyond the stale 30s window that the buggy retained-snapshot prune would
+        //    have used to evict it.
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: timeProvider.GetUtcNow().UtcDateTime);
+
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "an options failure must not evict a live long-window bucket using a stale shorter window; the post-recovery send stays rate-limited");
     }
 
     // -----------------------------------------------------------------------
     // Fakes for the new blocker tests. Placed alongside the other test
     // helpers in this file so they compile without additional wiring.
     // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Options monitor driven by a scripted queue of responses. Each read consumes the
+    /// next queued action (a value or a throw); once the queue drains, reads return the
+    /// fallback value. Used to reproduce the blocker-2 interleaving deterministically:
+    /// enqueue a stale short-window value for the entry snapshot followed by a throw for
+    /// the authoritative core read.
+    /// </summary>
+    private sealed class ScriptedOptionsMonitor : IOptionsMonitor<NativePushSettings>, IDisposable
+    {
+        private readonly object _sync = new();
+        private readonly Queue<Func<NativePushSettings>> _script = new();
+        private readonly NativePushSettings _fallback;
+
+        public ScriptedOptionsMonitor(NativePushSettings fallback)
+        {
+            _fallback = fallback;
+        }
+
+        public NativePushSettings CurrentValue
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _script.Count > 0 ? _script.Dequeue().Invoke() : _fallback;
+                }
+            }
+        }
+
+        public void EnqueueValue(NativePushSettings value)
+        {
+            lock (_sync)
+            {
+                _script.Enqueue(() => value);
+            }
+        }
+
+        public void EnqueueThrow()
+        {
+            lock (_sync)
+            {
+                _script.Enqueue(static () => throw new InvalidOperationException("simulated options acquisition failure"));
+            }
+        }
+
+        public NativePushSettings Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<NativePushSettings, string?> listener) => null;
+
+        public void Dispose()
+        {
+        }
+    }
 
     /// <summary>
     /// Options monitor that can be armed to throw on the next N
@@ -7520,7 +7685,18 @@ public sealed class NativePushDispatcherTests
 
         public bool IsEnabled(OperatorFeature feature) => _enabled;
 
-        public async Task<bool> IsEnabledAsync(OperatorFeature feature, CancellationToken cancellationToken = default)
+        public Task<bool> IsEnabledAsync(OperatorFeature feature, CancellationToken cancellationToken = default)
+            => EvaluateAsync(cancellationToken);
+
+        public Task<bool> IsEnabledStrictAsync(OperatorFeature feature, CancellationToken cancellationToken = default)
+            => EvaluateAsync(cancellationToken);
+
+        // Both async surfaces share one machinery so the dispatcher's strict
+        // transport-start reads drive the same call counter, pause, and throw
+        // arming the tests rely on (Hicks r2 blocker 1). The dispatcher calls the
+        // strict path exclusively, so ArmThrowOnCall/ArmPauseForCallCounts indices
+        // are unchanged from when it called the general path.
+        private async Task<bool> EvaluateAsync(CancellationToken cancellationToken)
         {
             int callIndex = Interlocked.Increment(ref _asyncCalls);
 
@@ -7690,12 +7866,15 @@ public sealed class NativePushDispatcherTests
     {
         var gate = new Mock<IOperatorFeatureGate>();
         // Keep the sync IsEnabled set for controllers/services that still take
-        // the synchronous surface, and mirror the same value on the async
-        // <see cref="IOperatorFeatureGate.IsEnabledAsync"/> path used by the
-        // dispatcher's transport-start handshake (Hicks r2 blocker 2). Both
-        // must agree so tests that build a single gate keep behaving as before.
+        // the synchronous surface, and mirror the same value on BOTH async paths:
+        // the general fallback <see cref="IOperatorFeatureGate.IsEnabledAsync"/> and
+        // the strict <see cref="IOperatorFeatureGate.IsEnabledStrictAsync"/> path the
+        // dispatcher's transport-start handshake now uses (Hicks r2 blocker 1). All
+        // three must agree so tests that build a single gate keep behaving as before.
         gate.Setup(g => g.IsEnabled(OperatorFeature.NativePush)).Returns(enabled);
         gate.Setup(g => g.IsEnabledAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(enabled);
+        gate.Setup(g => g.IsEnabledStrictAsync(OperatorFeature.NativePush, It.IsAny<CancellationToken>()))
             .ReturnsAsync(enabled);
         return gate;
     }

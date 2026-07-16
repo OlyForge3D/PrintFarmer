@@ -61,7 +61,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private static readonly TimeSpan ActionableAlertTtl = TimeSpan.FromMinutes(30);
 
     private long _lastPruneAtTicks;
-    private long _lastValidRateLimitWindowTicks;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly INativePushTransportSender _sender;
@@ -105,7 +104,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     internal void PruneCachesForTests()
     {
         NativePushSettings settings = _optionsMonitor.CurrentValue;
-        RememberRateLimitWindow(settings);
         PruneCaches(UtcNow, EffectiveRateLimitWindow(settings));
     }
 
@@ -215,7 +213,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         if (changeKind != AttentionChangeKind.Resolved)
         {
             NativePushSettings entrySettings = _optionsMonitor.CurrentValue;
-            RememberRateLimitWindow(entrySettings);
             if (entrySettings.Mode == NativePushMode.Disabled)
             {
                 return;
@@ -320,7 +317,6 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // silent dismissal even after the source removes the live item.
             NativePushSettings settings = _optionsMonitor.CurrentValue;
             settingsSnapshot = settings;
-            RememberRateLimitWindow(settings);
             if (settings.Mode == NativePushMode.Disabled)
             {
                 return;
@@ -331,7 +327,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
             IServiceProvider sp = scope.ServiceProvider;
             IOperatorFeatureGate gate = sp.GetRequiredService<IOperatorFeatureGate>();
-            if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+            if (!await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return;
@@ -391,7 +387,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // Re-check the gate on every recipient so a mid-flight flip stops sends.
-                if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+                if (!await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
                 {
                     _metrics.SkippedFeatureDisabled.Add(1);
                     return;
@@ -477,14 +473,21 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // sweeps in bursty conditions.
             //
             // Settings-independent caches still need bounded reclamation after
-            // an options failure, but rate buckets must never be pruned using a
-            // fabricated shorter window. Use the most recent successfully-read
-            // window; when none exists, skip rate-bucket pruning for this pass.
+            // an options failure. Hicks r2 blocker 2: rate-bucket expiry is
+            // settings-dependent, so it is driven ONLY by an authoritative current
+            // options snapshot. When the current options read failed
+            // (settingsSnapshot is null) we pass a null window, so PruneCaches
+            // performs only the settings-INDEPENDENT bounded cleanup
+            // (dedupe/lifecycle/lane/fence) and skips rate-bucket expiry entirely.
+            // This removes all reliance on an unordered retained window, so a stale
+            // shorter snapshot can never evict a live longer-window bucket and permit
+            // a send after recovery. A valid snapshot (including disabled mode) prunes
+            // rate buckets with its own normalized window.
             if (settingsSnapshot is null || settingsSnapshot.Mode == NativePushMode.Disabled)
             {
                 TimeSpan? rateLimitWindow = settingsSnapshot is not null
                     ? EffectiveRateLimitWindow(settingsSnapshot)
-                    : TryGetLastValidRateLimitWindow();
+                    : null;
                 PruneCaches(UtcNow, rateLimitWindow);
             }
         }
@@ -631,7 +634,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+                if (!await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
                 {
                     _metrics.SkippedFeatureDisabled.Add(1);
                     return;
@@ -1188,7 +1191,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // Awaited outside every lock — the dispatcher does not hold any in-memory
             // lock at this point, so a slow DB round-trip only delays this dispatch's
             // retry cadence, never unrelated concurrent transports.
-            if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+            if (!await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return new NativePushSendOutcome(null, anyTransportStarted);
@@ -1308,7 +1311,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
                     _metrics.Attempted.Add(1);
                 },
-                async ct => await gate.IsEnabledAsync(OperatorFeature.NativePush, ct).ConfigureAwait(false),
+                async ct => await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, ct).ConfigureAwait(false),
                 () => _metrics.SkippedFeatureDisabled.Add(1),
                 cancellationToken);
 
@@ -1377,7 +1380,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // alert generation. Discard that provider result before retry or any
             // result attribution.
             cancellationToken.ThrowIfCancellationRequested();
-            if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+            if (!await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
             {
                 _metrics.SkippedFeatureDisabled.Add(1);
                 return new NativePushSendOutcome(null, true);
@@ -1629,7 +1632,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
         IOperatorFeatureGate gate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
-        if (!await gate.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+        if (!await gate.IsEnabledStrictAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
             _metrics.SkippedFeatureDisabled.Add(1);
             return DeviceDispatchOutcome.DispatchStopped;
@@ -2888,33 +2891,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
 
     // The rate-bucket eviction TTL has always normalised a non-positive
     // configured window to five minutes (the historical PruneCaches default).
-    // Centralised here so every prune call site — the normal path, the
-    // disabled/no-op finally, and the retained last-valid snapshot — evicts on
-    // identical semantics, and a misconfigured non-positive window can never
-    // collapse the eviction cutoff onto "now".
+    // Centralised here so every prune call site — the normal path and the
+    // disabled/no-op finally — evicts on identical semantics, and a misconfigured
+    // non-positive window can never collapse the eviction cutoff onto "now".
     private static TimeSpan EffectiveRateLimitWindow(NativePushSettings settings)
     {
         return settings.RateLimitWindow > TimeSpan.Zero
             ? settings.RateLimitWindow
             : TimeSpan.FromMinutes(5);
-    }
-
-    private void RememberRateLimitWindow(NativePushSettings settings)
-    {
-        // Retain the authoritative last-valid eviction window so a later options
-        // read failure can still prune rate buckets on the configured cadence
-        // instead of a fabricated default (504dfb15 blocker 2). Interlocked
-        // mirrors the sibling _lastPruneAtTicks so this 64-bit value is written
-        // and read atomically on every runtime.
-        _ = Interlocked.Exchange(
-            ref _lastValidRateLimitWindowTicks,
-            EffectiveRateLimitWindow(settings).Ticks);
-    }
-
-    private TimeSpan? TryGetLastValidRateLimitWindow()
-    {
-        long ticks = Interlocked.Read(ref _lastValidRateLimitWindowTicks);
-        return ticks > 0 ? TimeSpan.FromTicks(ticks) : null;
     }
 
     private void PruneCaches(DateTime nowUtc, TimeSpan? rateLimitWindow)
@@ -2959,9 +2943,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // set an IsDead flag so racing TryConsumeRate calls that already
             // fetched the doomed bucket via GetOrAdd can detect and retry.
             //
-            // The eviction TTL honours the last successfully-read configured
-            // RateLimitWindow. If options acquisition failed before any valid
-            // snapshot existed, this entire settings-dependent section is skipped.
+            // The eviction TTL honours the caller-supplied authoritative window
+            // (the current options snapshot). When the current options read failed
+            // the caller passes a null window and this entire settings-dependent
+            // section is skipped, so a live bucket is never evicted on a stale or
+            // fabricated window.
             foreach (KeyValuePair<RateLimitKey, RateLimitBucket> kv in _rateLimits)
             {
                 lock (kv.Value)
