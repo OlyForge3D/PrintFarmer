@@ -587,6 +587,14 @@ struct PrintJob: Codable, Identifiable, Sendable {
     let remainingCopies: Int
     let projectFileId: UUID?
     let thumbnailUrl: String?
+    /// Non-nil once `POST /api/parts-inventory/harvest/{jobId}` has been
+    /// applied for this job (Dispute C, #714). Additive/optional so the
+    /// existing `DemoJobService.swift` memberwise-init call site — outside
+    /// this dispute's mobile-only file scope — needs no changes. Must be
+    /// `var`, not `let`: a `let` with an initial value is never decoded by
+    /// Swift's synthesized `Decodable` (silently stays at its default
+    /// regardless of the JSON payload).
+    var harvestedAt: Date? = nil
 
     var name: String { gcodeFileName }
 
@@ -648,6 +656,13 @@ struct QueuedJobInfo: Codable, Identifiable, Sendable {
     let copies: Int
     let completedCopies: Int
     let remainingCopies: Int
+    /// Non-nil once the job has been harvested (Dispute C, #714). Additive/
+    /// optional so `DemoJobService.swift`'s memberwise-init call site —
+    /// outside this dispute's mobile-only file scope — needs no changes.
+    /// Must be `var`, not `let`: a `let` with an initial value is never
+    /// decoded by Swift's synthesized `Decodable` (silently stays at its
+    /// default regardless of the JSON payload).
+    var harvestedAt: Date? = nil
 
     var jobStatus: PrintJobStatus? {
         PrintJobStatus(rawValue: status)

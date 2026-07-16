@@ -62,6 +62,19 @@ struct HarvestSheetView: View {
             .onChange(of: viewModel.hasWrongBinConflict) { _, hasConflict in
                 showOverrideSheet = hasConflict
             }
+            // Dispute C: invoke `onHarvested` exactly once, immediately upon
+            // any successful response — including a stale-sheet
+            // `alreadyHarvested == true` replay — rather than deferring it to
+            // the "Done" tap. `result` only ever transitions from `nil` to a
+            // value once per sheet instance (both `submit()` and
+            // `confirmWrongBinOverride()` funnel into the same property), so
+            // this fires exactly once regardless of which path produced it.
+            .onChange(of: viewModel.result) { _, newResult in
+                if newResult != nil {
+                    onHarvested?()
+                }
+            }
+            .interactiveDismissDisabled(viewModel.isSubmitting)
         }
     }
 
@@ -415,8 +428,10 @@ struct HarvestSheetView: View {
             .padding()
             .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
 
+            // Dispute C: `onHarvested` already fired via `.onChange(of:
+            // viewModel.result)` the moment the server responded — "Done"
+            // only dismisses the sheet.
             Button {
-                onHarvested?()
                 dismiss()
             } label: {
                 Text("Done")
