@@ -4,7 +4,7 @@ import XCTest
 final class ScanViewModelTests: XCTestCase {
     @MainActor
     func testDispatchPrinterDeepLinkSetsPendingPrinterDestinationWithoutResolving() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
 
         await viewModel.dispatch("printfarmer://printer/\(UUID().uuidString)")
 
@@ -18,7 +18,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchPrinterReadyDeepLinkSetsPendingPrinterDestination() async {
-        let (viewModel, _, _) = makeSubject()
+        let (viewModel, _, _, _) = makeSubject()
         let printerId = UUID()
 
         await viewModel.dispatch("printfarmer://printer/\(printerId.uuidString)/ready")
@@ -29,14 +29,18 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertEqual(id, printerId)
     }
 
-    // MARK: - Final remediation Blocker 5: canonical spool QR recognition
+    // MARK: - Final remediation Blocker 5 / Item C: canonical spool QR recognition
+    // with active-server existence confirmation and preserved dispatch order
 
     @MainActor
-    func testDispatchSpoolDeepLinkRoutesDirectlyWithoutTouchingBinPartOrBarcodeIntake() async {
-        // `printfarmer://spool/{id}` CAN be produced by a scan (a printed or
-        // NFC-written tag) — it must route directly to spool detail, not
-        // fall through to bin/part/barcode resolution.
-        let (viewModel, partsService, barcodeService) = makeSubject()
+    func testDispatchSpoolDeepLinkAttemptsBinAndPartFirstThenRoutesAfterExistenceConfirmed() async {
+        // #714 Item C: printer -> bin -> part -> spool precedence must be
+        // preserved even for a recognized spool deep link — it is deferred,
+        // not early-routed, so bin/part resolution are attempted first.
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.resolvePartError = NetworkError.notFound
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [makeSpool(id: 42)], totalCount: 1)
 
         await viewModel.dispatch("printfarmer://spool/42")
 
@@ -45,21 +49,69 @@ final class ScanViewModelTests: XCTestCase {
         }
         XCTAssertEqual(id, 42)
         XCTAssertNil(viewModel.pendingOutcome)
-        XCTAssertTrue(partsService.resolveBinCodes.isEmpty)
-        XCTAssertTrue(partsService.resolvePartBarcodes.isEmpty)
-        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty)
+        XCTAssertEqual(partsService.resolveBinCodes, ["printfarmer://spool/42"], "bin resolution must be attempted before spool routing")
+        XCTAssertEqual(partsService.resolvePartBarcodes, ["printfarmer://spool/42"], "part resolution must be attempted before spool routing")
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "a deep-linked spool ID must never reach Barcode Intake")
+        XCTAssertTrue(spoolService.listSpoolsCalled)
         XCTAssertEqual(viewModel.recentScans.first?.title, "Spool")
     }
 
     @MainActor
-    func testDispatchStructuredSpoolURLRoutesDirectlyNeverTouchingBarcodeIntake() async {
+    func testDispatchSpoolDeepLinkNotFoundOnServerSurfacesErrorWithoutRoutingOrFallback() async {
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.resolvePartError = NetworkError.notFound
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+
+        await viewModel.dispatch("printfarmer://spool/42")
+
+        XCTAssertNil(viewModel.pendingDeepLinkDestination, "an ID absent from the active server must never route to spool detail")
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "a not-found spool ID must never fall back to raw barcode registration")
+    }
+
+    @MainActor
+    func testDispatchSpoolDeepLinkExistenceLookupNetworkErrorSurfacesErrorWithoutRoutingOrFallback() async {
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.resolvePartError = NetworkError.notFound
+        spoolService.errorToThrow = NetworkError.serverError(500)
+
+        await viewModel.dispatch("printfarmer://spool/42")
+
+        XCTAssertNil(viewModel.pendingDeepLinkDestination, "a failed existence lookup must never route to spool detail")
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "an existence-lookup error must never fall back to raw barcode registration")
+    }
+
+    @MainActor
+    func testDispatchSpoolExistenceLookupUsesTheInjectedActiveServerSpoolService() async {
+        // Active-server isolation: the existence check must go through the
+        // exact spoolService instance injected via configure() for the
+        // currently-connected server, not some other/shared instance.
+        let (viewModel, partsService, _, spoolService) = makeSubject()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.resolvePartError = NetworkError.notFound
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [makeSpool(id: 42)], totalCount: 1)
+
+        await viewModel.dispatch("printfarmer://spool/42")
+
+        XCTAssertEqual(spoolService.listSpoolsArgs?.limit, 500)
+        XCTAssertEqual(spoolService.listSpoolsArgs?.offset, 0)
+    }
+
+    @MainActor
+    func testDispatchStructuredSpoolURLRoutesAfterExistenceConfirmedNeverTouchingBarcodeIntake() async {
         // A structured spool URL payload (e.g. from a Spoolman-generated QR
         // label) is unambiguous — it must never be registered as a raw
         // barcode via Barcode Intake, even though bin/part resolution are
-        // attempted first (and miss) as usual.
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        // attempted first (and miss) as usual, and even though it now also
+        // requires active-server existence confirmation.
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
         partsService.resolvePartError = NetworkError.notFound
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [makeSpool(id: 42)], totalCount: 1)
 
         await viewModel.dispatch("https://spoolman.example.com/spools/42")
 
@@ -72,16 +124,32 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testDispatchBareNumericFallsBackToSpoolIdOnlyAfterBarcodeIntakeMiss() async {
+    func testDispatchStructuredSpoolURLNotFoundNeverFallsBackToBarcodeIntake() async {
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.resolvePartError = NetworkError.notFound
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+
+        await viewModel.dispatch("https://spoolman.example.com/spools/42")
+
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "a structured payload must never fall back to raw barcode registration, found or not")
+    }
+
+    @MainActor
+    func testDispatchBareNumericFallsBackToSpoolIdOnlyAfterBarcodeIntakeMissAndExistenceConfirmed() async {
         // Known raw barcodes retain Barcode Intake (regression-guarded by
         // testDispatchFallsThroughBinAndPartNotFoundToKnownSpoolBarcode
         // above, using the same style of numeric code). Only once Barcode
         // Intake reports a definitive miss does an unresolved bare numeric
-        // code fall back to being treated as a spool ID.
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        // code fall back to being treated as a spool ID, and only then is
+        // it routed once active-server existence is confirmed.
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
         partsService.resolvePartError = NetworkError.notFound
         barcodeService.filamentToResolve = nil // Barcode Intake: not recognized
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [makeSpool(id: 77)], totalCount: 1)
 
         await viewModel.dispatch("77")
 
@@ -94,13 +162,29 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testDispatchBareNumericNotFoundOnServerSurfacesErrorNotUnknownCode() async {
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.resolvePartError = NetworkError.notFound
+        barcodeService.filamentToResolve = nil
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+
+        await viewModel.dispatch("77")
+
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertNil(viewModel.pendingOutcome, "a not-found bare-numeric spool candidate must surface an error, not .unknownCode")
+        XCTAssertNotNil(viewModel.errorMessage)
+    }
+
+    @MainActor
     func testDispatchKnownRawBarcodeStillResolvesViaBarcodeIntakeNotSpoolFallback() async {
         // Regression guard: the existing known-barcode-resolves-to-spool
         // test (12-digit UPC-like code) must still resolve via Barcode
-        // Intake, not be short-circuited by the new structured-spool check
+        // Intake, not be short-circuited by the structured-spool check
         // (a bare numeric string is deliberately excluded from
-        // `parseStructured`).
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        // `parseStructured`), and must never touch the spool existence
+        // lookup at all.
+        let (viewModel, partsService, barcodeService, spoolService) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
         partsService.resolvePartError = NetworkError.notFound
         barcodeService.filamentToResolve = makeFilament(id: 9, name: "PETG Blue")
@@ -110,11 +194,12 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertEqual(barcodeService.resolveBarcodes, ["012345678905"])
         XCTAssertEqual(viewModel.pendingSpoolBarcode, "012345678905")
         XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertFalse(spoolService.listSpoolsCalled, "a known raw barcode must never trigger a spool existence lookup")
     }
 
     @MainActor
     func testDispatchBinBarcodeResolvesBinAndSkipsPartAndSpoolResolution() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         let bin = makeBin(code: "BIN-01")
         partsService.binToResolve = bin
 
@@ -132,7 +217,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchFallsThroughBinNotFoundToPartResolution() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
         let part = makePart(sku: "SKU-01")
         partsService.partToResolve = part
@@ -157,7 +242,7 @@ final class ScanViewModelTests: XCTestCase {
         // still fall through to part resolution, not stop and surface an
         // error, so operators on a server with the feature off can still
         // scan spools/printers via the same unified scan entry point.
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         partsService.resolveBinError = NetworkError.featureDisabled(
             APIError(title: "Disabled", status: 404, detail: nil, errors: nil, message: nil, code: "featureDisabled")
         )
@@ -180,7 +265,7 @@ final class ScanViewModelTests: XCTestCase {
         // Both bin AND part resolution gated off must still reach spool
         // resolution — the feature gate must never block the pre-existing
         // spool/printer routing paths.
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         let disabled = NetworkError.featureDisabled(
             APIError(title: "Disabled", status: 404, detail: nil, errors: nil, message: nil, code: "featureDisabled")
         )
@@ -198,7 +283,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchFallsThroughBinAndPartNotFoundToKnownSpoolBarcode() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
         partsService.resolvePartError = NetworkError.notFound
         barcodeService.filamentToResolve = makeFilament(id: 3, name: "PLA Black")
@@ -212,7 +297,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchUnrecognizedCodeSetsUnknownOutcome() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
         partsService.resolvePartError = NetworkError.notFound
         barcodeService.filamentToResolve = nil
@@ -228,7 +313,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchBinResolutionNonNotFoundErrorSurfacesImmediatelyWithoutFallingThrough() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         partsService.resolveBinError = NetworkError.serverError(500)
 
         await viewModel.dispatch("BIN-CODE")
@@ -241,7 +326,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchPartResolutionNonNotFoundErrorSurfacesImmediatelyWithoutFallingThrough() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
         partsService.resolvePartError = NetworkError.serverError(500)
 
@@ -254,7 +339,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchIgnoresBlankCode() async {
-        let (viewModel, partsService, barcodeService) = makeSubject()
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
 
         await viewModel.dispatch("   ")
 
@@ -287,7 +372,13 @@ final class ScanViewModelTests: XCTestCase {
         let viewModel = ScanViewModel()
         let partsService = MockPartsInventoryService()
         let barcodeService = MockBarcodeIntakeService()
-        viewModel.configure(scanner: scanner, partsInventoryService: partsService, barcodeIntakeService: barcodeService)
+        let spoolService = MockSpoolService()
+        viewModel.configure(
+            scanner: scanner,
+            partsInventoryService: partsService,
+            barcodeIntakeService: barcodeService,
+            spoolService: spoolService
+        )
 
         viewModel.scan()
 
@@ -313,7 +404,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testRecentScansCapAtTwentyEntries() async {
-        let (viewModel, partsService, _) = makeSubject()
+        let (viewModel, partsService, _, _) = makeSubject()
 
         for index in 0..<25 {
             partsService.binToResolve = makeBin(code: "BIN-\(index)")
@@ -327,12 +418,18 @@ final class ScanViewModelTests: XCTestCase {
     // MARK: - Helpers
 
     @MainActor
-    private func makeSubject() -> (ScanViewModel, MockPartsInventoryService, MockBarcodeIntakeService) {
+    private func makeSubject() -> (ScanViewModel, MockPartsInventoryService, MockBarcodeIntakeService, MockSpoolService) {
         let viewModel = ScanViewModel()
         let partsService = MockPartsInventoryService()
         let barcodeService = MockBarcodeIntakeService()
-        viewModel.configure(scanner: nil, partsInventoryService: partsService, barcodeIntakeService: barcodeService)
-        return (viewModel, partsService, barcodeService)
+        let spoolService = MockSpoolService()
+        viewModel.configure(
+            scanner: nil,
+            partsInventoryService: partsService,
+            barcodeIntakeService: barcodeService,
+            spoolService: spoolService
+        )
+        return (viewModel, partsService, barcodeService, spoolService)
     }
 
     @MainActor
@@ -340,8 +437,14 @@ final class ScanViewModelTests: XCTestCase {
         let viewModel = ScanViewModel()
         let partsService = MockPartsInventoryService()
         let barcodeService = MockBarcodeIntakeService()
+        let spoolService = MockSpoolService()
         let scanner = MockScannerService()
-        viewModel.configure(scanner: scanner, partsInventoryService: partsService, barcodeIntakeService: barcodeService)
+        viewModel.configure(
+            scanner: scanner,
+            partsInventoryService: partsService,
+            barcodeIntakeService: barcodeService,
+            spoolService: spoolService
+        )
         return (viewModel, partsService, scanner)
     }
 
@@ -367,6 +470,18 @@ final class ScanViewModelTests: XCTestCase {
             density: 1.24, diameter: 1.75, weight: 1000, spoolWeight: 200, price: 25,
             settingsExtruderTemp: 215, settingsBedTemp: 60, articleNumber: nil,
             comment: nil, multiColorHexes: nil, externalId: nil
+        )
+    }
+
+    private func makeSpool(id: Int) -> SpoolmanSpool {
+        SpoolmanSpool(
+            id: id, filamentId: nil, name: "Spool #\(id)", material: "PLA", colorHex: "#000000",
+            inUse: false, filamentName: "PLA Black", vendor: "Vendor",
+            registeredAt: nil, firstUsedAt: nil, lastUsedAt: nil,
+            remainingWeightG: 800, initialWeightG: 1000, usedWeightG: 200, spoolWeightG: 200,
+            remainingLengthMm: nil, usedLengthMm: nil,
+            location: nil, lotNumber: nil, archived: false, price: nil, comment: nil,
+            hasNfcTag: false, usedPercent: 20, remainingPercent: 80
         )
     }
 }

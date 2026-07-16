@@ -93,7 +93,8 @@ struct ScanView: View {
                 viewModel.configure(
                     scanner: services.barcodeScannerService,
                     partsInventoryService: services.partsInventoryService,
-                    barcodeIntakeService: services.barcodeIntakeService
+                    barcodeIntakeService: services.barcodeIntakeService,
+                    spoolService: services.spoolService
                 )
                 await services.capabilitiesService.refresh()
                 partsInventoryEnabled = services.capabilitiesService.resolved.printedPartsInventoryEnabled
