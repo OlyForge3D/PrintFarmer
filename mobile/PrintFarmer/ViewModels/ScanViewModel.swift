@@ -138,8 +138,10 @@ final class ScanViewModel {
             recordRecentScan(icon: "shippingbox", title: bin.name, subtitle: "Bin \(bin.code)")
             pendingOutcome = .bin(bin)
             return
-        } catch NetworkError.notFound {
-            // Not a bin — fall through to part resolution.
+        } catch NetworkError.notFound, NetworkError.featureDisabled {
+            // Not a bin, or printed-parts inventory is disabled server-side —
+            // either way fall through to part resolution rather than surfacing
+            // an error (the feature gate must not block spool/printer routing).
         } catch {
             logger.warning("Bin resolution failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
@@ -152,8 +154,9 @@ final class ScanViewModel {
             recordRecentScan(icon: "cube.box", title: part.name, subtitle: "SKU \(part.sku)")
             pendingOutcome = .part(part)
             return
-        } catch NetworkError.notFound {
-            // Not a part SKU — fall through to spool resolution.
+        } catch NetworkError.notFound, NetworkError.featureDisabled {
+            // Not a part SKU, or printed-parts inventory is disabled server-side —
+            // either way fall through to spool resolution.
         } catch {
             logger.warning("Part resolution failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription

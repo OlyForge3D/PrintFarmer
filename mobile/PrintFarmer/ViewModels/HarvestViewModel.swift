@@ -13,6 +13,21 @@ struct HarvestOutputDraft: Identifiable, Equatable {
     /// `HarvestViewModel.usePerOutputBins` is enabled — otherwise every
     /// output uses the shared `binCode`.
     var binCodeOverride: String = ""
+    /// `true` for rows added via `addManualOutputRow()` (no server-resolved
+    /// mapping backs them), which drives the SKU-picker UI in
+    /// `HarvestSheetView` — auto-resolved rows show a static label.
+    var isManuallyAdded: Bool = false
+}
+
+/// Lightweight, `id`-free snapshot of a resolved output row used to detect
+/// whether the operator has manually edited the server-resolved mapping
+/// (see `HarvestViewModel.hasManualOutputEdits`). Deliberately excludes
+/// `HarvestOutputDraft.id` (a fresh random `UUID` per instance would always
+/// compare unequal) and avoids keying a `Dictionary` by SKU (which would
+/// trap on duplicate SKUs while the operator is mid-edit).
+private struct OutputSnapshot: Equatable {
+    let sku: String
+    let quantity: Int
 }
 
 /// Drives the F9 (#714) harvest sheet: confirm quantity (prefilled from the
@@ -25,8 +40,17 @@ final class HarvestViewModel {
 
     var outputs: [HarvestOutputDraft] = []
     var availableParts: [PartInventoryResponse] = []
+    /// Loaded in `loadContext()` for the H3 bin scan/select affordance in
+    /// `HarvestSheetView` (offline/no-scanner picker fallback).
+    var availableBins: [BinResponse] = []
     var sharedBinCode: String = ""
     var usePerOutputBins = false
+    /// Server-resolved baseline captured at the end of `loadContext()`.
+    /// Compared against the live `outputs` array (via `hasManualOutputEdits`)
+    /// to decide whether `submit()` must send explicit outputs + a required
+    /// override reason, or may send `outputs: nil` and let the server
+    /// resolve the mapping itself (see PartHarvestService.ResolveOutputsAsync).
+    private var resolvedBaseline: [OutputSnapshot] = []
 
     var isLoadingContext = false
     var isSubmitting = false
@@ -55,7 +79,21 @@ final class HarvestViewModel {
     }
 
     var canSubmit: Bool {
-        !isSubmitting && result == nil
+        guard !isSubmitting && result == nil else { return false }
+        if hasManualOutputEdits && !outputs.isEmpty {
+            return !overrideReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
+    }
+
+    /// `true` when the live `outputs` array differs from the server-resolved
+    /// `resolvedBaseline` captured in `loadContext()` — i.e. the operator has
+    /// added, removed, or edited a row rather than accepting the auto
+    /// resolution. Manually-added rows (no baseline counterpart at all)
+    /// always count as an edit.
+    var hasManualOutputEdits: Bool {
+        let live = outputs.map { OutputSnapshot(sku: $0.sku, quantity: $0.quantity) }
+        return live != resolvedBaseline
     }
 
     var hasWrongBinConflict: Bool { wrongBinConflict != nil }
@@ -66,7 +104,14 @@ final class HarvestViewModel {
     }
 
     func addManualOutputRow() {
-        outputs.append(HarvestOutputDraft(sku: availableParts.first?.sku ?? "", name: availableParts.first?.name, quantity: 1))
+        outputs.append(
+            HarvestOutputDraft(
+                sku: availableParts.first?.sku ?? "",
+                name: availableParts.first?.name,
+                quantity: 1,
+                isManuallyAdded: true
+            )
+        )
     }
 
     func removeOutputRow(_ id: UUID) {
@@ -80,13 +125,27 @@ final class HarvestViewModel {
         do {
             async let mappingsTask = partsInventoryService.mappings()
             async let partsTask = partsInventoryService.listParts()
+            async let binsTask = partsInventoryService.listBins()
             let allMappings = try await mappingsTask
             let parts = try await partsTask
             availableParts = parts
+            availableBins = (try? await binsTask) ?? []
 
-            let matching = allMappings.filter { mapping in
-                (job.gcodeFileId != nil && mapping.gcodeFileId == job.gcodeFileId)
-                    || (job.projectFileId != nil && mapping.printProjectFileId == job.projectFileId)
+            // Exclusive project-first precedence, matching the server's
+            // PartOutputMappingResolver.ResolveCurrentMappingsAsync: project
+            // mappings are authoritative when present; gcode mappings are
+            // only consulted as a fallback when no project mapping exists.
+            // This is NOT an OR-union of both sources.
+            let projectMatches = job.projectFileId.map { projectId in
+                allMappings.filter { $0.printProjectFileId == projectId }
+            } ?? []
+            let matching: [PartOutputMappingResponse]
+            if !projectMatches.isEmpty {
+                matching = projectMatches
+            } else if let gcodeId = job.gcodeFileId {
+                matching = allMappings.filter { $0.gcodeFileId == gcodeId }
+            } else {
+                matching = []
             }
             let partsBySku = Dictionary(uniqueKeysWithValues: parts.map { ($0.sku, $0) })
             outputs = matching.map { mapping in
@@ -96,6 +155,7 @@ final class HarvestViewModel {
                     quantity: mapping.quantity
                 )
             }
+            resolvedBaseline = outputs.map { OutputSnapshot(sku: $0.sku, quantity: $0.quantity) }
         } catch {
             logger.warning("Failed to load harvest context: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
@@ -113,9 +173,17 @@ final class HarvestViewModel {
         }
 
         let trimmedBin = sharedBinCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        let explicitOutputs: [HarvestOutputRequestItem]? = outputs.isEmpty
-            ? nil
-            : outputs.map { HarvestOutputRequestItem(sku: $0.sku, quantity: $0.quantity) }
+        // Only send explicit outputs when the operator has actually deviated
+        // from the server-resolved baseline (added/removed/edited a row).
+        // Sending a non-empty `outputs` array with an unedited, auto-resolved
+        // mapping trips the server's unconditional "outputs requires a
+        // non-blank overrideReason" validation (PartHarvestService
+        // .ResolveOutputsAsync) even when nothing was actually overridden —
+        // so unedited mappings send `nil` and let the server resolve them.
+        let hasEdits = hasManualOutputEdits && !outputs.isEmpty
+        let explicitOutputs: [HarvestOutputRequestItem]? = hasEdits
+            ? outputs.map { HarvestOutputRequestItem(sku: $0.sku, quantity: $0.quantity) }
+            : nil
         let outputBins: [HarvestOutputBinRequest]? = usePerOutputBins
             ? outputs.compactMap { draft in
                 let bin = draft.binCodeOverride.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -123,6 +191,11 @@ final class HarvestViewModel {
                 return HarvestOutputBinRequest(partSku: draft.sku, binCode: bin)
             }
             : nil
+        // A reason is required whenever we're overriding a wrongBin conflict
+        // OR sending explicit (manually-edited) outputs — both are operator
+        // overrides of the server's default resolution.
+        let needsOverrideReason = allowWrongBin || explicitOutputs != nil
+        let trimmedReason = overrideReason.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let request = HarvestJobRequest(
             binCode: trimmedBin.isEmpty ? nil : trimmedBin,
@@ -131,7 +204,7 @@ final class HarvestViewModel {
             operationKey: job.id.uuidString,
             outputBins: (outputBins?.isEmpty ?? true) ? nil : outputBins,
             allowWrongBin: allowWrongBin,
-            overrideReason: allowWrongBin ? overrideReason.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            overrideReason: needsOverrideReason ? trimmedReason : nil
         )
 
         do {

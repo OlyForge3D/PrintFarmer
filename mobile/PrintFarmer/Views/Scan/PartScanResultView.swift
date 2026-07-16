@@ -7,22 +7,21 @@ import SwiftUI
 struct PartScanResultView: View {
     let part: PartInventoryResponse
     private let navigationTitle: String
+    /// Called with the successful adjustment so a presenting parent (e.g.
+    /// `PartsInventoryListView`) can refresh its on-hand/reorder state
+    /// instead of showing stale data after this sheet dismisses.
+    var onAdjusted: ((PartAdjustmentResponse) -> Void)?
 
     @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
-    @State private var delta: Int = -1
-    @State private var reason: PartAdjustmentReason = .qcReject
-    @State private var notes: String = ""
-    @State private var isSubmitting = false
-    @State private var errorMessage: String?
-    @State private var successMessage: String?
-    @State private var latestOnHand: Int
+    @State private var viewModel: PartAdjustmentViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
 
-    init(part: PartInventoryResponse, navigationTitle: String = "Part Scanned") {
+    init(part: PartInventoryResponse, navigationTitle: String = "Part Scanned", onAdjusted: ((PartAdjustmentResponse) -> Void)? = nil) {
         self.part = part
         self.navigationTitle = navigationTitle
-        _latestOnHand = State(initialValue: part.onHand)
+        self.onAdjusted = onAdjusted
+        _viewModel = State(initialValue: PartAdjustmentViewModel(part: part))
     }
 
     var body: some View {
@@ -34,7 +33,7 @@ struct PartScanResultView: View {
                     HStack {
                         Text("On Hand")
                         Spacer()
-                        Text("\(latestOnHand)")
+                        Text("\(viewModel.latestOnHand)")
                             .font(.body.monospacedDigit())
                             .foregroundStyle(part.needsReorder ? Color.pfWarning : Color.pfTextPrimary)
                     }
@@ -52,30 +51,43 @@ struct PartScanResultView: View {
                 }
 
                 Section {
-                    Stepper(value: $delta, in: -9999...9999) {
+                    Stepper(value: $viewModel.delta, in: -9999...9999) {
                         HStack {
                             Text("Adjustment")
                             Spacer()
-                            Text(delta >= 0 ? "+\(delta)" : "\(delta)")
+                            Text(viewModel.delta >= 0 ? "+\(viewModel.delta)" : "\(viewModel.delta)")
                                 .font(.body.monospacedDigit())
-                                .foregroundStyle(delta >= 0 ? Color.pfSuccess : Color.pfError)
+                                .foregroundStyle(viewModel.delta >= 0 ? Color.pfSuccess : Color.pfError)
                         }
                     }
                     .accessibilityIdentifier("partScan.deltaStepper")
+                    .onChange(of: viewModel.delta) { _, _ in viewModel.noteIntentChanged() }
 
-                    Picker("Reason", selection: $reason) {
+                    Picker("Reason", selection: $viewModel.reason) {
                         Text("QC Reject").tag(PartAdjustmentReason.qcReject)
                         Text("Manual Correction").tag(PartAdjustmentReason.manual)
                     }
                     .accessibilityIdentifier("partScan.reasonPicker")
+                    .onChange(of: viewModel.reason) { _, _ in viewModel.noteIntentChanged() }
 
-                    TextField("Notes (optional)", text: $notes, axis: .vertical)
+                    TextField("Notes (optional)", text: $viewModel.notes, axis: .vertical)
+                        .onChange(of: viewModel.notes) { _, _ in viewModel.noteIntentChanged() }
 
                     Button {
-                        let task = Task { await submitAdjustment() }
+                        // Synchronous re-entrancy guard runs BEFORE the Task
+                        // is created, on the same run-loop turn as the tap —
+                        // this is what actually prevents rapid duplicate
+                        // mutations (an async guard inside submit() would
+                        // leave a race window between two fast taps).
+                        guard viewModel.beginSubmit() else { return }
+                        let task = Task {
+                            if let adjustment = await viewModel.submit(partsInventoryService: services.partsInventoryService) {
+                                onAdjusted?(adjustment)
+                            }
+                        }
                         activeTasks.append(task)
                     } label: {
-                        if isSubmitting {
+                        if viewModel.isSubmitting {
                             HStack {
                                 Spacer()
                                 ProgressView()
@@ -88,7 +100,7 @@ struct PartScanResultView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.pfAccent)
-                    .disabled(isSubmitting || delta == 0)
+                    .disabled(!viewModel.canSubmit)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("partScan.applyAdjustment")
                 } header: {
@@ -97,7 +109,7 @@ struct PartScanResultView: View {
                     Text("Harvest deltas are recorded automatically from the harvest flow — use this only for QC rejects or manual corrections.")
                 }
 
-                if let successMessage {
+                if let successMessage = viewModel.successMessage {
                     Section {
                         Label(successMessage, systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
@@ -113,42 +125,15 @@ struct PartScanResultView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .alert("Error", isPresented: .constant(errorMessage != nil)) {
-                Button("OK") { errorMessage = nil }
+            .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
+                Button("OK") { viewModel.errorMessage = nil }
             } message: {
-                if let errorMessage {
+                if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage)
                 }
             }
             .onDisappear { activeTasks.forEach { $0.cancel() } }
         }
     }
-
-    private func submitAdjustment() async {
-        guard delta != 0 else { return }
-        isSubmitting = true
-        errorMessage = nil
-        successMessage = nil
-
-        let request = AdjustPartInventoryRequest(
-            delta: delta,
-            reason: reason,
-            jobId: nil,
-            binCode: nil,
-            notes: notes.isEmpty ? nil : notes,
-            operationKey: UUID().uuidString
-        )
-
-        do {
-            let adjustment = try await services.partsInventoryService.adjustPart(sku: part.sku, request: request)
-            latestOnHand = adjustment.resultingBalance
-            successMessage = "New balance: \(adjustment.resultingBalance)"
-            delta = -1
-            notes = ""
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-
-        isSubmitting = false
-    }
 }
+

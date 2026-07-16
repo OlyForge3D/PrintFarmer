@@ -67,7 +67,10 @@ struct PartsInventoryListView: View {
             }
         }
         .sheet(item: $selectedPart) { part in
-            PartScanResultView(part: part, navigationTitle: part.name)
+            PartScanResultView(part: part, navigationTitle: part.name) { _ in
+                let task = Task { await viewModel.loadParts() }
+                activeTasks.append(task)
+            }
         }
         .task {
             viewModel.isViewActive = true

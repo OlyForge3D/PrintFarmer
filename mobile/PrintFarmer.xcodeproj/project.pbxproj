@@ -79,6 +79,7 @@
 		5DDB3BDDE5ED51B9B30AC9FC /* PartsInventoryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 879D8719F73BF287A889F44F /* PartsInventoryUITests.swift */; };
 		5E141422FB3849E6169FA79E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 255B7030A4CC2759FC7FC79B /* ContentView.swift */; };
 		60F2B655F2FBC9AFCFBAD01C /* DemoAutoDispatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B96F411A0F4B4EA6AABB11B /* DemoAutoDispatchService.swift */; };
+		60F61ECE0CCE4FD024E2A99C /* PartAdjustmentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7624589C7329A2C995FAE40D /* PartAdjustmentViewModel.swift */; };
 		660DA45F179749438845EEE1 /* SpoolmanSpool+ColorName.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C6B85B1BB446FB9FACBC8D /* SpoolmanSpool+ColorName.swift */; };
 		66C4475E3B8413EDE2498086 /* ServiceContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967769D7BBE893354EE7158A /* ServiceContainer.swift */; };
 		676E7DBB0DA21342C6F6B86E /* JobDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42FBB38EFCA394CA24A5B3E /* JobDetailView.swift */; };
@@ -177,6 +178,7 @@
 		BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */; };
 		C0BEC42C218A8055A23740FD /* JobDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB279A2CAF8BE1C1BD61D6B2 /* JobDetailViewModelTests.swift */; };
 		C0CF42E5C08F7567EDD6E459 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B16CA4D9FC52BF34ADB51B /* DashboardView.swift */; };
+		C168511ECD1BDBD8B1E68370 /* PartAdjustmentViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */; };
 		C31B17605CE275A98D53A86C /* DispatchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDC1F2F6909E556EA2FB598 /* DispatchModels.swift */; };
 		C36E71E0B8D651B87256150D /* PrinterCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57A3A3E21352CC6A4514221E /* PrinterCardView.swift */; };
 		C3C22EFA772CBD5125E9F2FE /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 007F057316513D6585B3D53A /* NotificationService.swift */; };
@@ -224,6 +226,7 @@
 		E1E5F6A7B8C9D0E1F2A3B4C5 /* NFCWriteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F6A7B8C9D0E1F2A3B4C5D6 /* NFCWriteView.swift */; };
 		E36958254468F349BCE07693 /* JobAnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9E5245051668A52E97EA4A9 /* JobAnalyticsService.swift */; };
 		E46139D1458EC8E0E1D8E832 /* NotificationServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820455561ACB377B99D56057 /* NotificationServiceProtocol.swift */; };
+		E6B5C07C74F94339C65677B7 /* PartsInventoryConflictTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07AA8A2045A2F85558A9FC5 /* PartsInventoryConflictTests.swift */; };
 		E9DC782356C902A24D0D9172 /* PartsInventoryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F17A591BE794A57D83307E /* PartsInventoryViewModelTests.swift */; };
 		EA1637E6E57AC07CE7EBCF2D /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A04E921C5D66B7F4B5F80B3C /* KeychainSwift */; };
 		ED545B8192219C8947CF7F73 /* MockJobService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B199518AF445724CE1C3213 /* MockJobService.swift */; };
@@ -365,6 +368,7 @@
 		6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecodingTests.swift; sourceTree = "<group>"; };
 		6EE23E12C23FE0D3C5476AD0 /* AutoDispatchServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchServiceProtocol.swift; sourceTree = "<group>"; };
 		6F6608F46256F5914589FD48 /* HarvestSheetView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HarvestSheetView.swift; sourceTree = "<group>"; };
+		7624589C7329A2C995FAE40D /* PartAdjustmentViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartAdjustmentViewModel.swift; sourceTree = "<group>"; };
 		7B2964C5D45A5CE3875411C5 /* DemoDispatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoDispatchService.swift; sourceTree = "<group>"; };
 		7BFFF06BB67FE01E4DADD88E /* DemoSpoolService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSpoolService.swift; sourceTree = "<group>"; };
 		809149B9D7E0B339296A7E1E /* SignalRServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRServiceProtocol.swift; sourceTree = "<group>"; };
@@ -383,6 +387,7 @@
 		962BFA7750A020B42AECBFA4 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		967769D7BBE893354EE7158A /* ServiceContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceContainer.swift; sourceTree = "<group>"; };
 		96FDDDBE9704424E9A42D5A2 /* PageIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageIndicator.swift; sourceTree = "<group>"; };
+		976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartAdjustmentViewModelTests.swift; sourceTree = "<group>"; };
 		97D2C93E6A6018200655B52C /* DispatchServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchServiceProtocol.swift; sourceTree = "<group>"; };
 		97DEEFD9852661DAA2637C25 /* TemperatureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemperatureView.swift; sourceTree = "<group>"; };
 		989568D96F467DF4CCAC381E /* JobAnalyticsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobAnalyticsViewModel.swift; sourceTree = "<group>"; };
@@ -505,6 +510,7 @@
 		E9B65E6EDFEDC96108A9812E /* ScanViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
 		E9C6B85B1BB446FB9FACBC8D /* SpoolmanSpool+ColorName.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SpoolmanSpool+ColorName.swift"; sourceTree = "<group>"; };
 		EOXFREPV2L15HYWN1T3VOVNC /* SpoolScannerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolScannerProtocol.swift; sourceTree = "<group>"; };
+		F07AA8A2045A2F85558A9FC5 /* PartsInventoryConflictTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartsInventoryConflictTests.swift; sourceTree = "<group>"; };
 		F1B2C3D4E5F6A7B8C9D0E1F2 /* QRCodeParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeParserTests.swift; sourceTree = "<group>"; };
 		F1B8C9D0E1F2A3B4C5D6E7F8 /* SpoolPickerViewModelScanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolPickerViewModelScanTests.swift; sourceTree = "<group>"; };
 		F1D0E1F2A3B4C5D6E7F8A9B0 /* MockSpoolService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSpoolService.swift; sourceTree = "<group>"; };
@@ -793,6 +799,7 @@
 				3B77A2FE86D1154248756C5A /* ScanViewModelTests.swift */,
 				32DEA03A8035CAB7B908215E /* HarvestViewModelTests.swift */,
 				27F17A591BE794A57D83307E /* PartsInventoryViewModelTests.swift */,
+				976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1097,6 +1104,7 @@
 				E9B65E6EDFEDC96108A9812E /* ScanViewModel.swift */,
 				87B9A481D27DFAD0954FDBB7 /* HarvestViewModel.swift */,
 				09DC3371C5396DF28C087A78 /* PartsInventoryViewModel.swift */,
+				7624589C7329A2C995FAE40D /* PartAdjustmentViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1107,6 +1115,7 @@
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
 				A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */,
 				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
+				F07AA8A2045A2F85558A9FC5 /* PartsInventoryConflictTests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1352,6 +1361,8 @@
 				1BBE2F4594687816DAE0838A /* ScanViewModelTests.swift in Sources */,
 				2686C148AE9D2C643157A837 /* HarvestViewModelTests.swift in Sources */,
 				E9DC782356C902A24D0D9172 /* PartsInventoryViewModelTests.swift in Sources */,
+				E6B5C07C74F94339C65677B7 /* PartsInventoryConflictTests.swift in Sources */,
+				C168511ECD1BDBD8B1E68370 /* PartAdjustmentViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1539,6 +1550,7 @@
 				4803A48567FD87B3F1F0AE87 /* PartsInventoryViewModel.swift in Sources */,
 				AAA6CE79BF9D8D28AB9DEB7D /* PartsInventoryListView.swift in Sources */,
 				8132EE7A42B14BE4C6AF7527 /* InventoryView.swift in Sources */,
+				60F61ECE0CCE4FD024E2A99C /* PartAdjustmentViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

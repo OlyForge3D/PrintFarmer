@@ -74,4 +74,51 @@ final class HarvestUITests: PrintFarmerUITestCase {
         // non-destructive to the job's completed state.
         XCTAssertTrue(app.buttons["jobDetail.harvestToInventory"].waitForExistence(timeout: 3))
     }
+
+    /// H3 (remediation): a manually-added output row (via "Add SKU") must
+    /// expose a real SKU picker rather than a free-text field, so operators
+    /// can only select from known printed-part SKUs. The row's picker
+    /// identifier embeds a per-row UUID, so it is matched with a
+    /// `BEGINSWITH` predicate rather than a literal identifier.
+    func testAddSkuRowExposesSkuPicker() {
+        openCompletedJobDetail()
+
+        let harvestButton = app.buttons["jobDetail.harvestToInventory"]
+        XCTAssertTrue(harvestButton.waitForExistence(timeout: 5))
+        harvestButton.tap()
+        XCTAssertTrue(app.navigationBars["Harvest Plate"].waitForExistence(timeout: 5))
+
+        let addSkuButton = app.buttons["harvest.addSku"]
+        XCTAssertTrue(addSkuButton.waitForExistence(timeout: 5))
+        addSkuButton.tap()
+
+        let skuPickerPredicate = NSPredicate(format: "identifier BEGINSWITH 'harvest.output.skuPicker.'")
+        let skuPicker = app.descendants(matching: .any).matching(skuPickerPredicate).firstMatch
+        XCTAssertTrue(skuPicker.waitForExistence(timeout: 5),
+                      "A manually-added output row must expose a SKU picker, not a free-text field")
+    }
+
+    /// H3 (remediation): the harvest sheet must expose a labeled
+    /// destination-bin scan/selection affordance in addition to the manual
+    /// bin-code text field. The demo/UI-test `ServiceContainer` runs with no
+    /// camera scanner (`barcodeScannerService == nil`, matching
+    /// `ScanStationUITests`), so tapping it deterministically falls back to
+    /// the `BinPickerView` selection list rather than presenting a camera.
+    func testScanOrSelectBinAffordanceFallsBackToBinPickerWithoutScanner() {
+        openCompletedJobDetail()
+
+        let harvestButton = app.buttons["jobDetail.harvestToInventory"]
+        XCTAssertTrue(harvestButton.waitForExistence(timeout: 5))
+        harvestButton.tap()
+        XCTAssertTrue(app.navigationBars["Harvest Plate"].waitForExistence(timeout: 5))
+
+        let scanBinButton = app.buttons["harvest.scanBin"]
+        XCTAssertTrue(scanBinButton.waitForExistence(timeout: 5),
+                      "Harvest sheet should expose a labeled Scan or Select Bin affordance")
+        scanBinButton.tap()
+
+        let binPickerTitle = app.navigationBars["Select Bin"]
+        XCTAssertTrue(binPickerTitle.waitForExistence(timeout: 5),
+                      "Without a scanner, the bin affordance should fall back to a bin selection list")
+    }
 }

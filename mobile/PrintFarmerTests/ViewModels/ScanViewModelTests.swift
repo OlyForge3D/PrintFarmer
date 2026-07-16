@@ -65,6 +65,54 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertEqual(resolved.sku, "SKU-01")
     }
 
+    // MARK: - H1a: feature-disabled must fall through, not block routing
+
+    @MainActor
+    func testDispatchFallsThroughFeatureDisabledBinResolutionToPartResolution() async {
+        // #725 gate: a disabled printed-parts-inventory feature surfaces as
+        // NetworkError.featureDisabled (distinct from .notFound) — it must
+        // still fall through to part resolution, not stop and surface an
+        // error, so operators on a server with the feature off can still
+        // scan spools/printers via the same unified scan entry point.
+        let (viewModel, partsService, barcodeService) = makeSubject()
+        partsService.resolveBinError = NetworkError.featureDisabled(
+            APIError(title: "Disabled", status: 404, detail: nil, errors: nil, message: nil, code: "featureDisabled")
+        )
+        let part = makePart(sku: "SKU-01")
+        partsService.partToResolve = part
+
+        await viewModel.dispatch("SKU-01")
+
+        XCTAssertEqual(partsService.resolveBinCodes, ["SKU-01"])
+        XCTAssertEqual(partsService.resolvePartBarcodes, ["SKU-01"])
+        XCTAssertNil(viewModel.errorMessage, "feature-disabled must not surface as an error")
+        guard case .part(let resolved) = viewModel.pendingOutcome else {
+            return XCTFail("Expected .part outcome")
+        }
+        XCTAssertEqual(resolved.sku, "SKU-01")
+    }
+
+    @MainActor
+    func testDispatchFallsThroughFeatureDisabledBinAndPartResolutionToSpoolResolution() async {
+        // Both bin AND part resolution gated off must still reach spool
+        // resolution — the feature gate must never block the pre-existing
+        // spool/printer routing paths.
+        let (viewModel, partsService, barcodeService) = makeSubject()
+        let disabled = NetworkError.featureDisabled(
+            APIError(title: "Disabled", status: 404, detail: nil, errors: nil, message: nil, code: "featureDisabled")
+        )
+        partsService.resolveBinError = disabled
+        partsService.resolvePartError = disabled
+        barcodeService.filamentToResolve = makeFilament(id: 3, name: "PLA Black")
+
+        await viewModel.dispatch("012345678905")
+
+        XCTAssertEqual(barcodeService.resolveBarcodes, ["012345678905"])
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "012345678905")
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     @MainActor
     func testDispatchFallsThroughBinAndPartNotFoundToKnownSpoolBarcode() async {
         let (viewModel, partsService, barcodeService) = makeSubject()
