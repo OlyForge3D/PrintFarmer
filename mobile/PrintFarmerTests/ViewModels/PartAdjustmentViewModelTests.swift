@@ -205,6 +205,95 @@ final class PartAdjustmentViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isSubmitting)
     }
 
+    // MARK: - Replacement remediation Item B: commit-then-response-loss causal proof
+    //
+    // `testRetryAfterFailureReusesFrozenSnapshotDespiteLiveMutationInGap`
+    // above only proves a simple 500-then-fresh-success retry — it never
+    // proves the server-side idempotent-dedupe contract a stable
+    // `operationKey` exists for: that a commit which the CLIENT never saw
+    // the response for (a lost/interrupted response, not a genuine
+    // failure) is replayed — not re-applied — on retry. These tests use
+    // `MockPartsInventoryService`'s stateful commit ledger
+    // (`simulateResponseLossOnFirstCommit` / `appliedMutationCount`) to
+    // prove that.
+
+    @MainActor
+    func testCommitThenResponseLossRetryReplaysCommittedResultWithoutSecondMutation() async {
+        let viewModel = PartAdjustmentViewModel(part: makePart())
+        viewModel.delta = -2
+        viewModel.reason = .qcReject
+        viewModel.notes = "loss test"
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 7)
+        service.simulateResponseLossOnFirstCommit = true
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        let firstResult = await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertNil(firstResult, "the client believes the first attempt failed (response lost)")
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertEqual(service.adjustPartCalls.count, 1)
+        XCTAssertEqual(service.appliedMutationCount, 1, "the server DID commit the mutation exactly once, even though the client saw a failure")
+        let frozenRequest = service.adjustPartCalls[0].request
+
+        // Retry the same intent (same key/body) — the mock must replay the
+        // already-committed result rather than applying a second mutation.
+        XCTAssertTrue(viewModel.beginSubmit(), "the guard must release after the (apparent) failure so the operator can retry")
+        let retryResult = await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertNotNil(retryResult, "the retry must succeed by replaying the committed result")
+        XCTAssertEqual(retryResult?.resultingBalance, 7, "truthful resulting balance from the actual committed mutation")
+        XCTAssertEqual(service.adjustPartCalls.count, 2, "two network attempts reached the server")
+        XCTAssertEqual(service.appliedMutationCount, 1, "exactly one mutation was ever applied, despite two network attempts")
+        XCTAssertEqual(service.adjustPartCalls[1].request, frozenRequest, "retry key+delta+reason+notes must be byte/value-identical to the frozen first attempt")
+        XCTAssertEqual(viewModel.latestOnHand, 7)
+        XCTAssertNotNil(viewModel.successMessage, "the retry's replayed success must be surfaced to the operator exactly once")
+    }
+
+    @MainActor
+    func testCancelDeterministicallyAfterCommitButBeforeResponseDeliveryLeavesNoStaleWriteAndAllowsFreshRetry() async {
+        let viewModel = PartAdjustmentViewModel(part: makePart())
+        viewModel.delta = -2
+        viewModel.reason = .qcReject
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 9)
+        let gate = AdjustmentAsyncGate()
+        service.adjustPartGate = { await gate.wait() }
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        let task = Task {
+            await viewModel.submit(partsInventoryService: service)
+        }
+
+        // Deterministically wait until the mock is blocked at the gate —
+        // which sits AFTER the mutation is committed but BEFORE the
+        // response is delivered — via a real-state busy-poll, not a sleep.
+        while await !gate.hasWaiters { await Task.yield() }
+        XCTAssertEqual(service.appliedMutationCount, 1, "the commit must already have happened before cancellation")
+
+        task.cancel()
+        await gate.open()
+        _ = await task.value
+
+        XCTAssertNil(viewModel.errorMessage, "a cancelled submission must not surface an error to a dismissed view")
+        XCTAssertNil(viewModel.successMessage, "a cancelled submission must not write success state into a dismissed view")
+        XCTAssertFalse(viewModel.isSubmitting)
+        XCTAssertEqual(service.appliedMutationCount, 1, "cancellation after commit must never trigger a second mutation")
+
+        // The commit DID succeed server-side before cancellation, so the
+        // key/snapshot are cleared (this intent is done) — a further
+        // submit mints a genuinely fresh key rather than retrying/
+        // replaying the cancelled-but-succeeded one.
+        let firstKey = service.adjustPartCalls[0].request.operationKey
+        XCTAssertTrue(viewModel.beginSubmit(), "cancellation after a successful commit must not block a fresh submit")
+        _ = await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertEqual(service.adjustPartCalls.count, 2)
+        let secondKey = service.adjustPartCalls[1].request.operationKey
+        XCTAssertNotEqual(firstKey, secondKey, "the cancelled-but-succeeded intent's key must never be reused for a new submission")
+        XCTAssertEqual(service.appliedMutationCount, 2, "the fresh key commits as a genuinely new mutation")
+    }
+
     // MARK: - Fixtures
 
     private func makePart(onHand: Int = 5) -> PartInventoryResponse {
@@ -222,5 +311,32 @@ final class PartAdjustmentViewModelTests: XCTestCase {
             delta: -2, resultingBalance: resultingBalance, reason: .qcReject,
             printJobId: nil, operationKey: nil, notes: nil, userId: nil, createdAt: .now
         )
+    }
+}
+
+/// Deterministic suspension-point gate for the Blocker B commit-then-loss
+/// causal-proof tests — same shape as the identical helper already
+/// established in `PrinterControlsViewModelTests.swift`, given a
+/// file-local name to avoid any cross-file ambiguity within the test
+/// target. Callers `await wait()` inside the code under test; the test
+/// `await open()`s it only after observing `hasWaiters` via a real-state
+/// busy-poll (`while await !gate.hasWaiters { await Task.yield() }`),
+/// never a fixed sleep.
+private actor AdjustmentAsyncGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var opened = false
+
+    var hasWaiters: Bool { !waiters.isEmpty || opened }
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { c in waiters.append(c) }
+    }
+
+    func open() {
+        opened = true
+        let toResume = waiters
+        waiters.removeAll()
+        for c in toResume { c.resume() }
     }
 }

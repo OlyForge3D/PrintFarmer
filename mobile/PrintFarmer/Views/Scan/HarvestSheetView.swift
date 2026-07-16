@@ -11,14 +11,19 @@ struct HarvestSheetView: View {
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var showOverrideSheet = false
     @State private var showBinPicker = false
-    @State private var hasInvokedOnHarvested = false
 
     /// Called after a successful (or already-harvested) result so the
-    /// presenter can refresh job/bin/inventory state.
+    /// presenter can refresh job/bin/inventory state. Delivery ("exactly
+    /// once, immediately upon the first successful response") is owned and
+    /// driven by `HarvestViewModel.onHarvested` — wired straight through at
+    /// init below — rather than a View-level `.onChange(of: result)` side
+    /// effect, so the once-per-sheet contract is provable from a unit test.
     var onHarvested: (() -> Void)?
 
     init(job: PrintJob, presetBinCode: String? = nil, onHarvested: (() -> Void)? = nil) {
-        _viewModel = State(initialValue: HarvestViewModel(job: job, presetBinCode: presetBinCode))
+        let model = HarvestViewModel(job: job, presetBinCode: presetBinCode)
+        model.onHarvested = onHarvested
+        _viewModel = State(initialValue: model)
         self.onHarvested = onHarvested
     }
 
@@ -62,22 +67,6 @@ struct HarvestSheetView: View {
             }
             .onChange(of: viewModel.hasWrongBinConflict) { _, hasConflict in
                 showOverrideSheet = hasConflict
-            }
-            // Dispute C: invoke `onHarvested` exactly once, immediately upon
-            // any successful response — including a stale-sheet
-            // `alreadyHarvested == true` replay — rather than deferring it to
-            // the "Done" tap. `result` only ever transitions from `nil` to a
-            // value once per sheet instance (both `submit()` and
-            // `confirmWrongBinOverride()` funnel into the same property,
-            // and `beginSubmit()`'s synchronous guard prevents any second
-            // request once `result` is set), so this fires exactly once
-            // regardless of which path produced it. `hasInvokedOnHarvested`
-            // is defense-in-depth against a duplicate `.onChange` firing
-            // (e.g. from a SwiftUI re-render replaying the transition).
-            .onChange(of: viewModel.result) { _, newResult in
-                guard newResult != nil, !hasInvokedOnHarvested else { return }
-                hasInvokedOnHarvested = true
-                onHarvested?()
             }
             .interactiveDismissDisabled(viewModel.isSubmitting)
         }
@@ -445,9 +434,9 @@ struct HarvestSheetView: View {
             .padding()
             .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
 
-            // Dispute C: `onHarvested` already fired via `.onChange(of:
-            // viewModel.result)` the moment the server responded — "Done"
-            // only dismisses the sheet.
+            // Dispute C: `onHarvested` already fired via
+            // `HarvestViewModel.submit()` the moment the server responded —
+            // "Done" only dismisses the sheet.
             Button {
                 dismiss()
             } label: {
