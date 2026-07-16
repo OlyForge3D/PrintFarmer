@@ -415,6 +415,85 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.recentScans.first?.subtitle, "Bin BIN-24")
     }
 
+    // MARK: - Final trio Item 1: paginated spoolExists(id:) existence check
+    // These test `SpoolServiceProtocol.spoolExists(id:)` directly (not
+    // through ScanViewModel.dispatch) since pagination is protocol-level
+    // logic independent of the ViewModel that calls it.
+
+    func testSpoolExistsFindsTargetOnFirstPageWithoutFetchingSecondPage() async throws {
+        let spoolService = MockSpoolService()
+        spoolService.spoolsPagesToReturn = [
+            SpoolmanPagedResult(items: [makeSpool(id: 42)], totalCount: 600)
+        ]
+
+        let found = try await spoolService.spoolExists(id: 42)
+
+        XCTAssertTrue(found)
+        XCTAssertEqual(spoolService.listSpoolsCallHistory.count, 1, "must short-circuit on the first page — no second page fetched once found")
+        XCTAssertEqual(spoolService.listSpoolsCallHistory.first?.offset, 0)
+    }
+
+    func testSpoolExistsFindsTargetOnSecondPageWhenTotalExceedsFirstPageSize() async throws {
+        // >500 total spools: target ID only appears on page two (offset 500).
+        let spoolService = MockSpoolService()
+        let firstPage = (0..<500).map { makeSpool(id: $0) }
+        spoolService.spoolsPagesToReturn = [
+            SpoolmanPagedResult(items: firstPage, totalCount: 600),
+            SpoolmanPagedResult(items: [makeSpool(id: 550)], totalCount: 600)
+        ]
+
+        let found = try await spoolService.spoolExists(id: 550)
+
+        XCTAssertTrue(found)
+        XCTAssertEqual(spoolService.listSpoolsCallHistory.count, 2)
+        XCTAssertEqual(spoolService.listSpoolsCallHistory[0].offset, 0)
+        XCTAssertEqual(spoolService.listSpoolsCallHistory[0].limit, 500)
+        XCTAssertEqual(spoolService.listSpoolsCallHistory[1].offset, 500, "second page must request the advanced offset, not offset 0 again")
+        XCTAssertEqual(spoolService.listSpoolsCallHistory[1].limit, 500)
+    }
+
+    func testSpoolExistsReturnsFalseWhenAbsentAfterAllPagesExhausted() async throws {
+        let spoolService = MockSpoolService()
+        let firstPage = (0..<500).map { makeSpool(id: $0) }
+        let secondPage = (500..<600).map { makeSpool(id: $0) }
+        spoolService.spoolsPagesToReturn = [
+            SpoolmanPagedResult(items: firstPage, totalCount: 600),
+            SpoolmanPagedResult(items: secondPage, totalCount: 600)
+        ]
+
+        let found = try await spoolService.spoolExists(id: 99_999)
+
+        XCTAssertFalse(found)
+        XCTAssertEqual(spoolService.listSpoolsCallHistory.count, 2, "must stop once every reported item (per totalCount) has been checked — no extra requests")
+    }
+
+    func testSpoolExistsTerminatesOnEmptyPageWithoutLoopingForever() async throws {
+        // Defensive guard: a malformed/inconsistent response (totalCount
+        // overstates what the server can actually return) must terminate
+        // rather than loop indefinitely re-requesting an empty page.
+        let spoolService = MockSpoolService()
+        spoolService.spoolsPagesToReturn = [
+            SpoolmanPagedResult(items: [], totalCount: 600)
+        ]
+
+        let found = try await spoolService.spoolExists(id: 42)
+
+        XCTAssertFalse(found)
+        XCTAssertEqual(spoolService.listSpoolsCallHistory.count, 1, "an empty page must terminate the walk immediately, not be re-requested")
+    }
+
+    func testSpoolExistsPropagatesNetworkErrorFromAnyPage() async throws {
+        let spoolService = MockSpoolService()
+        spoolService.errorToThrow = NetworkError.serverError(500)
+
+        do {
+            _ = try await spoolService.spoolExists(id: 42)
+            XCTFail("expected the existence lookup's network error to propagate")
+        } catch {
+            XCTAssertTrue(error is NetworkError, "the underlying error must propagate unchanged so it can be distinguished from a genuine not-found")
+        }
+    }
+
     // MARK: - Helpers
 
     @MainActor
