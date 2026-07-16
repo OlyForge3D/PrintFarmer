@@ -53,7 +53,7 @@ final class HarvestViewModel {
     private var resolvedBaseline: [OutputSnapshot] = []
 
     var isLoadingContext = false
-    var isSubmitting = false
+    private(set) var isSubmitting = false
     var errorMessage: String?
     var result: HarvestJobResponse?
 
@@ -87,6 +87,29 @@ final class HarvestViewModel {
         return true
     }
 
+    /// Synchronous, atomic check-and-set re-entrancy guard for the "exactly
+    /// once per sheet" submit contract (final #714 remediation, superseding
+    /// the prior per-response interpretation): the first successful
+    /// response for a presented sheet is the only one that may ever
+    /// complete, and a rapid or delayed double-tap of Submit/Override must
+    /// never send a second POST while the first is in flight — or after it
+    /// has already succeeded. Must be called directly from the button's
+    /// action closure BEFORE any `Task {}` is created, so the check and the
+    /// `isSubmitting = true` set happen on the same run-loop turn as the
+    /// tap, with no intervening suspension point a guard placed inside the
+    /// async `submit()` body could race on (two independently-scheduled
+    /// `Task`s hopping onto `@MainActor` are not guaranteed to preserve tap
+    /// order). Shared by both the main submit button and the wrong-bin
+    /// override-confirm button, since they mutate the same `isSubmitting`/
+    /// `result` state and must never run concurrently either.
+    ///
+    /// Returns `true` if the caller may proceed to create the submit `Task`.
+    func beginSubmit() -> Bool {
+        guard !isSubmitting && result == nil else { return false }
+        isSubmitting = true
+        return true
+    }
+
     /// `true` when the live `outputs` array differs from the server-resolved
     /// `resolvedBaseline` captured in `loadContext()` — i.e. the operator has
     /// added, removed, or edited a row rather than accepting the auto
@@ -113,7 +136,7 @@ final class HarvestViewModel {
 
         guard hasManualOutputEdits else { return false }
         if outputs.isEmpty { return true }
-        if !isBaselineMembershipComplete { return true }
+        if !isBaselineSetExactMatch { return true }
 
         let normalizedSkus = outputs.map { Self.normalizeIdentity($0.sku) }
         if normalizedSkus.contains(where: \.isEmpty) { return true }
@@ -135,15 +158,21 @@ final class HarvestViewModel {
         return normalizedBins.allSatisfy(isKnownActiveBinCode)
     }
 
-    /// When a server-resolved baseline exists, every baseline SKU must still
-    /// be present among the live outputs — quantity edits are fine, but the
-    /// operator cannot silently drop a subset (or all) of the resolved
-    /// mapping. Vacuously true when there was no resolved baseline (a
-    /// manually-built output set from scratch has no membership to preserve).
-    private var isBaselineMembershipComplete: Bool {
+    /// When a server-resolved baseline exists, the live outputs' SKU set
+    /// must be an EXACT match (both directions) of the baseline SKU set —
+    /// quantity edits are fine, but the operator cannot drop a subset (or
+    /// all) of the resolved mapping, nor add an extra SKU beyond it. A
+    /// one-directional subset check would let an extra SKU slip through
+    /// unflagged, so this compares full normalized sets rather than just
+    /// checking that every baseline SKU is still present. Vacuously true
+    /// when there was no resolved baseline (a manually-built output set
+    /// from scratch, e.g. `partMappingRequired` recovery, has no baseline
+    /// membership to preserve).
+    private var isBaselineSetExactMatch: Bool {
         guard !resolvedBaseline.isEmpty else { return true }
         let currentSkus = Set(outputs.map { Self.normalizeIdentity($0.sku) })
-        return resolvedBaseline.allSatisfy { currentSkus.contains(Self.normalizeIdentity($0.sku)) }
+        let baselineSkus = Set(resolvedBaseline.map { Self.normalizeIdentity($0.sku) })
+        return currentSkus == baselineSkus
     }
 
     /// Active parts loaded by `loadContext()` (`listParts()` defaults to
@@ -167,6 +196,17 @@ final class HarvestViewModel {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
             .precomposedStringWithCompatibilityMapping
             .uppercased()
+    }
+
+    /// Multiplies a per-print quantity by the job's copy count, clamping to
+    /// `Int.max` on overflow rather than trapping (`Int * Int` crashes on
+    /// overflow) — the (1...10000) quantity bound enforced elsewhere still
+    /// rejects an absurdly large prefilled total; this just keeps the
+    /// multiplication itself from ever crashing the app on a malformed
+    /// `copies`/`quantity` combination.
+    private static func multipliedTotal(_ quantity: Int, copies: Int) -> Int {
+        let (total, overflowed) = quantity.multipliedReportingOverflow(by: copies)
+        return overflowed ? Int.max : total
     }
 
     private func isReasonValid(_ reason: String) -> Bool {
@@ -226,11 +266,21 @@ final class HarvestViewModel {
                 matching = []
             }
             let partsBySku = Dictionary(uniqueKeysWithValues: parts.map { ($0.sku, $0) })
+            // Multi-copy totals: `mapping.quantity` is the per-print
+            // quantity (server's `QuantityPerPrint`). For an untouched
+            // mapping the server applies `QuantityPerPrint * copies`
+            // (`PartHarvestService.ResolveOutputsAsync`, copies defaulting
+            // to `Math.Max(1, job.Copies)`), so the prefilled/baseline
+            // total must match that here — otherwise an unedited
+            // `outputs: nil` submission would harvest a different quantity
+            // than what's displayed, and an edited total would be compared
+            // against the wrong baseline.
+            let copies = max(1, job.copies)
             outputs = matching.map { mapping in
                 HarvestOutputDraft(
                     sku: mapping.sku,
                     name: partsBySku[mapping.sku]?.name,
-                    quantity: mapping.quantity
+                    quantity: Self.multipliedTotal(mapping.quantity, copies: copies)
                 )
             }
             resolvedBaseline = outputs.map { OutputSnapshot(sku: $0.sku, quantity: $0.quantity) }
@@ -243,14 +293,32 @@ final class HarvestViewModel {
     }
 
     func submit(partsInventoryService: any PartsInventoryServiceProtocol, allowWrongBin: Bool = false) async {
+        // Once-per-sheet contract: a `result` already means a prior attempt
+        // succeeded — no further attempt may ever reach the server again
+        // for this presented sheet, even if `submit()` is called directly
+        // (bypassing the synchronous `beginSubmit()` guard, e.g. a delayed
+        // duplicate call from an earlier tap). This is the terminal state;
+        // never released, unlike the failure-path releases below.
+        guard result == nil else { return }
+
         // Defense-in-depth: the UI already disables Submit via `canSubmit`
         // when the edited output set is invalid (delete-all, incomplete
         // baseline membership, blank/duplicate/unknown SKU, out-of-range
         // quantity, or an unregistered per-output bin) — Dispute A requires
         // this never be allowed to reach the server as a fallback-to-nil or
-        // partial-baseline request, so guard here too.
-        guard !hasInvalidOutputEdits else { return }
+        // partial-baseline request, so guard here too. Releases the
+        // `beginSubmit()` guard (rather than leaving it stuck) since this
+        // path never reaches the network.
+        guard !hasInvalidOutputEdits else {
+            isSubmitting = false
+            return
+        }
 
+        // Callers are expected to have already called the synchronous
+        // `beginSubmit()` guard before creating the `Task` that invokes
+        // this method — setting `isSubmitting` here too is a harmless
+        // no-op in that case, and keeps direct test/preview calls to
+        // `submit()` (bypassing `beginSubmit()`) behaviorally correct.
         isSubmitting = true
         errorMessage = nil
         if !allowWrongBin {
@@ -306,7 +374,13 @@ final class HarvestViewModel {
             result = response
             wrongBinConflict = nil
             mappingRequiredConflict = nil
+            // Once-per-sheet contract: the guard is HELD (never released)
+            // on success. No further submit or override-confirm attempt —
+            // including a delayed duplicate `Task` from an earlier tap that
+            // hadn't yet observed `result != nil` — can ever fire a second
+            // POST for this presented sheet.
         } catch NetworkError.partsInventoryConflict(let conflict) {
+            isSubmitting = false
             if conflict.isWrongBin {
                 wrongBinConflict = conflict
             } else if conflict.isPartMappingRequired {
@@ -315,11 +389,10 @@ final class HarvestViewModel {
                 errorMessage = conflict.detail ?? conflict.title ?? "Printed-parts conflict"
             }
         } catch {
+            isSubmitting = false
             logger.warning("Harvest failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
-
-        isSubmitting = false
     }
 
     /// Retries the harvest with `allowWrongBin=true` and the operator's

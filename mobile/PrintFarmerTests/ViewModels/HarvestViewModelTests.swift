@@ -231,7 +231,13 @@ final class HarvestViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testAddingExtraManualOutputAlongsideResolvedBaselineIsValidAndSendsAllOutputs() async {
+    func testAddingExtraManualOutputAlongsideResolvedBaselineIsInvalidAndBlocksSubmit() async {
+        // Final remediation, Blocker 1: an extra SKU beyond a nonempty
+        // resolved baseline must now be REJECTED (exact set equality, not a
+        // one-directional subset check) — this test was previously an
+        // acceptance case and is rewritten into a rejection per the
+        // unanimous review requirement. Extra, partial, and delete-all sets
+        // must all block Submit.
         let job = makeJob(gcodeFileId: gcodeFileId)
         let viewModel = HarvestViewModel(job: job)
         let service = MockPartsInventoryService()
@@ -243,13 +249,61 @@ final class HarvestViewModelTests: XCTestCase {
         viewModel.outputs.append(HarvestOutputDraft(sku: "SKU-Z", name: "Widget", quantity: 1, isManuallyAdded: true))
         viewModel.overrideReason = "Also harvested an extra widget from the same plate"
 
-        XCTAssertFalse(viewModel.hasInvalidOutputEdits, "an extra row alongside a complete baseline is a valid edit")
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "an extra SKU beyond the resolved baseline must be invalid")
+        XCTAssertFalse(viewModel.canSubmit, "Submit must be disabled when an extra SKU is added beyond the resolved baseline")
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertTrue(service.harvestCalls.isEmpty, "an extra-SKU edit must never reach the server")
+        XCTAssertNil(viewModel.result)
+    }
+
+    @MainActor
+    func testNoBaselineManualOutputSetIsValidAndSendsExplicitOutputs() async {
+        // The exact-set-equality rule only applies when a nonempty resolved
+        // baseline exists. A manually-built output set from scratch (no
+        // mapping matched, e.g. `partMappingRequired` recovery) has no
+        // baseline membership to preserve and remains a valid, submittable
+        // edit as long as the SKU rows themselves are otherwise valid.
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.partsToReturn = [makePart(sku: "SKU-Z", name: "Widget")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        XCTAssertTrue(viewModel.outputs.isEmpty, "sanity: no mapping matched, so there is no resolved baseline")
+
+        viewModel.addManualOutputRow()
+        viewModel.outputs[0].sku = "SKU-Z"
+        viewModel.overrideReason = "No mapping configured; adding SKU manually"
+
+        XCTAssertFalse(viewModel.hasInvalidOutputEdits, "a manual output set with no baseline is valid")
         XCTAssertTrue(viewModel.canSubmit)
 
         await viewModel.submit(partsInventoryService: service)
 
-        let sentSkus = Set(service.harvestCalls.first?.request.outputs?.map(\.sku) ?? [])
-        XCTAssertEqual(sentSkus, ["SKU-A", "SKU-Z"], "the resolved baseline SKU and the extra manual SKU must both be sent")
+        XCTAssertEqual(service.harvestCalls.first?.request.outputs?.map(\.sku), ["SKU-Z"])
+        XCTAssertNotNil(viewModel.result)
+    }
+
+    @MainActor
+    func testSwappingResolvedOutputForADifferentSkuOfSameCountIsInvalidExactSetMismatch() async {
+        // A same-size but different-membership swap (drop SKU-A, add
+        // SKU-Z) must be rejected just as clearly as a strict superset or
+        // subset — exact SET equality, not just a count/size check.
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket"), makePart(sku: "SKU-Z", name: "Widget")]
+
+        await viewModel.loadContext(partsInventoryService: service)
+        viewModel.outputs[0].sku = "SKU-Z" // swap the resolved row's SKU entirely
+        viewModel.overrideReason = "Swapped to a different SKU"
+
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "swapping the resolved SKU for a different one must be invalid")
+        XCTAssertFalse(viewModel.canSubmit)
     }
 
     @MainActor
@@ -438,6 +492,144 @@ final class HarvestViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.outputs.first?.quantity, 7)
     }
 
+    // MARK: - Final remediation Blocker 2: multi-copy totals
+
+    @MainActor
+    func testLoadContextMultipliesMappingQuantityByJobCopiesForDisplayedTotal() async {
+        // Server (PartHarvestService) applies `QuantityPerPrint * copies`
+        // for an untouched/implicit resolution — the prefilled/displayed
+        // total must match, or an unedited `outputs: nil` submission would
+        // silently harvest a different quantity than what the operator saw.
+        let job = makeJob(gcodeFileId: gcodeFileId, copies: 4)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+
+        await viewModel.loadContext(partsInventoryService: service)
+
+        XCTAssertEqual(viewModel.outputs.first?.quantity, 8, "2 per print × 4 copies = 8")
+    }
+
+    @MainActor
+    func testSubmitWithUntouchedMultiCopyMappingStillSendsNilOutputs() async {
+        // Untouched (unedited) outputs are still sent as `outputs: nil`
+        // regardless of the copies multiplier — the server independently
+        // recomputes `QuantityPerPrint * copies` when resolving a nil
+        // request, so the client must never send an explicit total for an
+        // unedited mapping (that would trip the overrideReason validation).
+        let job = makeJob(gcodeFileId: gcodeFileId, copies: 3)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        XCTAssertEqual(viewModel.outputs.first?.quantity, 6, "sanity: prefilled total is 2 × 3 copies")
+        XCTAssertFalse(viewModel.hasManualOutputEdits, "untouched multi-copy total must not itself count as an edit")
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertNil(service.harvestCalls.first?.request.outputs, "untouched multi-copy mapping must still send nil outputs")
+        XCTAssertNil(service.harvestCalls.first?.request.overrideReason)
+    }
+
+    @MainActor
+    func testSubmitWithEditedQuantityOnMultiCopyMappingSendsWholeJobEditedTotal() async {
+        // When the operator edits the (already-multiplied) prefilled total,
+        // the edited explicit total sent to the server must match what the
+        // operator actually typed — a whole-job total, not a re-derived
+        // per-print amount.
+        let job = makeJob(gcodeFileId: gcodeFileId, copies: 3)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        XCTAssertEqual(viewModel.outputs.first?.quantity, 6, "sanity: prefilled total is 2 × 3 copies")
+
+        viewModel.outputs[0].quantity = 5 // operator recounts: only 5 of the 6 expected were usable
+        viewModel.overrideReason = "One part failed QC, only 5 usable of the expected 6"
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertEqual(service.harvestCalls.first?.request.outputs?.first?.quantity, 5, "edited total must be sent exactly as entered")
+    }
+
+    @MainActor
+    func testMultiCopyQuantityMultiplicationDoesNotOverflowOrTrap() async {
+        // `Int * Int` traps on overflow — an absurd copies/quantity
+        // combination must clamp rather than crash the app. The (1...10000)
+        // bound is still enforced elsewhere as an editing constraint; this
+        // only guards the multiplication itself.
+        let job = makeJob(gcodeFileId: gcodeFileId, copies: Int.max)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+
+        await viewModel.loadContext(partsInventoryService: service)
+
+        XCTAssertEqual(viewModel.outputs.first?.quantity, Int.max, "overflow must clamp to Int.max, never trap")
+    }
+
+    // MARK: - Final remediation Blocker 3: once-per-sheet submit/callback
+
+    @MainActor
+    func testBeginSubmitReturnsFalseOnRapidSecondCallBeforeFirstResolves() async {
+        // Simulates a rapid double-tap: the first `beginSubmit()` call
+        // succeeds and sets `isSubmitting`; a second call on the same
+        // run-loop turn (before any network response) must be rejected so
+        // only one submit `Task` is ever created.
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+
+        XCTAssertTrue(viewModel.beginSubmit(), "first call must be allowed to proceed")
+        XCTAssertFalse(viewModel.beginSubmit(), "a second call while the first is still in flight must be rejected")
+    }
+
+    @MainActor
+    func testBeginSubmitRemainsBlockedAfterSuccessNoSecondPostEverPossible() async {
+        // Once-per-sheet contract (superseding the prior per-response
+        // interpretation): the guard is held — never released — after a
+        // successful response, so a delayed duplicate submit attempt for
+        // the same sheet instance can never fire a second POST.
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertNotNil(viewModel.result)
+        XCTAssertEqual(service.harvestCalls.count, 1)
+        XCTAssertFalse(viewModel.beginSubmit(), "no further submit may ever be started once a result exists")
+
+        await viewModel.submit(partsInventoryService: service)
+        XCTAssertEqual(service.harvestCalls.count, 1, "a second submit() call after success must never reach the server again")
+    }
+
+    @MainActor
+    func testBeginSubmitIsAllowedAgainOnlyAfterAGenuineFailure() async {
+        // The guard must release on failure (so the operator can retry) but
+        // never on success — this test proves the failure-release half of
+        // that contract.
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.harvestError = NetworkError.serverError(500)
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertNil(viewModel.result, "sanity: the attempt failed")
+        XCTAssertTrue(viewModel.beginSubmit(), "the guard must release after a genuine failure so the operator can retry")
+    }
+
     // MARK: - H5: malformed wrongBin payload must not type as wrongBin
 
     @MainActor
@@ -573,7 +765,7 @@ final class HarvestViewModelTests: XCTestCase {
 
     private let gcodeFileId = UUID()
 
-    private func makeJob(gcodeFileId: UUID? = nil, projectFileId: UUID? = nil) -> PrintJob {
+    private func makeJob(gcodeFileId: UUID? = nil, projectFileId: UUID? = nil, copies: Int = 1) -> PrintJob {
         PrintJob(
             id: UUID(), status: .completed, priority: 1, queuePosition: 0,
             gcodeFileId: gcodeFileId, gcodeFileName: "part.gcode",
@@ -584,7 +776,7 @@ final class HarvestViewModelTests: XCTestCase {
             estimatedCost: nil, actualCost: nil, failureReason: nil,
             requiredNozzleDiameter: nil, requiredMaterialType: nil,
             spoolmanFilamentId: nil, filamentName: nil, filamentVendor: nil, filamentColor: nil,
-            copies: 1, completedCopies: 1, remainingCopies: 0,
+            copies: copies, completedCopies: copies, remainingCopies: 0,
             projectFileId: projectFileId, thumbnailUrl: nil
         )
     }
