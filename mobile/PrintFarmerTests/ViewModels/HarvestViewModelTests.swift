@@ -82,6 +82,7 @@ final class HarvestViewModelTests: XCTestCase {
     func testSubmitWithConfirmedOutputsSendsExplicitOutputsList() async {
         let job = makeJob()
         let viewModel = HarvestViewModel(job: job)
+        viewModel.availableParts = [makePart(sku: "SKU-A", name: "Bracket")]
         viewModel.outputs = [HarvestOutputDraft(sku: "SKU-A", name: "Bracket", quantity: 3)]
         let service = MockPartsInventoryService()
         service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
@@ -169,6 +170,231 @@ final class HarvestViewModelTests: XCTestCase {
 
         XCTAssertNotNil(service.harvestCalls.first?.request.outputs)
         XCTAssertEqual(service.harvestCalls.first?.request.overrideReason, "No mapping configured; adding SKU manually")
+    }
+
+    // MARK: - Dispute A: invalid edited output states must disable Submit
+    // and never fall back to `outputs: nil` or a partial baseline.
+    // (Untouched -> outputs:nil is already covered by
+    // testSubmitWithUneditedResolvedMappingSendsNilOutputsAndNoOverrideReason
+    // above, and is re-verified not to have regressed by every test below
+    // that asserts a non-nil, non-empty `outputs` payload.)
+
+    @MainActor
+    func testDeletingAllResolvedOutputsDisablesSubmitAndNeverSendsNilFallback() async {
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        XCTAssertEqual(viewModel.outputs.count, 1, "sanity: mapping resolved a row")
+
+        viewModel.outputs.removeAll() // operator swipes away every resolved row
+        viewModel.overrideReason = "Plate actually produced nothing usable"
+
+        XCTAssertTrue(viewModel.hasManualOutputEdits, "sanity: deleting a resolved row counts as an edit")
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "deleting all resolved outputs must be an invalid edit state")
+        XCTAssertFalse(viewModel.canSubmit, "Submit must be disabled when all resolved outputs are deleted")
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertTrue(service.harvestCalls.isEmpty, "delete-all must never reach the server as a nil-fallback or any other request")
+        XCTAssertNil(viewModel.result)
+    }
+
+    @MainActor
+    func testDeletingOnlySomeResolvedOutputsLeavesIncompleteBaselineAndDisablesSubmit() async {
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [
+            makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2),
+            makeMapping(sku: "SKU-B", gcodeFileId: gcodeFileId, quantity: 1)
+        ]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket"), makePart(sku: "SKU-B", name: "Clip")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        XCTAssertEqual(viewModel.outputs.count, 2, "sanity: both mappings resolved")
+
+        viewModel.outputs.removeAll { $0.sku == "SKU-B" } // partial delete: SKU-A survives, SKU-B doesn't
+        viewModel.overrideReason = "Only recovered one of the two mapped SKUs"
+
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "dropping a subset of the resolved baseline must be invalid, not just delete-all")
+        XCTAssertFalse(viewModel.canSubmit)
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertTrue(service.harvestCalls.isEmpty, "partial baseline membership must never reach the server")
+    }
+
+    @MainActor
+    func testAddingExtraManualOutputAlongsideResolvedBaselineIsValidAndSendsAllOutputs() async {
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket"), makePart(sku: "SKU-Z", name: "Widget")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        viewModel.outputs.append(HarvestOutputDraft(sku: "SKU-Z", name: "Widget", quantity: 1, isManuallyAdded: true))
+        viewModel.overrideReason = "Also harvested an extra widget from the same plate"
+
+        XCTAssertFalse(viewModel.hasInvalidOutputEdits, "an extra row alongside a complete baseline is a valid edit")
+        XCTAssertTrue(viewModel.canSubmit)
+
+        await viewModel.submit(partsInventoryService: service)
+
+        let sentSkus = Set(service.harvestCalls.first?.request.outputs?.map(\.sku) ?? [])
+        XCTAssertEqual(sentSkus, ["SKU-A", "SKU-Z"], "the resolved baseline SKU and the extra manual SKU must both be sent")
+    }
+
+    @MainActor
+    func testDuplicateNormalizedSkusAcrossOutputsDisablesSubmit() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        // Same identity once server-equivalent normalized (NFKC fold, trim,
+        // uppercase) — differs only by case and incidental whitespace.
+        viewModel.outputs = [
+            HarvestOutputDraft(sku: "SKU-A", name: "Bracket", quantity: 1, isManuallyAdded: true),
+            HarvestOutputDraft(sku: " sku-a ", name: "Bracket", quantity: 2, isManuallyAdded: true)
+        ]
+        viewModel.overrideReason = "Duplicate attempt"
+
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "normalized-duplicate SKUs must be invalid")
+        XCTAssertFalse(viewModel.canSubmit)
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertTrue(service.harvestCalls.isEmpty)
+    }
+
+    @MainActor
+    func testBlankSkuOutputDisablesSubmit() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        viewModel.outputs = [HarvestOutputDraft(sku: "   ", name: nil, quantity: 1, isManuallyAdded: true)]
+        viewModel.overrideReason = "Blank SKU"
+
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "a blank SKU must be invalid")
+        XCTAssertFalse(viewModel.canSubmit)
+
+        await viewModel.submit(partsInventoryService: service)
+
+        XCTAssertTrue(service.harvestCalls.isEmpty)
+    }
+
+    @MainActor
+    func testUnknownOrInactiveSkuOutputDisablesSubmit() async {
+        let job = makeJob()
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.partsToReturn = [] // no known/active parts loaded
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        viewModel.outputs = [HarvestOutputDraft(sku: "SKU-GHOST", name: nil, quantity: 1, isManuallyAdded: true)]
+        viewModel.overrideReason = "Not a real part"
+
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "a SKU with no known active part must be invalid")
+        XCTAssertFalse(viewModel.canSubmit)
+    }
+
+    @MainActor
+    func testQuantityOutOfRangeDisablesSubmitAtBothBounds() async {
+        let job = makeJob()
+        let service = MockPartsInventoryService()
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        let tooLow = HarvestViewModel(job: job)
+        await tooLow.loadContext(partsInventoryService: service)
+        tooLow.outputs = [HarvestOutputDraft(sku: "SKU-A", name: "Bracket", quantity: 0, isManuallyAdded: true)]
+        tooLow.overrideReason = "Zero quantity"
+        XCTAssertTrue(tooLow.hasInvalidOutputEdits, "quantity below 1 must be invalid")
+
+        let tooHigh = HarvestViewModel(job: job)
+        await tooHigh.loadContext(partsInventoryService: service)
+        tooHigh.outputs = [HarvestOutputDraft(sku: "SKU-A", name: "Bracket", quantity: 10001, isManuallyAdded: true)]
+        tooHigh.overrideReason = "Over the server's Range(1, 10000)"
+        XCTAssertTrue(tooHigh.hasInvalidOutputEdits, "quantity above 10000 must be invalid")
+
+        let atBounds = HarvestViewModel(job: job)
+        await atBounds.loadContext(partsInventoryService: service)
+        atBounds.outputs = [HarvestOutputDraft(sku: "SKU-A", name: "Bracket", quantity: 1, isManuallyAdded: true)]
+        atBounds.overrideReason = "Minimum valid quantity"
+        XCTAssertFalse(atBounds.hasInvalidOutputEdits, "quantity of exactly 1 must be valid")
+
+        atBounds.outputs[0].quantity = 10000
+        XCTAssertFalse(atBounds.hasInvalidOutputEdits, "quantity of exactly 10000 must be valid")
+    }
+
+    @MainActor
+    func testOverrideReasonBoundsRequireNonBlankAndAtMost1000Characters() async {
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2)]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        viewModel.outputs[0].quantity = 5 // valid edit, needs a reason
+
+        viewModel.overrideReason = "   "
+        XCTAssertFalse(viewModel.canSubmit, "a blank/whitespace-only reason must not satisfy the requirement")
+
+        viewModel.overrideReason = String(repeating: "a", count: 1001)
+        XCTAssertFalse(viewModel.canSubmit, "a reason over 1000 characters must be rejected client-side, matching the server's bound")
+
+        viewModel.overrideReason = String(repeating: "a", count: 1000)
+        XCTAssertTrue(viewModel.canSubmit, "a reason of exactly 1000 characters must be accepted")
+    }
+
+    @MainActor
+    func testCompletePerOutputBinsRequiredWhenUsePerOutputBinsEnabled() async {
+        let job = makeJob(gcodeFileId: gcodeFileId)
+        let viewModel = HarvestViewModel(job: job)
+        let service = MockPartsInventoryService()
+        service.mappingsToReturn = [
+            makeMapping(sku: "SKU-A", gcodeFileId: gcodeFileId, quantity: 2),
+            makeMapping(sku: "SKU-B", gcodeFileId: gcodeFileId, quantity: 1)
+        ]
+        service.partsToReturn = [makePart(sku: "SKU-A", name: "Bracket"), makePart(sku: "SKU-B", name: "Clip")]
+        service.binsToReturn = [makeBin(code: "BIN-1", name: "Shelf 1"), makeBin(code: "BIN-2", name: "Shelf 2")]
+        service.harvestResponseToReturn = makeHarvestResponse(jobId: job.id)
+
+        await viewModel.loadContext(partsInventoryService: service)
+        viewModel.usePerOutputBins = true
+        viewModel.outputs[0].binCodeOverride = "BIN-1"
+        // SKU-B's bin is left blank — must never be silently compacted away.
+        viewModel.overrideReason = "n/a" // no manual sku/quantity edits, but per-output bins still gate submit
+
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "a blank per-output bin must block submit, not be dropped")
+
+        viewModel.outputs[1].binCodeOverride = "BIN-UNREGISTERED"
+        XCTAssertTrue(viewModel.hasInvalidOutputEdits, "an unregistered bin code must also block submit")
+
+        viewModel.outputs[1].binCodeOverride = "BIN-2"
+        XCTAssertFalse(viewModel.hasInvalidOutputEdits, "a nonblank, registered, active bin per SKU must be valid")
+
+        await viewModel.submit(partsInventoryService: service)
+
+        let sentBins = service.harvestCalls.first?.request.outputBins
+        XCTAssertEqual(sentBins?.count, 2, "every output row must be sent — none silently compacted away")
+        XCTAssertEqual(Set(sentBins?.map(\.binCode) ?? []), ["BIN-1", "BIN-2"])
     }
 
     // MARK: - B2: exclusive project-first mapping precedence
@@ -332,6 +558,7 @@ final class HarvestViewModelTests: XCTestCase {
     func testPerOutputBinsOnlySentWhenUsePerOutputBinsEnabled() async {
         let job = makeJob()
         let viewModel = HarvestViewModel(job: job)
+        viewModel.availableParts = [makePart(sku: "SKU-A", name: "Bracket")]
         viewModel.outputs = [HarvestOutputDraft(sku: "SKU-A", name: nil, quantity: 1, binCodeOverride: "BIN-9")]
         viewModel.usePerOutputBins = false
         let service = MockPartsInventoryService()
@@ -383,6 +610,13 @@ final class HarvestViewModelTests: XCTestCase {
         HarvestJobResponse(
             printJobId: jobId, harvestedAt: .now, binId: nil, binCode: "BIN-1",
             alreadyHarvested: false, adjustments: [], outputs: []
+        )
+    }
+
+    private func makeBin(code: String, name: String) -> BinResponse {
+        BinResponse(
+            id: UUID(), code: code, name: name, location: nil, notes: nil,
+            isActive: true, createdAt: .now, updatedAt: .now
         )
     }
 }

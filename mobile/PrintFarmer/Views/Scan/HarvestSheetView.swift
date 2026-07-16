@@ -150,7 +150,11 @@ struct HarvestSheetView: View {
                 Text("Scan or enter the bin code where these parts were placed. Leave blank to use each SKU's default bin.")
             }
 
-            if viewModel.hasManualOutputEdits && !viewModel.outputs.isEmpty {
+            if viewModel.hasInvalidOutputEdits {
+                invalidOutputEditsSection
+            }
+
+            if viewModel.hasManualOutputEdits {
                 Section {
                     TextField("Reason for edited outputs", text: $viewModel.overrideReason, axis: .vertical)
                         .accessibilityIdentifier("harvest.outputOverrideReason")
@@ -259,6 +263,36 @@ struct HarvestSheetView: View {
         } else {
             viewModel.sharedBinCode = code
         }
+    }
+
+    /// Dispute A: surfaced whenever `HarvestViewModel.hasInvalidOutputEdits`
+    /// is true — Submit is disabled in this state, and this can happen even
+    /// without the "Reason Required" section showing (e.g. an incomplete
+    /// per-output bin assignment doesn't touch SKU/quantity, so it isn't a
+    /// `hasManualOutputEdits` case), so this section must not be nested
+    /// inside that one.
+    private var invalidOutputEditsSection: some View {
+        Section {
+            Label {
+                Text(invalidOutputEditsMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color.pfWarning)
+            }
+            .accessibilityIdentifier("harvest.invalidOutputEditsWarning")
+        }
+    }
+
+    private var invalidOutputEditsMessage: String {
+        if viewModel.outputs.isEmpty {
+            return "All resolved outputs were removed. Add at least one SKU back with \"Add SKU\" before submitting."
+        }
+        if viewModel.usePerOutputBins {
+            return "Each SKU needs a registered destination bin above before you can submit."
+        }
+        return "Check the SKUs and quantities above — a duplicate, blank, unknown, or out-of-range value is blocking submit."
     }
 
     private var mappingRequiredSection: some View {
