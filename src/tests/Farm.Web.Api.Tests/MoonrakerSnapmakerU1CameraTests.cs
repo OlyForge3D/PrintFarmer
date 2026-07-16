@@ -154,13 +154,16 @@ public class MoonrakerSnapmakerU1CameraTests
 
         bool firstStart = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
         await clock.FirstTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
-        clock.ReleaseLatestTimer();
-        await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Task<RecordingJsonRpcClient.StopInvocation> stopAttempt = rpc.StopInvocationAt(0);
+        ControlledTimeProvider.TimerFireResult fired = await clock.ReleaseLatestTimerAndAwaitAsync();
+        fired.CallbackInvoked.Should().BeTrue("the authoritative idle-stop timer must execute");
+        await stopAttempt.WaitAsync(TimeSpan.FromSeconds(10));
 
         bool secondStart = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
 
         firstStart.Should().BeTrue();
         secondStart.Should().BeFalse("rate limit prevents restart while stopped");
+        clock.TimerCount.Should().Be(1, "the stopped-and-rate-limited Ensure call must not schedule a second timer");
         rpc.Methods.Should().Equal("camera.start_monitor", "camera.stop_monitor");
     }
 
@@ -439,6 +442,17 @@ public class MoonrakerSnapmakerU1CameraTests
         public Task FirstTimerCreated => _firstTimerCreated.Task;
 
         public Task SecondTimerCreated => _secondTimerCreated.Task;
+
+        public int TimerCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _timers.Count;
+                }
+            }
+        }
 
         /// <summary>Returns a task that completes when the timer at <paramref name="index"/> (0-based) has been created.</summary>
         public Task TimerCreatedAt(int index)
