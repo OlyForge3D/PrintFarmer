@@ -107,7 +107,8 @@ public class DispatchScorer(
         }
 
         List<DispatchScore> results = [];
-        bool multiSlotEnabled = featureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true;
+        bool multiSlotEnabled = featureGate is null
+            || await featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
 
         // Batch-load per-tool usable coverage and fallback chains only when the feature is on and
         // the job carries gram estimates. Missing/failed coverage remains material-only with an

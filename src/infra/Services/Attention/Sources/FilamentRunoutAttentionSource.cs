@@ -56,7 +56,8 @@ public sealed class FilamentRunoutAttentionSource(
         // The downgrade path is gated behind the multi-slot-fallback feature AND the presence of a
         // switch evaluator; otherwise every active runout retains its legacy Critical severity.
         bool downgradeEnabled = _switchEvaluator is not null
-            && (_operatorFeatureGate?.IsEnabled(OperatorFeature.MultiSlotFallback) ?? true);
+            && (_operatorFeatureGate is null
+                || await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, cancellationToken).ConfigureAwait(false));
 
         foreach (FilamentRunoutWarningDto warning in warnings)
         {

@@ -105,7 +105,7 @@ public sealed class IdempotencyFilter : IAsyncResourceFilter
         CancellationToken ct = http.RequestAborted;
 
         // ---- Feature gate #725: disabled → direct-online, no persistence ----
-        if (!_featureGate.IsEnabled(OperatorFeature.OfflineWriteReplay))
+        if (!await _featureGate.IsEnabledAsync(OperatorFeature.OfflineWriteReplay, ct).ConfigureAwait(false))
         {
             _ = await next();
             return;

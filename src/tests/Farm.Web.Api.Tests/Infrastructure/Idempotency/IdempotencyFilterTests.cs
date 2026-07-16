@@ -62,6 +62,7 @@ public class IdempotencyFilterTests : IDisposable
     {
         Mock<IOperatorFeatureGate> gate = new();
         _ = gate.Setup(g => g.IsEnabled(OperatorFeature.OfflineWriteReplay)).Returns(enabled);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.OfflineWriteReplay, It.IsAny<CancellationToken>())).ReturnsAsync(enabled);
         return gate.Object;
     }
 

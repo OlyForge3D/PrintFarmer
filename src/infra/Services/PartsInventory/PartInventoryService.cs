@@ -32,7 +32,7 @@ public class PartInventoryService(
         ArgumentException.ThrowIfNullOrWhiteSpace(sku);
         ArgumentNullException.ThrowIfNull(command);
 
-        if (featureGate is not null && !featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        if (featureGate is not null && !await featureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, ct).ConfigureAwait(false))
         {
             return new AdjustResult(PartInventoryOutcome.FeatureDisabled, null, 0, "Printed-parts inventory is disabled.");
         }
@@ -104,7 +104,7 @@ public class PartInventoryService(
     public async Task<CreatePartResult> CreatePartAsync(CreatePartCommand command, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (featureGate is not null && !featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        if (featureGate is not null && !await featureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, ct).ConfigureAwait(false))
         {
             return new CreatePartResult(PartInventoryOutcome.FeatureDisabled, null, "Printed-parts inventory is disabled.");
         }

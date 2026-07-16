@@ -116,6 +116,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var service = new MaintenanceAlertResolutionService(_context, gate.Object);
 
@@ -140,6 +141,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var service = new MaintenanceAlertResolutionService(_context, gate.Object);
 
@@ -161,6 +163,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
     {
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var service = new MaintenanceAlertResolutionService(_context, gate.Object);
 
         var orphanLog = new MaintenanceLog
@@ -191,6 +194,9 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
         gate.SetupSequence(g => g.IsEnabled(OperatorFeature.MultiSlotFallback))
             .Returns(true)   // controller pre-check
             .Returns(false); // service re-check inside the transaction
+        gate.SetupSequence(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)   // controller pre-check (async surface)
+            .ReturnsAsync(false); // service re-check inside the transaction (async surface)
 
         var statisticsRepository = new Mock<IPrinterStatisticsRepository>(MockBehavior.Loose);
         statisticsRepository
@@ -244,6 +250,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var printerStats = new Mock<IPrinterStatisticsRepository>(MockBehavior.Loose);
         printerStats
@@ -287,6 +294,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var notifier = new Mock<IMaintenanceResolutionNotifier>(MockBehavior.Strict);
         notifier
             .Setup(n => n.NotifyCreatedAsync(
@@ -333,6 +341,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var broadcaster = new Mock<IAttentionBroadcaster>(MockBehavior.Loose);
         broadcaster
@@ -374,6 +383,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
 
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Loose);
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var service = new MaintenanceAlertResolutionService(_context, gate.Object);
 
         MaintenanceAlertResolutionResult? result =

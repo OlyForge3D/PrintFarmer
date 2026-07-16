@@ -302,6 +302,7 @@ public sealed class JobDispatchServiceTests : IDisposable
     {
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         return new PartOutputSnapshotService(_db, gate.Object);
     }
 

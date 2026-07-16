@@ -35,7 +35,7 @@ public sealed class MaintenanceAttentionSource(
     {
         List<MaintenanceAlert> alerts = await _alerts.GetAllActiveAlertsAsync(cancellationToken);
         List<AttentionItemDto> items = new(alerts.Count);
-        bool includeToolheadScope = _featureGate.IsEnabled(OperatorFeature.MultiSlotFallback);
+        bool includeToolheadScope = await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, cancellationToken).ConfigureAwait(false);
 
         foreach (MaintenanceAlert alert in alerts)
         {

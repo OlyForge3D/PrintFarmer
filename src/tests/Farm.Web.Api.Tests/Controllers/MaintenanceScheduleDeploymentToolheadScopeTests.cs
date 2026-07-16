@@ -173,6 +173,7 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
         (Printer p, Toolhead t0, _, MaintenancePlan plan) = await SeedAsync();
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         var controller = new MaintenanceScheduleDeploymentController(
             NullLogger<MaintenanceScheduleDeploymentController>.Instance,
             _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
@@ -261,6 +262,7 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
         bool enabled = true;
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(() => enabled);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).Returns(() => Task.FromResult(enabled));
         MaintenanceScheduleDeploymentController controller = new(
             NullLogger<MaintenanceScheduleDeploymentController>.Instance,
             _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
@@ -319,6 +321,7 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
                 CancellationToken.None));
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         MaintenanceScheduleDeploymentController controller = new(
             NullLogger<MaintenanceScheduleDeploymentController>.Instance,
             _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),
@@ -349,6 +352,7 @@ public class MaintenanceScheduleDeploymentToolheadScopeTests : IAsyncLifetime
                 CancellationToken.None));
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         MaintenanceScheduleDeploymentController controller = new(
             NullLogger<MaintenanceScheduleDeploymentController>.Instance,
             _scope.ServiceProvider.GetRequiredService<IPrinterMaintenanceScheduleRepository>(),

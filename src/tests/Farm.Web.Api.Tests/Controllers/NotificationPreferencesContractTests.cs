@@ -1420,6 +1420,7 @@ public sealed class NotificationPreferencesContractTests
         Farm.Web.Api.Controllers.NotificationsController controller = BuildController(dbContext, userId);
         var gate = new Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate>(Moq.MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.NativePush)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.NativePush, Moq.It.IsAny<System.Threading.CancellationToken>())).Returns(System.Threading.Tasks.Task.FromResult(true));
         return (controller, gate, dbContext, userId);
     }
 

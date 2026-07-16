@@ -108,6 +108,7 @@ public class MaintenanceLogToolheadScopeTests : IAsyncLifetime
         (Printer p, Toolhead t0, _) = await SeedAsync();
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         MaintenanceController controller = ActivatorUtilities.CreateInstance<MaintenanceController>(
             _scope.ServiceProvider,
             gate.Object);

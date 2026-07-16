@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 public sealed class RelayNativePushSender(
     IHttpClientFactory httpClientFactory,
     IOptionsMonitor<NativePushSettings> optionsMonitor,
-    ILogger<RelayNativePushSender> logger) : INativePushSender
+    ILogger<RelayNativePushSender> logger) : INativePushTransportSender
 {
     /// <summary>Named HTTP client the relay sender resolves.</summary>
     public const string HttpClientName = "NativePushRelay";
@@ -35,9 +35,24 @@ public sealed class RelayNativePushSender(
     public string ModeName => "relay";
 
     /// <inheritdoc />
-    public async Task<NativePushDispatchResult> SendAsync(NativePushEnvelope envelope, CancellationToken cancellationToken = default)
+    public Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        CancellationToken cancellationToken = default)
+    {
+        return SendAsync(
+            envelope,
+            AlwaysPermittedNativePushTransportStart.Instance,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        INativePushTransportStart transportStart,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(transportStart);
 
         NativePushSettings settings = _optionsMonitor.CurrentValue;
         NativePushRelaySettings relay = settings.Relay;
@@ -75,6 +90,33 @@ public sealed class RelayNativePushSender(
         using var request = new HttpRequestMessage(HttpMethod.Post, relay.Endpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", relay.ApiKey);
         request.Content = new StringContent(JsonSerializer.Serialize(body, PayloadOptions), Encoding.UTF8, "application/json");
+
+        // Serialization and request construction are pre-transport work. The
+        // dispatcher can still veto this exact lifecycle immediately before the
+        // relay HTTP request starts.
+        //
+        // Hicks blocker 2: check cancellation explicitly, immediately before
+        // crossing the transport-start boundary. Without this, a token that
+        // was already cancelled after preparation completed (but before this
+        // call) would still reach TryStartAsync() and could commit dispatcher-owned
+        // lifecycle/dedupe/rate state and increment Attempted for an attempt
+        // that will never actually reach the network. The dispatcher's own
+        // TryStartAsync() implementation also guards against this independently
+        // (defense in depth) but must never be the ONLY check.
+        //
+        // The transport-start handshake is now async so the dispatcher can perform
+        // its persisted feature-gate re-check outside every in-memory lock (Hicks r2
+        // blocker 2). The awaited call is cancellation-aware: a caller cancel that
+        // arrives while the gate read is in flight vetoes with rollback rather
+        // than blocking a thread-pool worker on the DB round-trip.
+        cancellationToken.ThrowIfCancellationRequested();
+        NativePushTransportStartDecision decision = await transportStart
+            .TryStartAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!decision.IsPermitted)
+        {
+            return NativePushDispatchResult.TransportStartVetoed();
+        }
 
         // HttpClient.Timeout and caller/shutdown cancellation both surface as
         // OperationCanceledException. The caller token is authoritative: when it

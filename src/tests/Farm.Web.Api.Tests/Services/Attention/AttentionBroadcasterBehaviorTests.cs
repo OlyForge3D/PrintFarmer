@@ -139,6 +139,7 @@ public class AttentionBroadcasterBehaviorTests
 
         Mock<IOperatorFeatureGate> gate = new();
         gate.Setup(g => g.IsEnabled(OperatorFeature.Attention)).Returns(gateEnabled);
+        gate.Setup(g => g.IsEnabledAsync(OperatorFeature.Attention, It.IsAny<CancellationToken>())).ReturnsAsync(gateEnabled);
 
         Mock<IServiceProvider> provider = new();
         provider.Setup(p => p.GetService(typeof(IOperatorFeatureGate))).Returns(gate.Object);

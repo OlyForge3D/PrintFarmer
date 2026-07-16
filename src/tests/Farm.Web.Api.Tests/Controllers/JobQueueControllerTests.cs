@@ -45,6 +45,9 @@ public class JobQueueControllerTests
         _operatorFeatureGateMock
             .Setup(gate => gate.IsEnabled(OperatorFeature.PrintedPartsInventory))
             .Returns(true);
+        _operatorFeatureGateMock
+            .Setup(gate => gate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         _controller = new JobQueueController(
             _queueServiceMock.Object,
             _printJobManagementServiceMock.Object,
@@ -560,6 +563,9 @@ public class JobQueueControllerTests
         _operatorFeatureGateMock
             .Setup(gate => gate.IsEnabled(OperatorFeature.PrintedPartsInventory))
             .Returns(false);
+        _operatorFeatureGateMock
+            .Setup(gate => gate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(false));
         _operatorFeatureGateMock
             .Setup(gate => gate.GetFlagName(OperatorFeature.PrintedPartsInventory))
             .Returns("printedPartsInventoryEnabled");

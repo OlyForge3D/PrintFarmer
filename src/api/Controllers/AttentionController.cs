@@ -225,7 +225,7 @@ public sealed class AttentionController(
         }
 
         if (actionKind == AttentionActionKind.Harvest
-            && !_featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+            && !await _featureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, cancellationToken).ConfigureAwait(false))
         {
             return OperatorFeatureProblemDetails.NotFound(_featureGate, OperatorFeature.PrintedPartsInventory);
         }

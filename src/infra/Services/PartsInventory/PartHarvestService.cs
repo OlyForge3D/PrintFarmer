@@ -36,7 +36,7 @@ public class PartHarvestService(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (featureGate is not null && !featureGate.IsEnabled(OperatorFeature.PrintedPartsInventory))
+        if (featureGate is not null && !await featureGate.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, ct).ConfigureAwait(false))
         {
             return new HarvestResult(
                 PartInventoryOutcome.FeatureDisabled,

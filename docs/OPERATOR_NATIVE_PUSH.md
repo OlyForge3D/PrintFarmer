@@ -308,16 +308,32 @@ priority `5`, and an APS object containing only `{ "content-available": 1 }`; no
 category, thread, or mutable-content keys are present. A user without an authorized
 snapshot receives no dismissal.
 
-The snapshot also tracks whether *any* device for that recipient achieved a
-successful delivery before resolution (#756). If every device attempt for that
-recipient's alert generation ended in transient exhaustion, a terminal failure,
-or a token invalidation — i.e. the client never actually received the alert —
-the resolution dismissal is skipped as a benign no-op and
+Delivery tracking (whether *any* device for that recipient ever achieved a
+successful delivery, and which provider attempts are still in flight) belongs to
+the recipient's whole unresolved *occurrence*, not to a single routing snapshot.
+An `Updated` change can replace the routing snapshot several times before the
+item resolves — e.g. a `Created` alert with a still-in-flight send, followed by
+an `Updated` whose own send already finished — and every one of those
+generations shares the same underlying delivery state. If every device attempt
+across every generation of that recipient's alert ended in transient exhaustion,
+a terminal failure, or a token invalidation — i.e. the client never actually
+received the alert — the resolution dismissal is skipped as a benign no-op and
 `native_push.skipped_never_delivered` is incremented. Partial success (at least
-one of the recipient's devices delivered) still emits the dismissal to every
+one device, on any generation, delivered) still emits the dismissal to every
 currently active device for that recipient, preserving per-recipient/per-device
 behavior; the never-delivered check only ever suppresses the whole recipient,
 never a subset of their devices.
+
+When a resolution races an already-started alert transport, it captures every
+provider attempt still pending anywhere in that recipient's occurrence — including
+one started against an older routing snapshot that has since been superseded by a
+newer `Updated` — and waits for all of them to settle before applying the
+never-delivered rule. A late successful provider result therefore still produces
+the required dismissal even if it lands on a since-replaced snapshot; if every
+inherited attempt fails, the dismissal remains a benign no-op. A resolution that
+is itself cancelled (or otherwise never reaches a device send) before consuming
+that delivery state leaves it untouched, so an exact-version retry of the same
+resolution still finds it intact instead of seeing nothing pending or delivered.
 
 ## 7. Observability
 
@@ -338,6 +354,18 @@ Meter name: `Farm.Infrastructure.Services.Notifications.NativePush`.
 | `native_push.skipped_never_delivered`  | counter | (none)                       |
 | `native_push.isolated_device_failure`   | counter | `stage` (`device`/`persist`) |
 | `native_push.isolated_owner_failure`    | counter | (none)                       |
+
+`native_push.attempted` increments only when a sender crosses the typed
+transport-start boundary immediately before its provider call. JWT/key
+preparation, dedupe or rate reservations, vetoed starts, and cancellation
+before that boundary do not increment it. This is enforced twice: every real
+sender (Relay, Direct APNs) checks its cancellation token immediately before
+calling the transport-start handshake, and the dispatcher's own handshake
+implementation independently vetoes the same already-cancelled token even if a
+sender forgot that check — so a token cancelled after preparation but before
+the provider call can never commit lifecycle/dedupe/rate state or this
+counter, while cancellation observed strictly after a permitted start remains
+a genuine, normally-attributed attempt.
 
 The two `native_push.isolated_*_failure` counters (added under Vasquez v6 B1
 remediation) surface fan-out isolation activity in the dispatcher. Each

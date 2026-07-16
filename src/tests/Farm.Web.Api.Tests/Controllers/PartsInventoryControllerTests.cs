@@ -160,6 +160,7 @@ public class PartsInventoryControllerTests
     {
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(enabled);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(enabled);
         if (!enabled)
         {
             gate.Setup(value => value.GetFlagName(OperatorFeature.PrintedPartsInventory))

@@ -959,6 +959,7 @@ public class PartHarvestServiceTests : IDisposable
         var factory = new Mock<IDbContextFactory<AppDbContext>>(MockBehavior.Strict);
         var gate = new Mock<IOperatorFeatureGate>(MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(false);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(false);
         var sut = new PartHarvestService(
             factory.Object,
             NullLogger<PartHarvestService>.Instance,

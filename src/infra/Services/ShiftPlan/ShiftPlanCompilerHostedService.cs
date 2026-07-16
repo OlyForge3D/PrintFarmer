@@ -52,7 +52,7 @@ public sealed class ShiftPlanCompilerHostedService : BackgroundService
 
                 // Fix 7: check the feature gate each iteration; skip compile when disabled.
                 IOperatorFeatureGate featureGate = scope.ServiceProvider.GetRequiredService<IOperatorFeatureGate>();
-                if (!featureGate.IsEnabled(OperatorFeature.ShiftPlan))
+                if (!await featureGate.IsEnabledAsync(OperatorFeature.ShiftPlan, stoppingToken).ConfigureAwait(false))
                 {
                     _logger.LogDebug("Shift-plan feature is disabled; skipping compile pass");
                     intervalSeconds = 60;

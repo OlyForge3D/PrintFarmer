@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Services.Notifications.NativePush;
 /// build with a self-issued .p8 key (never OlyForge3D's key). See
 /// <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
 /// </summary>
-public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
+public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDisposable
 {
     /// <summary>Named HTTP client the direct sender resolves.</summary>
     public const string HttpClientName = "NativePushDirect";
@@ -102,9 +102,24 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
     public string ModeName => "direct";
 
     /// <inheritdoc />
-    public async Task<NativePushDispatchResult> SendAsync(NativePushEnvelope envelope, CancellationToken cancellationToken = default)
+    public Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        CancellationToken cancellationToken = default)
+    {
+        return SendAsync(
+            envelope,
+            AlwaysPermittedNativePushTransportStart.Instance,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<NativePushDispatchResult> SendAsync(
+        NativePushEnvelope envelope,
+        INativePushTransportStart transportStart,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(transportStart);
 
         NativePushSettings settings = _optionsMonitor.CurrentValue;
         NativePushApnsSettings apns = settings.Apns;
@@ -171,6 +186,34 @@ public sealed class DirectApnsNativePushSender : INativePushSender, IDisposable
             request.Headers.TryAddWithoutValidation(
                 "apns-expiration",
                 unix.ToString(CultureInfo.InvariantCulture));
+        }
+
+        // JWT acquisition and request construction are pre-transport work. The
+        // dispatcher decides whether this still-current lifecycle may cross into
+        // APNs only at the final boundary immediately below.
+        //
+        // Hicks blocker 2: the cached-JWT fast path in GetOrRefreshJwtAsync
+        // returns without ever awaiting the JWT lock or observing
+        // cancellationToken, so a token cancelled after that return (but
+        // before this call) would otherwise reach TryStartAsync() unchecked and
+        // could commit dispatcher-owned lifecycle/dedupe/rate state and
+        // increment Attempted for an attempt that never reaches APNs. The
+        // dispatcher's own TryStartAsync() implementation also guards against
+        // this independently (defense in depth) but must never be the ONLY
+        // check.
+        //
+        // The transport-start handshake is now async so the dispatcher can perform
+        // its persisted feature-gate re-check outside every in-memory lock (Hicks r2
+        // blocker 2). The awaited call is cancellation-aware: a caller cancel that
+        // arrives while the gate read is in flight vetoes with rollback rather
+        // than blocking a thread-pool worker on the DB round-trip.
+        cancellationToken.ThrowIfCancellationRequested();
+        NativePushTransportStartDecision decision = await transportStart
+            .TryStartAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!decision.IsPermitted)
+        {
+            return NativePushDispatchResult.TransportStartVetoed();
         }
 
         // HttpClient.Timeout and caller/shutdown cancellation both surface as
