@@ -80,8 +80,9 @@ final class HarvestViewModel {
 
     var canSubmit: Bool {
         guard !isSubmitting && result == nil else { return false }
-        if hasManualOutputEdits && !outputs.isEmpty {
-            return !overrideReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !hasInvalidOutputEdits else { return false }
+        if hasManualOutputEdits {
+            return isReasonValid(overrideReason)
         }
         return true
     }
@@ -96,11 +97,88 @@ final class HarvestViewModel {
         return live != resolvedBaseline
     }
 
+    /// `true` when the operator's edit leaves the output set in a state that
+    /// must never be submitted — per Dallas's Dispute A adjudication this is
+    /// an explicitly invalid edit, not merely "unedited": Submit must be
+    /// disabled and the request must never silently fall back to
+    /// `outputs: nil` (full server re-resolution) or a partial baseline.
+    /// Covers: deleting some/all resolved baseline SKUs, a blank/duplicate/
+    /// unknown-or-inactive SKU, an out-of-range quantity, and — in
+    /// per-output-bin mode — any row missing a registered active bin (this
+    /// last check applies whenever `usePerOutputBins` is on, independent of
+    /// `hasManualOutputEdits`, since assigning per-output bins doesn't touch
+    /// SKU/quantity and so wouldn't otherwise be detected as an "edit").
+    var hasInvalidOutputEdits: Bool {
+        if usePerOutputBins && !isPerOutputBinAssignmentComplete { return true }
+
+        guard hasManualOutputEdits else { return false }
+        if outputs.isEmpty { return true }
+        if !isBaselineMembershipComplete { return true }
+
+        let normalizedSkus = outputs.map { Self.normalizeIdentity($0.sku) }
+        if normalizedSkus.contains(where: \.isEmpty) { return true }
+        if Set(normalizedSkus).count != normalizedSkus.count { return true }
+        if !normalizedSkus.allSatisfy(isKnownActivePartSku) { return true }
+        if !outputs.allSatisfy({ (1...10000).contains($0.quantity) }) { return true }
+
+        return false
+    }
+
+    /// When per-output bins are enabled, every output row must carry a
+    /// nonblank, registered, active bin code — never silently compacted
+    /// away as a blank/unregistered row. Vacuously complete when there are
+    /// no output rows yet to assign bins to.
+    private var isPerOutputBinAssignmentComplete: Bool {
+        guard !outputs.isEmpty else { return true }
+        let normalizedBins = outputs.map { Self.normalizeIdentity($0.binCodeOverride) }
+        guard normalizedBins.allSatisfy({ !$0.isEmpty }) else { return false }
+        return normalizedBins.allSatisfy(isKnownActiveBinCode)
+    }
+
+    /// When a server-resolved baseline exists, every baseline SKU must still
+    /// be present among the live outputs — quantity edits are fine, but the
+    /// operator cannot silently drop a subset (or all) of the resolved
+    /// mapping. Vacuously true when there was no resolved baseline (a
+    /// manually-built output set from scratch has no membership to preserve).
+    private var isBaselineMembershipComplete: Bool {
+        guard !resolvedBaseline.isEmpty else { return true }
+        let currentSkus = Set(outputs.map { Self.normalizeIdentity($0.sku) })
+        return resolvedBaseline.allSatisfy { currentSkus.contains(Self.normalizeIdentity($0.sku)) }
+    }
+
+    /// Active parts loaded by `loadContext()` (`listParts()` defaults to
+    /// `includeInactive: false`), so membership here already implies active.
+    private func isKnownActivePartSku(_ normalizedSku: String) -> Bool {
+        availableParts.contains { Self.normalizeIdentity($0.sku) == normalizedSku }
+    }
+
+    /// Active bins loaded by `loadContext()` (`listBins()` defaults to
+    /// `includeInactive: false`), so membership here already implies active
+    /// and registered.
+    private func isKnownActiveBinCode(_ normalizedBinCode: String) -> Bool {
+        availableBins.contains { Self.normalizeIdentity($0.code) == normalizedBinCode }
+    }
+
+    /// Mirrors the server's canonical identity normalization
+    /// (`PartInventoryIdentity.NormalizeSku`/`NormalizeBinCode` — NFKC fold,
+    /// trim, then uppercase) so duplicate/membership/lookup checks agree
+    /// with the server's width- and case-insensitive comparison.
+    private static func normalizeIdentity(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCompatibilityMapping
+            .uppercased()
+    }
+
+    private func isReasonValid(_ reason: String) -> Bool {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed.count <= 1000
+    }
+
     var hasWrongBinConflict: Bool { wrongBinConflict != nil }
     var hasMappingRequiredConflict: Bool { mappingRequiredConflict != nil }
 
     var canConfirmOverride: Bool {
-        !overrideReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        isReasonValid(overrideReason)
     }
 
     func addManualOutputRow() {
@@ -165,6 +243,14 @@ final class HarvestViewModel {
     }
 
     func submit(partsInventoryService: any PartsInventoryServiceProtocol, allowWrongBin: Bool = false) async {
+        // Defense-in-depth: the UI already disables Submit via `canSubmit`
+        // when the edited output set is invalid (delete-all, incomplete
+        // baseline membership, blank/duplicate/unknown SKU, out-of-range
+        // quantity, or an unregistered per-output bin) — Dispute A requires
+        // this never be allowed to reach the server as a fallback-to-nil or
+        // partial-baseline request, so guard here too.
+        guard !hasInvalidOutputEdits else { return }
+
         isSubmitting = true
         errorMessage = nil
         if !allowWrongBin {
@@ -180,15 +266,23 @@ final class HarvestViewModel {
         // non-blank overrideReason" validation (PartHarvestService
         // .ResolveOutputsAsync) even when nothing was actually overridden —
         // so unedited mappings send `nil` and let the server resolve them.
-        let hasEdits = hasManualOutputEdits && !outputs.isEmpty
+        // (The invalid "edited to empty/incomplete" case is excluded by the
+        // `hasInvalidOutputEdits` guard above, so `hasManualOutputEdits` here
+        // only ever means a genuinely valid, non-empty explicit edit.)
+        let hasEdits = hasManualOutputEdits
         let explicitOutputs: [HarvestOutputRequestItem]? = hasEdits
             ? outputs.map { HarvestOutputRequestItem(sku: $0.sku, quantity: $0.quantity) }
             : nil
+        // Validated by `hasInvalidOutputEdits` above to be complete (every
+        // row has a nonblank, registered active bin) whenever per-output
+        // bins are in use — safe to `map` directly, never silently compact
+        // away a blank row.
         let outputBins: [HarvestOutputBinRequest]? = usePerOutputBins
-            ? outputs.compactMap { draft in
-                let bin = draft.binCodeOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !bin.isEmpty else { return nil }
-                return HarvestOutputBinRequest(partSku: draft.sku, binCode: bin)
+            ? outputs.map { draft in
+                HarvestOutputBinRequest(
+                    partSku: draft.sku,
+                    binCode: draft.binCodeOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
             }
             : nil
         // A reason is required whenever we're overriding a wrongBin conflict
