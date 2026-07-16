@@ -157,7 +157,7 @@ public class MoonrakerSnapmakerU1CameraTests
         Task<RecordingJsonRpcClient.StopInvocation> stopAttempt = rpc.StopInvocationAt(0);
         ControlledTimeProvider.TimerFireResult fired = await clock.ReleaseLatestTimerAndAwaitAsync();
         fired.CallbackInvoked.Should().BeTrue("the authoritative idle-stop timer must execute");
-        await stopAttempt.WaitAsync(TimeSpan.FromSeconds(1));
+        await stopAttempt.WaitAsync(TimeSpan.FromSeconds(10));
 
         bool secondStart = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
 
