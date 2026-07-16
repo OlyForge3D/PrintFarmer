@@ -61,6 +61,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private static readonly TimeSpan ActionableAlertTtl = TimeSpan.FromMinutes(30);
 
     private long _lastPruneAtTicks;
+    private long _lastValidRateLimitWindowTicks;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly INativePushTransportSender _sender;
@@ -103,7 +104,9 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     /// </summary>
     internal void PruneCachesForTests()
     {
-        PruneCaches(UtcNow, _optionsMonitor.CurrentValue);
+        NativePushSettings settings = _optionsMonitor.CurrentValue;
+        RememberRateLimitWindow(settings);
+        PruneCaches(UtcNow, EffectiveRateLimitWindow(settings));
     }
 
     /// <summary>Constructs the dispatcher.</summary>
@@ -204,16 +207,15 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // need to serialise against, and any subsequent Resolved on the
         // same item still creates or advances the required fence.
         //
-        // Resolved changes (both global and targeted) fall through so
-        // DispatchCoreAsync can perform the pre-exit fencing invariants
-        // even in disabled mode — the tombstone/lifecycle advancement is
-        // a correctness requirement that survives the operator toggle,
-        // and DispatchCoreAsync's own finally releases the fence's
-        // participant leases and drives bounded PruneCaches on the
-        // disabled early return so its own state cannot leak either.
+        // Resolved changes (both global and targeted) fall through so this
+        // method can publish their pre-exit fences before waiting on the lane,
+        // even in disabled mode. DispatchCoreAsync then owns optional delivery
+        // and bounded pruning; both finally blocks idempotently release the
+        // fence participant leases on every exit.
         if (changeKind != AttentionChangeKind.Resolved)
         {
             NativePushSettings entrySettings = _optionsMonitor.CurrentValue;
+            RememberRateLimitWindow(entrySettings);
             if (entrySettings.Mode == NativePushMode.Disabled)
             {
                 return;
@@ -225,9 +227,26 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
+        GlobalResolvedFence? globalResolvedFence = null;
+        GlobalResolvedFence? targetedResolvedFence = null;
         bool entered = false;
         try
         {
+            // Publish resolution ownership before waiting for this audience lane.
+            // An older same-lane Created may already be preparing a transport
+            // while holding the lane. Publishing here advances its lifecycle
+            // immediately, so its transport-boundary revalidation vetoes the
+            // stale attempt instead of allowing lane ordering to hide the
+            // resolution until after transport starts.
+            globalResolvedFence = changeKind == AttentionChangeKind.Resolved
+                && targetUserId is null
+                ? PublishResolvedTombstoneAndFenceLifecycles(attentionItemId, version)
+                : null;
+            targetedResolvedFence = changeKind == AttentionChangeKind.Resolved
+                && targetUserId is Guid targetForFence
+                ? PublishTargetedResolvedFence(attentionItemId, targetForFence, version)
+                : null;
+
             await lane.Gate.WaitAsync(cancellationToken);
             entered = true;
             if (!lane.IsLatest(version))
@@ -235,11 +254,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 return;
             }
 
+            // The lane protects only the latest-version decision. All feature
+            // gate, database, sender preparation, and provider awaits run after
+            // releasing it. Per-recipient lifecycle reservations perform the
+            // authoritative atomic version check again at transport start.
+            lane.Gate.Release();
+            entered = false;
+
             await DispatchCoreAsync(
                 attentionItemId,
                 changeKind,
                 targetUserId,
                 version,
+                globalResolvedFence,
+                targetedResolvedFence,
                 cancellationToken);
         }
         finally
@@ -249,6 +277,11 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 lane.Gate.Release();
             }
 
+            // DispatchCoreAsync normally releases these before pruning. These
+            // idempotent completions cover cancellation while waiting for the
+            // lane and any other pre-core exit.
+            globalResolvedFence?.Complete();
+            targetedResolvedFence?.Complete();
             lane.Complete(version);
         }
     }
@@ -258,37 +291,14 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         AttentionChangeKind changeKind,
         Guid? targetUserId,
         AttentionDispatchVersion version,
+        GlobalResolvedFence? globalResolvedFence,
+        GlobalResolvedFence? targetedResolvedFence,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(attentionItemId))
         {
             return;
         }
-
-        // A global resolution's ordering fence is independent from optional
-        // delivery. Publish it before reading configuration, constructing a
-        // scope, or querying the database so a disabled/unavailable dispatcher
-        // can never let an older targeted alert resurrect after recovery.
-        GlobalResolvedFence? globalResolvedFence = changeKind == AttentionChangeKind.Resolved
-            && targetUserId is null
-            ? PublishResolvedTombstoneAndFenceLifecycles(attentionItemId, version)
-            : null;
-
-        // Hicks r2 blocker 3: a targeted resolution's ordering fence is
-        // symmetric to the global one. It must publish and advance the
-        // target user's lifecycle synchronously — under the same
-        // AttentionItemFence lock a concurrent global Resolved acquires
-        // — BEFORE any settings/gate/scope/owner-lookup or other
-        // optional/fallible early exit. Without this, a concurrent
-        // Created that has already admitted the target's lifecycle can
-        // resume after this dispatch returns and start transport for an
-        // older generation. The item-wide _resolvedVersion tombstone is
-        // NOT bumped here (that is a global-only invariant); only the
-        // target's per-user lifecycle is advanced to Resolved v_target.
-        GlobalResolvedFence? targetedResolvedFence = changeKind == AttentionChangeKind.Resolved
-            && targetUserId is Guid targetForFence
-            ? PublishTargetedResolvedFence(attentionItemId, targetForFence, version)
-            : null;
 
         // Hicks r2 blocker 1 (B): every fallible operation past this point —
         // <see cref="IOptionsMonitor{T}.CurrentValue"/>, gate reads, scope
@@ -310,12 +320,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // silent dismissal even after the source removes the live item.
             NativePushSettings settings = _optionsMonitor.CurrentValue;
             settingsSnapshot = settings;
+            RememberRateLimitWindow(settings);
             if (settings.Mode == NativePushMode.Disabled)
             {
                 return;
             }
 
-            PruneCaches(UtcNow, settings);
+            PruneCaches(UtcNow, EffectiveRateLimitWindow(settings));
 
             await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
             IServiceProvider sp = scope.ServiceProvider;
@@ -442,7 +453,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // Delivery failures must never break the attention broadcast path.
             // A validated-options reload that throws lands here (blocker 1 B):
             // the fence + lifecycle leases still release below and PruneCaches
-            // still drives bounded reclamation using safe defaults.
+            // still drives bounded reclamation without inventing rate settings.
             _logger.LogWarning(ex, "[NativePush] Dispatch failed for attentionItemId={AttentionItemId}", attentionItemId);
         }
         finally
@@ -465,16 +476,16 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // traffic; the internal 30-second rate limit prevents redundant
             // sweeps in bursty conditions.
             //
-            // Hicks r2 blocker 1 (B) extension: when the options read itself
-            // threw before <c>settingsSnapshot</c> could be assigned, use safe
-            // defaults so bounded reclamation still runs. <c>new
-            // NativePushSettings()</c> defaults to <see cref="NativePushMode.Disabled"/>
-            // and a 30-second RateLimitWindow, matching the same eviction
-            // cadence the normal disabled path uses.
-            NativePushSettings pruneSettings = settingsSnapshot ?? new NativePushSettings();
-            if (settingsSnapshot is null || pruneSettings.Mode == NativePushMode.Disabled)
+            // Settings-independent caches still need bounded reclamation after
+            // an options failure, but rate buckets must never be pruned using a
+            // fabricated shorter window. Use the most recent successfully-read
+            // window; when none exists, skip rate-bucket pruning for this pass.
+            if (settingsSnapshot is null || settingsSnapshot.Mode == NativePushMode.Disabled)
             {
-                PruneCaches(UtcNow, pruneSettings);
+                TimeSpan? rateLimitWindow = settingsSnapshot is not null
+                    ? EffectiveRateLimitWindow(settingsSnapshot)
+                    : TryGetLastValidRateLimitWindow();
+                PruneCaches(UtcNow, rateLimitWindow);
             }
         }
     }
@@ -2875,7 +2886,38 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         }
     }
 
-    private void PruneCaches(DateTime nowUtc, NativePushSettings settings)
+    // The rate-bucket eviction TTL has always normalised a non-positive
+    // configured window to five minutes (the historical PruneCaches default).
+    // Centralised here so every prune call site — the normal path, the
+    // disabled/no-op finally, and the retained last-valid snapshot — evicts on
+    // identical semantics, and a misconfigured non-positive window can never
+    // collapse the eviction cutoff onto "now".
+    private static TimeSpan EffectiveRateLimitWindow(NativePushSettings settings)
+    {
+        return settings.RateLimitWindow > TimeSpan.Zero
+            ? settings.RateLimitWindow
+            : TimeSpan.FromMinutes(5);
+    }
+
+    private void RememberRateLimitWindow(NativePushSettings settings)
+    {
+        // Retain the authoritative last-valid eviction window so a later options
+        // read failure can still prune rate buckets on the configured cadence
+        // instead of a fabricated default (504dfb15 blocker 2). Interlocked
+        // mirrors the sibling _lastPruneAtTicks so this 64-bit value is written
+        // and read atomically on every runtime.
+        _ = Interlocked.Exchange(
+            ref _lastValidRateLimitWindowTicks,
+            EffectiveRateLimitWindow(settings).Ticks);
+    }
+
+    private TimeSpan? TryGetLastValidRateLimitWindow()
+    {
+        long ticks = Interlocked.Read(ref _lastValidRateLimitWindowTicks);
+        return ticks > 0 ? TimeSpan.FromTicks(ticks) : null;
+    }
+
+    private void PruneCaches(DateTime nowUtc, TimeSpan? rateLimitWindow)
     {
         // Rate-limit prune to at most once every 30s so an alert storm cannot force an
         // O(N) sweep on every dispatch (bucket count may stay > threshold while every
@@ -2904,41 +2946,40 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             }
         }
 
-        // Bucket-side prune: drop rate-limit entries that have gone stale so the
-        // dictionary does not hold state for every user who ever received a push.
-        //
-        // Hicks v3 blocker 3: we must hold the bucket's own lock across BOTH
-        // the emptiness check AND the dictionary Remove call. Otherwise a
-        // concurrent TryConsumeRate could add a timestamp between our
-        // decision and our Remove, and that timestamp would be silently
-        // discarded when the bucket instance drops out of the dict. We also
-        // set an IsDead flag so racing TryConsumeRate calls that already
-        // fetched the doomed bucket via GetOrAdd can detect and retry.
-        //
-        // The eviction TTL now honours the configured RateLimitWindow rather
-        // than a hard-coded 5 minutes — otherwise a longer configured window
-        // (e.g., 30 minutes for slower environments) would evict buckets
-        // while their timestamps were still relevant to rate decisions.
-        TimeSpan evictAfter = settings.RateLimitWindow > TimeSpan.Zero
-            ? settings.RateLimitWindow
-            : TimeSpan.FromMinutes(5);
-        foreach (KeyValuePair<RateLimitKey, RateLimitBucket> kv in _rateLimits)
+        if (rateLimitWindow is TimeSpan evictAfter)
         {
-            lock (kv.Value)
+            // Bucket-side prune: drop rate-limit entries that have gone stale so the
+            // dictionary does not hold state for every user who ever received a push.
+            //
+            // Hicks v3 blocker 3: we must hold the bucket's own lock across BOTH
+            // the emptiness check AND the dictionary Remove call. Otherwise a
+            // concurrent TryConsumeRate could add a timestamp between our
+            // decision and our Remove, and that timestamp would be silently
+            // discarded when the bucket instance drops out of the dict. We also
+            // set an IsDead flag so racing TryConsumeRate calls that already
+            // fetched the doomed bucket via GetOrAdd can detect and retry.
+            //
+            // The eviction TTL honours the last successfully-read configured
+            // RateLimitWindow. If options acquisition failed before any valid
+            // snapshot existed, this entire settings-dependent section is skipped.
+            foreach (KeyValuePair<RateLimitKey, RateLimitBucket> kv in _rateLimits)
             {
-                DateTime cutoff = nowUtc - evictAfter;
-                kv.Value.Timestamps.RemoveAll(t => t < cutoff);
-                bool empty = kv.Value.Timestamps.Count == 0;
-                if (!empty)
+                lock (kv.Value)
                 {
-                    continue;
-                }
+                    DateTime cutoff = nowUtc - evictAfter;
+                    kv.Value.Timestamps.RemoveAll(t => t < cutoff);
+                    bool empty = kv.Value.Timestamps.Count == 0;
+                    if (!empty)
+                    {
+                        continue;
+                    }
 
-                // Mark dead BEFORE removing from the dict so any thread that
-                // grabbed this instance via GetOrAdd sees IsDead=true after
-                // it acquires the lock and will retry with a fresh bucket.
-                kv.Value.IsDead = true;
-                _ = ((ICollection<KeyValuePair<RateLimitKey, RateLimitBucket>>)_rateLimits).Remove(kv);
+                    // Mark dead BEFORE removing from the dict so any thread that
+                    // grabbed this instance via GetOrAdd sees IsDead=true after
+                    // it acquires the lock and will retry with a fresh bucket.
+                    kv.Value.IsDead = true;
+                    _ = ((ICollection<KeyValuePair<RateLimitKey, RateLimitBucket>>)_rateLimits).Remove(kv);
+                }
             }
         }
 

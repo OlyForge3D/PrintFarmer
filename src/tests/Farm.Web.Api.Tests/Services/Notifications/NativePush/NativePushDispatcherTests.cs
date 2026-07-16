@@ -2121,7 +2121,7 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_CreatedBlockedBeforeSnapshot_ResolvedWaitsForAlert()
+    public async Task DispatchAsync_CreatedBlockedBeforeSnapshot_ResolvedPublishesFenceAndVetoesAlert()
     {
         Guid userId = Guid.NewGuid();
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
@@ -2167,7 +2167,7 @@ public sealed class NativePushDispatcherTests
             AttentionChangeKind.Created,
             userId,
             occurredAtUtc: createdAt);
-        await createdLookupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await createdLookupEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
         Task resolved = sut.DispatchAsync(
             item.Id,
             AttentionChangeKind.Resolved,
@@ -2175,12 +2175,13 @@ public sealed class NativePushDispatcherTests
             occurredAtUtc: createdAt.AddSeconds(1));
 
         sent.Should().BeEmpty();
-        resolved.IsCompleted.Should().BeFalse();
+        await resolved.WaitAsync(TimeSpan.FromSeconds(30));
 
         releaseCreatedLookup.TrySetResult();
-        await Task.WhenAll(created, resolved).WaitAsync(TimeSpan.FromSeconds(10));
+        await created.WaitAsync(TimeSpan.FromSeconds(30));
 
-        sent.Should().Equal(AttentionChangeKind.Created, AttentionChangeKind.Resolved);
+        sent.Should().BeEmpty(
+            "the resolution fence is published while Created is outside the narrow lane in its item lookup, so Created cannot install a snapshot or start transport afterward");
     }
 
     [Fact]
@@ -4896,32 +4897,24 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_TargetedDispatchLaneExactRetryAfterCancelWhileQueuedBehindOlderPending_IsAdmittedAndDelivered()
+    public async Task DispatchAsync_TargetedDispatchLaneExactRetryAfterCancelOutsideLaneWhileOlderPending_IsAdmittedAndDelivered()
     {
-        // #755 Hicks (dispatch-lane variant of the same version-blind
-        // bug at the AttentionDispatchLane admission around line 1510):
-        //   * S1 targeted Created (v1) acquires the lane's Gate and
-        //     pauses in transport.
-        //   * R2 targeted Updated (v2 > v1) admits at the SAME lane
-        //     (its higher version passes the ordering check), then
-        //     blocks queued behind S1 on the Gate. TryObserveDispatch
-        //     runs synchronously before the first await in
-        //     DispatchAsync, so v2 is committed to the lane's active
-        //     set before the caller sees the returned Task.
-        //   * R2's caller cancels while queued. Gate.WaitAsync throws
-        //     OperationCanceledException; the finally releases only
-        //     R2's own v2 lease from the lane; S1's v1 remains active.
-        //   * The exact R2 retry (same v2) MUST admit at the same lane
-        //     — the version-blind design rejected this because the
-        //     lane's `_participants != 0` (S1 still counts). Fixed
-        //     design admits because `_activeVersions.Contains(v2)` is
-        //     false after R2 first released only its own v2 slot.
-        //   * S1 completes, Gate is released, R2 retry acquires it and
-        //     delivers its own generation to the sender.
+        // The lane now protects only the latest-version decision; all
+        // feature-gate/DB/network awaits run outside it. This preserves the
+        // original version-scoped admission proof with a realistic outside-
+        // lane cancellation:
+        //   * S1 targeted Created (v1) remains active while paused in sender
+        //     preparation before transport start.
+        //   * R2 targeted Updated (v2) admits on the same lane, releases the
+        //     lane, then is canceled in its initial async feature-gate read.
+        //   * R2's exact-version retry must admit even though S1's v1
+        //     participant remains active.
+        //   * The retry delivers v2; releasing S1 then vetoes its stale v1
+        //     reservation at the lifecycle transport boundary.
         Guid userId = Guid.NewGuid();
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
         await using AppDbContext db = BuildDbContext();
-        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        using var gate = new ControllableAsyncGate();
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
@@ -4931,7 +4924,7 @@ public sealed class NativePushDispatcherTests
             .Returns(Task.CompletedTask);
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
-        var s1TransportStarted = new TaskCompletionSource<NativePushEnvelope>(
+        var s1PreparationStarted = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseS1 = new TaskCompletionSource<NativePushDispatchResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -4939,25 +4932,25 @@ public sealed class NativePushDispatcherTests
         int sendCount = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
+            int callIndex = Interlocked.Increment(ref sendCount);
+            if (callIndex == 1)
+            {
+                s1PreparationStarted.TrySetResult();
+                _ = await releaseS1.Task.WaitAsync(cancellationToken);
+            }
+
             if (!(await transportStart.TryStartAsync(cancellationToken)).IsPermitted)
             {
                 return NativePushDispatchResult.TransportStartVetoed();
             }
 
-            int callIndex = Interlocked.Increment(ref sendCount);
             sent.Enqueue(envelope);
-            if (callIndex == 1)
-            {
-                s1TransportStarted.TrySetResult(envelope);
-                return await releaseS1.Task.WaitAsync(cancellationToken);
-            }
-
             return NativePushDispatchResult.Delivered();
         });
 
         NativePushDispatcher sut = BuildWithScope(
             sender,
-            gate.Object,
+            gate,
             tokens.Object,
             attention.Object,
             db,
@@ -4966,19 +4959,15 @@ public sealed class NativePushDispatcherTests
         DateTime createdAt = new(2026, 7, 15, 4, 10, 0, DateTimeKind.Utc);
         DateTime updatedAt = createdAt.AddSeconds(1);
 
-        // S1: targeted Created (v1). Holds the lane's Gate + pauses.
+        // S1: targeted Created (v1). Remains active while sender preparation pauses.
         Task s1 = sut.DispatchAsync(
             item.Id,
             AttentionChangeKind.Created,
             userId,
             occurredAtUtc: createdAt);
-        await s1TransportStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await s1PreparationStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // R2 first (targeted Updated v2) on the SAME lane. The lane
-        // admission is synchronous — TryObserveDispatch runs before
-        // the first await in DispatchAsync — so v2 is committed to the
-        // lane's _activeVersions before the caller sees the returned
-        // Task. The Task then blocks on the Gate (S1 holds it).
+        gate.ArmPauseForCallCounts(pauseAfterCall: 4);
         using var firstCts = new CancellationTokenSource();
         Task r2First = sut.DispatchAsync(
             item.Id,
@@ -4987,40 +4976,28 @@ public sealed class NativePushDispatcherTests
             occurredAtUtc: updatedAt,
             cancellationToken: firstCts.Token);
 
+        await gate.WaitForPausedAsync().WaitAsync(TimeSpan.FromSeconds(30));
         firstCts.Cancel();
         Func<Task> awaitCancelledFirst = () => r2First;
         await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
+        gate.DisarmPause();
+        gate.ReleasePause();
 
-        // R2 retry (targeted Updated v2). On the buggy version-blind
-        // dispatch-lane design this returns silently because
-        // `_participants != 0` (S1's v1 is still there). Fixed design
-        // admits because `_activeVersions.Contains(_latest=v2)` is
-        // false after R2 first released only its own v2 lease. The
-        // retry then queues on the Gate behind S1.
         Task r2Retry = sut.DispatchAsync(
             item.Id,
             AttentionChangeKind.Updated,
             userId,
             occurredAtUtc: updatedAt);
 
-        // TryObserveDispatch is synchronous, so by the time
-        // sut.DispatchAsync returns the Task has either been rejected
-        // at admission (RanToCompletion — the buggy path) or admitted
-        // and parked on Gate.WaitAsync (WaitingForActivation — the
-        // fixed path). No race window: an admitted Task cannot
-        // advance past the Gate because S1 still holds it.
-        r2Retry.IsCompleted.Should().BeFalse(
-            "the exact-version retry must have been admitted at the dispatch lane and queued on the gate behind S1");
+        await r2Retry.WaitAsync(TimeSpan.FromSeconds(30));
 
         releaseS1.TrySetResult(NativePushDispatchResult.Delivered());
-        await Task.WhenAll(s1, r2Retry).WaitAsync(TimeSpan.FromSeconds(10));
+        await s1.WaitAsync(TimeSpan.FromSeconds(30));
 
-        sent.Select(envelope => envelope.ChangeKind).Should().Equal(
-            AttentionChangeKind.Created,
-            AttentionChangeKind.Updated);
+        sent.Select(envelope => envelope.ChangeKind).Should().Equal(AttentionChangeKind.Updated);
         sent.Count(envelope => envelope.ChangeKind == AttentionChangeKind.Updated)
             .Should().Be(1,
-                "the admitted retry must run its own generation exactly once");
+                "the exact-version retry must admit while S1 remains active, and S1 must later be vetoed as stale");
     }
 
     [Fact]
@@ -7151,6 +7128,258 @@ public sealed class NativePushDispatcherTests
         gate.ReleasePause();
         await dispatchA.WaitAsync(TimeSpan.FromSeconds(10));
         Volatile.Read(ref providerA).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_TargetedResolvedSameLaneWhileCreatedPausedBeforeTransport_PublishesFenceAndReleasesOwnership()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var createdPrepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCreated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int providerCalls = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (envelope.ChangeKind == AttentionChangeKind.Created)
+            {
+                createdPrepared.TrySetResult();
+                await releaseCreated.Task.WaitAsync(cancellationToken);
+            }
+
+            NativePushTransportStartDecision decision =
+                await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        DateTime createdAt = new(2026, 7, 15, 19, 0, 0, DateTimeKind.Utc);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+
+        Task created = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: createdAt);
+        await createdPrepared.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Task resolved = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            userId,
+            occurredAtUtc: resolvedAt);
+
+        try
+        {
+            await resolved.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            releaseCreated.TrySetResult();
+            await created.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "the same-lane resolution must publish its lifecycle fence before waiting on the lane, so the older prepared Created is vetoed at transport start");
+
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            userId,
+            occurredAtUtc: resolvedAt);
+
+        attention.Verify(
+            service => service.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()),
+            Times.Exactly(3),
+            "Created plus both exact-version Resolved attempts must reach the lookup, proving the first resolution released its lane and lifecycle participant ownership");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_GlobalResolvedSameLaneWhileCreatedPausedBeforeTransport_PublishesFenceAndReleasesOwnership()
+    {
+        // Global (untargeted) sibling of the targeted same-lane proof. A global
+        // Resolved advances every fenced lifecycle through the distinct
+        // PublishResolvedTombstoneAndFenceLifecycles + tracked-enumeration path,
+        // whereas the targeted case uses PublishTargetedResolvedFence. Both must
+        // publish their fence BEFORE waiting on the (item, null) lane so an older
+        // untargeted Created paused in sender preparation is vetoed at its
+        // transport-start boundary instead of the resolution being hidden behind
+        // the lane until after transport starts.
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var createdPrepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCreated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int providerCalls = 0;
+        var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
+        {
+            if (envelope.ChangeKind == AttentionChangeKind.Created)
+            {
+                createdPrepared.TrySetResult();
+                await releaseCreated.Task.WaitAsync(cancellationToken);
+            }
+
+            NativePushTransportStartDecision decision =
+                await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            new NativePushSettings { Mode = NativePushMode.Direct, MaxAttempts = 1 });
+        DateTime createdAt = new(2026, 7, 15, 19, 0, 0, DateTimeKind.Utc);
+        DateTime resolvedAt = createdAt.AddSeconds(1);
+
+        // Global Created (targetUserId: null) fans out to the single active
+        // owner and pauses in sender preparation before its transport-start.
+        Task created = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            targetUserId: null,
+            occurredAtUtc: createdAt);
+        await createdPrepared.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Global Resolved (targetUserId: null) on the SAME (item, null) lane.
+        Task resolved = sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+
+        try
+        {
+            // On 504dfb15 the lane is held across the paused Created, so this
+            // resolution can never acquire it and this await deadlocks until the
+            // timeout. The fix publishes the fence before the lane wait and only
+            // holds the lane across the latest-version decision, so it completes.
+            await resolved.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            releaseCreated.TrySetResult();
+            await created.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "the same-lane global resolution must publish its tombstone + lifecycle fence before waiting on the lane, so the older prepared Created is vetoed at transport start");
+
+        // The exact-version global Resolved retry must re-admit, proving the
+        // first resolution released its lane participant and every fenced
+        // lifecycle lease rather than leaving a live participant pinned.
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            targetUserId: null,
+            occurredAtUtc: resolvedAt);
+
+        Volatile.Read(ref providerCalls).Should().Be(0,
+            "no stale Created generation may reach the provider even after the resolution and its retry complete");
+        attention.Verify(
+            service => service.FindItemAsync(userId, item.Id, It.IsAny<CancellationToken>()),
+            Times.Exactly(3),
+            "Created plus both exact-version global Resolved attempts must reach the lookup, proving the first resolution released its lane and lifecycle participant ownership");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_OptionsFailurePruneRetainsLastValidRateLimitWindowAfterRecovery()
+    {
+        Guid userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        int providerCalls = 0;
+        var sender = new DelegateTransportSender(async (_, transportStart, cancellationToken) =>
+        {
+            NativePushTransportStartDecision decision =
+                await transportStart.TryStartAsync(cancellationToken);
+            if (!decision.IsPermitted)
+            {
+                return NativePushDispatchResult.TransportStartVetoed();
+            }
+
+            Interlocked.Increment(ref providerCalls);
+            return NativePushDispatchResult.Delivered();
+        });
+        var settings = new NativePushSettings
+        {
+            Mode = NativePushMode.Direct,
+            MaxAttempts = 1,
+            RateLimitPerUser = 1,
+            RateLimitWindow = TimeSpan.FromMinutes(10),
+        };
+        using var monitor = new ThrowingOptionsMonitor(settings);
+        var timeProvider = new AdvancingTimeProvider(
+            new DateTime(2026, 7, 15, 20, 0, 0, DateTimeKind.Utc));
+        var services = new ServiceCollection();
+        services.AddSingleton(gate.Object);
+        services.AddSingleton(tokens.Object);
+        services.AddSingleton(attention.Object);
+        services.AddSingleton(db);
+        ServiceProvider provider = services.BuildServiceProvider();
+        using var sut = new NativePushDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            sender,
+            monitor,
+            new NativePushMetrics(),
+            NullLogger<NativePushDispatcher>.Instance,
+            timeProvider);
+        DateTime firstAt = timeProvider.GetUtcNow().UtcDateTime;
+
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: firstAt);
+        Volatile.Read(ref providerCalls).Should().Be(1);
+
+        timeProvider.Advance(TimeSpan.FromMinutes(1));
+        monitor.ArmThrowsForNextReads(1);
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Resolved,
+            userId,
+            occurredAtUtc: timeProvider.GetUtcNow().UtcDateTime);
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        await sut.DispatchAsync(
+            item.Id,
+            AttentionChangeKind.Created,
+            userId,
+            occurredAtUtc: timeProvider.GetUtcNow().UtcDateTime);
+
+        Volatile.Read(ref providerCalls).Should().Be(1,
+            "options failure pruning must retain the last valid ten-minute rate window instead of substituting the default thirty seconds and dropping an active bucket");
     }
 
     // -----------------------------------------------------------------------
