@@ -16,11 +16,15 @@ function shallowEqualPrinter(previous: Printer | PrinterDisplay, next: Printer |
   const previousRecord = previous as Record<string, unknown>;
   const nextRecord = next as Record<string, unknown>;
   const previousKeys = Object.keys(previousRecord);
-  if (previousKeys.length !== Object.keys(nextRecord).length) {
+  const nextKeys = Object.keys(nextRecord);
+  if (previousKeys.length !== nextKeys.length) {
     return false;
   }
 
-  return previousKeys.every((key) => Object.is(previousRecord[key], nextRecord[key]));
+  return previousKeys.every((key) => (
+    Object.prototype.hasOwnProperty.call(nextRecord, key) &&
+    Object.is(previousRecord[key], nextRecord[key])
+  ));
 }
 
 export function areCompactPrinterCardPropsEqual(
@@ -29,6 +33,8 @@ export function areCompactPrinterCardPropsEqual(
 ): boolean {
   return (
     shallowEqualPrinter(previous.printer, next.printer) &&
-    previous.backendCapabilities === next.backendCapabilities
+    previous.backendCapabilities === next.backendCapabilities &&
+    previous.onExpand === next.onExpand &&
+    previous.onEdit === next.onEdit
   );
 }
