@@ -235,7 +235,8 @@ public class JobQueueService : IJobQueueService
             UpdatedAt = j.UpdatedAt,
             GcodeFileName = j.GcodeFile?.Name ?? string.Empty,
             AssignedPrinterName = j.AssignedPrinter?.Name ?? string.Empty,
-            ToolheadUsages = MapToolheadUsages(j)
+            ToolheadUsages = MapToolheadUsages(j),
+            HarvestedAt = j.HarvestedAt
         }).ToList();
 
         List<JobQueuePrintJobDto> queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Infrastructure.PrintJobStatus.Queued || d.Status.Value == Farm.Infrastructure.PrintJobStatus.Assigned)).ToList();
@@ -454,7 +455,8 @@ public class JobQueueService : IJobQueueService
             DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
-            ToolheadUsages = MapToolheadUsages(job)
+            ToolheadUsages = MapToolheadUsages(job),
+            HarvestedAt = job.HarvestedAt
         };
     }
 
@@ -509,7 +511,8 @@ public class JobQueueService : IJobQueueService
                 DeadlineAtUtc = job.DeadlineAtUtc,
                 CreatedAt = job.CreatedAt,
                 UpdatedAt = job.UpdatedAt,
-                ToolheadUsages = MapToolheadUsages(job)
+                ToolheadUsages = MapToolheadUsages(job),
+                HarvestedAt = job.HarvestedAt
             };
     }
 
@@ -598,7 +601,8 @@ public class JobQueueService : IJobQueueService
             DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
-            ToolheadUsages = MapToolheadUsages(job)
+            ToolheadUsages = MapToolheadUsages(job),
+            HarvestedAt = job.HarvestedAt
         };
     }
 
@@ -764,7 +768,8 @@ public class JobQueueService : IJobQueueService
             DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
-            ToolheadUsages = MapToolheadUsages(job!)
+            ToolheadUsages = MapToolheadUsages(job!),
+            HarvestedAt = job.HarvestedAt
         };
     }
 

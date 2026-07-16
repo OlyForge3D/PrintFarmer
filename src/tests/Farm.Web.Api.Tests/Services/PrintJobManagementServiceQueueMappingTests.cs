@@ -314,6 +314,87 @@ public class PrintJobManagementServiceQueueMappingTests
             Times.Exactly(2));
     }
 
+    // #714: harvestedAt must be projected onto QueuedPrintJobDto so mobile
+    // clients can filter already-harvested completed jobs out of the scan
+    // picker and gate the Harvest affordance in job detail.
+    [Fact]
+    public async Task GetAllQueuedJobsAsync_UnharvestedJob_ReturnsNullHarvestedAt()
+    {
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "unharvested.gcode",
+            Status = PrintJobStatus.Completed,
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            HarvestedAt = null
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetFilteredJobsAsync(
+                It.IsAny<PrintJobStatus?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([job]);
+
+        PrintJobManagementService service = CreateService(repository);
+
+        List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto> result =
+            await service.GetAllQueuedJobsAsync();
+
+        Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto dto = Assert.Single(result);
+        Assert.Null(dto.Job.HarvestedAt);
+    }
+
+    [Fact]
+    public async Task GetAllQueuedJobsAsync_HarvestedJob_ProjectsHarvestedAt()
+    {
+        DateTime harvestedAt = new(2026, 7, 15, 12, 34, 56, DateTimeKind.Utc);
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "harvested.gcode",
+            Status = PrintJobStatus.Completed,
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            HarvestedAt = harvestedAt
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetFilteredJobsAsync(
+                It.IsAny<PrintJobStatus?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([job]);
+
+        PrintJobManagementService service = CreateService(repository);
+
+        List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto> result =
+            await service.GetAllQueuedJobsAsync();
+
+        Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto dto = Assert.Single(result);
+        Assert.Equal(harvestedAt, dto.Job.HarvestedAt);
+        Assert.Equal(nameof(PrintJobStatus.Completed), dto.Job.Status);
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         IPartOutputSnapshotService? snapshots = null,

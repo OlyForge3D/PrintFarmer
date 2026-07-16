@@ -2892,7 +2892,8 @@ public class PrintJobManagementService(
                     tu.FilamentName,
                     tu.FilamentColor,
                     tu.MaterialCostUsd))
-                .ToList()
+                .ToList(),
+            HarvestedAt = job.HarvestedAt
         };
     }
 
