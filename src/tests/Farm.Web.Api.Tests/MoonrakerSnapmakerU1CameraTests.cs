@@ -163,6 +163,7 @@ public class MoonrakerSnapmakerU1CameraTests
 
         firstStart.Should().BeTrue();
         secondStart.Should().BeFalse("rate limit prevents restart while stopped");
+        clock.TimerCount.Should().Be(1, "the stopped-and-rate-limited Ensure call must not schedule a second timer");
         rpc.Methods.Should().Equal("camera.start_monitor", "camera.stop_monitor");
     }
 
@@ -441,6 +442,17 @@ public class MoonrakerSnapmakerU1CameraTests
         public Task FirstTimerCreated => _firstTimerCreated.Task;
 
         public Task SecondTimerCreated => _secondTimerCreated.Task;
+
+        public int TimerCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _timers.Count;
+                }
+            }
+        }
 
         /// <summary>Returns a task that completes when the timer at <paramref name="index"/> (0-based) has been created.</summary>
         public Task TimerCreatedAt(int index)
