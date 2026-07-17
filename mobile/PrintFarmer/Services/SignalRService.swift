@@ -1,42 +1,192 @@
 import Foundation
 import os
 
+// MARK: - Test seams for real-transport lifecycle proof (r9 blocker #4)
+
+/// Abstraction over `URLSessionWebSocketTask`. Production uses the
+/// stock URLSession task; tests provide a mock that gates `send` and
+/// `receive` on continuations so real-transport lifecycle tests can
+/// prove handshake/receive suspension behavior without wall-clock
+/// pass criteria.
+///
+/// Only the subset of the WebSocket task API the SignalR service
+/// actually calls is exposed. `URLSessionWebSocketTask` conforms via
+/// the extension below.
+protocol SignalRWebSocket: AnyObject, Sendable {
+    func resume()
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
+    func send(_ message: URLSessionWebSocketTask.Message) async throws
+    func receive() async throws -> URLSessionWebSocketTask.Message
+}
+
+extension URLSessionWebSocketTask: SignalRWebSocket {}
+
+/// Async reconnect sleeper. Production uses `Task.sleep(for:)`.
+/// Tests inject a controllable sleeper that resumes exactly when the
+/// test releases each attempt so retries can be proven deterministically
+/// without wall-clock waits (r9 blocker #4).
+typealias SignalRReconnectSleeper = @Sendable (TimeInterval) async -> Void
+
+/// Default production sleeper — wraps `Task.sleep(for:)` and returns
+/// silently on cancellation so the reconnect flow can honor its
+/// generation/intent recheck immediately after the sleep resumes.
+@Sendable
+func defaultSignalRReconnectSleeper(_ seconds: TimeInterval) async {
+    try? await Task.sleep(for: .seconds(seconds))
+}
+
 /// SignalR real-time connection to /hubs/printers.
 ///
 /// Uses URLSessionWebSocketTask with the SignalR JSON protocol (messages
 /// delimited by ASCII Record Separator 0x1E). Handles negotiate → WebSocket
 /// upgrade → handshake → message loop with auto-reconnect on disconnect.
-@Observable
 final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
-    private(set) var connectionState: SignalRConnectionState = .disconnected
+    /// Per-service coordinator: private serial queue + service-wide FIFO
+    /// delivery guard shared by every hub belonging to this service. Two
+    /// separate `SignalRService` instances (e.g. multi-server) each own
+    /// their own coordinator and therefore never share hub state.
+    private let coordinator = SignalRHubCoordinator(label: "com.printfarmer.signalr.hubs")
+    /// One coherent serial-executor hub owns connection-state reads,
+    /// mutation, subscription, initial-observation, and ordered transition
+    /// delivery. See `SignalRConnectionStateHub` for the invariants.
+    private let connectionStateHub: SignalRConnectionStateHub
+    /// Event hubs — one per event type — deliver on their own serial
+    /// executors so subscription/cancellation is race-free and every
+    /// subscriber can be independently cancelled via its returned token.
+    private let printerUpdateHub: SignalREventHub<PrinterStatusUpdate>
+    private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
+    private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
+
+    /// Race-free connection-state read. Delegates to the hub's serial
+    /// executor so any pending `setConnectionState` block has been applied
+    /// before the read returns.
+    var connectionState: SignalRConnectionState { connectionStateHub.snapshot() }
+
+    private func setConnectionState(_ newValue: SignalRConnectionState) {
+        connectionStateHub.setState(newValue)
+    }
 
     private let serverURL: URL
     private let tokenProvider: @Sendable () async -> String?
     private let session: URLSession
     private let decoder: JSONDecoder
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "SignalR")
+    /// Test seam: computes the reconnect back-off duration for a given
+    /// attempt number. Production uses 1s, 2s, 4s, 8s, 16s, capped at
+    /// 30s (`Self.defaultReconnectBackoff`). Tests inject a compressed
+    /// version so real-transport lifecycle tests can prove multi-retry
+    /// behavior in bounded wall time without gating on the production
+    /// exponential curve.
+    private let reconnectBackoff: @Sendable (Int) -> TimeInterval
+
+    static let defaultReconnectBackoff: @Sendable (Int) -> TimeInterval = { attempt in
+        min(pow(2.0, Double(max(attempt - 1, 0))), 30.0)
+    }
+
+    /// Async reconnect sleeper (r9 blocker #4). Production sleeps via
+    /// `Task.sleep`; tests inject a controllable sleeper that resumes
+    /// only when the test explicitly releases each attempt, so retry
+    /// behavior can be proven without wall-clock timing.
+    private let reconnectSleeper: SignalRReconnectSleeper
+
+    /// WebSocket factory (r9 blocker #4). Production returns a
+    /// `URLSessionWebSocketTask` from the configured session; tests
+    /// return a mock `SignalRWebSocket` whose send/receive resume
+    /// through continuations so handshake and receive-loop suspension
+    /// can be gated deterministically.
+    private let webSocketFactory: @Sendable (URL) -> SignalRWebSocket
 
     /// 0x1E — ASCII Record Separator, SignalR message terminator
     private static let recordSeparator: UInt8 = 0x1E
 
-    private var webSocketTask: URLSessionWebSocketTask?
+    /// Serial queue guarding every mutable lifecycle field below.
+    /// `webSocketTask`, `receiveTask`, `pingTask`, `reconnectTask`,
+    /// `reconnectAttempt`, `intentionalDisconnect`, and `generation`
+    /// are ONLY read/written while executing on this queue. Every
+    /// transition (connect / disconnect / receive-error / reconnect
+    /// scheduling / socket install / state publish) routes through
+    /// `lifecycleSync` so intent + generation are checked atomically
+    /// alongside the socket handles they refer to (r7 blocker #2).
+    private let lifecycleQueue = DispatchQueue(label: "com.printfarmer.signalr.lifecycle")
+    /// Per-instance key used to detect that we're already executing
+    /// on `lifecycleQueue`. When present, `lifecycleSync` runs the
+    /// closure inline instead of calling `queue.sync` — this keeps
+    /// nested lifecycle calls (e.g. `handleMessage` → `processFrame`
+    /// type-7 → `scheduleReconnect`, r10 blocker #1) from deadlocking
+    /// on the same serial queue while preserving full serial ordering
+    /// (the outer caller still executes on the queue, so all state
+    /// mutations and hub `coordinator.async` enqueues run in the same
+    /// FIFO order as if the nested call had waited on `sync`).
+    private let lifecycleSpecificKey = DispatchSpecificKey<UUID>()
+    private let lifecycleSpecificValue = UUID()
+    private var webSocketTask: SignalRWebSocket?
     private var receiveTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
+    /// Coalesced reconnect owner. Set on entry to the reconnect flow and
+    /// cleared on exit; a second reconnect trigger while one is already
+    /// running is dropped (no accumulation). Paired with an identity
+    /// token so ONLY the task that installed the slot may clear it
+    /// (r8 blocker #2: prevents a stale reconnect from wiping a newer
+    /// scheduled reconnect owner).
+    private var reconnectTask: Task<Void, Never>?
+    private var reconnectToken: UUID?
     private var reconnectAttempt = 0
     private var intentionalDisconnect = false
+    /// Monotonic connection generation. Bumped on every explicit
+    /// `disconnect()`, on every `tearDown()`, and on every reconnect
+    /// scheduling. `performConnect()` snapshots this once at entry and
+    /// checks it after every suspension point BEFORE publishing
+    /// `.connected` or installing the receive/ping tasks; a stale
+    /// resumption whose snapshot no longer matches is discarded so a
+    /// slow negotiate/handshake from an earlier attempt cannot publish
+    /// `.connected` after the user requested disconnect or a newer
+    /// connect ran.
+    private var generation: UInt64 = 0
 
-    private var printerUpdateHandlers: [@Sendable (PrinterStatusUpdate) -> Void] = []
-    private var jobQueueUpdateHandlers: [@Sendable (JobQueueUpdate) -> Void] = []
-    private var attentionChangedHandlers: [@Sendable (AttentionChangedEvent) -> Void] = []
+    // Handler storage for #711 F6 `fallbackGroupsUpdated` follows the
+    // simple handler-array pattern rather than a SignalREventHub because
+    // fallback-group updates are refetch hints with no in-flight lifecycle
+    // that would benefit from hub-managed unsubscribe semantics. Printer,
+    // job-queue, and attention events were converted to hubs by #777 for
+    // lifecycle isolation; #711 F6 intentionally keeps this simpler path.
     private var fallbackGroupsUpdatedHandlers: [@Sendable (FallbackGroupsUpdatedEvent) -> Void] = []
     private let handlerLock = NSLock()
 
-    init(serverURL: URL, session: URLSession = .shared, tokenProvider: @escaping @Sendable () async -> String?) {
+    init(
+        serverURL: URL,
+        session: URLSession = .shared,
+        tokenProvider: @escaping @Sendable () async -> String?,
+        reconnectBackoff: @escaping @Sendable (Int) -> TimeInterval = SignalRService.defaultReconnectBackoff,
+        reconnectSleeper: @escaping SignalRReconnectSleeper = defaultSignalRReconnectSleeper,
+        webSocketFactory: (@Sendable (URL) -> SignalRWebSocket)? = nil
+    ) {
         self.serverURL = serverURL
         self.tokenProvider = tokenProvider
         self.session = session
+        self.reconnectBackoff = reconnectBackoff
+        self.reconnectSleeper = reconnectSleeper
+        // Capture `session` in a local Sendable so the closure escapes
+        // safely into the actor-agnostic factory.
+        let capturedSession = session
+        self.webSocketFactory = webSocketFactory ?? { url in
+            capturedSession.webSocketTask(with: url)
+        }
+        // All hubs share this service's coordinator so nested cross-hub
+        // deliveries FIFO through the service-wide guard AND separate
+        // services (multi-server) do not share hub state.
+        self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
+        self.printerUpdateHub = SignalREventHub<PrinterStatusUpdate>(coordinator: coordinator)
+        self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
+        self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
 
         self.decoder = JSONDecoder()
+        // r10 blocker #1: register a per-instance specific value on
+        // the lifecycle queue so `lifecycleSync` can detect reentrant
+        // calls and execute the closure inline. Two distinct
+        // `SignalRService` instances have distinct values, so
+        // reentrancy detection is instance-scoped even though the
+        // queue label is shared.
+        lifecycleQueue.setSpecific(key: lifecycleSpecificKey, value: lifecycleSpecificValue)
         // Match APIClient's dual-format date decoder — ASP.NET Core emits fractional seconds
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
@@ -50,47 +200,139 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         }
     }
 
+    // MARK: - Lifecycle helpers
+
+    /// Snapshot lifecycle state under the queue. Returns a tuple of the
+    /// current generation and intent flag so the caller can validate
+    /// after each suspension without holding the queue across an await.
+    ///
+    /// **r10 blocker #1**: reentrancy-safe. When the caller is already
+    /// executing on `lifecycleQueue` (detected via a per-instance
+    /// `DispatchSpecificKey`), the closure is run inline — a nested
+    /// `queue.sync` on the same serial queue would deadlock. Inline
+    /// execution preserves the same serial ordering because the outer
+    /// caller is still executing on the queue, so any hub
+    /// `coordinator.async` enqueues emitted from the inner block
+    /// happen strictly before the outer block returns.
+    private func lifecycleSync<T>(_ work: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: lifecycleSpecificKey) == lifecycleSpecificValue {
+            return work()
+        }
+        return lifecycleQueue.sync(execute: work)
+    }
+
     // MARK: - Public API
 
     func connect() async throws {
-        guard connectionState != .connected && connectionState != .connecting else { return }
-        intentionalDisconnect = false
-        connectionState = .connecting
-        reconnectAttempt = 0
+        // r9 blockers #1 + #2: reserve generation/intent AND publish
+        // `.connecting` inside one lifecycleSync transition. If an
+        // earlier reconnect flow still owns the slot, cancel and clear
+        // it here so its failure-recursion cannot install a stale
+        // replacement while we're mid-connect. Snapshot the cancelled
+        // task after we exit the queue.
+        //
+        // r10 blocker #2b: also tear down any receive/ping/socket that
+        // an in-flight reconnect may have installed (e.g. Step-4 of an
+        // earlier `performConnect` already published `.connected`
+        // before we were called). Bumping generation is not enough —
+        // the socket must be closed and the receive/ping tasks
+        // cancelled here, atomically with the generation bump, so the
+        // superseded transport cannot deliver frames or schedule
+        // reconnects under the new generation.
+        let (myGen, alreadyLive, superseded): (UInt64, Bool, Task<Void, Never>?) = lifecycleSync {
+            let state = connectionStateHub.snapshot()
+            if state == .connected || state == .connecting {
+                return (self.generation, true, nil)
+            }
+            let priorReconnect = self.reconnectTask
+            self.reconnectTask = nil
+            self.reconnectToken = nil
+            self.intentionalDisconnect = false
+            self.generation &+= 1
+            self.reconnectAttempt = 0
+            // Cancel the leaked receive/ping/socket, if any (r10 #2b).
+            // `tearDownLocked` runs inside the same lifecycleSync so
+            // the transport is guaranteed torn down before the new
+            // generation is exposed anywhere.
+            self.tearDownLocked()
+            // Enqueue `.connecting` INSIDE this transition so a
+            // concurrent disconnect() that runs AFTER us publishes
+            // `.disconnected` STRICTLY AFTER our `.connecting`, and one
+            // that runs BEFORE us has already committed its
+            // `.disconnected` — the hub coordinator preserves that
+            // enqueue order because `setState` uses `coordinator.async`.
+            self.connectionStateHub.setState(.connecting)
+            return (self.generation, false, priorReconnect)
+        }
+        if alreadyLive { return }
+        // Cancel a superseded reconnect AFTER releasing the lifecycle
+        // queue — cancellation itself is safe outside the queue since
+        // the token/task have already been cleared.
+        superseded?.cancel()
+
         do {
-            try await performConnect()
+            try await performConnect(myGen: myGen)
         } catch {
-            // Initial connect failed. Route into the reconnect flow (mirroring a
-            // mid-session drop) so the hub recovers on its own via backoff instead
-            // of being stuck in `.connecting` forever with no retry scheduled.
-            Task { [weak self] in await self?.handleDisconnect() }
+            // Only schedule a reconnect if this connect attempt is still
+            // the current generation. Otherwise the user has already
+            // disconnected or another connect superseded us — do not
+            // enter the reconnect flow.
+            let stillCurrent = lifecycleSync {
+                self.generation == myGen && !self.intentionalDisconnect
+            }
+            if stillCurrent {
+                scheduleReconnect(fromGen: myGen)
+            }
             throw error
         }
     }
 
     func disconnect() async {
-        intentionalDisconnect = true
-        tearDown()
-        connectionState = .disconnected
+        // Bump generation, tear down, AND enqueue the .disconnected
+        // publish all inside one lifecycleQueue block. Because
+        // connectionStateHub.setState uses `coordinator.async`, the
+        // publish is enqueued FIFO relative to any prior/pending
+        // publishes emitted from other lifecycleSync blocks on this
+        // service — so a stale performConnect that already exited
+        // its own lifecycleSync WITHOUT enqueuing `.connected` cannot
+        // publish `.connected` after this `.disconnected`, and one
+        // that DID enqueue `.connected` while it was still current
+        // will have that state observed before we override it here.
+        // (r8 blocker #2: atomic state mutation + publication order.)
+        let reconnect: Task<Void, Never>? = lifecycleSync {
+            self.intentionalDisconnect = true
+            self.generation &+= 1
+            self.tearDownLocked()
+            let r = self.reconnectTask
+            self.reconnectTask = nil
+            self.reconnectToken = nil
+            self.connectionStateHub.setState(.disconnected)
+            return r
+        }
+        reconnect?.cancel()
         logger.info("Disconnected from SignalR hub")
     }
 
-    func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) {
-        handlerLock.lock()
-        printerUpdateHandlers.append(handler)
-        handlerLock.unlock()
+    @discardableResult
+    func onConnectionStateChanged(
+        _ handler: @escaping @Sendable (SignalRConnectionState) -> Void
+    ) -> (initial: SignalRConnectionState, subscription: SignalRSubscription) {
+        connectionStateHub.subscribe(handler)
     }
 
-    func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {
-        handlerLock.lock()
-        jobQueueUpdateHandlers.append(handler)
-        handlerLock.unlock()
+    @discardableResult
+    func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription {
+        printerUpdateHub.subscribe(handler)
     }
 
-    func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {
-        handlerLock.lock()
-        attentionChangedHandlers.append(handler)
-        handlerLock.unlock()
+    @discardableResult
+    func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription {
+        jobQueueUpdateHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
+        attentionChangedHub.subscribe(handler)
     }
 
     func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {
@@ -101,25 +343,94 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     // MARK: - Connection Lifecycle
 
-    private func performConnect() async throws {
-        // Step 1: Negotiate to get a connection token
+    /// Perform a full negotiate/connect sequence stamped with `myGen`.
+    /// After every suspension we validate the generation still matches
+    /// the service's current one, so a stale performConnect that has
+    /// been superseded by disconnect() or a newer connect() cannot
+    /// publish `.connected`, install a socket, or start the receive
+    /// loop under the newer intent.
+    private func performConnect(myGen: UInt64) async throws {
+        // Step 1: Negotiate.
         let token = await tokenProvider()
+        try checkGenerationStillCurrent(myGen)
+
         let negotiateResponse = try await negotiate(jwt: token)
+        try checkGenerationStillCurrent(myGen)
 
-        // Step 2: Open WebSocket with the connection token
+        // Step 2: Open WebSocket.
         let connectionToken = negotiateResponse.connectionToken ?? negotiateResponse.connectionId ?? ""
-        try await openWebSocket(connectionToken: connectionToken, jwt: token)
+        let task = try makeWebSocketTask(connectionToken: connectionToken, jwt: token)
+        // Install ONLY under the lifecycle queue with a generation
+        // recheck; if generation moved on we release the task without
+        // publishing it. `resume()` runs after the guard passes.
+        let installed: Bool = lifecycleSync {
+            guard self.generation == myGen, !self.intentionalDisconnect else {
+                return false
+            }
+            self.webSocketTask = task
+            return true
+        }
+        if !installed {
+            task.cancel(with: .normalClosure, reason: nil)
+            throw NetworkError.invalidResponse
+        }
+        task.resume()
 
-        // Step 3: Send SignalR handshake
-        try await sendHandshake()
+        // Step 3: Handshake. `sendHandshake(myGen:)` validates
+        // generation both before the send and between send and
+        // receive (r8 blocker #2: every suspension inside the
+        // handshake path re-checks intent so disconnect() can
+        // invalidate mid-handshake).
+        try await sendHandshake(myGen: myGen)
+        try checkGenerationStillCurrent(myGen)
 
-        connectionState = .connected
-        reconnectAttempt = 0
+        // Step 4: Publish `.connected` and start ancillary tasks — all
+        // under one lifecycle-queue transition so a concurrent
+        // disconnect() cannot squeeze between the state publish and
+        // the task start. `.connected` is enqueued INSIDE the
+        // lifecycleSync block so publication order across
+        // performConnect vs disconnect is fully serialized by the
+        // lifecycle queue (r8 blocker #2: atomic state mutation +
+        // publication order — the hub's `coordinator.async` FIFO
+        // observes lifecycleQueue ordering).
+        //
+        // r10 blocker #2a: release the reconnect ownership slot HERE,
+        // atomically with `.connected` publication and receive-task
+        // install. If we reached this point from a reconnect flow, its
+        // token still owns `reconnectToken`; without releasing it, a
+        // nested `scheduleReconnect(fromGen: myGen)` from an
+        // immediately-failing receive would see the slot as still-owned
+        // and drop, stranding the service in `.connected` with no live
+        // receive loop and no scheduled retry. Clearing the slot here
+        // is safe: the reconnect task's outer
+        // `clearReconnectSlotIfOwned` becomes a no-op via its token
+        // guard, and a normal `connect()` cleared the slot already so
+        // this is a redundant no-op there.
+        let started: Bool = lifecycleSync {
+            guard self.generation == myGen, !self.intentionalDisconnect else {
+                return false
+            }
+            self.reconnectAttempt = 0
+            self.reconnectTask = nil
+            self.reconnectToken = nil
+            self.receiveTask = self.makeReceiveTask(myGen: myGen)
+            self.pingTask = self.makePingTask()
+            self.connectionStateHub.setState(.connected)
+            return true
+        }
+        if !started {
+            throw NetworkError.invalidResponse
+        }
         logger.info("Connected to SignalR hub at \(self.serverURL.absoluteString)")
+    }
 
-        // Step 4: Start receive loop and keepalive ping
-        startReceiveLoop()
-        startPingLoop()
+    private func checkGenerationStillCurrent(_ myGen: UInt64) throws {
+        let stillCurrent = lifecycleSync {
+            self.generation == myGen && !self.intentionalDisconnect
+        }
+        if !stillCurrent {
+            throw NetworkError.invalidResponse
+        }
     }
 
     private func negotiate(jwt: String?) async throws -> SignalRNegotiateResponse {
@@ -148,7 +459,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         return try decoder.decode(SignalRNegotiateResponse.self, from: data)
     }
 
-    private func openWebSocket(connectionToken: String, jwt: String?) async throws {
+    private func makeWebSocketTask(connectionToken: String, jwt: String?) throws -> SignalRWebSocket {
         guard var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: true) else {
             throw NetworkError.invalidURL(serverURL.absoluteString)
         }
@@ -166,21 +477,40 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             throw NetworkError.invalidURL("hubs/printers (WebSocket)")
         }
 
-        let task = session.webSocketTask(with: wsURL)
-        task.resume()
-        self.webSocketTask = task
+        return webSocketFactory(wsURL)
     }
 
-    private func sendHandshake() async throws {
+    private func sendHandshake(myGen: UInt64) async throws {
+        try checkGenerationStillCurrent(myGen)
         let handshake = SignalRHandshakeRequest(protocol: "json", version: 1)
         let data = try JSONEncoder().encode(handshake)
         var message = data
         message.append(Self.recordSeparator)
-        try await webSocketTask?.send(.data(message))
+        // Snapshot the current socket under the lifecycle queue so a
+        // concurrent tearDown/disconnect that clears `webSocketTask`
+        // cannot leave us sending onto a stale nil reference.
+        guard let wsTask: SignalRWebSocket = lifecycleSync({ self.webSocketTask }) else {
+            throw NetworkError.invalidResponse
+        }
+        try await wsTask.send(.data(message))
 
-        // Wait for handshake response
-        guard let wsTask = webSocketTask else { throw NetworkError.invalidResponse }
+        // Between send and receive, re-check generation. A disconnect
+        // arriving between these two awaits must be observed so a stale
+        // handshake completion cannot advance the connection state.
+        // (r8 blocker #2: generation/intent validation at every
+        // suspension point inside the handshake.)
+        try checkGenerationStillCurrent(myGen)
+
+        // Wait for handshake response on the same snapshot.
         let result = try await wsTask.receive()
+
+        // r9 blocker #3: gen-guard IMMEDIATELY after handshake receive,
+        // BEFORE parsing the response. A disconnect racing the receive
+        // await must invalidate this frame — otherwise a stale
+        // handshake success could publish `.connected` via the
+        // subsequent Step-4 lifecycleSync (the Step-4 guard would
+        // otherwise be the only line of defense).
+        try checkGenerationStillCurrent(myGen)
 
         switch result {
         case .data(let data):
@@ -203,18 +533,48 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     // MARK: - Message Loop
 
-    private func startReceiveLoop() {
-        receiveTask = Task { [weak self] in
+    /// Build the receive task for connection generation `myGen`. On an
+    /// error or a close-frame from the peer we schedule the reconnect
+    /// flow on a **detached** Task so `tearDown()` cancelling the
+    /// receive task cannot itself cancel the reconnect back-off sleep
+    /// (r7 blocker #2). The reconnect flow gates on `myGen` so a stale
+    /// receive task cannot trigger reconnect after the user has
+    /// explicitly disconnected or a newer generation has taken over.
+    private func makeReceiveTask(myGen: UInt64) -> Task<Void, Never> {
+        Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                guard let wsTask = self.webSocketTask else { break }
+                let wsTask: SignalRWebSocket? = self.lifecycleSync { self.webSocketTask }
+                guard let wsTask else { break }
                 do {
                     let message = try await wsTask.receive()
-                    self.handleMessage(message)
+                    // r9 blocker #3: serialize post-receive generation
+                    // check with event dispatch. `handleMessage` fans
+                    // out to `coordinator.async` hub enqueues, so
+                    // performing that fan-out INSIDE `lifecycleSync`
+                    // means a concurrent `disconnect()` (which bumps
+                    // generation and enqueues `.disconnected` from its
+                    // own lifecycleSync) is strictly ordered with
+                    // respect to any stale-socket frame — either this
+                    // block sees generation still current and enqueues
+                    // events BEFORE disconnect's `.disconnected` is
+                    // enqueued, or generation has already moved and no
+                    // events are enqueued at all.
+                    self.lifecycleSync {
+                        guard self.generation == myGen, !self.intentionalDisconnect else {
+                            return
+                        }
+                        self.handleMessage(message)
+                    }
                 } catch {
-                    if !Task.isCancelled && !self.intentionalDisconnect {
-                        self.logger.warning("WebSocket receive error: \(error.localizedDescription)")
-                        await self.handleDisconnect()
+                    if !Task.isCancelled {
+                        let stillCurrent = self.lifecycleSync {
+                            self.generation == myGen && !self.intentionalDisconnect
+                        }
+                        if stillCurrent {
+                            self.logger.warning("WebSocket receive error: \(error.localizedDescription)")
+                            self.scheduleReconnect(fromGen: myGen)
+                        }
                     }
                     break
                 }
@@ -222,11 +582,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         }
     }
 
-    private func startPingLoop() {
-        pingTask = Task { [weak self] in
+    private func makePingTask() -> Task<Void, Never> {
+        Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
-                guard !Task.isCancelled, let self, let wsTask = self.webSocketTask else { break }
+                guard !Task.isCancelled, let self else { break }
+                let wsTask: SignalRWebSocket? = self.lifecycleSync { self.webSocketTask }
+                guard let wsTask else { break }
                 // SignalR ping is type 6
                 let ping = "{\"type\":6}"
                 var data = Data(ping.utf8)
@@ -267,8 +629,11 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         case 7: // Close
             let error = json["error"] as? String
             logger.info("SignalR close frame received: \(error ?? "no error")")
-            if !intentionalDisconnect {
-                Task { await handleDisconnect() }
+            let (myGen, shouldReconnect) = lifecycleSync {
+                (self.generation, !self.intentionalDisconnect)
+            }
+            if shouldReconnect {
+                scheduleReconnect(fromGen: myGen)
             }
         default:
             break
@@ -286,12 +651,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         case "printerupdated":
             do {
                 let update = try decoder.decode(PrinterStatusUpdate.self, from: argData)
-                handlerLock.lock()
-                let handlers = printerUpdateHandlers
-                handlerLock.unlock()
-                for handler in handlers {
-                    handler(update)
-                }
+                printerUpdateHub.deliver(update)
             } catch {
                 logger.warning("Failed to decode printerupdated: \(error.localizedDescription)")
             }
@@ -299,12 +659,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         case "jobqueueupdate":
             do {
                 let update = try decoder.decode(JobQueueUpdate.self, from: argData)
-                handlerLock.lock()
-                let handlers = jobQueueUpdateHandlers
-                handlerLock.unlock()
-                for handler in handlers {
-                    handler(update)
-                }
+                jobQueueUpdateHub.deliver(update)
             } catch {
                 logger.warning("Failed to decode jobqueueupdate: \(error.localizedDescription)")
             }
@@ -317,12 +672,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         case "attentionchanged":
             do {
                 let event = try decoder.decode(AttentionChangedEvent.self, from: argData)
-                handlerLock.lock()
-                let handlers = attentionChangedHandlers
-                handlerLock.unlock()
-                for handler in handlers {
-                    handler(event)
-                }
+                attentionChangedHub.deliver(event)
             } catch {
                 logger.warning("Failed to decode attentionchanged: \(error.localizedDescription)")
             }
@@ -354,35 +704,136 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     // MARK: - Reconnection
 
-    private func handleDisconnect() async {
-        tearDown()
-        guard !intentionalDisconnect else { return }
+    /// Enter the reconnect flow from generation `fromGen`. Coalesced:
+    /// only one reconnect task runs at a time; subsequent calls while a
+    /// reconnect is already in progress are dropped. The reconnect
+    /// itself runs on a **detached** Task not tied to the receive task,
+    /// so `tearDown()` cancelling the receive task cannot itself
+    /// cancel the reconnect back-off sleep.
+    ///
+    /// Identity token (r8 blocker #2 + r9 blocker #2): each entry
+    /// mints its own UUID and RESERVES the slot atomically before the
+    /// detached task is created. A subsequent `scheduleReconnect` sees
+    /// `reconnectToken != nil` and drops. The task itself installs
+    /// only if the token still owns the slot when it runs. On exit
+    /// the task compares its own token against `reconnectToken` and
+    /// only clears the slot if they still match — a stale task whose
+    /// slot has already been replaced by a newer scheduleReconnect
+    /// (or zeroed by disconnect / superseded by connect) cannot wipe
+    /// the newer owner's handle.
+    private func scheduleReconnect(fromGen: UInt64) {
+        // r9 blocker #2: reserve `reconnectToken` under lifecycleQueue
+        // BEFORE any detached Task exists. The token IS the ownership
+        // proof; the task is installed later inside a second
+        // lifecycleSync only if the token is still ours. Between
+        // reservation and install, another scheduleReconnect sees the
+        // reserved token and drops.
+        let taskToken = UUID()
+        let (myGen, reserved): (UInt64, Bool) = lifecycleSync {
+            guard !self.intentionalDisconnect, self.generation == fromGen else {
+                return (self.generation, false)
+            }
+            if self.reconnectToken != nil {
+                // Another scheduleReconnect already owns the slot.
+                return (self.generation, false)
+            }
+            self.generation &+= 1
+            self.tearDownLocked()
+            self.reconnectAttempt += 1
+            // Reserve the slot with just the token; the Task handle is
+            // installed below once we've created it.
+            self.reconnectToken = taskToken
+            self.reconnectTask = nil
+            self.connectionStateHub.setState(.reconnecting)
+            return (self.generation, true)
+        }
+        if !reserved { return }
 
-        connectionState = .reconnecting
-        reconnectAttempt += 1
+        let reconnectTask = Task.detached { [weak self] in
+            guard let self else { return }
+            // Backoff schedule is injectable so tests can drive
+            // multi-retry paths in bounded wall time.
+            let attempt: Int = self.lifecycleSync { self.reconnectAttempt }
+            let delay = self.reconnectBackoff(attempt)
+            self.logger.info("Reconnecting in \(delay)s (attempt \(attempt))")
+            // r9 blocker #4: injected async sleeper. Production wraps
+            // `Task.sleep`; tests provide a controllable sleeper that
+            // suspends until the test releases each attempt.
+            await self.reconnectSleeper(delay)
 
-        // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
-        let delay = min(pow(2.0, Double(reconnectAttempt - 1)), 30.0)
-        logger.info("Reconnecting in \(delay)s (attempt \(self.reconnectAttempt))")
+            // After the back-off, revalidate under the lifecycle queue.
+            let stillCurrent = self.lifecycleSync {
+                self.generation == myGen && !self.intentionalDisconnect && !Task.isCancelled
+            }
+            if !stillCurrent {
+                self.clearReconnectSlotIfOwned(token: taskToken)
+                return
+            }
 
-        try? await Task.sleep(for: .seconds(delay))
+            do {
+                try await self.performConnect(myGen: myGen)
+                self.clearReconnectSlotIfOwned(token: taskToken)
+            } catch {
+                self.logger.warning("Reconnect attempt \(attempt) failed: \(error.localizedDescription)")
+                // Release ownership BEFORE recursing so the retry can
+                // legitimately install its own slot. Only clear if we
+                // still own this slot — a newer scheduleReconnect from
+                // some other path may have taken over already.
+                let (shouldRetry, giveUp) = self.lifecycleSync { () -> (Bool, Bool) in
+                    if self.reconnectToken == taskToken {
+                        self.reconnectTask = nil
+                        self.reconnectToken = nil
+                    }
+                    let retry = self.generation == myGen &&
+                        !self.intentionalDisconnect &&
+                        self.reconnectAttempt < 10
+                    let stop = !self.intentionalDisconnect &&
+                        self.reconnectAttempt >= 10 &&
+                        self.generation == myGen
+                    return (retry, stop)
+                }
+                if shouldRetry {
+                    self.scheduleReconnect(fromGen: myGen)
+                } else if giveUp {
+                    self.lifecycleSync {
+                        self.connectionStateHub.setState(.disconnected)
+                    }
+                    self.logger.error("Gave up reconnecting after \(attempt) attempts")
+                }
+            }
+        }
+        // Install the task handle only if we still own the token. A
+        // disconnect() racing this call between the token reservation
+        // above and now will have cleared `reconnectToken` — in that
+        // case cancel the task we just created and drop.
+        let installed: Bool = lifecycleSync {
+            guard self.reconnectToken == taskToken else {
+                return false
+            }
+            self.reconnectTask = reconnectTask
+            return true
+        }
+        if !installed {
+            reconnectTask.cancel()
+        }
+    }
 
-        guard !intentionalDisconnect, !Task.isCancelled else { return }
-
-        do {
-            try await performConnect()
-        } catch {
-            logger.warning("Reconnect attempt \(self.reconnectAttempt) failed: \(error.localizedDescription)")
-            if reconnectAttempt < 10 {
-                await handleDisconnect()
-            } else {
-                connectionState = .disconnected
-                logger.error("Gave up reconnecting after \(self.reconnectAttempt) attempts")
+    /// Clear the reconnect slot if and only if this task still owns
+    /// it. Prevents a stale reconnect from wiping a newer owner.
+    private func clearReconnectSlotIfOwned(token: UUID) {
+        lifecycleSync {
+            if self.reconnectToken == token {
+                self.reconnectTask = nil
+                self.reconnectToken = nil
             }
         }
     }
 
-    private func tearDown() {
+    /// MUST be invoked from within `lifecycleSync`. Cancels the current
+    /// receive/ping/socket handles and clears them. Does NOT cancel the
+    /// reconnect task — that owns its own lifecycle and cannot be
+    /// interrupted by a receive-error tear-down.
+    private func tearDownLocked() {
         receiveTask?.cancel()
         receiveTask = nil
         pingTask?.cancel()

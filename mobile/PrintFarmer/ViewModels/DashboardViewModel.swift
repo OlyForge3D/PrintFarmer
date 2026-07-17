@@ -21,6 +21,7 @@ final class DashboardViewModel {
     private var statisticsService: (any StatisticsServiceProtocol)?
     private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
+    @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
 
     func configure(
         printerService: any PrinterServiceProtocol,
@@ -36,11 +37,13 @@ final class DashboardViewModel {
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
         self.signalRService = service
-        service.onPrinterUpdated { [weak self] update in
+        for subscription in signalRSubscriptions { subscription.cancel() }
+        signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
             Task { @MainActor [weak self] in
                 self?.applyPrinterUpdate(update)
             }
-        }
+        })
     }
 
     private func applyPrinterUpdate(_ update: PrinterStatusUpdate) {

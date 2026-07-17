@@ -482,11 +482,27 @@ final class ServerRegistryTests: XCTestCase {
             connectionState = .disconnected
         }
 
-        func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) {}
+        @discardableResult
+        func onConnectionStateChanged(
+            _ handler: @escaping @Sendable (SignalRConnectionState) -> Void
+        ) -> (initial: SignalRConnectionState, subscription: SignalRSubscription) {
+            (connectionState, SignalRSubscription {})
+        }
 
-        func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {}
+        @discardableResult
+        func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
 
-        func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {}
+        @discardableResult
+        func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
+        @discardableResult
+        func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
 
         func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {}
 
