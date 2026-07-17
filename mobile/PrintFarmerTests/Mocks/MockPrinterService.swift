@@ -235,5 +235,95 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         homeZCalledWith = nil
         moveCalledWith = nil
         spoolsToReturn = []
+        getDetailsCalledWith = nil
+        detailsToReturn = nil
+        listFallbackGroupsCalledWith = nil
+        fallbackGroupsToReturn = []
+        getFallbackGroupCalledWith = nil
+        fallbackGroupToReturn = nil
+        createFallbackGroupCalledWith = nil
+        updateFallbackGroupCalledWith = nil
+        deleteFallbackGroupCalledWith = nil
+        getAvailableFallbackCalledWith = nil
+        availableFallbackMemberToReturn = nil
+    }
+
+    // MARK: - #711 F6 fallback groups
+
+    var detailsToReturn: PrinterDetails?
+    var fallbackGroupsToReturn: [FilamentFallbackGroup] = []
+    var fallbackGroupToReturn: FilamentFallbackGroup?
+    var availableFallbackMemberToReturn: AvailableFallbackMember?
+
+    var getDetailsCalledWith: UUID?
+    var listFallbackGroupsCalledWith: UUID?
+    var getFallbackGroupCalledWith: (printerId: UUID, groupId: UUID)?
+    var createFallbackGroupCalledWith: (printerId: UUID, request: CreateFilamentFallbackGroupRequest)?
+    var updateFallbackGroupCalledWith: (printerId: UUID, groupId: UUID, request: UpdateFilamentFallbackGroupRequest)?
+    var deleteFallbackGroupCalledWith: (printerId: UUID, groupId: UUID)?
+    var getAvailableFallbackCalledWith: (printerId: UUID, sourceToolheadId: UUID, material: String)?
+
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        getDetailsCalledWith = id
+        if let error = errorToThrow { throw error }
+        guard let details = detailsToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 1, userInfo: [NSLocalizedDescriptionKey: "No details stubbed"])
+        }
+        return details
+    }
+
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] {
+        listFallbackGroupsCalledWith = printerId
+        if let error = errorToThrow { throw error }
+        return fallbackGroupsToReturn
+    }
+
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        getFallbackGroupCalledWith = (printerId, groupId)
+        if let error = errorToThrow { throw error }
+        guard let group = fallbackGroupToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 2, userInfo: [NSLocalizedDescriptionKey: "No group stubbed"])
+        }
+        return group
+    }
+
+    func createFallbackGroup(
+        printerId: UUID,
+        _ request: CreateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        createFallbackGroupCalledWith = (printerId, request)
+        if let error = errorToThrow { throw error }
+        guard let group = fallbackGroupToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 3, userInfo: [NSLocalizedDescriptionKey: "No group stubbed"])
+        }
+        return group
+    }
+
+    func updateFallbackGroup(
+        printerId: UUID,
+        groupId: UUID,
+        _ request: UpdateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        updateFallbackGroupCalledWith = (printerId, groupId, request)
+        if let error = errorToThrow { throw error }
+        guard let group = fallbackGroupToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 4, userInfo: [NSLocalizedDescriptionKey: "No group stubbed"])
+        }
+        return group
+    }
+
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {
+        deleteFallbackGroupCalledWith = (printerId, groupId)
+        if let error = errorToThrow { throw error }
+    }
+
+    func getAvailableFallback(
+        printerId: UUID,
+        sourceToolheadId: UUID,
+        material: String
+    ) async throws -> AvailableFallbackMember? {
+        getAvailableFallbackCalledWith = (printerId, sourceToolheadId, material)
+        if let error = errorToThrow { throw error }
+        return availableFallbackMemberToReturn
     }
 }

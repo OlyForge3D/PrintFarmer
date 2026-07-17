@@ -242,4 +242,13 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
         PrinterBackendCapabilities.fallback(for: .moonraker)
     }
+
+    // #711 F6 stubs — not exercised by preheat tests but required for conformance.
+    func getDetails(id: UUID) async throws -> PrinterDetails { throw NetworkError.notFound }
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] { [] }
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup { throw NetworkError.notFound }
+    func createFallbackGroup(printerId: UUID, _ request: CreateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup { throw NetworkError.notFound }
+    func updateFallbackGroup(printerId: UUID, groupId: UUID, _ request: UpdateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup { throw NetworkError.notFound }
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {}
+    func getAvailableFallback(printerId: UUID, sourceToolheadId: UUID, material: String) async throws -> AvailableFallbackMember? { nil }
 }

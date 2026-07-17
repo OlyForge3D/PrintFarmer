@@ -488,6 +488,8 @@ final class ServerRegistryTests: XCTestCase {
 
         func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) {}
 
+        func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {}
+
         func resumeDisconnect() {
             lock.lock()
             let continuation = disconnectContinuation

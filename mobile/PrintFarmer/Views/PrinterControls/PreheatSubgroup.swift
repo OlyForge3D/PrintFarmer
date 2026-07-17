@@ -514,6 +514,24 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {}
 
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities { capabilities }
+
+    // MARK: - #711 F6 preview stubs
+
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        throw NetworkError.notFound
+    }
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] { [] }
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        throw NetworkError.notFound
+    }
+    func createFallbackGroup(printerId: UUID, _ request: CreateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup {
+        throw NetworkError.notFound
+    }
+    func updateFallbackGroup(printerId: UUID, groupId: UUID, _ request: UpdateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup {
+        throw NetworkError.notFound
+    }
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {}
+    func getAvailableFallback(printerId: UUID, sourceToolheadId: UUID, material: String) async throws -> AvailableFallbackMember? { nil }
 }
 
 // MARK: - Preview seam on the ViewModel

@@ -19,6 +19,12 @@ actor PrinterService: PrinterServiceProtocol {
         try await apiClient.get("/api/printers/\(id)")
     }
 
+    /// Fetches the extended printer detail envelope with per-toolhead F6
+    /// data. See `PrinterServiceProtocol.getDetails(id:)`.
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        try await apiClient.get("/api/printers/\(id)/details")
+    }
+
     func update(id: UUID, _ request: UpdatePrinterRequest) async throws -> Printer {
         try await apiClient.put("/api/printers/\(id)", body: request)
     }
@@ -190,6 +196,86 @@ actor PrinterService: PrinterServiceProtocol {
             return "/api/printers/\(printerId)/homez"
         }
         return "/api/printers/\(printerId)/home"
+    }
+
+    // MARK: - Fallback groups (issue #711, F6)
+
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] {
+        try await apiClient.get("/api/printers/\(printerId)/fallback-groups")
+    }
+
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        try await apiClient.get("/api/printers/\(printerId)/fallback-groups/\(groupId)")
+    }
+
+    func createFallbackGroup(
+        printerId: UUID,
+        _ request: CreateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        try await apiClient.post("/api/printers/\(printerId)/fallback-groups", body: request)
+    }
+
+    func updateFallbackGroup(
+        printerId: UUID,
+        groupId: UUID,
+        _ request: UpdateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        try await apiClient.put("/api/printers/\(printerId)/fallback-groups/\(groupId)", body: request)
+    }
+
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {
+        try await apiClient.delete("/api/printers/\(printerId)/fallback-groups/\(groupId)")
+    }
+
+    func getAvailableFallback(
+        printerId: UUID,
+        sourceToolheadId: UUID,
+        material: String
+    ) async throws -> AvailableFallbackMember? {
+        // Strict RFC 3986 encoding for `material`: only unreserved characters
+        // (ALPHA / DIGIT / "-" / "." / "_" / "~") pass through. This is
+        // deliberately narrower than `.urlQueryAllowed`, which leaves the
+        // sub-delims (`&`, `=`, `+`, etc.) unescaped and lets a free-text
+        // material like `PLA&x=1` inject a spurious query parameter or
+        // `PLA+` decode to `PLA ` on the server. `sourceToolheadId` is a
+        // UUID string composed entirely of unreserved characters, so it is
+        // safe to interpolate directly.
+        let encodedMaterial = Self.rfc3986Encode(material)
+        let path = "/api/printers/\(printerId)/fallback-groups/available"
+            + "?sourceToolheadId=\(sourceToolheadId.uuidString)"
+            + "&material=\(encodedMaterial)"
+        return try await apiClient.get(path) as AvailableFallbackMember?
+    }
+
+    /// RFC 3986 unreserved characters — the only characters that are safe
+    /// unescaped in a URL query component. Any other character (including
+    /// the sub-delimiters `& = + ? # / , ; :` and the space) is percent
+    /// encoded.
+    private static let rfc3986Unreserved: CharacterSet = {
+        var set = CharacterSet()
+        set.insert(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        set.insert(charactersIn: "abcdefghijklmnopqrstuvwxyz")
+        set.insert(charactersIn: "0123456789")
+        set.insert(charactersIn: "-._~")
+        return set
+    }()
+
+    /// Percent-encodes `value` for use as a URL query value under RFC 3986.
+    /// The `addingPercentEncoding` call cannot fail for this allowed set
+    /// (all UTF-8 byte sequences are representable), but if it ever did we
+    /// fall back to a defensively double-escaped placeholder rather than
+    /// emitting the raw value.
+    private static func rfc3986Encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: rfc3986Unreserved)
+            ?? value.unicodeScalars.reduce(into: "") { acc, scalar in
+                if rfc3986Unreserved.contains(scalar) {
+                    acc.append(Character(scalar))
+                } else {
+                    for byte in String(scalar).utf8 {
+                        acc.append(String(format: "%%%02X", byte))
+                    }
+                }
+            }
     }
 }
 

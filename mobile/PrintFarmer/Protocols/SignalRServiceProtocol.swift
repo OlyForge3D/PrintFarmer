@@ -14,4 +14,11 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     /// never persist any field of the payload as the item's canonical
     /// state.
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void)
+
+    /// Subscribes to the lowercase `fallbackgroupsupdated` invalidation
+    /// event (issue #711, F6) emitted after any fallback-group mutation.
+    /// The payload is a refetch hint — handlers must trigger
+    /// `GET /api/printers/{printerId}/fallback-groups` and never persist
+    /// any field of the payload as the canonical group state.
+    func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void)
 }

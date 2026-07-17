@@ -158,4 +158,56 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         // Demo no-op
     }
 
+    // MARK: - Details + fallback groups (issue #711, F6 demo stubs)
+
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        guard let p = printers.first(where: { $0.id == id }) else {
+            throw ServiceError.notImplemented("Printer not found in demo data")
+        }
+        return PrinterDetails(
+            id: p.id,
+            name: p.name,
+            backend: p.backend,
+            hasMmu: nil,
+            manufacturerName: p.manufacturerName,
+            modelName: p.modelName,
+            toolheads: [],
+            fallbackGroups: [],
+            supportsPerToolAttribution: false
+        )
+    }
+
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] { [] }
+
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        throw ServiceError.notImplemented("Fallback groups not available in demo mode")
+    }
+
+    func createFallbackGroup(
+        printerId: UUID,
+        _ request: CreateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        throw ServiceError.notImplemented("Fallback groups not available in demo mode")
+    }
+
+    func updateFallbackGroup(
+        printerId: UUID,
+        groupId: UUID,
+        _ request: UpdateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        throw ServiceError.notImplemented("Fallback groups not available in demo mode")
+    }
+
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {
+        throw ServiceError.notImplemented("Fallback groups not available in demo mode")
+    }
+
+    func getAvailableFallback(
+        printerId: UUID,
+        sourceToolheadId: UUID,
+        material: String
+    ) async throws -> AvailableFallbackMember? {
+        nil
+    }
+
 }
