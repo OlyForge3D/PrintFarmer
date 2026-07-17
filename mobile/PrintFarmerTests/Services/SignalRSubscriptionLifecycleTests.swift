@@ -812,6 +812,16 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     private var resumed = false
     private var cancelled = false
     private var receiveWaiters: [CheckedContinuation<Void, Never>] = []
+    // r15 (Hicks item 6): cumulative enrollment counter + target
+    // waiters. Every successful `_enqueueReceive` bumps
+    // `receiveEnrolledCount`; a test that needs "receiver B has
+    // actually enrolled its continuation" awaits
+    // `waitForReceiveEnrollments(count: 2)` after enrolling A then B.
+    // This is deterministically stronger than `waitForReceiveCall`,
+    // which only fires on the FIRST arrival and can't distinguish
+    // caller B's enrollment from caller A's.
+    private var receiveEnrolledCount: Int = 0
+    private var enrollmentWaiters: [(target: Int, cont: CheckedContinuation<Void, Never>)] = []
 
     func resume() {
         lock.lock(); resumed = true; lock.unlock()
@@ -909,9 +919,25 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
             return []
         }
         pendingReceives.append((id: id, cont: cont))
+        receiveEnrolledCount += 1
+        let currentEnrolled = receiveEnrolledCount
+        // Wake `waitForReceiveCall` waiters (FIFO one-shot).
         let waiters = receiveWaiters
         receiveWaiters.removeAll()
+        // r15 (Hicks item 6): wake enrollment-count waiters whose
+        // target has now been reached, and remove them from the list.
+        var enrollmentToWake: [CheckedContinuation<Void, Never>] = []
+        var remainingEnrollment: [(target: Int, cont: CheckedContinuation<Void, Never>)] = []
+        for entry in enrollmentWaiters {
+            if entry.target <= currentEnrolled {
+                enrollmentToWake.append(entry.cont)
+            } else {
+                remainingEnrollment.append(entry)
+            }
+        }
+        enrollmentWaiters = remainingEnrollment
         lock.unlock()
+        for w in enrollmentToWake { w.resume() }
         return waiters
     }
 
@@ -922,6 +948,46 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         await withCheckedContinuation { cont in
             _enqueueReceiveWaiter(cont: cont)
         }
+    }
+
+    /// r15 (Hicks item 6): deterministic wait for the Nth cumulative
+    /// receive enrollment. Uses a monotonically-increasing counter
+    /// (never decremented by completeReceive/failReceive/cancel), so
+    /// this reflects "N callers have invoked receive() and
+    /// successfully enrolled their continuations", regardless of
+    /// intervening completions. Enables caller-specific proofs like
+    /// "A enrolled, then B enrolled, cancel A, B stays parked".
+    func waitForReceiveEnrollments(count target: Int) async {
+        precondition(target >= 1, "target must be >= 1")
+        if _enrollmentReached(target: target) { return }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            _enqueueEnrollmentWaiter(target: target, cont: cont)
+        }
+    }
+
+    private func _enrollmentReached(target: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return receiveEnrolledCount >= target
+    }
+
+    private func _enqueueEnrollmentWaiter(target: Int, cont: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if receiveEnrolledCount >= target {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        enrollmentWaiters.append((target: target, cont: cont))
+        lock.unlock()
+    }
+
+    /// r15 (Hicks item 6): count of currently-parked receive
+    /// continuations. Distinct from `receiveEnrolledCount` because
+    /// completed/failed/cancelled receives are removed from
+    /// `pendingReceives` but leave the cumulative counter alone.
+    func pendingReceiveCount() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return pendingReceives.count
     }
 
     private func _hasPendingReceive() -> Bool {
@@ -1399,8 +1465,22 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         )
         let inv = service.lifecycleInvariants.snapshot()
         XCTAssertEqual(inv.activeReconnectOwners, 0)
+        // r15 (Hicks item 2): single sequential retry-owner loop —
+        // one enter/exit per retry chain regardless of attempts.
         XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
-                                 "bounded retry chain: max concurrent reconnect owners must be <= 1 across retry hand-offs. The failing owner queues its successor via `pendingReconnectFromGen`; the outgoing task's outer `defer { spawnPendingReconnectIfAny() }` runs AFTER the inner `defer { exitReconnectOwner() }` (defers are LIFO), so the successor's `enterReconnectOwner()` is strictly ordered after the outgoing's `exitReconnectOwner()`. Observed \(inv.maxReconnectOwners).")
+                                 "bounded retry chain: max concurrent reconnect owners must be <= 1. r15 single-loop retry-owner design guarantees exactly one enterReconnectOwner/exitReconnectOwner pair per chain. Observed \(inv.maxReconnectOwners).")
+        // Non-vacuity witness: the retry LOOP actually iterated,
+        // proved by `reconnectAttemptCount` regardless of the
+        // one-owner structural bound.
+        XCTAssertGreaterThanOrEqual(inv.reconnectAttemptCount, 2,
+                                    "retry chain must have iterated at least twice; observed reconnectAttemptCount=\(inv.reconnectAttemptCount)")
+        // r15 (Hicks item 4): balanced enter==exit across families.
+        XCTAssertEqual(inv.transportEnterCount, inv.transportExitCount,
+                       "transport enter/exit must be balanced; observed enter=\(inv.transportEnterCount) exit=\(inv.transportExitCount)")
+        XCTAssertEqual(inv.receiveLoopEnterCount, inv.receiveLoopExitCount,
+                       "receive-loop enter/exit must be balanced; observed enter=\(inv.receiveLoopEnterCount) exit=\(inv.receiveLoopExitCount)")
+        XCTAssertEqual(inv.reconnectOwnerEnterCount, inv.reconnectOwnerExitCount,
+                       "reconnect-owner enter/exit must be balanced; observed enter=\(inv.reconnectOwnerEnterCount) exit=\(inv.reconnectOwnerExitCount)")
         XCTAssertLessThanOrEqual(inv.maxTransports, 1)
         XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1)
 
@@ -1512,14 +1592,22 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
 
         XCTAssertTrue(didComplete, "Type-7 close-frame path must not wedge the lifecycle queue (r10 blocker #1)")
 
-        // r12 blocker #3: prove the type-7 interleaving never
-        // ran with two active transports, receive loops, or
-        // reconnect owners. reconnectOwnerEnterCount must be at
-        // least 1 (proves the counter fired non-vacuously off the
-        // type-7 → scheduleReconnect path).
+        // r12 blocker #3 + r15 (Hicks item 4/8): prove the type-7
+        // interleaving never ran with two active transports, receive
+        // loops, or reconnect owners. `reconnectAttemptCount` proves
+        // the retry loop iterated non-vacuously off the type-7 →
+        // scheduleReconnect path.
         let inv = service.lifecycleInvariants.snapshot()
-        XCTAssertGreaterThanOrEqual(inv.reconnectOwnerEnterCount, 1,
-                                    "reconnect owner counter must have fired at least once via type-7 close")
+        XCTAssertGreaterThanOrEqual(inv.reconnectAttemptCount, 1,
+                                    "retry loop must have iterated >= 1 time via type-7 close; observed \(inv.reconnectAttemptCount)")
+        XCTAssertEqual(inv.reconnectOwnerEnterCount, 1,
+                       "type-7 must have entered exactly one reconnect-owner Task (r15 single-loop); observed \(inv.reconnectOwnerEnterCount)")
+        XCTAssertEqual(inv.reconnectOwnerEnterCount, inv.reconnectOwnerExitCount,
+                       "reconnect-owner enter/exit must be balanced; observed enter=\(inv.reconnectOwnerEnterCount) exit=\(inv.reconnectOwnerExitCount)")
+        XCTAssertEqual(inv.transportEnterCount, inv.transportExitCount,
+                       "transport enter/exit must be balanced; observed enter=\(inv.transportEnterCount) exit=\(inv.transportExitCount)")
+        XCTAssertEqual(inv.receiveLoopEnterCount, inv.receiveLoopExitCount,
+                       "receive-loop enter/exit must be balanced; observed enter=\(inv.receiveLoopEnterCount) exit=\(inv.receiveLoopExitCount)")
         XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
                                  "max concurrent reconnect owners must be <= 1 across type-7 interleaving; observed \(inv.maxReconnectOwners)")
         XCTAssertLessThanOrEqual(inv.maxTransports, 1,
@@ -1986,20 +2074,33 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 await sleeper.waitForSleepAfter(baseline: baselineSleeps)
                 await recorder.waitFor(state: .reconnecting)
 
-                // Snapshot at second handoff: reconnect owner
-                // enrollment count must be at least 2 (type-7 close
-                // + recv-error), and no invariant may have breached.
+                // Snapshot at second handoff: r15 (Hicks item 8) —
+                // exact deltas, not lower bounds. Two reconnect
+                // sequences fired (type-7 close + recv-error), so
+                // exactly two reconnect-owner enters, two transport
+                // enters (mockA + mockB), and two receive-loop enters.
+                // All balanced except the second owner, which is
+                // currently parked in the sleeper (exit count = 1).
+                // No duplicate socket may have coexisted.
                 let secondInv = service.lifecycleInvariants.snapshot()
-                XCTAssertGreaterThanOrEqual(secondInv.reconnectOwnerEnterCount, 2,
-                                            "reconnect owner counter must have fired at least twice (type-7 + recv-error); observed \(secondInv.reconnectOwnerEnterCount)")
-                XCTAssertGreaterThanOrEqual(secondInv.transportEnterCount, 2,
-                                            "transport counter must have fired at least twice (initial + reconnect); observed \(secondInv.transportEnterCount)")
-                XCTAssertLessThanOrEqual(secondInv.maxReconnectOwners, 1,
-                                        "max concurrent reconnect owners must be <= 1; observed \(secondInv.maxReconnectOwners)")
-                XCTAssertLessThanOrEqual(secondInv.maxTransports, 1,
-                                        "max concurrent transports must be <= 1; observed \(secondInv.maxTransports)")
-                XCTAssertLessThanOrEqual(secondInv.maxReceiveLoops, 1,
-                                        "max concurrent receive loops must be <= 1; observed \(secondInv.maxReceiveLoops)")
+                XCTAssertEqual(secondInv.reconnectOwnerEnterCount, 2,
+                               "exactly two reconnect owners must have fired (type-7 + recv-error); observed \(secondInv.reconnectOwnerEnterCount)")
+                XCTAssertEqual(secondInv.reconnectOwnerExitCount, 1,
+                               "the first (type-7) reconnect owner must have exited on success; the second (recv-error) is currently parked; observed exit=\(secondInv.reconnectOwnerExitCount)")
+                XCTAssertEqual(secondInv.transportEnterCount, 2,
+                               "exactly two transports (mockA initial + mockB replacement); observed \(secondInv.transportEnterCount)")
+                XCTAssertEqual(secondInv.transportExitCount, 2,
+                               "both transports must be torn down by the current handoff-mid snapshot; observed \(secondInv.transportExitCount)")
+                XCTAssertEqual(secondInv.receiveLoopEnterCount, 2,
+                               "exactly two receive loops (mockA + mockB); observed \(secondInv.receiveLoopEnterCount)")
+                XCTAssertEqual(secondInv.receiveLoopExitCount, 2,
+                               "both receive loops must have exited; observed \(secondInv.receiveLoopExitCount)")
+                XCTAssertEqual(secondInv.maxReconnectOwners, 1,
+                               "max concurrent reconnect owners must be exactly 1 (no duplicate owner ever coexisted); observed \(secondInv.maxReconnectOwners)")
+                XCTAssertEqual(secondInv.maxTransports, 1,
+                               "max concurrent transports must be exactly 1 (no duplicate socket); observed \(secondInv.maxTransports)")
+                XCTAssertEqual(secondInv.maxReceiveLoops, 1,
+                               "max concurrent receive loops must be exactly 1; observed \(secondInv.maxReceiveLoops)")
 
                 await service.disconnect()
                 await recorder.waitFor(state: .disconnected)
@@ -2128,14 +2229,29 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                        "no transport may remain live after bounded terminal; observed \(inv.activeTransports)")
         XCTAssertEqual(inv.activeReceiveLoops, 0,
                        "no receive loop may remain live after bounded terminal; observed \(inv.activeReceiveLoops)")
-        // Prove the reconnect-owner task actually ran ≥ 10 times and
-        // that every entered owner also exited (no zombie owner).
-        XCTAssertGreaterThanOrEqual(inv.reconnectOwnerEnterCount, 10,
-                                    "bounded loop must have entered the reconnect-owner Task >= 10 times; observed \(inv.reconnectOwnerEnterCount)")
+        // r15 (Hicks item 2): single sequential retry-owner. The
+        // owner Task enters ONCE per retry chain regardless of how
+        // many attempts iterated. Non-vacuity is proved by
+        // `reconnectAttemptCount` (see item 4/8) not by
+        // `reconnectOwnerEnterCount`.
+        XCTAssertEqual(inv.reconnectOwnerEnterCount, 1,
+                       "bounded retry chain must have entered the reconnect-owner Task exactly ONCE (r15 single-loop design); observed \(inv.reconnectOwnerEnterCount)")
         XCTAssertEqual(inv.reconnectOwnerEnterCount, inv.reconnectOwnerExitCount,
                        "every entered reconnect-owner Task must have exited via its `defer`; observed enter=\(inv.reconnectOwnerEnterCount) exit=\(inv.reconnectOwnerExitCount)")
+        // r15 (Hicks item 4/8): non-vacuity witness — the retry LOOP
+        // actually iterated >= 10 times. This is the causal proof
+        // that the terminal branch was reached, not merely a
+        // one-shot exit.
+        XCTAssertGreaterThanOrEqual(inv.reconnectAttemptCount, 10,
+                                    "bounded loop must have recorded >= 10 retry attempts; observed \(inv.reconnectAttemptCount)")
         XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
-                                "bounded retry chain: max concurrent reconnect owners must be <= 1 across retry hand-offs. The failing owner queues its successor via `pendingReconnectFromGen`; the outgoing task's outer `defer { spawnPendingReconnectIfAny() }` runs AFTER the inner `defer { exitReconnectOwner() }` (defers are LIFO), so the successor's `enterReconnectOwner()` is strictly ordered after the outgoing's `exitReconnectOwner()`. Observed \(inv.maxReconnectOwners).")
+                                "bounded retry chain: max concurrent reconnect owners must be <= 1. r15 single-loop retry-owner design guarantees exactly one enterReconnectOwner/exitReconnectOwner pair per chain. Observed \(inv.maxReconnectOwners).")
+        // r15 (Hicks item 4): balanced enter==exit across transport
+        // and receive-loop families as well.
+        XCTAssertEqual(inv.transportEnterCount, inv.transportExitCount,
+                       "transport enter/exit must be balanced; observed enter=\(inv.transportEnterCount) exit=\(inv.transportExitCount)")
+        XCTAssertEqual(inv.receiveLoopEnterCount, inv.receiveLoopExitCount,
+                       "receive-loop enter/exit must be balanced; observed enter=\(inv.receiveLoopEnterCount) exit=\(inv.receiveLoopExitCount)")
         XCTAssertLessThanOrEqual(inv.maxTransports, 1,
                                 "max concurrent transports must be <= 1; observed \(inv.maxTransports)")
 
@@ -2305,60 +2421,132 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
     }
 }
 
-/// r14 (Hicks final item 1+2): pre-enrollment cancellation race and
-/// caller-specific mock-receive cancellation.
+/// r15 (Hicks items 5, 6, 7): deterministic pre-enrollment
+/// cancellation, caller-specific mock-receive cancellation, and
+/// owner-teardown/reconfiguration proofs.
 ///
 /// These tests prove:
-///   * A Task that is cancelled BEFORE it enrolls a continuation in a
-///     quiescence waiter or `TerminalDisconnectLatch` waiter cannot
-///     leak/hang. The enrollment path checks `Task.isCancelled` under
-///     the same lock as the enqueue and resumes immediately when
-///     cancelled.
-///   * `MockSignalRWebSocket.receive()` cancellation is caller-specific
-///     (keyed by per-call UUID); cancelling one caller must not resume
-///     an unrelated pending receive, and other pending receives must
-///     remain parked exactly as they were.
+///   * Every quiescence waiter (`waitForTransportsZero`,
+///     `waitForReceiveLoopsZero`, `waitForReconnectOwnersZero`) and
+///     `TerminalDisconnectLatch.waitForTerminal()` cannot leak/hang
+///     when its Task is cancelled at/before enrollment. r15 adds
+///     explicit per-family pre-enrollment barrier hooks
+///     (`setTransportPreEnrollBarrier` etc.) so the test can park
+///     the waiter deterministically at the pre-enroll boundary,
+///     cancel, then release — proving no continuation was enqueued
+///     (via `waiterCounts()`).
+///   * Cancellation of one waiter family cannot resume a waiter of
+///     another family (per-family barriers + independent counters).
+///   * `MockSignalRWebSocket.receive()` cancellation is
+///     caller-specific: each call keyed by UUID, cancellation
+///     removes and resumes only that caller. Deterministic
+///     enrollment ACK via `waitForReceiveEnrollments(count:)`
+///     replaces the FIFO-first / aggregate-call-count ambiguity of
+///     `waitForReceiveCall()`.
+///   * Owner teardown after `disconnect()` prevents delivery of any
+///     later frame; reconfigure (disconnect + fresh connect) does
+///     not stack or leak subscription registrations.
 ///
-/// Timing is used ONLY as failure ceilings (via an outer bounded
-/// `withThrowingTaskGroup` race). The pass path is a positive
-/// completion event / structural observation of the pending-receive
-/// registry.
+/// Timing is used ONLY as failure ceilings.
 final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
 
-    /// Cancel the task BEFORE it awaits the waiter (while the
-    /// counter is non-zero). The cancellation-aware pre-enrollment
-    /// check must resume the continuation immediately; the task
-    /// completes without hanging. Failure ceiling: 5s.
-    func testInvariantsWaiter_preCancelledTask_doesNotHang() async throws {
+    /// r15 (Hicks item 5): deterministic barrier-based proof.
+    /// Install a barrier that fires the moment a waiter reaches the
+    /// pre-enroll boundary. The test arms the barrier, spawns a
+    /// waiter Task, awaits "arrived" confirmation via the barrier's
+    /// signal, cancels the Task, releases the gate, then asserts:
+    ///   - the waiter Task returned (no hang),
+    ///   - `waiterCounts().receiveLoops == 0` (no continuation was
+    ///     enqueued after cancellation).
+    /// Failure ceiling: 5s outer race.
+    func testInvariantsWaiter_receiveLoops_preCancelledAtBarrier_doesNotEnqueue() async throws {
         let inv = SignalRLifecycleInvariants()
-        // Ensure the counter is non-zero so a "not cancelled" caller
-        // would legitimately park until an `exitReceiveLoop()` fires.
-        inv.enterReceiveLoop()
+        inv.enterReceiveLoop() // Force counter non-zero so a non-cancelled waiter would park.
+
+        // Barrier signal: fires once, when the waiter reaches the
+        // pre-enroll boundary. Test awaits this to know cancellation
+        // is being applied at the right moment.
+        let arrived = LifecycleSignal()
+        let gate = LifecycleSignal()
+        inv.setReceiveLoopPreEnrollBarrier {
+            arrived.signal()
+            await gate.wait()
+        }
 
         let t = Task<Bool, Never> {
             await inv.waitForReceiveLoopsZero()
             return true
         }
+        // Wait until the waiter is parked at the pre-enroll barrier.
+        await arrived.wait()
         t.cancel()
+        gate.signal() // Release the barrier so enrollment path runs.
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await t.value }
-            group.addTask {
-                // Failure ceiling only; Task.sleep throws on cancel,
-                // caught here so this child never propagates.
-                do { try await Task.sleep(nanoseconds: 5_000_000_000); return false }
-                catch { return false }
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
+        let didComplete = await raceComplete(seconds: 5) { await t.value }
+        XCTAssertTrue(didComplete, "waitForReceiveLoopsZero must not hang when cancelled at the pre-enroll barrier")
+        let counts = inv.waiterCounts()
+        XCTAssertEqual(counts.receiveLoops, 0,
+                       "cancelled task must not have enqueued a continuation; observed receiveLoops waiters=\(counts.receiveLoops)")
+        inv.setReceiveLoopPreEnrollBarrier(nil)
         inv.exitReceiveLoop()
-
-        XCTAssertTrue(didComplete, "waitForReceiveLoopsZero() must not hang when its Task was cancelled at/before enrollment")
     }
 
-    /// Same race, applied to `TerminalDisconnectLatch.waitForTerminal()`.
+    /// r15 (Hicks item 5): per-family isolation. Cancelling a
+    /// receiveLoops waiter must NOT resume a parked transports
+    /// waiter. Tests independence of family-specific barriers /
+    /// continuation lists.
+    func testInvariantsWaiters_perFamily_cancelOneDoesNotResumeAnother() async throws {
+        let inv = SignalRLifecycleInvariants()
+        inv.enterReceiveLoop()
+        inv.enterTransport()
+
+        // Spawn waiterB on transports family; it will park because
+        // active transports > 0.
+        let waiterB = Task<Bool, Never> {
+            await inv.waitForTransportsZero()
+            return true
+        }
+
+        // Deterministically wait until waiterB's enrollment is
+        // observable via `waiterCounts().transports >= 1`. Bounded
+        // failure ceiling; the pass path is a positive observation
+        // of the enrolled continuation count (not a wall-clock
+        // idle-window).
+        let deadline = Date().addingTimeInterval(5.0)
+        while inv.waiterCounts().transports < 1 {
+            if Date() >= deadline {
+                XCTFail("waiterB failed to enroll on transports family within 5s")
+                inv.exitReceiveLoop(); inv.exitTransport()
+                waiterB.cancel(); _ = await waiterB.value
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000) // 1ms poll, failure ceiling only
+        }
+
+        // Spawn waiterA on a DIFFERENT family and cancel it.
+        let waiterA = Task<Bool, Never> {
+            await inv.waitForReceiveLoopsZero()
+            return true
+        }
+        waiterA.cancel()
+        _ = await waiterA.value
+
+        // waiterB must still be parked on transports (its family was
+        // never disturbed by waiterA's cancellation).
+        XCTAssertGreaterThanOrEqual(inv.waiterCounts().transports, 1,
+                                    "cancelling a receiveLoops waiter must not resume transports waiters; observed transports waiters=\(inv.waiterCounts().transports)")
+        XCTAssertFalse(waiterB.isCancelled,
+                       "waiterB Task must not have been touched by the receiveLoops-family cancellation")
+
+        // Release transports family and prove waiterB wakes.
+        inv.exitTransport()
+        _ = await waiterB.value
+
+        inv.exitReceiveLoop()
+    }
+
+    /// r15 (Hicks item 5): same barrier-based race applied to
+    /// `TerminalDisconnectLatch.waitForTerminal()`.
     func testTerminalDisconnectLatch_preCancelledTask_doesNotHang() async throws {
         let latch = TerminalDisconnectLatch()
 
@@ -2368,75 +2556,157 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
         }
         t.cancel()
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await t.value }
-            group.addTask {
-                do { try await Task.sleep(nanoseconds: 5_000_000_000); return false }
-                catch { return false }
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
-
+        let didComplete = await raceComplete(seconds: 5) { await t.value }
         XCTAssertTrue(didComplete, "TerminalDisconnectLatch.waitForTerminal() must not hang when its Task was cancelled at/before enrollment")
         XCTAssertFalse(latch.hasFired(), "Cancellation must not synthesise a terminal-branch observation")
     }
 
-    /// Two concurrent `receive()` callers on the same
-    /// `MockSignalRWebSocket`. Cancelling caller A must fail A's
-    /// continuation with `CancellationError` and MUST NOT touch B.
-    /// After A is cancelled, exactly one pending receive should
-    /// remain in the mock's registry, and `completeReceive(with:)`
-    /// must deliver to B.
-    func testMockReceive_cancelIsCallerSpecific_otherReceiverRemainsParked() async throws {
+    /// r15 (Hicks item 6): caller-specific mock-receive cancellation
+    /// with deterministic enrollment ACK. Enrolls B, then A, cancels
+    /// A specifically, asserts:
+    ///   - A observes its own CancellationError,
+    ///   - `pendingReceiveCount() == 1` (only B remains),
+    ///   - `completeReceive` delivers to B.
+    /// No FIFO-first / global-call-count ambiguity.
+    func testMockReceive_cancelIsCallerSpecific_withEnrollmentACK() async throws {
         let mock = MockSignalRWebSocket()
 
-        // B: long-lived receiver that must survive A's cancellation.
+        // B first — must survive A's cancellation.
         let receiverB = Task<URLSessionWebSocketTask.Message, Error> {
             try await mock.receive()
         }
-        await mock.waitForReceiveCall()
+        await mock.waitForReceiveEnrollments(count: 1)
 
-        // A: doomed receiver; enroll then cancel it.
+        // A: doomed receiver.
         let receiverA = Task<Bool, Never> {
             do {
                 _ = try await mock.receive()
-                return false // expected to throw
+                return false
             } catch is CancellationError {
                 return true
             } catch {
                 return false
             }
         }
-        await mock.waitForReceiveCall()
+        await mock.waitForReceiveEnrollments(count: 2)
 
-        // Cancel only A. B must remain parked.
+        // Deterministic: exactly two enrollments observed. Cancel A.
         receiverA.cancel()
-
-        let aWasCancelled: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await receiverA.value }
-            group.addTask {
-                do { try await Task.sleep(nanoseconds: 5_000_000_000); return false }
-                catch { return false }
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
+        let aWasCancelled = await raceComplete(seconds: 5) { await receiverA.value }
         XCTAssertTrue(aWasCancelled, "Caller-A must observe its own CancellationError")
 
-        // B still parked → deliver to B and verify it wakes.
+        // Only B remains parked.
+        XCTAssertEqual(mock.pendingReceiveCount(), 1,
+                       "exactly one pending receive must remain (B); observed \(mock.pendingReceiveCount())")
+
+        // Deliver to B; verify.
         mock.completeReceive(with: .string("delivered-to-B"))
         let receivedByB = try await receiverB.value
         switch receivedByB {
         case .string(let s):
-            XCTAssertEqual(s, "delivered-to-B", "completeReceive must deliver to the surviving receiver, not to a slot vacated by an unrelated cancellation")
+            XCTAssertEqual(s, "delivered-to-B",
+                           "completeReceive must deliver to the surviving receiver B, not to A's cancelled slot")
         case .data:
             XCTFail("Expected string frame")
         @unknown default:
             XCTFail("Unexpected message case")
         }
+    }
+
+    /// r15 (Hicks item 7): owner teardown proof — after a
+    /// subscription is cancelled (the owner-teardown analogue at the
+    /// hub level), no subsequent publish reaches it, and a fresh
+    /// subscription registered afterwards fires exactly once per
+    /// publish (no stacking / no leaked registrations).
+    @MainActor
+    func testOwnerTeardown_afterSubscriptionCancel_noFurtherCallbacksAndNoStacking() async throws {
+        let mock = MockSignalRService()
+        let seenA = LockedStringSequence()
+        let seenB = LockedStringSequence()
+
+        let (_, subA) = mock.onConnectionStateChanged { state in
+            seenA.append("A:\(state)")
+        }
+        mock.simulateConnectionStateChange(.connected)
+        subA.cancel()
+        // Post-cancel publish: A must NOT observe it.
+        mock.simulateConnectionStateChange(.disconnected)
+
+        let snapA = seenA.snapshot()
+        XCTAssertEqual(snapA, ["A:connected"],
+                       "cancelled subscription must not receive post-cancel events; observed \(snapA)")
+
+        // Reconfigure: fresh subscription B, publish, verify exactly
+        // one delivery (no stacking with cancelled A).
+        let (_, subB) = mock.onConnectionStateChanged { state in
+            seenB.append("B:\(state)")
+        }
+        withExtendedLifetime(subB) {
+            mock.simulateConnectionStateChange(.reconnecting)
+        }
+        let snapB = seenB.snapshot()
+        XCTAssertEqual(snapB, ["B:reconnecting"],
+                       "fresh subscription must fire exactly once per publish (no stacking); observed \(snapB)")
+        let snapAAfter = seenA.snapshot()
+        XCTAssertEqual(snapAAfter, ["A:connected"],
+                       "cancelled subscription A must remain untouched by post-reconfigure publishes; observed \(snapAAfter)")
+    }
+}
+
+/// r15 helper: deterministic one-shot signal for pre-enroll barrier
+/// tests. `signal()` unblocks any current or future `wait()`.
+final class LifecycleSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        lock.lock()
+        let toWake = fired ? [] : waiters
+        if !fired {
+            fired = true
+            waiters.removeAll()
+        }
+        lock.unlock()
+        for w in toWake { w.resume() }
+    }
+
+    func wait() async {
+        if _isFired() { return }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            _enqueueWaiter(cont: cont)
+        }
+    }
+
+    private func _isFired() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return fired
+    }
+
+    private func _enqueueWaiter(cont: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if fired {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        waiters.append(cont)
+        lock.unlock()
+    }
+}
+
+/// r15 helper: race a work closure against a wall-clock ceiling.
+/// Returns `true` if the work completed within `seconds`.
+private func raceComplete(seconds: UInt64, work: @Sendable @escaping () async -> Bool) async -> Bool {
+    await withTaskGroup(of: Bool.self) { group in
+        group.addTask { await work() }
+        group.addTask {
+            do { try await Task.sleep(nanoseconds: seconds * 1_000_000_000); return false }
+            catch { return false }
+        }
+        let first = await group.next() ?? false
+        group.cancelAll()
+        return first
     }
 }
 

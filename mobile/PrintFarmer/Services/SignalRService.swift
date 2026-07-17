@@ -132,17 +132,6 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private var reconnectToken: UUID?
     private var reconnectAttempt = 0
     private var intentionalDisconnect = false
-    /// r14 (Hicks handoff-order correction): pending successor
-    /// generation for retry chains. The failing reconnect-owner Task's
-    /// catch branch sets this under `lifecycleSync` instead of calling
-    /// `scheduleReconnect` recursively; the outgoing task's outer
-    /// `defer { spawnPendingReconnectIfAny() }` runs AFTER the inner
-    /// `defer { invariants.exitReconnectOwner() }` (defers are LIFO),
-    /// so the successor's `enterReconnectOwner()` is strictly ordered
-    /// after the outgoing's `exitReconnectOwner()`. This preserves
-    /// `maxReconnectOwners <= 1` across retry-chain hand-offs without
-    /// changing retry count, backoff schedule, or terminal semantics.
-    private var pendingReconnectFromGen: UInt64?
     /// Monotonic connection generation. Bumped on every explicit
     /// `disconnect()`, on every `tearDown()`, and on every reconnect
     /// scheduling. `performConnect()` snapshots this once at entry and
@@ -253,12 +242,33 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     // with the field still non-nil (or vice versa).
 
     /// Install `new` as the active WebSocket. Passing `nil` clears
-    /// the slot. Pure slot setter — lifecycle counters are driven by
-    /// the actual receive-task lifetime (see `makeReceiveTask`), not
-    /// by slot occupancy, so a nonnil→nonnil supersede is observable
-    /// as `maxTransports >= 2` if the outgoing receive task has not
-    /// yet exited.
+    /// the slot.
+    ///
+    /// r15 (Hicks item 1): transport lifetime instrumentation. The
+    /// live transport is the WebSocket owned by this slot from the
+    /// moment it is installed here (post negotiate/upgrade,
+    /// pre-handshake — so handshake-only/parked transports ARE
+    /// observable) through authoritative teardown or replacement.
+    /// Transitions:
+    ///   nil → nonnil  = enter (new transport installed)
+    ///   nonnil → nil  = exit  (teardown / cancel / disconnect)
+    ///   nonnil → nonnil different = exit outgoing, enter incoming
+    ///                   (supersede — observable as a brief
+    ///                   `activeTransports == 2` only if the outgoing
+    ///                   was NOT torn down first; every well-formed
+    ///                   supersede path in this service calls
+    ///                   `tearDownLocked` before installing the
+    ///                   replacement so the counter stays at 1)
+    ///   x → x (same) = no-op
+    /// Transport lifetime is DISTINCT from receive-loop lifetime; the
+    /// receive loop is tracked separately in `makeReceiveTask` and
+    /// counts the running receive-Task body only.
     private func setWebSocketTaskLocked(_ new: SignalRWebSocket?) {
+        let old = webSocketTask
+        // Identity comparison — SignalRWebSocket is a class (AnyObject).
+        if old === new { return }
+        if old != nil { lifecycleInvariants.exitTransport() }
+        if new != nil { lifecycleInvariants.enterTransport() }
         webSocketTask = new
     }
 
@@ -296,10 +306,6 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             let priorReconnect = self.reconnectTask
             self.reconnectTask = nil
             self.setReconnectTokenLocked(nil)
-            // r14: also drop any queued successor from a prior retry
-            // chain so an in-flight failing owner's outer defer cannot
-            // resurrect a stale reconnect after a fresh connect().
-            self.pendingReconnectFromGen = nil
             self.intentionalDisconnect = false
             self.generation &+= 1
             self.reconnectAttempt = 0
@@ -359,12 +365,6 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             let r = self.reconnectTask
             self.reconnectTask = nil
             self.setReconnectTokenLocked(nil)
-            // r14: drop any queued successor. `spawnPendingReconnectIfAny`
-            // called after this point (from the outgoing failing owner's
-            // outer defer) will observe `nil` and no-op. `scheduleReconnect`
-            // itself would also drop on `intentionalDisconnect`, but clearing
-            // here is cheaper and keeps the invariant obvious.
-            self.pendingReconnectFromGen = nil
             self.connectionStateHub.setState(.disconnected)
             return r
         }
@@ -607,15 +607,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // `defer` so the counter reflects real concurrent
             // execution, not slot occupancy. If a supersede fails to
             // fully tear down the outgoing receive task before this
-            // body begins running, `maxReceiveLoops` and
-            // `maxTransports` will both reach 2. A live transport is
-            // defined as one whose receive loop is currently
-            // executing.
+            // body begins running, `maxReceiveLoops` will observe 2.
+            //
+            // r15 (Hicks item 1): transport lifetime is tracked
+            // separately in `setWebSocketTaskLocked`, NOT here. The
+            // receive-loop counter is now decoupled from the transport
+            // counter so a handshake-only / parked-transport bug would
+            // be caught (transport enter without matching receive-loop
+            // enter, or vice versa).
             invariants.enterReceiveLoop()
-            invariants.enterTransport()
             defer {
                 invariants.exitReceiveLoop()
-                invariants.exitTransport()
             }
             guard let self else { return }
             while !Task.isCancelled {
@@ -796,6 +798,37 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// slot has already been replaced by a newer scheduleReconnect
     /// (or zeroed by disconnect / superseded by connect) cannot wipe
     /// the newer owner's handle.
+    ///
+    /// r15 (Hicks item 2 + item 3): **single sequential retry-owner
+    /// loop**. Previously a failed reconnect attempt recursively
+    /// spawned a successor `Task.detached`, whose body's
+    /// `enterReconnectOwner()` could execute before (or interleaved
+    /// with) the outgoing Task's own body completion — even with the
+    /// r14 LIFO-defer handoff, the outgoing Task itself had not
+    /// externally completed. The r15 design uses a SINGLE detached
+    /// retry-owner Task that iterates internally up to
+    /// `Self.maxReconnectAttempts` attempts; there is no successor
+    /// spawn, no `pendingReconnectFromGen` field, and no
+    /// second-owner reservation. This makes `maxReconnectOwners <= 1`
+    /// structural (one `enterReconnectOwner` / one
+    /// `exitReconnectOwner` per retry chain). Non-vacuity is proved
+    /// by `reconnectAttemptCount` (see
+    /// `SignalRLifecycleInvariants.recordReconnectAttempt`) which is
+    /// incremented at the top of every retry iteration, so a
+    /// bounded-terminal test observes `reconnectAttemptCount == 10`
+    /// with `reconnectOwnerEnterCount == 1`. Retry count (10),
+    /// backoff schedule, terminal `.disconnected` publish,
+    /// cancellation, and supersede semantics are unchanged.
+    ///
+    /// Immediate receive-failure on the success path (r15 Hicks item
+    /// 3): a receive-error inside `makeReceiveTask` calls
+    /// `scheduleReconnect(fromGen:)`, which reserves the slot IFF
+    /// `reconnectToken == nil`. If a retry-owner is already running
+    /// (e.g. an earlier type-7 already installed one), the second
+    /// call drops. The reservation is owner-keyed by `taskToken` —
+    /// no other owner or slot can consume this owner's state.
+    private static let maxReconnectAttempts: Int = 10
+
     private func scheduleReconnect(fromGen: UInt64) {
         // r9 blocker #2: reserve `reconnectToken` under lifecycleQueue
         // BEFORE any detached Task exists. The token IS the ownership
@@ -804,7 +837,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // reservation and install, another scheduleReconnect sees the
         // reserved token and drops.
         let taskToken = UUID()
-        let (myGen, reserved): (UInt64, Bool) = lifecycleSync {
+        let (myGen0, reserved): (UInt64, Bool) = lifecycleSync {
             guard !self.intentionalDisconnect, self.generation == fromGen else {
                 return (self.generation, false)
             }
@@ -814,7 +847,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             self.generation &+= 1
             self.tearDownLocked()
-            self.reconnectAttempt += 1
+            self.reconnectAttempt = 0
             // Reserve the slot with just the token; the Task handle is
             // installed below once we've created it.
             self.setReconnectTokenLocked(taskToken)
@@ -829,84 +862,100 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             let invariants = self.lifecycleInvariants
             // r13 (Hicks item 1): reconnect-owner lifetime = the
             // detached Task's actual body execution. Enter at top,
-            // exit in defer. A supersede that fails to let the
-            // outgoing reconnect task finish before the replacement's
-            // body runs will drive `maxReconnectOwners` to 2.
+            // exit in defer.
+            //
+            // r15 (Hicks item 2): the retry LOOP is inside this
+            // single Task body. There is no successor spawn, so this
+            // enter/exit pair is called EXACTLY ONCE per retry chain
+            // regardless of how many attempts iterate. Overlap is
+            // structurally impossible.
             invariants.enterReconnectOwner()
-            // r14 (Hicks handoff-order correction): defers run LIFO.
-            // The outer defer is declared FIRST so it runs LAST — i.e.
-            // AFTER `exitReconnectOwner()` has already decremented the
-            // active count. This guarantees that when the retry chain's
-            // catch branch queued a successor via `pendingReconnectFromGen`,
-            // the successor's `scheduleReconnect` (and therefore its
-            // successor Task's `enterReconnectOwner`) executes only
-            // after this owner has exited, so `maxReconnectOwners <= 1`
-            // holds even across retry-chain hand-offs.
-            defer { self.spawnPendingReconnectIfAny() }
             defer { invariants.exitReconnectOwner() }
-            // Backoff schedule is injectable so tests can drive
-            // multi-retry paths in bounded wall time.
-            let attempt: Int = self.lifecycleSync { self.reconnectAttempt }
-            let delay = self.reconnectBackoff(attempt)
-            self.logger.info("Reconnecting in \(delay)s (attempt \(attempt))")
-            // r9 blocker #4: injected async sleeper. Production wraps
-            // `Task.sleep`; tests provide a controllable sleeper that
-            // suspends until the test releases each attempt.
-            await self.reconnectSleeper(delay)
 
-            // After the back-off, revalidate under the lifecycle queue.
-            let stillCurrent = self.lifecycleSync {
-                self.generation == myGen && !self.intentionalDisconnect && !Task.isCancelled
-            }
-            if !stillCurrent {
-                self.clearReconnectSlotIfOwned(token: taskToken)
-                return
-            }
+            var currentGen = myGen0
+            var attempt = 0
+            while attempt < Self.maxReconnectAttempts {
+                attempt += 1
+                // r15 (Hicks item 4/8): record every retry attempt so
+                // the retry-chain proof is non-vacuous even though
+                // `reconnectOwnerEnterCount == 1`.
+                invariants.recordReconnectAttempt()
+                self.lifecycleSync { self.reconnectAttempt = attempt }
 
-            do {
-                try await self.performConnect(myGen: myGen)
-                self.clearReconnectSlotIfOwned(token: taskToken)
-            } catch {
-                self.logger.warning("Reconnect attempt \(attempt) failed: \(error.localizedDescription)")
-                // Release ownership BEFORE queuing the successor so the
-                // retry can legitimately install its own slot. Only clear
-                // if we still own this slot — a newer scheduleReconnect
-                // from some other path may have taken over already.
-                // r14 (Hicks handoff-order correction): do NOT call
-                // `scheduleReconnect(fromGen:)` recursively here. Doing
-                // so would spawn a new detached Task whose
-                // `enterReconnectOwner()` can execute BEFORE this
-                // task's `defer { exitReconnectOwner() }`, driving
-                // `maxReconnectOwners` above 1. Instead queue the
-                // successor via `pendingReconnectFromGen` and let the
-                // outer `defer { spawnPendingReconnectIfAny() }` — which
-                // runs AFTER `exitReconnectOwner()` because defers are
-                // LIFO — actually kick off the successor.
-                let giveUp: Bool = self.lifecycleSync { () -> Bool in
-                    if self.reconnectToken == taskToken {
-                        self.reconnectTask = nil
-                        self.setReconnectTokenLocked(nil)
-                    }
-                    let retry = self.generation == myGen &&
+                let delay = self.reconnectBackoff(attempt)
+                self.logger.info("Reconnecting in \(delay)s (attempt \(attempt))")
+                // r9 blocker #4: injected async sleeper. Production
+                // wraps `Task.sleep`; tests provide a controllable
+                // sleeper that suspends until the test releases each
+                // attempt.
+                await self.reconnectSleeper(delay)
+
+                // After the back-off, revalidate under the lifecycle
+                // queue. Cancelled / disconnected / superseded ⇒ exit.
+                let stillOwn: Bool = self.lifecycleSync {
+                    self.reconnectToken == taskToken &&
+                        self.generation == currentGen &&
                         !self.intentionalDisconnect &&
-                        self.reconnectAttempt < 10
-                    let stop = !self.intentionalDisconnect &&
-                        self.reconnectAttempt >= 10 &&
-                        self.generation == myGen
-                    if retry {
-                        // Queue the successor; the outer defer will
-                        // actually schedule it after we have exited.
-                        self.pendingReconnectFromGen = myGen
-                    }
-                    return stop
+                        !Task.isCancelled
                 }
-                if giveUp {
-                    self.lifecycleSync {
+                if !stillOwn {
+                    self.clearReconnectSlotIfOwned(token: taskToken)
+                    return
+                }
+
+                do {
+                    try await self.performConnect(myGen: currentGen)
+                    // Success. `performConnect` step 4 already cleared
+                    // `reconnectToken` atomically with `.connected`
+                    // publish and receive-task install (r10 #2a). Our
+                    // `clearReconnectSlotIfOwned` here is defensive.
+                    self.clearReconnectSlotIfOwned(token: taskToken)
+                    return
+                } catch {
+                    self.logger.warning("Reconnect attempt \(attempt) failed: \(error.localizedDescription)")
+                    // Per-attempt cleanup + generation bump. The failing
+                    // `performConnect` may have installed a WebSocket
+                    // before throwing (e.g. handshake failure). Tear it
+                    // down here and bump generation so any stale
+                    // in-flight receive/handshake from that attempt
+                    // becomes inert. This mirrors the pre-r15 recursive
+                    // design's per-attempt `tearDownLocked` +
+                    // generation-bump semantics.
+                    let (nextGen, shouldContinue): (UInt64, Bool) = self.lifecycleSync {
+                        // A racing disconnect() / connect() may have
+                        // yanked ownership; if so, stop.
+                        guard self.reconnectToken == taskToken,
+                              !self.intentionalDisconnect,
+                              !Task.isCancelled else {
+                            return (self.generation, false)
+                        }
+                        self.tearDownLocked()
+                        self.generation &+= 1
+                        return (self.generation, true)
+                    }
+                    if !shouldContinue {
+                        self.clearReconnectSlotIfOwned(token: taskToken)
+                        return
+                    }
+                    currentGen = nextGen
+                    // Loop to next attempt.
+                }
+            }
+
+            // Bounded terminal: `maxReconnectAttempts` exhausted. Only
+            // publish `.disconnected` if we still own the slot AND the
+            // user hasn't already intentionally disconnected. Under
+            // lifecycleSync so publication order is preserved.
+            self.lifecycleSync {
+                if self.reconnectToken == taskToken {
+                    self.reconnectTask = nil
+                    self.setReconnectTokenLocked(nil)
+                    if !self.intentionalDisconnect {
                         self.connectionStateHub.setState(.disconnected)
                     }
-                    self.logger.error("Gave up reconnecting after \(attempt) attempts")
                 }
             }
+            self.logger.error("Gave up reconnecting after \(Self.maxReconnectAttempts) attempts")
         }
         // Install the task handle only if we still own the token. A
         // disconnect() racing this call between the token reservation
@@ -932,28 +981,6 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 self.reconnectTask = nil
                 self.setReconnectTokenLocked(nil)
             }
-        }
-    }
-
-    /// r14 (Hicks handoff-order correction): if the failing reconnect
-    /// owner's catch branch queued a successor via `pendingReconnectFromGen`,
-    /// pull the generation under `lifecycleSync` and call
-    /// `scheduleReconnect(fromGen:)` OUTSIDE the queue. Invoked from the
-    /// outgoing reconnect-owner Task's outer `defer`, which runs AFTER
-    /// `defer { invariants.exitReconnectOwner() }` (defers are LIFO), so
-    /// the successor task's `enterReconnectOwner()` is strictly ordered
-    /// after the outgoing task's `exitReconnectOwner()`.
-    /// `scheduleReconnect` internally rechecks `intentionalDisconnect`
-    /// and generation, so a `disconnect()` racing the successor kick-off
-    /// is dropped safely by the existing guard.
-    private func spawnPendingReconnectIfAny() {
-        let pending: UInt64? = lifecycleSync {
-            let g = self.pendingReconnectFromGen
-            self.pendingReconnectFromGen = nil
-            return g
-        }
-        if let g = pending {
-            self.scheduleReconnect(fromGen: g)
         }
     }
 

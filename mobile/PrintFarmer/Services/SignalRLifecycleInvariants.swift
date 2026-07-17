@@ -44,6 +44,15 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         let transportExitCount: Int
         let receiveLoopExitCount: Int
         let reconnectOwnerExitCount: Int
+        /// r15 (Hicks item 4/8): number of retry attempts issued
+        /// INSIDE the (single) reconnect-owner loop. This is the
+        /// non-vacuity witness for retry-chain tests: with a single
+        /// sequential retry-owner, `reconnectOwnerEnterCount == 1`
+        /// but `reconnectAttemptCount` can be 1..10 (bounded terminal
+        /// = 10). Every attempt is bracketed by a
+        /// `recordReconnectAttempt()` call at the top of the retry
+        /// iteration.
+        let reconnectAttemptCount: Int
     }
 
     private let lock = NSLock()
@@ -67,6 +76,22 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     private var transportExitCount = 0
     private var receiveLoopExitCount = 0
     private var reconnectOwnerExitCount = 0
+
+    private var reconnectAttemptCount = 0
+
+    // r15 (Hicks item 5): deterministic pre-enrollment barrier hooks.
+    // Tests set these to controlled `@Sendable` closures. Each
+    // `waitFor*Zero()` awaits its family's barrier BEFORE taking the
+    // enrollment lock; the test's barrier resolves an "arrived at
+    // pre-enroll" signal and then awaits a release. This lets tests
+    // cancel the waiter Task while it is deterministically parked at
+    // the pre-enrollment point, prove no continuation was ever
+    // enqueued (family's waiter list stays empty AFTER the release),
+    // and prove no hang. Barriers are per-family so a cancel or
+    // resume in one family CANNOT resume waiters in another.
+    private var transportPreEnrollBarrier: (@Sendable () async -> Void)?
+    private var receiveLoopPreEnrollBarrier: (@Sendable () async -> Void)?
+    private var reconnectOwnerPreEnrollBarrier: (@Sendable () async -> Void)?
 
     // MARK: - Transport counters
 
@@ -140,6 +165,48 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         toResume.forEach { $0.resume() }
     }
 
+    /// r15 (Hicks item 4/8): record one retry ATTEMPT inside the single
+    /// sequential reconnect-owner loop. Distinct from
+    /// `enterReconnectOwner()`, which is called ONCE per retry chain.
+    /// Together the two make the retry-chain proof non-vacuous:
+    /// `reconnectOwnerEnterCount == 1` guarantees no overlap (structural),
+    /// `reconnectAttemptCount == 10` (bounded terminal) or `>= 3`
+    /// (repeated-failed-reconnects) guarantees the retry loop actually
+    /// iterated.
+    func recordReconnectAttempt() {
+        lock.lock()
+        reconnectAttemptCount += 1
+        lock.unlock()
+    }
+
+    // MARK: - Pre-enrollment barrier hooks (r15 Hicks item 5)
+
+    func setTransportPreEnrollBarrier(_ b: (@Sendable () async -> Void)?) {
+        lock.lock()
+        transportPreEnrollBarrier = b
+        lock.unlock()
+    }
+
+    func setReceiveLoopPreEnrollBarrier(_ b: (@Sendable () async -> Void)?) {
+        lock.lock()
+        receiveLoopPreEnrollBarrier = b
+        lock.unlock()
+    }
+
+    func setReconnectOwnerPreEnrollBarrier(_ b: (@Sendable () async -> Void)?) {
+        lock.lock()
+        reconnectOwnerPreEnrollBarrier = b
+        lock.unlock()
+    }
+
+    /// Test-only introspection: waiter counts per family. Used to
+    /// prove pre-enrollment cancellation left no leaked continuation.
+    func waiterCounts() -> (transports: Int, receiveLoops: Int, reconnectOwners: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (transportZeroWaiters.count, receiveLoopZeroWaiters.count, reconnectOwnerZeroWaiters.count)
+    }
+
     // MARK: - Snapshot
 
     func snapshot() -> Snapshot {
@@ -157,7 +224,8 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
             reconnectOwnerEnterCount: reconnectOwnerEnterCount,
             transportExitCount: transportExitCount,
             receiveLoopExitCount: receiveLoopExitCount,
-            reconnectOwnerExitCount: reconnectOwnerExitCount
+            reconnectOwnerExitCount: reconnectOwnerExitCount,
+            reconnectAttemptCount: reconnectAttemptCount
         )
     }
 
@@ -193,6 +261,16 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     // remains idempotent — finding no matching UUID is a no-op.
 
     func waitForTransportsZero() async {
+        // r15 (Hicks item 5): deterministic pre-enroll barrier for
+        // tests. Awaited BEFORE the enrollment lock so the caller Task
+        // can be cancelled while parked at a known point; the post-
+        // barrier `Task.isCancelled` check then returns without ever
+        // enqueuing a waiter.
+        let barrier: (@Sendable () async -> Void)? = {
+            lock.lock(); defer { lock.unlock() }
+            return transportPreEnrollBarrier
+        }()
+        if let barrier { await barrier() }
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -216,6 +294,11 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     }
 
     func waitForReceiveLoopsZero() async {
+        let barrier: (@Sendable () async -> Void)? = {
+            lock.lock(); defer { lock.unlock() }
+            return receiveLoopPreEnrollBarrier
+        }()
+        if let barrier { await barrier() }
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -239,6 +322,11 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     }
 
     func waitForReconnectOwnersZero() async {
+        let barrier: (@Sendable () async -> Void)? = {
+            lock.lock(); defer { lock.unlock() }
+            return reconnectOwnerPreEnrollBarrier
+        }()
+        if let barrier { await barrier() }
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
