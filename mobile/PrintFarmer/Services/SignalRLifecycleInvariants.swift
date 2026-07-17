@@ -2,27 +2,34 @@ import Foundation
 
 /// Per-service-instance lifecycle invariant counters.
 ///
-/// Tracks the number of currently-active transports, receive loops,
-/// and reconnect owners on a single `SignalRService` instance, along
-/// with the maximum observed values. Every increment/decrement is
-/// paired with a state-variable transition on the service (webSocket
-/// install/tear-down, receive-task install/tear-down, reconnect-token
-/// reservation/clear), so the counters are non-vacuous: a passing
-/// assertion means the transition happened, and `max == 1` means only
-/// one such entity was ever alive at any time.
+/// **Task-lifetime instrumentation (not slot occupancy).**
+/// `enter*`/`exit*` MUST be called from inside the actual body of the
+/// receive loop / reconnect owner Task (enter at the top, exit in a
+/// `defer` at the end). The transport counter is tied to the running
+/// receive loop's lifetime — an "active transport" is one whose
+/// receive loop is actually executing. This makes `max <= 1`
+/// falsifiable: if a supersede ever fails to fully tear down the
+/// outgoing task before the replacement's body begins running, the
+/// counter will observe both alive simultaneously and `max >= 2`.
+///
+/// A previous version tied enter/exit to optional-slot occupancy
+/// inside the lifecycle-queue setter. Because the setter's
+/// nonnil→nonnil replacement path is `exit` then `enter` on the same
+/// serialized queue, `active` was structurally capped at 1 and
+/// `max <= 1` was vacuous. The lifetime model here counts concurrent
+/// running tasks and cannot be circumvented that way.
 ///
 /// Barrier waiters (`waitForReconnectOwnersZero()`,
 /// `waitForReceiveLoopsZero()`, `waitForTransportsZero()`) let tests
-/// synchronize on tear-down completion without polling elapsed time.
-/// They resume every parked waiter when the corresponding counter
-/// hits zero.
+/// synchronize on task-completion (not slot-clearing) without polling
+/// elapsed time. They resume every parked waiter of THAT family when
+/// its counter hits zero. Cancellation only wakes waiters belonging
+/// to the cancelled Task, and only within their own family — a
+/// cancelled transport waiter does not resume a parked receive-loop
+/// or reconnect-owner waiter.
 ///
 /// Access is protected by `NSLock` so tests can query snapshots from
-/// any Task without serializing through the lifecycle queue. All
-/// service-side increment/decrement calls happen inside
-/// `lifecycleSync`, so the counter transitions are already serialized
-/// with respect to each other at the service; the lock protects
-/// snapshot readers and the waiter arrays.
+/// any Task without serializing through the lifecycle queue.
 final class SignalRLifecycleInvariants: @unchecked Sendable {
     struct Snapshot: Equatable, Sendable {
         let activeTransports: Int
@@ -34,6 +41,9 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         let transportEnterCount: Int
         let receiveLoopEnterCount: Int
         let reconnectOwnerEnterCount: Int
+        let transportExitCount: Int
+        let receiveLoopExitCount: Int
+        let reconnectOwnerExitCount: Int
     }
 
     private let lock = NSLock()
@@ -50,9 +60,13 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     private var receiveLoopEnterCount = 0
     private var reconnectOwnerEnterCount = 0
 
-    private var transportZeroWaiters: [CheckedContinuation<Void, Never>] = []
-    private var receiveLoopZeroWaiters: [CheckedContinuation<Void, Never>] = []
-    private var reconnectOwnerZeroWaiters: [CheckedContinuation<Void, Never>] = []
+    private var transportZeroWaiters: [(id: UUID, cont: CheckedContinuation<Void, Never>)] = []
+    private var receiveLoopZeroWaiters: [(id: UUID, cont: CheckedContinuation<Void, Never>)] = []
+    private var reconnectOwnerZeroWaiters: [(id: UUID, cont: CheckedContinuation<Void, Never>)] = []
+
+    private var transportExitCount = 0
+    private var receiveLoopExitCount = 0
+    private var reconnectOwnerExitCount = 0
 
     // MARK: - Transport counters
 
@@ -68,9 +82,10 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         var toResume: [CheckedContinuation<Void, Never>] = []
         lock.lock()
         activeTransports -= 1
+        transportExitCount += 1
         precondition(activeTransports >= 0, "activeTransports went negative — lifecycle invariant broken")
         if activeTransports == 0 {
-            toResume = transportZeroWaiters
+            toResume = transportZeroWaiters.map { $0.cont }
             transportZeroWaiters.removeAll()
         }
         lock.unlock()
@@ -91,9 +106,10 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         var toResume: [CheckedContinuation<Void, Never>] = []
         lock.lock()
         activeReceiveLoops -= 1
+        receiveLoopExitCount += 1
         precondition(activeReceiveLoops >= 0, "activeReceiveLoops went negative — lifecycle invariant broken")
         if activeReceiveLoops == 0 {
-            toResume = receiveLoopZeroWaiters
+            toResume = receiveLoopZeroWaiters.map { $0.cont }
             receiveLoopZeroWaiters.removeAll()
         }
         lock.unlock()
@@ -114,9 +130,10 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         var toResume: [CheckedContinuation<Void, Never>] = []
         lock.lock()
         activeReconnectOwners -= 1
+        reconnectOwnerExitCount += 1
         precondition(activeReconnectOwners >= 0, "activeReconnectOwners went negative — lifecycle invariant broken")
         if activeReconnectOwners == 0 {
-            toResume = reconnectOwnerZeroWaiters
+            toResume = reconnectOwnerZeroWaiters.map { $0.cont }
             reconnectOwnerZeroWaiters.removeAll()
         }
         lock.unlock()
@@ -137,20 +154,26 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
             maxReconnectOwners: maxReconnectOwners,
             transportEnterCount: transportEnterCount,
             receiveLoopEnterCount: receiveLoopEnterCount,
-            reconnectOwnerEnterCount: reconnectOwnerEnterCount
+            reconnectOwnerEnterCount: reconnectOwnerEnterCount,
+            transportExitCount: transportExitCount,
+            receiveLoopExitCount: receiveLoopExitCount,
+            reconnectOwnerExitCount: reconnectOwnerExitCount
         )
     }
 
-    // MARK: - Deterministic barriers
+    // MARK: - Deterministic barriers (task-completion, per family)
     //
     // Each `waitFor*Zero()` primitive returns immediately if the
     // corresponding counter is already zero, else parks a
-    // `CheckedContinuation` that is resumed exactly once when the
-    // counter transitions to zero. Cancellation-safe: if the caller's
-    // Task is cancelled, the waiter is removed and resumed with
-    // `Void`. Returning on cancellation is intentional — the caller
-    // is expected to check `Task.isCancelled` or a separate deadline
-    // if it needs to distinguish.
+    // `CheckedContinuation` keyed by a unique `UUID` in ITS family's
+    // waiter list. When the family's counter transitions to zero
+    // (via `exit*`, which is called from the actual task body's
+    // `defer`), all parked waiters in THAT family are resumed. When
+    // the caller's Task is cancelled, only that specific waiter is
+    // removed from that specific family and resumed. Cross-family
+    // cancellation cannot resume waiters in another family, so
+    // "receive loops are quiescent" cannot be spuriously satisfied
+    // because a reconnect-owner waiter's Task was cancelled.
 
     func waitForTransportsZero() async {
         let id = UUID()
@@ -162,13 +185,12 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
                     cont.resume()
                     return
                 }
-                transportZeroWaiters.append(cont)
+                transportZeroWaiters.append((id: id, cont: cont))
                 lock.unlock()
             }
         } onCancel: {
-            self.cancelZeroWaiters(id: id)
+            self.cancelTransportWaiter(id: id)
         }
-        _ = id  // reserved for future keyed removal; current implementation drains all on zero
     }
 
     func waitForReceiveLoopsZero() async {
@@ -181,13 +203,12 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
                     cont.resume()
                     return
                 }
-                receiveLoopZeroWaiters.append(cont)
+                receiveLoopZeroWaiters.append((id: id, cont: cont))
                 lock.unlock()
             }
         } onCancel: {
-            self.cancelZeroWaiters(id: id)
+            self.cancelReceiveLoopWaiter(id: id)
         }
-        _ = id
     }
 
     func waitForReconnectOwnersZero() async {
@@ -200,31 +221,41 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
                     cont.resume()
                     return
                 }
-                reconnectOwnerZeroWaiters.append(cont)
+                reconnectOwnerZeroWaiters.append((id: id, cont: cont))
                 lock.unlock()
             }
         } onCancel: {
-            self.cancelZeroWaiters(id: id)
+            self.cancelReconnectOwnerWaiter(id: id)
         }
-        _ = id
     }
 
-    /// On cancellation, drain every parked waiter of every family.
-    /// A resumed-then-torn-down waiter simply becomes a no-op on the
-    /// zero-drain path via the array reset. This is coarse but safe:
-    /// cancellation is a bail-out signal, so waking any parked
-    /// continuations is the correct behavior — the caller's Task is
-    /// exiting.
-    private func cancelZeroWaiters(id _: UUID) {
-        var toResume: [CheckedContinuation<Void, Never>] = []
+    private func cancelTransportWaiter(id: UUID) {
+        var toResume: CheckedContinuation<Void, Never>?
         lock.lock()
-        toResume.append(contentsOf: transportZeroWaiters)
-        toResume.append(contentsOf: receiveLoopZeroWaiters)
-        toResume.append(contentsOf: reconnectOwnerZeroWaiters)
-        transportZeroWaiters.removeAll()
-        receiveLoopZeroWaiters.removeAll()
-        reconnectOwnerZeroWaiters.removeAll()
+        if let idx = transportZeroWaiters.firstIndex(where: { $0.id == id }) {
+            toResume = transportZeroWaiters.remove(at: idx).cont
+        }
         lock.unlock()
-        toResume.forEach { $0.resume() }
+        toResume?.resume()
+    }
+
+    private func cancelReceiveLoopWaiter(id: UUID) {
+        var toResume: CheckedContinuation<Void, Never>?
+        lock.lock()
+        if let idx = receiveLoopZeroWaiters.firstIndex(where: { $0.id == id }) {
+            toResume = receiveLoopZeroWaiters.remove(at: idx).cont
+        }
+        lock.unlock()
+        toResume?.resume()
+    }
+
+    private func cancelReconnectOwnerWaiter(id: UUID) {
+        var toResume: CheckedContinuation<Void, Never>?
+        lock.lock()
+        if let idx = reconnectOwnerZeroWaiters.firstIndex(where: { $0.id == id }) {
+            toResume = reconnectOwnerZeroWaiters.remove(at: idx).cont
+        }
+        lock.unlock()
+        toResume?.resume()
     }
 }

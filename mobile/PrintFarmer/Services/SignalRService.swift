@@ -242,53 +242,21 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     // with the field still non-nil (or vice versa).
 
     /// Install `new` as the active WebSocket. Passing `nil` clears
-    /// the slot. Counter transitions:
-    /// * nil -> non-nil: `enterTransport()`
-    /// * non-nil -> nil: `exitTransport()`
-    /// * non-nil -> non-nil: `exitTransport()` then `enterTransport()`
-    ///   (a supersede-without-tear-down would violate the contract;
-    ///   the tests assert `maxTransports <= 1`, so this path should
-    ///   never fire in a healthy service).
+    /// the slot. Pure slot setter — lifecycle counters are driven by
+    /// the actual receive-task lifetime (see `makeReceiveTask`), not
+    /// by slot occupancy, so a nonnil→nonnil supersede is observable
+    /// as `maxTransports >= 2` if the outgoing receive task has not
+    /// yet exited.
     private func setWebSocketTaskLocked(_ new: SignalRWebSocket?) {
-        let had = webSocketTask != nil
-        let has = new != nil
         webSocketTask = new
-        if had && !has {
-            lifecycleInvariants.exitTransport()
-        } else if !had && has {
-            lifecycleInvariants.enterTransport()
-        } else if had && has {
-            lifecycleInvariants.exitTransport()
-            lifecycleInvariants.enterTransport()
-        }
     }
 
     private func setReceiveTaskLocked(_ new: Task<Void, Never>?) {
-        let had = receiveTask != nil
-        let has = new != nil
         receiveTask = new
-        if had && !has {
-            lifecycleInvariants.exitReceiveLoop()
-        } else if !had && has {
-            lifecycleInvariants.enterReceiveLoop()
-        } else if had && has {
-            lifecycleInvariants.exitReceiveLoop()
-            lifecycleInvariants.enterReceiveLoop()
-        }
     }
 
     private func setReconnectTokenLocked(_ new: UUID?) {
-        let had = reconnectToken != nil
-        let has = new != nil
         reconnectToken = new
-        if had && !has {
-            lifecycleInvariants.exitReconnectOwner()
-        } else if !had && has {
-            lifecycleInvariants.enterReconnectOwner()
-        } else if had && has {
-            lifecycleInvariants.exitReconnectOwner()
-            lifecycleInvariants.enterReconnectOwner()
-        }
     }
 
     // MARK: - Public API
@@ -611,7 +579,23 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// receive task cannot trigger reconnect after the user has
     /// explicitly disconnected or a newer generation has taken over.
     private func makeReceiveTask(myGen: UInt64) -> Task<Void, Never> {
-        Task { [weak self] in
+        let invariants = self.lifecycleInvariants
+        return Task { [weak self] in
+            // r13 (Hicks item 1): task-lifetime instrumentation. Enter
+            // at the top of the actual running task body; exit in
+            // `defer` so the counter reflects real concurrent
+            // execution, not slot occupancy. If a supersede fails to
+            // fully tear down the outgoing receive task before this
+            // body begins running, `maxReceiveLoops` and
+            // `maxTransports` will both reach 2. A live transport is
+            // defined as one whose receive loop is currently
+            // executing.
+            invariants.enterReceiveLoop()
+            invariants.enterTransport()
+            defer {
+                invariants.exitReceiveLoop()
+                invariants.exitTransport()
+            }
             guard let self else { return }
             while !Task.isCancelled {
                 let wsTask: SignalRWebSocket? = self.lifecycleSync { self.webSocketTask }
@@ -821,6 +805,14 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
         let reconnectTask = Task.detached { [weak self] in
             guard let self else { return }
+            let invariants = self.lifecycleInvariants
+            // r13 (Hicks item 1): reconnect-owner lifetime = the
+            // detached Task's actual body execution. Enter at top,
+            // exit in defer. A supersede that fails to let the
+            // outgoing reconnect task finish before the replacement's
+            // body runs will drive `maxReconnectOwners` to 2.
+            invariants.enterReconnectOwner()
+            defer { invariants.exitReconnectOwner() }
             // Backoff schedule is injectable so tests can drive
             // multi-retry paths in bounded wall time.
             let attempt: Int = self.lifecycleSync { self.reconnectAttempt }

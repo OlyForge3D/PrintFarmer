@@ -654,7 +654,7 @@ final class TerminalDisconnectLatch: @unchecked Sendable {
     private let lock = NSLock()
     private var sawReconnecting = false
     private var fired = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [(id: UUID, cont: CheckedContinuation<Void, Never>)] = []
 
     func observe(_ state: SignalRConnectionState) {
         lock.lock()
@@ -665,7 +665,7 @@ final class TerminalDisconnectLatch: @unchecked Sendable {
         }
         if state == .disconnected, sawReconnecting, !fired {
             fired = true
-            let toResume = waiters
+            let toResume = waiters.map { $0.cont }
             waiters.removeAll()
             lock.unlock()
             for c in toResume { c.resume() }
@@ -674,10 +674,21 @@ final class TerminalDisconnectLatch: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Cancellation-aware terminal wait. If the caller's Task is
+    /// cancelled (e.g. by the enclosing task-group's `cancelAll()`
+    /// after the failure-ceiling timeout child fires), the waiter is
+    /// removed and resumed with `Void` so the task-group can unwind
+    /// cleanly. Without this, `withThrowingTaskGroup` would await the
+    /// terminal-waiter child indefinitely past the ceiling.
     func waitForTerminal() async {
-        if _quickCheck() { return }
-        await withCheckedContinuation { cont in
-            _enqueue(cont: cont)
+        let id = UUID()
+        await withTaskCancellationHandler {
+            if _quickCheck() { return }
+            await withCheckedContinuation { cont in
+                _enqueue(id: id, cont: cont)
+            }
+        } onCancel: {
+            self._cancelWaiter(id: id)
         }
     }
 
@@ -686,15 +697,30 @@ final class TerminalDisconnectLatch: @unchecked Sendable {
         return fired
     }
 
-    private func _enqueue(cont: CheckedContinuation<Void, Never>) {
+    private func _enqueue(id: UUID, cont: CheckedContinuation<Void, Never>) {
         lock.lock()
         if fired {
             lock.unlock()
             cont.resume()
             return
         }
-        waiters.append(cont)
+        waiters.append((id: id, cont: cont))
         lock.unlock()
+    }
+
+    private func _cancelWaiter(id: UUID) {
+        var toResume: CheckedContinuation<Void, Never>?
+        lock.lock()
+        if let idx = waiters.firstIndex(where: { $0.id == id }) {
+            toResume = waiters.remove(at: idx).cont
+        }
+        lock.unlock()
+        toResume?.resume()
+    }
+
+    func hasFired() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return fired
     }
 }
 
@@ -802,10 +828,38 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     }
 
     func receive() async throws -> URLSessionWebSocketTask.Message {
-        try await withCheckedThrowingContinuation { cont in
-            let waiters = _enqueueReceive(cont: cont)
-            for w in waiters { w.resume() }
+        // r13 (Hicks item 1): cancellation-aware receive. When the
+        // caller's Task is cancelled (e.g. `tearDownLocked` calls
+        // `receiveTask?.cancel()`), fail the pending continuation so
+        // the receive-loop body can break, run its `defer`, and
+        // exit — otherwise the task-lifetime counter would stay at 1
+        // forever and `waitForReceiveLoopsZero()` would never fire.
+        // This matches real `URLSessionWebSocketTask.receive()`
+        // behavior: Task cancellation propagates to the pending
+        // receive as a thrown error.
+        //
+        // The r9 blocker #3 test (`disconnectDuringHandshakeReceive_
+        // neverPublishesConnected`) is unaffected: the handshake's
+        // `wsTask.receive()` is awaited by the outer `connect()`
+        // Task, which is NOT cancelled by `service.disconnect()`.
+        // Only `wsTask.cancel(with:reason:)` fires against the mock
+        // there, and that call remains a no-op for pending receives.
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                let waiters = _enqueueReceive(cont: cont)
+                for w in waiters { w.resume() }
+            }
+        } onCancel: { [weak self] in
+            self?._failPendingReceiveOnCancel()
         }
+    }
+
+    private func _failPendingReceiveOnCancel() {
+        lock.lock()
+        guard let cont = pendingReceives.first else { lock.unlock(); return }
+        pendingReceives.removeFirst()
+        lock.unlock()
+        cont.resume(throwing: CancellationError())
     }
 
     private func _recordSent(_ message: URLSessionWebSocketTask.Message) {
@@ -2021,15 +2075,38 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(attempts, 11,
                                     "loop must reach the bounded terminal after >= 10 retries; observed \(attempts) negotiate calls")
 
+        // r13 (Hicks item 3): explicit terminal-branch proof. Prove
+        // that the pass path took the giveUp branch — i.e. we
+        // observed `.reconnecting` at least once AND then a terminal
+        // `.disconnected` fired via the latch. The latch itself
+        // enforces the ordering (only fires on `.disconnected` after
+        // `.reconnecting`), so `hasFired()` here is the causal
+        // completion signal for the giveUp branch, not merely any
+        // `.disconnected` publish.
+        XCTAssertTrue(terminalLatch.hasFired(),
+                      "terminal latch must have fired — giveUp branch's `.disconnected` publish is the causal completion event")
+
         let inv = service.lifecycleInvariants.snapshot()
         XCTAssertEqual(inv.activeReconnectOwners, 0,
                        "no reconnect owner may remain live after bounded terminal; observed \(inv.activeReconnectOwners)")
+        XCTAssertEqual(inv.activeTransports, 0,
+                       "no transport may remain live after bounded terminal; observed \(inv.activeTransports)")
+        XCTAssertEqual(inv.activeReceiveLoops, 0,
+                       "no receive loop may remain live after bounded terminal; observed \(inv.activeReceiveLoops)")
+        // Prove the reconnect-owner task actually ran ≥ 10 times and
+        // that every entered owner also exited (no zombie owner).
+        XCTAssertGreaterThanOrEqual(inv.reconnectOwnerEnterCount, 10,
+                                    "bounded loop must have entered the reconnect-owner Task >= 10 times; observed \(inv.reconnectOwnerEnterCount)")
+        XCTAssertEqual(inv.reconnectOwnerEnterCount, inv.reconnectOwnerExitCount,
+                       "every entered reconnect-owner Task must have exited via its `defer`; observed enter=\(inv.reconnectOwnerEnterCount) exit=\(inv.reconnectOwnerExitCount)")
         XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
                                 "max concurrent reconnect owners must be <= 1; observed \(inv.maxReconnectOwners)")
         XCTAssertLessThanOrEqual(inv.maxTransports, 1,
                                 "max concurrent transports must be <= 1; observed \(inv.maxTransports)")
 
         let states = recorder.snapshot()
+        XCTAssertTrue(states.contains(.reconnecting),
+                      "terminal branch must have passed through .reconnecting; observed \(states)")
         XCTAssertFalse(states.contains(.connected),
                        ".connected must never publish under always-failing negotiate; observed \(states)")
         XCTAssertEqual(states.last, .disconnected,
