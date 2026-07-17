@@ -152,6 +152,16 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private var fallbackGroupsUpdatedHandlers: [@Sendable (FallbackGroupsUpdatedEvent) -> Void] = []
     private let handlerLock = NSLock()
 
+    /// Per-instance lifecycle invariant counters (F4-L r12 blocker
+    /// #1). Tests use `.snapshot()` and `waitFor*Zero()` to prove
+    /// `maxActiveTransports <= 1`, `maxActiveReceiveLoops <= 1`, and
+    /// `maxActiveReconnectOwners <= 1` for required interleavings,
+    /// and to synchronize on tear-down completion without polling
+    /// elapsed time. Non-vacuous because every increment/decrement
+    /// is anchored to the actual mutation of `webSocketTask`,
+    /// `receiveTask`, and `reconnectToken` inside `lifecycleSync`.
+    let lifecycleInvariants = SignalRLifecycleInvariants()
+
     init(
         serverURL: URL,
         session: URLSession = .shared,
@@ -221,6 +231,66 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         return lifecycleQueue.sync(execute: work)
     }
 
+    // MARK: - Instrumented state setters (r12 blocker #1)
+    //
+    // Every mutation of `webSocketTask`, `receiveTask`, and
+    // `reconnectToken` goes through one of these helpers so the
+    // per-instance `lifecycleInvariants` counters see every
+    // transition. Callers MUST already hold the lifecycle queue.
+    // Counter mutations happen after the state variable is updated
+    // so a stale snapshot reader can never see a decremented count
+    // with the field still non-nil (or vice versa).
+
+    /// Install `new` as the active WebSocket. Passing `nil` clears
+    /// the slot. Counter transitions:
+    /// * nil -> non-nil: `enterTransport()`
+    /// * non-nil -> nil: `exitTransport()`
+    /// * non-nil -> non-nil: `exitTransport()` then `enterTransport()`
+    ///   (a supersede-without-tear-down would violate the contract;
+    ///   the tests assert `maxTransports <= 1`, so this path should
+    ///   never fire in a healthy service).
+    private func setWebSocketTaskLocked(_ new: SignalRWebSocket?) {
+        let had = webSocketTask != nil
+        let has = new != nil
+        webSocketTask = new
+        if had && !has {
+            lifecycleInvariants.exitTransport()
+        } else if !had && has {
+            lifecycleInvariants.enterTransport()
+        } else if had && has {
+            lifecycleInvariants.exitTransport()
+            lifecycleInvariants.enterTransport()
+        }
+    }
+
+    private func setReceiveTaskLocked(_ new: Task<Void, Never>?) {
+        let had = receiveTask != nil
+        let has = new != nil
+        receiveTask = new
+        if had && !has {
+            lifecycleInvariants.exitReceiveLoop()
+        } else if !had && has {
+            lifecycleInvariants.enterReceiveLoop()
+        } else if had && has {
+            lifecycleInvariants.exitReceiveLoop()
+            lifecycleInvariants.enterReceiveLoop()
+        }
+    }
+
+    private func setReconnectTokenLocked(_ new: UUID?) {
+        let had = reconnectToken != nil
+        let has = new != nil
+        reconnectToken = new
+        if had && !has {
+            lifecycleInvariants.exitReconnectOwner()
+        } else if !had && has {
+            lifecycleInvariants.enterReconnectOwner()
+        } else if had && has {
+            lifecycleInvariants.exitReconnectOwner()
+            lifecycleInvariants.enterReconnectOwner()
+        }
+    }
+
     // MARK: - Public API
 
     func connect() async throws {
@@ -246,7 +316,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             let priorReconnect = self.reconnectTask
             self.reconnectTask = nil
-            self.reconnectToken = nil
+            self.setReconnectTokenLocked(nil)
             self.intentionalDisconnect = false
             self.generation &+= 1
             self.reconnectAttempt = 0
@@ -305,7 +375,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.tearDownLocked()
             let r = self.reconnectTask
             self.reconnectTask = nil
-            self.reconnectToken = nil
+            self.setReconnectTokenLocked(nil)
             self.connectionStateHub.setState(.disconnected)
             return r
         }
@@ -367,7 +437,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             guard self.generation == myGen, !self.intentionalDisconnect else {
                 return false
             }
-            self.webSocketTask = task
+            self.setWebSocketTaskLocked(task)
             return true
         }
         if !installed {
@@ -412,8 +482,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             self.reconnectAttempt = 0
             self.reconnectTask = nil
-            self.reconnectToken = nil
-            self.receiveTask = self.makeReceiveTask(myGen: myGen)
+            self.setReconnectTokenLocked(nil)
+            self.setReceiveTaskLocked(self.makeReceiveTask(myGen: myGen))
             self.pingTask = self.makePingTask()
             self.connectionStateHub.setState(.connected)
             return true
@@ -742,7 +812,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.reconnectAttempt += 1
             // Reserve the slot with just the token; the Task handle is
             // installed below once we've created it.
-            self.reconnectToken = taskToken
+            self.setReconnectTokenLocked(taskToken)
             self.reconnectTask = nil
             self.connectionStateHub.setState(.reconnecting)
             return (self.generation, true)
@@ -782,7 +852,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 let (shouldRetry, giveUp) = self.lifecycleSync { () -> (Bool, Bool) in
                     if self.reconnectToken == taskToken {
                         self.reconnectTask = nil
-                        self.reconnectToken = nil
+                        self.setReconnectTokenLocked(nil)
                     }
                     let retry = self.generation == myGen &&
                         !self.intentionalDisconnect &&
@@ -824,7 +894,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         lifecycleSync {
             if self.reconnectToken == token {
                 self.reconnectTask = nil
-                self.reconnectToken = nil
+                self.setReconnectTokenLocked(nil)
             }
         }
     }
@@ -835,10 +905,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// interrupted by a receive-error tear-down.
     private func tearDownLocked() {
         receiveTask?.cancel()
-        receiveTask = nil
+        setReceiveTaskLocked(nil)
         pingTask?.cancel()
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
-        webSocketTask = nil
+        setWebSocketTaskLocked(nil)
     }
 }

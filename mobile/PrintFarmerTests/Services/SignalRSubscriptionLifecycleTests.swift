@@ -446,13 +446,12 @@ final class LockedStringSequence: @unchecked Sendable {
 actor LifecycleControlledSleeper {
     private var pendingSleeps: [CheckedContinuation<Void, Never>] = []
     private var pendingReleases: Int = 0
-    /// r11 blocker #1: waiters keyed by UUID so `waitForNextSleep`'s
+    /// r10 blocker #3: waiters keyed by UUID so `waitForNextSleep`'s
     /// cancellation handler can remove exactly the one it registered
     /// (not all waiters). Prior implementation used an unordered array
-    /// with a plain `withCheckedContinuation`, which meant the
-    /// `waitForNewSleep` task-group's `cancelAll()` never woke the
-    /// parked child — `withTaskGroup` waits for children to drain, so
-    /// the idle/false path hung forever.
+    /// with a plain `withCheckedContinuation`, which meant a
+    /// TaskGroup `cancelAll()` never woke the parked child — the
+    /// idle/false path hung forever.
     private var waitingForSleep: [UUID: CheckedContinuation<Void, Never>] = [:]
     /// r10 blocker #3: total number of `sleep(for:)` calls ever
     /// entered by the reconnect task. Monotonic. Tests use this to
@@ -515,19 +514,14 @@ actor LifecycleControlledSleeper {
         }
     }
 
-    /// r11 blocker #1: cancellation-aware wait. The prior version used
+    /// r10 blocker #3: cancellation-aware wait. The prior version used
     /// a plain `withCheckedContinuation`, so if the caller's Task was
-    /// cancelled (as `waitForNewSleep`'s task-group `cancelAll()`
-    /// does when the timeout child wins the race), this continuation
-    /// stayed parked forever — `withTaskGroup` drains children before
-    /// returning, so the whole method hung. Now: the waiter is keyed
-    /// with a UUID; the cancellation handler removes exactly that
-    /// entry and resumes it, so cancellation is honoured but any
-    /// still-registered peers are untouched. Returning normally on
-    /// cancellation is safe because the sole caller
-    /// (`waitForNewSleep`) has already captured `group.next()`'s value
-    /// before the cancellation fires — the drained child's return
-    /// value is discarded.
+    /// cancelled, this continuation stayed parked forever. Now: the
+    /// waiter is keyed with a UUID; the cancellation handler removes
+    /// exactly that entry and resumes it, so cancellation is honoured
+    /// but any still-registered peers are untouched. Returning
+    /// normally on cancellation is safe because the caller
+    /// (`waitForSleepAfter`) rechecks its condition in a loop.
     func waitForNextSleep() async {
         if !pendingSleeps.isEmpty { return }
         let id = UUID()
@@ -564,29 +558,17 @@ actor LifecycleControlledSleeper {
     /// `Task.yield()` polling).
     func totalSleepEntries() -> Int { sleepEnterCount }
 
-    /// Await until at least one new sleep enrolls beyond `baseline`,
-    /// bounded by `nanoseconds`. Returns `true` if a new sleep
-    /// enrolled (regression path — a retry was scheduled when the
-    /// test expected none), or `false` if the observation window
-    /// elapsed idle (expected-idle proof). Uses `TaskGroup` +
-    /// cancellation so no timing continuation leaks; the idle child
-    /// wakes reliably because `waitForNextSleep` (r11 blocker #1) is
-    /// now cancellation-aware.
-    func waitForNewSleep(afterBaseline baseline: Int, boundedNanoseconds: UInt64) async -> Bool {
-        if sleepEnterCount > baseline { return true }
-        return await withTaskGroup(of: Bool.self) { group in
-            group.addTask { [weak self] in
-                guard let self else { return false }
-                await self.waitForNextSleep()
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: boundedNanoseconds)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
+    /// r12 blocker #2: bounded pure barrier. Parks the caller until
+    /// `sleepEnterCount > baseline`. No wall-clock bound — the caller
+    /// is expected to run inside an outer `withTaskGroup` timeout
+    /// used **only as a failure ceiling** (never as evidence of
+    /// absence). Uses a UUID-keyed waiter registered via the same
+    /// `waitingForSleep` map used by `waitForNextSleep`, so it is
+    /// cancellation-safe.
+    func waitForSleepAfter(baseline: Int) async {
+        while sleepEnterCount <= baseline {
+            await waitForNextSleep()
+            if Task.isCancelled { return }
         }
     }
 
@@ -660,6 +642,58 @@ final class LifecycleStateObserver: @unchecked Sendable {
             return
         }
         waiters.append((state, cont))
+        lock.unlock()
+    }
+}
+
+/// r12 blocker #4 helper: one-shot latch that fires on the FIRST
+/// `.disconnected` observation that occurs AFTER `.reconnecting`
+/// has been observed. Used by the bounded-terminal test to avoid
+/// tripping on the recorder's initial `.disconnected` state.
+final class TerminalDisconnectLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sawReconnecting = false
+    private var fired = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func observe(_ state: SignalRConnectionState) {
+        lock.lock()
+        if state == .reconnecting {
+            sawReconnecting = true
+            lock.unlock()
+            return
+        }
+        if state == .disconnected, sawReconnecting, !fired {
+            fired = true
+            let toResume = waiters
+            waiters.removeAll()
+            lock.unlock()
+            for c in toResume { c.resume() }
+            return
+        }
+        lock.unlock()
+    }
+
+    func waitForTerminal() async {
+        if _quickCheck() { return }
+        await withCheckedContinuation { cont in
+            _enqueue(cont: cont)
+        }
+    }
+
+    private func _quickCheck() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return fired
+    }
+
+    private func _enqueue(cont: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if fired {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        waiters.append(cont)
         lock.unlock()
     }
 }
@@ -953,23 +987,29 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         // the released stale reconnect observes `!Task.isCancelled`
         // as false and no-ops via the ownership check.
         let baselineSleeps = await sleeper.totalSleepEntries()
+        let priorMax = service.lifecycleInvariants.snapshot().maxReconnectOwners
         await service.disconnect()
         await recorder.waitFor(state: .disconnected)
 
-        // r10 blocker #3: deterministic idle-gate. Wait a bounded
-        // window for a NEW sleep to enroll; expect none. Returns
-        // false when the window elapses idle (the deterministic
-        // pass path here). A regression that scheduled another
-        // retry would return true. Replaces prior `Task.yield()`
-        // polling.
-        let newSleepEnrolled = await sleeper.waitForNewSleep(
-            afterBaseline: baselineSleeps,
-            boundedNanoseconds: 200_000_000 // 200ms observation window
+        // r12 blocker #2: deterministic tear-down barrier. Instead
+        // of "wait a wall-clock window and hope no new sleep
+        // enrolls", we prove positively that the reconnect owner
+        // Task has fully torn down (counter hits zero) and THEN
+        // check that no additional sleep enrolled between disconnect
+        // and tear-down. This is a positive completion event; the
+        // outer test-case timeout is the only failure ceiling.
+        await service.lifecycleInvariants.waitForReconnectOwnersZero()
+        let sleepsAfterTearDown = await sleeper.totalSleepEntries()
+        XCTAssertEqual(
+            sleepsAfterTearDown,
+            baselineSleeps,
+            "After the reconnect owner has torn down (activeReconnectOwners == 0), no new reconnect sleep may have enrolled"
         )
-        XCTAssertFalse(
-            newSleepEnrolled,
-            "After disconnect(), no additional reconnect sleep must enroll (idle-gate proof, not Task.yield polling)"
-        )
+        let inv = service.lifecycleInvariants.snapshot()
+        XCTAssertEqual(inv.activeReconnectOwners, 0, "reconnect owner counter must be zero after tear-down barrier")
+        XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1, "no interleaving may allow two concurrent reconnect owners; max seen: \(inv.maxReconnectOwners) (prior: \(priorMax))")
+        XCTAssertLessThanOrEqual(inv.maxTransports, 1, "no interleaving may allow two concurrent transports; max seen: \(inv.maxTransports)")
+        XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1, "no interleaving may allow two concurrent receive loops; max seen: \(inv.maxReceiveLoops)")
 
         let final = counter.value()
         // After disconnect, no NEW retries should schedule. The
@@ -1052,6 +1092,21 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         // Wait for `.disconnected` to actually arrive via the state
         // observer. This is the proof the transition applied.
         await recorder.waitFor(state: .disconnected)
+
+        // r12 blocker #6a: prove the stale negotiate failure is
+        // inert. After disconnect() bumped generation and the
+        // released negotiate response landed, no reconnect owner
+        // may have been scheduled off the stale failure, no
+        // transport may have been installed, no receive loop may
+        // have started. All counters must remain at zero-max <= 1.
+        await service.lifecycleInvariants.waitForReconnectOwnersZero()
+        let inv = service.lifecycleInvariants.snapshot()
+        XCTAssertEqual(inv.activeReconnectOwners, 0, "no reconnect owner may remain live after stale negotiate failure")
+        XCTAssertEqual(inv.activeTransports, 0, "no transport may remain installed after stale negotiate failure")
+        XCTAssertEqual(inv.activeReceiveLoops, 0, "no receive loop may remain live after stale negotiate failure")
+        XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1, "max concurrent reconnect owners must be <= 1")
+        XCTAssertLessThanOrEqual(inv.maxTransports, 1, "max concurrent transports must be <= 1")
+        XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1, "max concurrent receive loops must be <= 1")
 
         let states = recorder.snapshot()
         if let firstDisconnect = states.firstIndex(of: .disconnected),
@@ -1149,6 +1204,21 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         }
         XCTAssertTrue(didComplete, "Test C body must complete within 15s")
 
+        // r12 blocker #6b: prove the stale generation frame is inert.
+        // A frame was delivered to the mock socket AFTER disconnect
+        // bumped generation. The service's post-receive generation
+        // guard must have rejected it — no transport install, no
+        // receive-loop start, no state mutation to `.connected`, no
+        // callbacks fired. Counters must show all activity <= 1 and
+        // fully torn down.
+        await service.lifecycleInvariants.waitForReceiveLoopsZero()
+        await service.lifecycleInvariants.waitForTransportsZero()
+        let inv = service.lifecycleInvariants.snapshot()
+        XCTAssertEqual(inv.activeTransports, 0, "no transport may remain installed after stale-generation frame")
+        XCTAssertEqual(inv.activeReceiveLoops, 0, "no receive loop may remain live after stale-generation frame")
+        XCTAssertLessThanOrEqual(inv.maxTransports, 1, "max concurrent transports must be <= 1; observed \(inv.maxTransports)")
+        XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1, "max concurrent receive loops must be <= 1; observed \(inv.maxReceiveLoops)")
+
         let states = recorder.snapshot()
         XCTAssertFalse(
             states.contains(.connected),
@@ -1227,17 +1297,23 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         await service.disconnect()
         await recorder.waitFor(state: .disconnected)
 
-        // r10 blocker #3: deterministic idle-gate replacing
-        // `Task.yield()` polling. Bounded observation window; a new
-        // enrollment would be the regression.
-        let newSleepEnrolled = await sleeper.waitForNewSleep(
-            afterBaseline: baselineSleeps,
-            boundedNanoseconds: 200_000_000
+        // r12 blocker #2: deterministic tear-down barrier. Prove
+        // the reconnect owner Task actually reached exit
+        // (activeReconnectOwners == 0), then check no further sleep
+        // enrollment occurred. No wall-clock idle-window is used as
+        // pass evidence.
+        await service.lifecycleInvariants.waitForReconnectOwnersZero()
+        let sleepsAfterTearDown = await sleeper.totalSleepEntries()
+        XCTAssertEqual(
+            sleepsAfterTearDown,
+            baselineSleeps,
+            "After the reconnect owner has torn down, no new reconnect sleep may have enrolled"
         )
-        XCTAssertFalse(
-            newSleepEnrolled,
-            "After disconnect(), no additional reconnect sleep must enroll"
-        )
+        let inv = service.lifecycleInvariants.snapshot()
+        XCTAssertEqual(inv.activeReconnectOwners, 0)
+        XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1)
+        XCTAssertLessThanOrEqual(inv.maxTransports, 1)
+        XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1)
 
         let final = counter.value()
         XCTAssertEqual(
@@ -1346,6 +1422,21 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         }
 
         XCTAssertTrue(didComplete, "Type-7 close-frame path must not wedge the lifecycle queue (r10 blocker #1)")
+
+        // r12 blocker #3: prove the type-7 interleaving never
+        // ran with two active transports, receive loops, or
+        // reconnect owners. reconnectOwnerEnterCount must be at
+        // least 1 (proves the counter fired non-vacuously off the
+        // type-7 → scheduleReconnect path).
+        let inv = service.lifecycleInvariants.snapshot()
+        XCTAssertGreaterThanOrEqual(inv.reconnectOwnerEnterCount, 1,
+                                    "reconnect owner counter must have fired at least once via type-7 close")
+        XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
+                                 "max concurrent reconnect owners must be <= 1 across type-7 interleaving; observed \(inv.maxReconnectOwners)")
+        XCTAssertLessThanOrEqual(inv.maxTransports, 1,
+                                 "max concurrent transports must be <= 1; observed \(inv.maxTransports)")
+        XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1,
+                                 "max concurrent receive loops must be <= 1; observed \(inv.maxReceiveLoops)")
 
         let states = recorder.snapshot()
         // Exactly one .reconnecting transition — the close frame
@@ -1458,20 +1549,46 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 await mockWS.waitForReceiveCall()
                 mockWS.failReceive(with: URLError(.networkConnectionLost))
 
-                // 5. Deterministic gate: a NEW sleep MUST enroll
-                //    within a bounded window; that is the proof the
+                // 5. Deterministic barrier: a NEW sleep MUST enroll
+                //    past baseline; that is the positive proof the
                 //    nested `scheduleReconnect` installed a fresh
                 //    slot instead of being dropped by stale
-                //    ownership.
-                let newSleepEnrolled = await sleeper.waitForNewSleep(
-                    afterBaseline: baselineSleeps,
-                    boundedNanoseconds: 2_000_000_000 // 2s failure-only bound
-                )
-                XCTAssertTrue(
-                    newSleepEnrolled,
-                    "After immediate receive failure, a NEW reconnect sleep must enroll (r10 blocker #2a — no stranded .connected)"
-                )
+                //    ownership. `waitForSleepAfter` parks purely on
+                //    enrollment — the outer 15s task-group timeout
+                //    is used only as a FAILURE ceiling, never as
+                //    evidence of absence.
+                await sleeper.waitForSleepAfter(baseline: baselineSleeps)
                 await recorder.waitFor(state: .reconnecting)
+
+                // r12 blocker #5: receive-error handoff proof. At
+                // THIS point the reconnect owner has enrolled and
+                // is parked in `sleep(for:)` (proved by
+                // `waitForSleepAfter`); the receive task that just
+                // failed must have exited (its Task body threw and
+                // returned). Snapshot invariants: exactly one
+                // reconnect owner active, zero receive loops
+                // active, zero transports installed. This proves
+                // the registered receive task was cancelled/torn
+                // down BEFORE the detached reconnect continues.
+                let handoffInv = service.lifecycleInvariants.snapshot()
+                XCTAssertEqual(handoffInv.activeReconnectOwners, 1,
+                               "exactly one reconnect owner must be alive during handoff; observed \(handoffInv.activeReconnectOwners)")
+                XCTAssertEqual(handoffInv.activeReceiveLoops, 0,
+                               "receive task must have exited before reconnect owner continues; observed \(handoffInv.activeReceiveLoops)")
+                XCTAssertEqual(handoffInv.activeTransports, 0,
+                               "prior transport must be torn down during handoff; observed \(handoffInv.activeTransports)")
+
+                // Non-vacuous invariant assertion: exactly one
+                // reconnect owner is active at this point (the fresh
+                // one just enrolled), and at no point during the
+                // full type-7-plus-recv-error interleaving did the
+                // service ever have two concurrent transports,
+                // receive loops, or reconnect owners.
+                let inv = service.lifecycleInvariants.snapshot()
+                XCTAssertGreaterThanOrEqual(inv.reconnectOwnerEnterCount, 1)
+                XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1, "max concurrent reconnect owners must be <= 1 (r12 blocker #1); observed \(inv.maxReconnectOwners)")
+                XCTAssertLessThanOrEqual(inv.maxTransports, 1, "max concurrent transports must be <= 1; observed \(inv.maxTransports)")
+                XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1, "max concurrent receive loops must be <= 1; observed \(inv.maxReceiveLoops)")
 
                 // 6. Clean halt.
                 await service.disconnect()
@@ -1682,73 +1799,397 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         XCTAssertTrue(didComplete, "connect() supersede + teardown must not hang (r11 blocker #2)")
     }
 
-    // MARK: - r11 blocker #1 direct sleeper-primitive proofs
+    // MARK: - r12 blocker #2 direct sleeper-primitive proof
 
-    /// r11 blocker #1 direct proof: `waitForNewSleep` returns `false`
-    /// within the bounded window when no sleep enrolls, and does not
-    /// hang draining a cancellation-unaware child (the r10 regression).
+    /// r12 blocker #3 composite proof: type-7 close-frame on the
+    /// **first** transport forces `scheduleReconnect`; the reconnect
+    /// flow installs a **second** transport, completes handshake and
+    /// publishes `.connected`; that new transport's **first**
+    /// connected-loop receive throws an immediate URL error. The
+    /// combined interleaving must never allow two active transports,
+    /// receive loops, or reconnect owners at any observed point.
     ///
-    /// The prior implementation used a plain `withCheckedContinuation`
-    /// inside `waitForNextSleep`, so the task-group `cancelAll()` after
-    /// the timeout child fired left the sleep-watcher child parked
-    /// forever — `withTaskGroup` awaits every child before returning,
-    /// so the whole method never came back. The r11 fix wraps the
-    /// waiter in `withTaskCancellationHandler` with UUID-keyed removal
-    /// on cancellation.
-    func testLifecycleControlledSleeper_waitForNewSleep_idlePathCompletesWithinBound_returnsFalse() async throws {
-        let sleeper = LifecycleControlledSleeper()
-        let bound: UInt64 = 100_000_000 // 100ms
-        let started = ContinuousClock.now
-        let result = await sleeper.waitForNewSleep(afterBaseline: 0, boundedNanoseconds: bound)
-        let elapsed = ContinuousClock.now - started
+    /// The proof uses:
+    /// * `MockWebSocketSwitcher` → deterministic two-socket handover.
+    /// * `LifecycleControlledSleeper` → gates each retry.
+    /// * `LifecycleStateObserver` → per-state continuation barrier.
+    /// * `SignalRLifecycleInvariants.snapshot()` at each phase edge.
+    func testRealService_type7CloseThenImmediateReceiveErrorOnNewTransport_singleOwnerSingleTransport() async throws {
+        let negotiatePayload: [String: Any] = [
+            "connectionId": "conn-r12-b3",
+            "connectionToken": "tok-r12-b3",
+            "availableTransports": [
+                [
+                    "transport": "WebSockets",
+                    "transferFormats": ["Text", "Binary"]
+                ]
+            ]
+        ]
+        MockURLProtocol.requestHandler = { request in
+            let data = (try? JSONSerialization.data(withJSONObject: negotiatePayload)) ?? Data()
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
 
-        XCTAssertFalse(result, "idle path must return false — no new sleep enrolled")
-        // Elapsed time can only fail; must be well below 5s so a hang
-        // (the r10 regression) trips the assertion instead of the
-        // Xcode default 60s testcase timeout.
-        XCTAssertLessThan(elapsed, .seconds(5),
-                          "waitForNewSleep must return promptly on the idle path — r11 blocker #1 regression trip")
+        let mockA = MockSignalRWebSocket()
+        let mockB = MockSignalRWebSocket()
+        let switcher = MockWebSocketSwitcher([mockA, mockB])
+        let sleeper = LifecycleControlledSleeper()
+        let service = SignalRService(
+            serverURL: testURL,
+            session: session,
+            tokenProvider: { nil },
+            reconnectBackoff: { _ in 1.0 },
+            reconnectSleeper: sleeper.makeSleeper(),
+            webSocketFactory: { _ in switcher.next() }
+        )
+
+        let recorder = LifecycleStateObserver()
+        let sub = recordStates(service, into: recorder)
+        _ = sub
+
+        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                // Phase 1: initial connect handshake → connected via mockA.
+                let connectTask = Task { try? await service.connect() }
+                await mockA.waitForReceiveCall()
+                mockA.completeReceive(with: .string("{}\u{1e}"))
+                _ = await connectTask.value
+                await recorder.waitFor(state: .connected)
+
+                // Phase 2: type-7 close frame on mockA → scheduleReconnect.
+                await mockA.waitForReceiveCall()
+                mockA.completeReceive(with: .string("{\"type\":7,\"error\":\"server-close\"}\u{1e}"))
+                await recorder.waitFor(state: .reconnecting)
+                await sleeper.waitForNextSleep()
+
+                // Snapshot at handoff-mid: previous transport torn
+                // down, receive loop exited, reconnect owner parked.
+                let midInv = service.lifecycleInvariants.snapshot()
+                XCTAssertEqual(midInv.activeReconnectOwners, 1,
+                               "one reconnect owner must be parked after type-7 close; observed \(midInv.activeReconnectOwners)")
+                XCTAssertEqual(midInv.activeTransports, 0,
+                               "previous transport must be torn down before reconnect flow installs its own; observed \(midInv.activeTransports)")
+                XCTAssertEqual(midInv.activeReceiveLoops, 0,
+                               "previous receive loop must have exited; observed \(midInv.activeReceiveLoops)")
+
+                // Phase 3: release sleeper → reconnect performConnect
+                // installs mockB, completes handshake, publishes
+                // `.connected` again.
+                await sleeper.release()
+                await mockB.waitForReceiveCall()
+                mockB.completeReceive(with: .string("{}\u{1e}"))
+                await recorder.waitFor(state: .connected)
+
+                // Phase 4: mockB's connected receive-loop parks → fail
+                // it with URLError. This is the "immediate receive
+                // error on the new transport" leg.
+                let baselineSleeps = await sleeper.totalSleepEntries()
+                await mockB.waitForReceiveCall()
+                mockB.failReceive(with: URLError(.networkConnectionLost))
+
+                // Deterministic barrier: another reconnect enrolls.
+                await sleeper.waitForSleepAfter(baseline: baselineSleeps)
+                await recorder.waitFor(state: .reconnecting)
+
+                // Snapshot at second handoff: reconnect owner
+                // enrollment count must be at least 2 (type-7 close
+                // + recv-error), and no invariant may have breached.
+                let secondInv = service.lifecycleInvariants.snapshot()
+                XCTAssertGreaterThanOrEqual(secondInv.reconnectOwnerEnterCount, 2,
+                                            "reconnect owner counter must have fired at least twice (type-7 + recv-error); observed \(secondInv.reconnectOwnerEnterCount)")
+                XCTAssertGreaterThanOrEqual(secondInv.transportEnterCount, 2,
+                                            "transport counter must have fired at least twice (initial + reconnect); observed \(secondInv.transportEnterCount)")
+                XCTAssertLessThanOrEqual(secondInv.maxReconnectOwners, 1,
+                                        "max concurrent reconnect owners must be <= 1; observed \(secondInv.maxReconnectOwners)")
+                XCTAssertLessThanOrEqual(secondInv.maxTransports, 1,
+                                        "max concurrent transports must be <= 1; observed \(secondInv.maxTransports)")
+                XCTAssertLessThanOrEqual(secondInv.maxReceiveLoops, 1,
+                                        "max concurrent receive loops must be <= 1; observed \(secondInv.maxReceiveLoops)")
+
+                await service.disconnect()
+                await recorder.waitFor(state: .disconnected)
+                return true
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        XCTAssertTrue(didComplete, "Type-7 + immediate receive-error interleaving must complete within 15s")
     }
 
-    /// r11 blocker #1 direct proof: the positive path still resolves.
-    /// A concurrent `sleep(for:)` enrolment must wake the waiter and
-    /// return `true`.
-    func testLifecycleControlledSleeper_waitForNewSleep_sleepEnrollmentPathCompletes_returnsTrue() async throws {
+    /// r12 blocker #4 proof: repeated failed reconnects reach the
+    /// bounded deterministic terminal (`reconnectAttempt >= 10 →
+    /// publish `.disconnected`, stop retrying`) required by #777 —
+    /// **without** the test manually disconnecting to end the loop.
+    ///
+    /// A driver task auto-releases the sleeper on every enrollment
+    /// so the retry loop can advance under always-failing negotiate.
+    /// The pass criterion is a positive completion event: a
+    /// one-shot terminal latch fires only after `.reconnecting` was
+    /// observed AND then `.disconnected` published again, plus
+    /// `activeReconnectOwners == 0` when the owner task exits.
+    func testRealService_boundedTerminalAfterMaxReconnectAttempts_publishesDisconnected() async throws {
+        let counter = NegotiateCounter()
+        MockURLProtocol.requestHandler = { request in
+            _ = counter.increment()
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let sleeper = LifecycleControlledSleeper()
+        let service = SignalRService(
+            serverURL: testURL,
+            session: session,
+            tokenProvider: { nil },
+            reconnectBackoff: { _ in 0.001 }, // ignored, sleeper is injected
+            reconnectSleeper: sleeper.makeSleeper()
+        )
+
+        let recorder = LifecycleStateObserver()
+        let sub = recordStates(service, into: recorder)
+        _ = sub
+
+        // Terminal latch: fires on the FIRST `.disconnected`
+        // observed AFTER `.reconnecting` has been observed. The
+        // recorder's initial `.disconnected` therefore does not
+        // trigger the latch — only the bounded-terminal publish
+        // from `giveUp` (which necessarily follows a `.reconnecting`
+        // transition) does.
+        let terminalLatch = TerminalDisconnectLatch()
+        let latchSub = service.onConnectionStateChanged { state in
+            terminalLatch.observe(state)
+        }.1
+        _ = latchSub
+
+        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
+            // Driver: on every new sleep enrollment, immediately
+            // release it so the retry loop advances. Terminates
+            // when the enclosing group cancels this task.
+            group.addTask {
+                while !Task.isCancelled {
+                    await sleeper.waitForNextSleep()
+                    if Task.isCancelled { return true }
+                    await sleeper.release()
+                }
+                return true
+            }
+            group.addTask {
+                do {
+                    try await service.connect()
+                    XCTFail("connect() should have thrown on 500 negotiate")
+                } catch {}
+                // Wait for the bounded terminal via the latch: this
+                // is the positive completion event when giveUp
+                // publishes `.disconnected` after
+                // `reconnectAttempt >= 10`.
+                await terminalLatch.waitForTerminal()
+                // Wait for the reconnect owner Task to actually
+                // exit — this is the positive completion event.
+                await service.lifecycleInvariants.waitForReconnectOwnersZero()
+                return true
+            }
+            group.addTask {
+                // Failure ceiling only; never the pass path.
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        XCTAssertTrue(didComplete, "Bounded terminal must be reached deterministically without wall-clock idle")
+
+        let attempts = counter.value()
+        // Initial connect + up to 10 retries = 11 negotiate calls.
+        // The exact upper bound is the production cap; we assert
+        // at least 11 because the loop must have exhausted its cap.
+        XCTAssertGreaterThanOrEqual(attempts, 11,
+                                    "loop must reach the bounded terminal after >= 10 retries; observed \(attempts) negotiate calls")
+
+        let inv = service.lifecycleInvariants.snapshot()
+        XCTAssertEqual(inv.activeReconnectOwners, 0,
+                       "no reconnect owner may remain live after bounded terminal; observed \(inv.activeReconnectOwners)")
+        XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
+                                "max concurrent reconnect owners must be <= 1; observed \(inv.maxReconnectOwners)")
+        XCTAssertLessThanOrEqual(inv.maxTransports, 1,
+                                "max concurrent transports must be <= 1; observed \(inv.maxTransports)")
+
+        let states = recorder.snapshot()
+        XCTAssertFalse(states.contains(.connected),
+                       ".connected must never publish under always-failing negotiate; observed \(states)")
+        XCTAssertEqual(states.last, .disconnected,
+                       "final state must be .disconnected via giveUp branch; observed \(states)")
+    }
+
+    /// r12 blocker #6d proof: two `SignalRService` instances have
+    /// independent lifecycle counters, transports, receive loops,
+    /// and per-instance connection-state subscribers. Activity on
+    /// service A must not surface as counter increments, callback
+    /// invocations, or state transitions on service B.
+    func testTwoServiceInstances_haveIndependentLifecycleCountersAndCallbacks() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let payload: [String: Any] = [
+                "connectionId": "conn-\(UUID().uuidString)",
+                "connectionToken": "tok-\(UUID().uuidString)",
+                "availableTransports": [
+                    [
+                        "transport": "WebSockets",
+                        "transferFormats": ["Text", "Binary"]
+                    ]
+                ]
+            ]
+            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+
+        let mockA = MockSignalRWebSocket()
+        let mockB = MockSignalRWebSocket()
+        let sleeperA = LifecycleControlledSleeper()
+        let sleeperB = LifecycleControlledSleeper()
+        let serviceA = SignalRService(
+            serverURL: URL(string: "https://a.test.invalid")!,
+            session: session,
+            tokenProvider: { nil },
+            reconnectBackoff: { _ in 1.0 },
+            reconnectSleeper: sleeperA.makeSleeper(),
+            webSocketFactory: { _ in mockA }
+        )
+        let serviceB = SignalRService(
+            serverURL: URL(string: "https://b.test.invalid")!,
+            session: session,
+            tokenProvider: { nil },
+            reconnectBackoff: { _ in 1.0 },
+            reconnectSleeper: sleeperB.makeSleeper(),
+            webSocketFactory: { _ in mockB }
+        )
+
+        // Independent recorders proved by identity: appending to A's
+        // must not affect B's snapshot.
+        let recorderA = LifecycleStateObserver()
+        let recorderB = LifecycleStateObserver()
+        let subA = recordStates(serviceA, into: recorderA)
+        let subB = recordStates(serviceB, into: recorderB)
+        _ = (subA, subB)
+
+        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                let connectTask = Task { try? await serviceA.connect() }
+                await mockA.waitForReceiveCall()
+                mockA.completeReceive(with: .string("{}\u{1e}"))
+                _ = await connectTask.value
+                await recorderA.waitFor(state: .connected)
+                return true
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        XCTAssertTrue(didComplete, "Service A connect must complete within 15s")
+
+        // Service A: counters must show activity.
+        let invA = serviceA.lifecycleInvariants.snapshot()
+        XCTAssertGreaterThanOrEqual(invA.transportEnterCount, 1,
+                                    "service A transport counter must have fired; observed \(invA.transportEnterCount)")
+        XCTAssertGreaterThanOrEqual(invA.receiveLoopEnterCount, 1,
+                                    "service A receive-loop counter must have fired; observed \(invA.receiveLoopEnterCount)")
+
+        // Service B: independent counters — must be untouched.
+        let invB = serviceB.lifecycleInvariants.snapshot()
+        XCTAssertEqual(invB.activeTransports, 0, "service B must have no active transport")
+        XCTAssertEqual(invB.activeReceiveLoops, 0, "service B must have no active receive loop")
+        XCTAssertEqual(invB.activeReconnectOwners, 0, "service B must have no active reconnect owner")
+        XCTAssertEqual(invB.transportEnterCount, 0,
+                       "service B transport counter must be zero (A's activity must not surface on B); observed \(invB.transportEnterCount)")
+        XCTAssertEqual(invB.receiveLoopEnterCount, 0,
+                       "service B receive-loop counter must be zero; observed \(invB.receiveLoopEnterCount)")
+        XCTAssertEqual(invB.reconnectOwnerEnterCount, 0,
+                       "service B reconnect-owner counter must be zero; observed \(invB.reconnectOwnerEnterCount)")
+
+        // Callback isolation: recorder B must not have observed any
+        // transition induced by service A's connect.
+        XCTAssertFalse(recorderB.snapshot().contains(.connected),
+                       "service B's subscriber must NOT observe .connected from A's activity; observed \(recorderB.snapshot())")
+        XCTAssertTrue(recorderA.snapshot().contains(.connected),
+                      "service A's own subscriber must observe .connected; observed \(recorderA.snapshot())")
+
+        // Independent teardown: disconnect A, B still untouched.
+        await serviceA.disconnect()
+        await recorderA.waitFor(state: .disconnected)
+        await serviceA.lifecycleInvariants.waitForTransportsZero()
+        let invBFinal = serviceB.lifecycleInvariants.snapshot()
+        XCTAssertEqual(invBFinal.transportEnterCount, 0,
+                       "service B counters must remain untouched after A's disconnect")
+        XCTAssertFalse(recorderB.snapshot().contains(.disconnected) && recorderB.snapshot().count > 1,
+                       "service B recorder must not observe A's disconnect transition")
+
+        // Cleanly release any parked sleepers so no dangling
+        // continuations leak into the next test.
+        await sleeperA.release()
+        await sleeperB.release()
+    }
+
+    // MARK: - r12 blocker #2 direct sleeper-primitive proof
+
+    /// r12 direct proof: `waitForSleepAfter(baseline:)` returns as
+    /// soon as a new `sleep(for:)` enrolls past `baseline`. Uses a
+    /// bounded outer task-group timeout only as a FAILURE ceiling;
+    /// the pass path is a positive completion event, not the
+    /// elapsed-time observation the removed `waitForNewSleep`
+    /// helper relied on. If the primitive regressed to hang, the
+    /// 5s ceiling would fail the assertion — never the pass path.
+    func testLifecycleControlledSleeper_waitForSleepAfter_wakesOnEnrollment() async throws {
         let sleeper = LifecycleControlledSleeper()
         let baseline = await sleeper.totalSleepEntries()
 
-        let didObserve: Bool = await withTaskGroup(of: Bool.self) { group in
+        let observed: Bool = await withTaskGroup(of: Bool.self) { group in
             group.addTask {
-                await sleeper.waitForNewSleep(
-                    afterBaseline: baseline,
-                    boundedNanoseconds: 5_000_000_000 // 5s failure-only bound
-                )
+                await sleeper.waitForSleepAfter(baseline: baseline)
+                return true
             }
             group.addTask {
-                // Enrol a sleep asynchronously. `sleep(for:)` parks on
-                // the internal continuation; the waiter must observe
-                // the enrolment and return true.
                 await sleeper.sleep(for: 0)
                 return true
             }
-            // The waiter returns true when the enrolment fires; the
-            // sleep child returns true when its parked continuation
-            // resumes. Either "first" is a satisfactory positive
-            // signal — we assert both children complete.
-            var first: Bool? = await group.next()
-            // Release the parked sleeper so the second child can
-            // exit; without this the second child would be blocked
-            // and cancelAll would hang if the waiter is a
-            // cancellation-unaware primitive (this is a secondary
-            // regression trip for the `sleep(for:)` cancellation
-            // handler path).
+            group.addTask {
+                // Failure ceiling only; never the pass path.
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            // Release the parked sleeper so the "sleep child" and
+            // any pending waiters exit cleanly before we tear down
+            // the group.
             await sleeper.release()
-            let second: Bool? = await group.next()
-            if first == nil { first = second }
-            return (first ?? false) && (second ?? false)
+            group.cancelAll()
+            return first
         }
 
-        XCTAssertTrue(didObserve, "positive path must return true when a new sleep enrols")
+        XCTAssertTrue(observed, "waitForSleepAfter must wake on a new sleep enrollment (positive completion, not elapsed-time absence)")
     }
 }
 

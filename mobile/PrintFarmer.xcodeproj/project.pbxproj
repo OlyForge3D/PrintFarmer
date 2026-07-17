@@ -274,6 +274,7 @@
 		50223C7434476DC0B6673E8B /* SignalRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45FDB4137FE34914C387AE17 /* SignalRService.swift */; };
 		CA110D6A7E1234567890AB03 /* SignalRSubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */; };
 		CA110D6A7E1234567890AD03 /* CompletionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */; };
+		CA110D6A7E1234567890B003 /* SignalRLifecycleInvariants.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */; };
 		CA110D6A7E1234567890AB05 /* SignalRSubscriptionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AB06 /* SignalRSubscriptionLifecycleTests.swift */; };
 		CA110D6A7E1234567890AF03 /* SignalRCrossHubFIFOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AF04 /* SignalRCrossHubFIFOTests.swift */; };
 		CA110D6A7E1234567890AE01 /* CompletionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AE02 /* CompletionRegistryTests.swift */; };
@@ -482,6 +483,7 @@
 		49036340D262B04245686D66 /* AutoDispatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchService.swift; sourceTree = "<group>"; };
 		CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRSubscription.swift; sourceTree = "<group>"; };
 		CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionRegistry.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRLifecycleInvariants.swift; sourceTree = "<group>"; };
 		CA110D6A7E1234567890AB06 /* SignalRSubscriptionLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRSubscriptionLifecycleTests.swift; sourceTree = "<group>"; };
 		CA110D6A7E1234567890AF04 /* SignalRCrossHubFIFOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRCrossHubFIFOTests.swift; sourceTree = "<group>"; };
 		CA110D6A7E1234567890AE02 /* CompletionRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionRegistryTests.swift; sourceTree = "<group>"; };
@@ -833,6 +835,7 @@
 				45FDB4137FE34914C387AE17 /* SignalRService.swift */,
 				CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */,
 				CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */,
+				CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */,
 				CF11AA0000000000000C0002 /* ConnectionMonitor.swift */,
 				BF23D467957EDEE89DB0A90A /* SpoolService.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */,
@@ -1607,6 +1610,7 @@
 				50223C7434476DC0B6673E8B /* SignalRService.swift in Sources */,
 				CA110D6A7E1234567890AB03 /* SignalRSubscription.swift in Sources */,
 				CA110D6A7E1234567890AD03 /* CompletionRegistry.swift in Sources */,
+				CA110D6A7E1234567890B003 /* SignalRLifecycleInvariants.swift in Sources */,
 				810501B5434D7BC2DBC2CFD6 /* StatisticsService.swift in Sources */,
 				762008F3419AB9A3D8FD178E /* AppConfig.swift in Sources */,
 				71A9C2DF9F18FDC75CE11E43 /* AuthViewModel.swift in Sources */,
