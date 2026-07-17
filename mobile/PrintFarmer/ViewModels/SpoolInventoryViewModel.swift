@@ -26,13 +26,40 @@ final class SpoolInventoryViewModel {
     var showScannedDataSheet = false
     var highlightedSpoolId: Int?
 
+    // Monotonic authority for spool-highlight lifetime. Advanced synchronously
+    // inside `setHighlight` and `invalidateHighlightOwnership`; a retained
+    // expiry Task captures the generation at arm time and defers to
+    // `clearHighlightIfCurrent(generation:spoolId:)` to enforce the guard.
+    // #726: correctness must not depend on cancellation observation or on
+    // deferred SwiftUI `.onChange` ordering.
+    private(set) var highlightGeneration: UInt64 = 0
+
+    @ObservationIgnored private var highlightExpiryTask: Task<Void, Never>?
+
+    /// Production duration for a highlight before its retained expiry task
+    /// attempts a guarded clear. Exposed so tests can shorten if needed;
+    /// deterministic tests inject `_highlightExpirySleepOverride` instead.
+    @ObservationIgnored var highlightExpiryDuration: Duration = .seconds(2)
+
+    /// Test seam. When set, the retained expiry task awaits this closure
+    /// (with the captured generation and spool id) instead of `Task.sleep`,
+    /// letting tests park the expiry, mutate authority, and release the
+    /// parked continuation to prove the identity+generation guard.
+    /// Production code never sets this.
+    @ObservationIgnored var _highlightExpirySleepOverride: (@Sendable (UInt64, Int) async -> Void)?
+
+    /// Test seam. Exposes the currently retained expiry Task so tests can
+    /// deterministically await its completion via `await task?.value` after
+    /// releasing a parked continuation — no polling, sleep, or `Task.yield`.
+    var _currentHighlightExpiryTask: Task<Void, Never>? { highlightExpiryTask }
+
     // NFC writing state
     var isWritingNFC = false
     var writeNFCError: String?
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "SpoolInventory")
-    private var spoolService: (any SpoolServiceProtocol)?
-    private var nfcScanner: (any SpoolScannerProtocol)?
+    @ObservationIgnored private var spoolService: (any SpoolServiceProtocol)?
+    @ObservationIgnored private var nfcScanner: (any SpoolScannerProtocol)?
 
     func configure(spoolService: any SpoolServiceProtocol) {
         self.spoolService = spoolService
@@ -162,7 +189,60 @@ final class SpoolInventoryViewModel {
         spools.first { $0.id == id }
     }
 
+    /// Synchronously advances highlight authority to a new spool, publishes
+    /// the new `highlightedSpoolId`, and arms a retained expiry task guarded
+    /// by the freshly captured (generation, spoolId) pair. Cancels any prior
+    /// expiry task on a best-effort basis, but correctness does not depend on
+    /// cancellation being observed — the guard alone prevents a stale expiry
+    /// (or one whose cancellation is dropped) from clearing a newer highlight.
+    ///
+    /// #726: this must run in a single `@MainActor` state transition so no
+    /// window exists between publishing the new highlight and advancing
+    /// authority. Callers must not modify `highlightedSpoolId` directly for
+    /// production highlight assignments; use this method instead.
+    func setHighlight(spoolId: Int) {
+        highlightExpiryTask?.cancel()
+        highlightGeneration &+= 1
+        let capturedGeneration = highlightGeneration
+        highlightedSpoolId = spoolId
+
+        let duration = highlightExpiryDuration
+        let sleepOverride = _highlightExpirySleepOverride
+        highlightExpiryTask = Task { @MainActor [weak self] in
+            if let sleepOverride {
+                await sleepOverride(capturedGeneration, spoolId)
+            } else {
+                try? await Task.sleep(for: duration)
+            }
+            self?.clearHighlightIfCurrent(generation: capturedGeneration, spoolId: spoolId)
+        }
+    }
+
+    /// Clears the highlight only when both the generation and spool identity
+    /// captured by an expiry callback still match the current highlight. This
+    /// is the single seam that guarantees a stale (or dropped-cancellation)
+    /// expiry cannot erase a newer highlight.
+    func clearHighlightIfCurrent(generation: UInt64, spoolId: Int) {
+        guard generation == highlightGeneration,
+              spoolId == highlightedSpoolId else { return }
+        highlightedSpoolId = nil
+        highlightExpiryTask = nil
+    }
+
+    /// Cancels the retained expiry task and advances the generation so any
+    /// already-scheduled or parked expiry becomes a no-op via the guard in
+    /// `clearHighlightIfCurrent`. Does not modify the visible
+    /// `highlightedSpoolId` — the view's disappearance handler calls this so
+    /// an off-screen view cannot later mutate a newer highlight, without
+    /// preemptively clearing the current one.
+    func invalidateHighlightOwnership() {
+        highlightExpiryTask?.cancel()
+        highlightExpiryTask = nil
+        highlightGeneration &+= 1
+    }
+
     func clearHighlight() {
+        invalidateHighlightOwnership()
         highlightedSpoolId = nil
     }
 
@@ -170,12 +250,12 @@ final class SpoolInventoryViewModel {
         switch result {
         case .spoolId(let id):
             if let existing = findSpool(byId: id) {
-                highlightedSpoolId = existing.id
+                setHighlight(spoolId: existing.id)
             } else {
                 // Reload and try again
                 await loadSpools()
                 if let existing = findSpool(byId: id) {
-                    highlightedSpoolId = existing.id
+                    setHighlight(spoolId: existing.id)
                 } else {
                     scanError = "Spool #\(id) not found in inventory."
                 }
