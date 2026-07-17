@@ -758,6 +758,23 @@ actor APIClient {
         case 405:
             throw NetworkError.methodNotAllowed
         case 409:
+            // #714 (F9): the printed-parts harvest endpoints
+            // (`POST /api/job-queue/{id}/harvest`) return a typed RFC 7807
+            // ProblemDetails 409 with `code == "wrongBin"` or
+            // `"partMappingRequired"` and extension fields the harvest UI
+            // must read structurally (see PartsInventoryProblemDetails.cs).
+            // Decode it when the `code` extension is recognised so callers
+            // get typed detail; every other 409 (e.g. plain `{message}`
+            // conflicts from job-state checks) keeps mapping to the
+            // existing bare `.conflict` case so current callers
+            // (PrinterControlsViewModel) are unaffected.
+            if !data.isEmpty,
+               let apiError = try? decoder.decode(APIError.self, from: data),
+               apiError.code == PartsInventoryConflict.wrongBinCode
+                || apiError.code == PartsInventoryConflict.partMappingRequiredCode,
+               let conflict = try? decoder.decode(PartsInventoryConflict.self, from: data) {
+                throw NetworkError.partsInventoryConflict(conflict)
+            }
             throw NetworkError.conflict
         case 400...499:
             let apiError = try? decoder.decode(APIError.self, from: data)
@@ -843,6 +860,13 @@ enum NetworkError: LocalizedError, Sendable {
     case featureDisabled(APIError)
     case methodNotAllowed
     case conflict
+    /// A typed printed-parts harvest conflict (#714/#741): either a
+    /// `wrongBin` mismatch (scanned destination bin does not match the
+    /// expected bin for one or more SKUs) or `partMappingRequired`
+    /// (the job has no resolvable output → SKU mapping). Callers use the
+    /// decoded ``PartsInventoryConflict`` to render the exact guidance the
+    /// backend adjudicated, rather than a generic conflict message.
+    case partsInventoryConflict(PartsInventoryConflict)
     case noConnection
     case timeout
     case serverUnreachable
@@ -866,6 +890,7 @@ enum NetworkError: LocalizedError, Sendable {
         case .methodNotAllowed:
             return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
         case .conflict: return "Conflict — resource was modified"
+        case .partsInventoryConflict(let conflict): return conflict.detail ?? conflict.title ?? "Printed-parts conflict"
         case .noConnection: return "No internet connection"
         case .timeout: return "Request timed out"
         case .serverUnreachable: return "Server is unreachable"

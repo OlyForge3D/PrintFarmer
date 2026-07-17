@@ -156,6 +156,46 @@ enum TestJSON {
 
     static let printJobArray = "[\(printJob), \(printJobQueued)]"
 
+    /// Dispute C (#714): completed job not yet harvested — eligible for
+    /// "Harvest to Inventory".
+    static let printJobCompleted = """
+    {
+        "id": "cc0e8400-e29b-41d4-a716-446655440008",
+        "status": "Completed",
+        "priority": 1,
+        "queuePosition": 0,
+        "gcodeFileName": "widget.gcode",
+        "assignedPrinterName": "Prusa MK4",
+        "createdAt": "2025-07-17T07:00:00Z",
+        "updatedAt": "2025-07-17T08:00:00Z",
+        "actualStartTime": "2025-07-17T07:05:00Z",
+        "actualEndTime": "2025-07-17T08:00:00Z",
+        "copies": 1,
+        "completedCopies": 1,
+        "remainingCopies": 0
+    }
+    """
+
+    /// Dispute C (#714): completed job that has already been harvested.
+    static let printJobHarvested = """
+    {
+        "id": "aa0e8400-e29b-41d4-a716-446655440006",
+        "status": "Completed",
+        "priority": 1,
+        "queuePosition": 0,
+        "gcodeFileName": "gear.gcode",
+        "assignedPrinterName": "Prusa MK4",
+        "createdAt": "2025-07-17T07:00:00Z",
+        "updatedAt": "2025-07-17T09:00:00Z",
+        "actualStartTime": "2025-07-17T07:05:00Z",
+        "actualEndTime": "2025-07-17T08:00:00Z",
+        "copies": 1,
+        "completedCopies": 1,
+        "remainingCopies": 0,
+        "harvestedAt": "2025-07-17T09:00:00Z"
+    }
+    """
+
     // MARK: QueueOverview (QueueOverviewDto)
 
     static let queueOverview = """
@@ -318,6 +358,32 @@ enum TestJSON {
             "copies": 1,
             "completedCopies": 1,
             "remainingCopies": 0
+        },
+        "gcodeFile": null,
+        "assignedPrinter": null,
+        "estimatedStartTime": null,
+        "estimatedCompletionTime": null
+    }
+    """
+
+    /// Dispute C (#714): a completed job already harvested — must decode
+    /// `harvestedAt` and must be excluded from the bin-scan harvest picker.
+    static let queuedPrintJobResponseCompletedHarvested = """
+    {
+        "job": {
+            "id": "bb0e8400-e29b-41d4-a716-446655440007",
+            "name": "harvested_part.gcode",
+            "fileName": "harvested_part.gcode",
+            "status": "Completed",
+            "priority": 1,
+            "queuePosition": 0,
+            "actualStartTimeUtc": "2025-07-17T06:00:00Z",
+            "actualEndTimeUtc": "2025-07-17T07:00:00Z",
+            "createdAtUtc": "2025-07-17T05:00:00Z",
+            "copies": 1,
+            "completedCopies": 1,
+            "remainingCopies": 0,
+            "harvestedAt": "2025-07-17T07:05:00Z"
         },
         "gcodeFile": null,
         "assignedPrinter": null,

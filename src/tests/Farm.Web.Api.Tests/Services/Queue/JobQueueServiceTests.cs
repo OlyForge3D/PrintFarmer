@@ -1123,6 +1123,43 @@ public class JobQueueServiceTests
         result.Status.Should().Be(PrintJobStatus.Queued);
     }
 
+    // #714: harvestedAt must round-trip through JobQueuePrintJobDto so mobile
+    // clients can tell harvested jobs apart from unharvested completed jobs.
+    [Fact]
+    public async Task GetJobAsync_UnharvestedJob_ReturnsNullHarvestedAt()
+    {
+        PrintJob job = new PrintJobBuilder()
+            .AsCompleted()
+            .Build();
+        job.HarvestedAt = null;
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.HarvestedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetJobAsync_HarvestedJob_ProjectsHarvestedAt()
+    {
+        DateTime harvestedAt = new(2026, 7, 15, 12, 34, 56, DateTimeKind.Utc);
+        PrintJob job = new PrintJobBuilder()
+            .AsCompleted()
+            .Build();
+        job.HarvestedAt = harvestedAt;
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.HarvestedAt.Should().Be(harvestedAt);
+    }
+
     #endregion
 
     #region RemoveJobAsync Tests

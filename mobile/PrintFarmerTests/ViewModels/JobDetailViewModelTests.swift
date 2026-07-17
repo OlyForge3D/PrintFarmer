@@ -222,4 +222,26 @@ final class JobDetailViewModelTests: XCTestCase {
         await unconfigured.cancelJob()
         XCTAssertFalse(unconfigured.isPerformingAction)
     }
+
+    // MARK: - Dispute C (#714): harvest-to-inventory gating
+
+    func testCanHarvestToInventoryTrueForCompletedUnharvestedJobWithFeatureEnabled() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobCompleted)
+
+        XCTAssertTrue(canHarvestToInventory(job: job, partsInventoryEnabled: true))
+    }
+
+    func testCanHarvestToInventoryFalseWhenAlreadyHarvested() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobHarvested)
+
+        XCTAssertNotNil(job.harvestedAt)
+        XCTAssertFalse(canHarvestToInventory(job: job, partsInventoryEnabled: true),
+                       "An already-harvested job must not offer Harvest to Inventory again")
+    }
+
+    func testCanHarvestToInventoryFalseWhenFeatureDisabled() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobHarvested)
+
+        XCTAssertFalse(canHarvestToInventory(job: job, partsInventoryEnabled: false))
+    }
 }
