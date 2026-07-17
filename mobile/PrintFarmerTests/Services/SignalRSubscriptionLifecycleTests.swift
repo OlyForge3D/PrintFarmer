@@ -680,6 +680,13 @@ final class TerminalDisconnectLatch: @unchecked Sendable {
     /// removed and resumed with `Void` so the task-group can unwind
     /// cleanly. Without this, `withThrowingTaskGroup` would await the
     /// terminal-waiter child indefinitely past the ceiling.
+    ///
+    /// Pre-enrollment cancellation race: `withTaskCancellationHandler`'s
+    /// `onCancel` may fire before the operation closure enqueues its
+    /// continuation (e.g. Task already cancelled at registration).
+    /// `_enqueue` therefore also checks `Task.isCancelled` under the
+    /// same lock as the append; if cancelled, it resumes immediately
+    /// without enqueuing so no waiter can leak past the ceiling.
     func waitForTerminal() async {
         let id = UUID()
         await withTaskCancellationHandler {
@@ -700,6 +707,11 @@ final class TerminalDisconnectLatch: @unchecked Sendable {
     private func _enqueue(id: UUID, cont: CheckedContinuation<Void, Never>) {
         lock.lock()
         if fired {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        if Task.isCancelled {
             lock.unlock()
             cont.resume()
             return
@@ -794,7 +806,7 @@ final class NegotiateCounter: @unchecked Sendable {
 /// `.connected`.
 final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendable {
     private let lock = NSLock()
-    private var pendingReceives: [CheckedContinuation<URLSessionWebSocketTask.Message, Error>] = []
+    private var pendingReceives: [(id: UUID, cont: CheckedContinuation<URLSessionWebSocketTask.Message, Error>)] = []
     private var pendingSends: [CheckedContinuation<Void, Error>] = []
     private var sentMessages: [URLSessionWebSocketTask.Message] = []
     private var resumed = false
@@ -838,28 +850,45 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         // behavior: Task cancellation propagates to the pending
         // receive as a thrown error.
         //
+        // r14 (Hicks final item 2): caller-specific cancellation
+        // AND pre-enrollment race safety. Every pending receive is
+        // keyed by a unique `UUID` allocated per-call. The
+        // `onCancel` handler removes and fails ONLY that caller's
+        // continuation — it does NOT resume the FIFO-first pending
+        // receive, which could belong to an unrelated caller. Under
+        // the same lock as the append, `_enqueueReceive` checks
+        // `Task.isCancelled`; if the caller's Task was cancelled
+        // before enrollment, the continuation is failed immediately
+        // with `CancellationError()` without being enqueued.
+        //
         // The r9 blocker #3 test (`disconnectDuringHandshakeReceive_
         // neverPublishesConnected`) is unaffected: the handshake's
         // `wsTask.receive()` is awaited by the outer `connect()`
         // Task, which is NOT cancelled by `service.disconnect()`.
         // Only `wsTask.cancel(with:reason:)` fires against the mock
         // there, and that call remains a no-op for pending receives.
-        try await withTaskCancellationHandler {
+        // Message-delivery FIFO order via `completeReceive` /
+        // `failReceive` is preserved — they still resume the
+        // first-in continuation.
+        let id = UUID()
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { cont in
-                let waiters = _enqueueReceive(cont: cont)
+                let waiters = _enqueueReceive(id: id, cont: cont)
                 for w in waiters { w.resume() }
             }
         } onCancel: { [weak self] in
-            self?._failPendingReceiveOnCancel()
+            self?._failReceiveOnCancel(id: id)
         }
     }
 
-    private func _failPendingReceiveOnCancel() {
+    private func _failReceiveOnCancel(id: UUID) {
+        var toFail: CheckedContinuation<URLSessionWebSocketTask.Message, Error>?
         lock.lock()
-        guard let cont = pendingReceives.first else { lock.unlock(); return }
-        pendingReceives.removeFirst()
+        if let idx = pendingReceives.firstIndex(where: { $0.id == id }) {
+            toFail = pendingReceives.remove(at: idx).cont
+        }
         lock.unlock()
-        cont.resume(throwing: CancellationError())
+        toFail?.resume(throwing: CancellationError())
     }
 
     private func _recordSent(_ message: URLSessionWebSocketTask.Message) {
@@ -872,9 +901,14 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         pendingSends.append(cont)
     }
 
-    private func _enqueueReceive(cont: CheckedContinuation<URLSessionWebSocketTask.Message, Error>) -> [CheckedContinuation<Void, Never>] {
+    private func _enqueueReceive(id: UUID, cont: CheckedContinuation<URLSessionWebSocketTask.Message, Error>) -> [CheckedContinuation<Void, Never>] {
         lock.lock()
-        pendingReceives.append(cont)
+        if Task.isCancelled {
+            lock.unlock()
+            cont.resume(throwing: CancellationError())
+            return []
+        }
+        pendingReceives.append((id: id, cont: cont))
         let waiters = receiveWaiters
         receiveWaiters.removeAll()
         lock.unlock()
@@ -908,18 +942,18 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
 
     func completeReceive(with message: URLSessionWebSocketTask.Message) {
         lock.lock()
-        guard let cont = pendingReceives.first else { lock.unlock(); return }
-        pendingReceives.removeFirst()
+        guard !pendingReceives.isEmpty else { lock.unlock(); return }
+        let entry = pendingReceives.removeFirst()
         lock.unlock()
-        cont.resume(returning: message)
+        entry.cont.resume(returning: message)
     }
 
     func failReceive(with error: Error) {
         lock.lock()
-        guard let cont = pendingReceives.first else { lock.unlock(); return }
-        pendingReceives.removeFirst()
+        guard !pendingReceives.isEmpty else { lock.unlock(); return }
+        let entry = pendingReceives.removeFirst()
         lock.unlock()
-        cont.resume(throwing: error)
+        entry.cont.resume(throwing: error)
     }
 
     func completeSend() {
@@ -1365,7 +1399,8 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         )
         let inv = service.lifecycleInvariants.snapshot()
         XCTAssertEqual(inv.activeReconnectOwners, 0)
-        XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1)
+        XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
+                                 "bounded retry chain: max concurrent reconnect owners must be <= 1 across retry hand-offs. The failing owner queues its successor via `pendingReconnectFromGen`; the outgoing task's outer `defer { spawnPendingReconnectIfAny() }` runs AFTER the inner `defer { exitReconnectOwner() }` (defers are LIFO), so the successor's `enterReconnectOwner()` is strictly ordered after the outgoing's `exitReconnectOwner()`. Observed \(inv.maxReconnectOwners).")
         XCTAssertLessThanOrEqual(inv.maxTransports, 1)
         XCTAssertLessThanOrEqual(inv.maxReceiveLoops, 1)
 
@@ -2100,7 +2135,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         XCTAssertEqual(inv.reconnectOwnerEnterCount, inv.reconnectOwnerExitCount,
                        "every entered reconnect-owner Task must have exited via its `defer`; observed enter=\(inv.reconnectOwnerEnterCount) exit=\(inv.reconnectOwnerExitCount)")
         XCTAssertLessThanOrEqual(inv.maxReconnectOwners, 1,
-                                "max concurrent reconnect owners must be <= 1; observed \(inv.maxReconnectOwners)")
+                                "bounded retry chain: max concurrent reconnect owners must be <= 1 across retry hand-offs. The failing owner queues its successor via `pendingReconnectFromGen`; the outgoing task's outer `defer { spawnPendingReconnectIfAny() }` runs AFTER the inner `defer { exitReconnectOwner() }` (defers are LIFO), so the successor's `enterReconnectOwner()` is strictly ordered after the outgoing's `exitReconnectOwner()`. Observed \(inv.maxReconnectOwners).")
         XCTAssertLessThanOrEqual(inv.maxTransports, 1,
                                 "max concurrent transports must be <= 1; observed \(inv.maxTransports)")
 
@@ -2267,6 +2302,141 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         }
 
         XCTAssertTrue(observed, "waitForSleepAfter must wake on a new sleep enrollment (positive completion, not elapsed-time absence)")
+    }
+}
+
+/// r14 (Hicks final item 1+2): pre-enrollment cancellation race and
+/// caller-specific mock-receive cancellation.
+///
+/// These tests prove:
+///   * A Task that is cancelled BEFORE it enrolls a continuation in a
+///     quiescence waiter or `TerminalDisconnectLatch` waiter cannot
+///     leak/hang. The enrollment path checks `Task.isCancelled` under
+///     the same lock as the enqueue and resumes immediately when
+///     cancelled.
+///   * `MockSignalRWebSocket.receive()` cancellation is caller-specific
+///     (keyed by per-call UUID); cancelling one caller must not resume
+///     an unrelated pending receive, and other pending receives must
+///     remain parked exactly as they were.
+///
+/// Timing is used ONLY as failure ceilings (via an outer bounded
+/// `withThrowingTaskGroup` race). The pass path is a positive
+/// completion event / structural observation of the pending-receive
+/// registry.
+final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
+
+    /// Cancel the task BEFORE it awaits the waiter (while the
+    /// counter is non-zero). The cancellation-aware pre-enrollment
+    /// check must resume the continuation immediately; the task
+    /// completes without hanging. Failure ceiling: 5s.
+    func testInvariantsWaiter_preCancelledTask_doesNotHang() async throws {
+        let inv = SignalRLifecycleInvariants()
+        // Ensure the counter is non-zero so a "not cancelled" caller
+        // would legitimately park until an `exitReceiveLoop()` fires.
+        inv.enterReceiveLoop()
+
+        let t = Task<Bool, Never> {
+            await inv.waitForReceiveLoopsZero()
+            return true
+        }
+        t.cancel()
+
+        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await t.value }
+            group.addTask {
+                // Failure ceiling only; Task.sleep throws on cancel,
+                // caught here so this child never propagates.
+                do { try await Task.sleep(nanoseconds: 5_000_000_000); return false }
+                catch { return false }
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        inv.exitReceiveLoop()
+
+        XCTAssertTrue(didComplete, "waitForReceiveLoopsZero() must not hang when its Task was cancelled at/before enrollment")
+    }
+
+    /// Same race, applied to `TerminalDisconnectLatch.waitForTerminal()`.
+    func testTerminalDisconnectLatch_preCancelledTask_doesNotHang() async throws {
+        let latch = TerminalDisconnectLatch()
+
+        let t = Task<Bool, Never> {
+            await latch.waitForTerminal()
+            return true
+        }
+        t.cancel()
+
+        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await t.value }
+            group.addTask {
+                do { try await Task.sleep(nanoseconds: 5_000_000_000); return false }
+                catch { return false }
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+
+        XCTAssertTrue(didComplete, "TerminalDisconnectLatch.waitForTerminal() must not hang when its Task was cancelled at/before enrollment")
+        XCTAssertFalse(latch.hasFired(), "Cancellation must not synthesise a terminal-branch observation")
+    }
+
+    /// Two concurrent `receive()` callers on the same
+    /// `MockSignalRWebSocket`. Cancelling caller A must fail A's
+    /// continuation with `CancellationError` and MUST NOT touch B.
+    /// After A is cancelled, exactly one pending receive should
+    /// remain in the mock's registry, and `completeReceive(with:)`
+    /// must deliver to B.
+    func testMockReceive_cancelIsCallerSpecific_otherReceiverRemainsParked() async throws {
+        let mock = MockSignalRWebSocket()
+
+        // B: long-lived receiver that must survive A's cancellation.
+        let receiverB = Task<URLSessionWebSocketTask.Message, Error> {
+            try await mock.receive()
+        }
+        await mock.waitForReceiveCall()
+
+        // A: doomed receiver; enroll then cancel it.
+        let receiverA = Task<Bool, Never> {
+            do {
+                _ = try await mock.receive()
+                return false // expected to throw
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }
+        await mock.waitForReceiveCall()
+
+        // Cancel only A. B must remain parked.
+        receiverA.cancel()
+
+        let aWasCancelled: Bool = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await receiverA.value }
+            group.addTask {
+                do { try await Task.sleep(nanoseconds: 5_000_000_000); return false }
+                catch { return false }
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        XCTAssertTrue(aWasCancelled, "Caller-A must observe its own CancellationError")
+
+        // B still parked → deliver to B and verify it wakes.
+        mock.completeReceive(with: .string("delivered-to-B"))
+        let receivedByB = try await receiverB.value
+        switch receivedByB {
+        case .string(let s):
+            XCTAssertEqual(s, "delivered-to-B", "completeReceive must deliver to the surviving receiver, not to a slot vacated by an unrelated cancellation")
+        case .data:
+            XCTFail("Expected string frame")
+        @unknown default:
+            XCTFail("Unexpected message case")
+        }
     }
 }
 

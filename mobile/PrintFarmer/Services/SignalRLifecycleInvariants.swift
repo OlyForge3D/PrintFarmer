@@ -174,12 +174,34 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     // cancellation cannot resume waiters in another family, so
     // "receive loops are quiescent" cannot be spuriously satisfied
     // because a reconnect-owner waiter's Task was cancelled.
+    //
+    // Pre-enrollment cancellation race:
+    // `withTaskCancellationHandler`'s `onCancel` block may run BEFORE
+    // the operation closure has had a chance to enqueue its
+    // continuation (either because the calling Task was already
+    // cancelled at handler registration, or because cancellation
+    // wins the race with enrollment on another thread). If we
+    // enqueued anyway, the `onCancel`'s UUID-keyed removal would
+    // have already run against an empty waiter list, and the
+    // waiter would then be enqueued with no future cancel handler
+    // to resume it — leaking/hanging on the next `exit*` failing
+    // to fire while the counter is non-zero.
+    //
+    // Fix: under the SAME lock as the enqueue, check
+    // `Task.isCancelled` first. If cancelled at enrollment time,
+    // resume immediately without enqueuing. The cancel handler
+    // remains idempotent — finding no matching UUID is a no-op.
 
     func waitForTransportsZero() async {
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    cont.resume()
+                    return
+                }
                 if activeTransports == 0 {
                     lock.unlock()
                     cont.resume()
@@ -198,6 +220,11 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    cont.resume()
+                    return
+                }
                 if activeReceiveLoops == 0 {
                     lock.unlock()
                     cont.resume()
@@ -216,6 +243,11 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    cont.resume()
+                    return
+                }
                 if activeReconnectOwners == 0 {
                     lock.unlock()
                     cont.resume()
