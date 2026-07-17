@@ -81,6 +81,18 @@ final class BinPartLoggingViewModel {
     /// before creating the `Task` that invokes this method.
     @discardableResult
     func submit(partsInventoryService: any PartsInventoryServiceProtocol) async -> PartAdjustmentResponse? {
+        // If the caller's own Task was already cancelled before this
+        // method got its first turn on the executor (e.g. the presenting
+        // sheet was dismissed in the same runloop tick as the submit
+        // Task was created), bail out before touching any state or
+        // minting a key/snapshot. Nothing has been submitted yet, so
+        // there is no committed response to shield or return — unlike
+        // the post-commit cancellation path below, a pre-start
+        // cancellation must not start the shielded transport at all,
+        // and must not reset errorMessage/successMessage either, since
+        // that would itself be a dismissed-child observable write.
+        guard !Task.isCancelled else { return nil }
+
         errorMessage = nil
         successMessage = nil
 

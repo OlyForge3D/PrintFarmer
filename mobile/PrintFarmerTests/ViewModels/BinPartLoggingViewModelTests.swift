@@ -200,6 +200,36 @@ final class BinPartLoggingViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.isSubmitting, "cancellation must never write isSubmitting either — it's dismissed-child observable state, same as errorMessage/successMessage")
     }
 
+    // MARK: - Pre-first-turn cancellation: zero transport, zero state churn
+    //
+    // Same causal proof as PartAdjustmentViewModelTests: cancellation
+    // observed before submit() gets a first turn must skip the shielded
+    // transport entirely (there is no committed response to protect yet)
+    // and must not mint an operationKey for a submission that never
+    // touched the server.
+    @MainActor
+    func testSubmitCancelledPriorToFirstTurnPerformsNoServiceCallAndMintsNoOperationKey() async {
+        let viewModel = BinPartLoggingViewModel(bin: makeBin())
+        viewModel.selectedSku = "SKU-A"
+        viewModel.quantity = 4
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 11)
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        let task = Task {
+            await viewModel.submit(partsInventoryService: service)
+        }
+        task.cancel()
+        let result = await task.value
+
+        XCTAssertNil(result, "a submission cancelled before its first turn has nothing to return")
+        XCTAssertEqual(service.adjustPartCalls.count, 0, "the shielded transport must never be created if the submission never got a first turn — there is no committed response to protect")
+        XCTAssertEqual(service.appliedMutationCount, 0, "no mutation may reach the server for a submission that never began")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.successMessage)
+        XCTAssertTrue(viewModel.isSubmitting, "the re-entrancy guard set by beginSubmit() is dismissed-child state and must not be cleared by this codepath")
+    }
+
     // MARK: - Final trio Item 2: post-commit cancellation callback proof
     //
     // Same production callback path as PartAdjustmentViewModel /

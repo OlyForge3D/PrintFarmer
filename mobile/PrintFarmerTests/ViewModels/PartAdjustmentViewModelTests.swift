@@ -205,6 +205,44 @@ final class PartAdjustmentViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.isSubmitting, "cancellation must never write isSubmitting either — it's dismissed-child observable state, same as errorMessage/successMessage")
     }
 
+    // MARK: - Pre-first-turn cancellation: zero transport, zero state churn
+    //
+    // The two tests above prove a cancelled submission doesn't leak error
+    // or success state, but they don't isolate WHEN the cancellation was
+    // observed relative to the shielded transport. Because `beginSubmit()`
+    // + `Task { await viewModel.submit(...) } ; task.cancel()` cancels the
+    // child task before it has had any chance to run (no `await` occurs
+    // between creating the task and cancelling it), the cancellation is
+    // actually already "pre-first-turn" in both of those tests too — but
+    // neither one asserts that the shielded transport was never started.
+    // This test makes that causal claim explicit and adds a second axis
+    // (the operationKey/pendingSnapshot must not be minted at all if the
+    // submission never began, so a subsequent genuine attempt gets a
+    // fresh key rather than reusing one from a submission that never
+    // touched the server).
+    @MainActor
+    func testSubmitCancelledPriorToFirstTurnPerformsNoServiceCallAndMintsNoOperationKey() async {
+        let viewModel = PartAdjustmentViewModel(part: makePart())
+        viewModel.delta = -4
+        viewModel.reason = .qcReject
+        let service = MockPartsInventoryService()
+        service.adjustmentToReturn = makeAdjustment(resultingBalance: 11)
+
+        XCTAssertTrue(viewModel.beginSubmit())
+        let task = Task {
+            await viewModel.submit(partsInventoryService: service)
+        }
+        task.cancel()
+        let result = await task.value
+
+        XCTAssertNil(result, "a submission cancelled before its first turn has nothing to return")
+        XCTAssertEqual(service.adjustPartCalls.count, 0, "the shielded transport must never be created if the submission never got a first turn — there is no committed response to protect")
+        XCTAssertEqual(service.appliedMutationCount, 0, "no mutation may reach the server for a submission that never began")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.successMessage)
+        XCTAssertTrue(viewModel.isSubmitting, "the re-entrancy guard set by beginSubmit() is dismissed-child state and must not be cleared by this codepath")
+    }
+
     // MARK: - Replacement remediation Item B: commit-then-response-loss causal proof
     //
     // `testRetryAfterFailureReusesFrozenSnapshotDespiteLiveMutationInGap`
