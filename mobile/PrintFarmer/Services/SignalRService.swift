@@ -188,6 +188,50 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// the completion watcher must await before dispatching the
     /// successor. (F4-L #777 r21 R2 fix.)
     private var receiveCompletionBarrier: Task<Void, Never>?
+    /// Owner-scoped finalizing-authority marker. Set atomically by
+    /// the owner-completion watcher IMMEDIATELY after `await
+    /// reconnectTask.value` returns, BEFORE any release/consume
+    /// step. While non-nil, `scheduleReconnect`'s Fix-B branch
+    /// scopes recorded successor intent to THIS owner even if
+    /// `reconnectToken` has been transiently cleared, so a
+    /// same-generation receive task's late `scheduleReconnect` call
+    /// (in the r22-CS-race window between its `stillCurrent` check
+    /// and its `scheduleReconnect` entry) cannot take the
+    /// fresh-reserve path and create a successor before its own
+    /// `Task.value` resolves. Cleared inside the watcher's atomic
+    /// `.done` step, at the same moment `reconnectToken` is
+    /// released. Guarded by `lifecycleQueue`. (F4-L #777 r23 CS-race
+    /// fix.)
+    private var finalizingOwnerToken: UUID?
+    /// Monotonic version bumped every time
+    /// `receiveCompletionBarrier` is installed in `performConnect`
+    /// step 4. The barrier's own body updates
+    /// `receiveBarrierResolvedVersion` after `await task.value`
+    /// completes (and, in DEBUG, after `receiveCompleted` has
+    /// posted). `installed > resolved` therefore identifies a
+    /// specific unresolved receive-barrier instance, distinguishing
+    /// "live receive whose Task.value hasn't returned" from "stale
+    /// barrier reference already fully awaited". Used by:
+    ///   * `scheduleReconnect`'s Fix-B branch to detect a live
+    ///     same-generation receive barrier and divert to record-
+    ///     intent instead of fresh-reserve.
+    ///   * The completion watcher's drain loop to await the current
+    ///     receive barrier (in addition to any pending-successor
+    ///     barrier) before releasing the slot / dispatching a
+    ///     successor.
+    /// Guarded by `lifecycleQueue`. (F4-L #777 r23 CS-race fix.)
+    private var receiveBarrierInstalledVersion: UInt64 = 0
+    /// Companion to `receiveBarrierInstalledVersion`; set from the
+    /// barrier Task's own body after `await task.value` resolves.
+    /// A barrier install captures `installedVersion` at install
+    /// time; when its body finishes, it advances
+    /// `receiveBarrierResolvedVersion` to that captured value. A
+    /// concurrent scheduleReconnect / watcher observing `installed
+    /// > resolved` under `lifecycleSync` therefore knows the
+    /// current barrier's underlying receive Task has NOT yet
+    /// returned. Guarded by `lifecycleQueue`. (F4-L #777 r23
+    /// CS-race fix.)
+    private var receiveBarrierResolvedVersion: UInt64 = 0
     /// Monotonic connection generation. Bumped on every explicit
     /// `disconnect()`, on every `tearDown()`, and on every reconnect
     /// scheduling. `performConnect()` snapshots this once at entry and
@@ -364,6 +408,11 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.setReconnectTokenLocked(nil)
             self.pendingSuccessorForOwner = nil
             self.pendingSuccessorReceiveBarrier = nil
+            // r23 (F4-L #777 CS-race fix): a supersede invalidates
+            // any in-progress owner-watcher finalizing authority.
+            // Clear the marker so `scheduleReconnect`'s Fix-B branch
+            // does not record intent against the dead owner.
+            self.finalizingOwnerToken = nil
             self.intentionalDisconnect = false
             self.generation &+= 1
             self.reconnectAttempt = 0
@@ -425,6 +474,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.setReconnectTokenLocked(nil)
             self.pendingSuccessorForOwner = nil
             self.pendingSuccessorReceiveBarrier = nil
+            // r23 (F4-L #777 CS-race fix): user disconnect
+            // invalidates any in-progress owner-watcher finalizing
+            // authority. See connect() supersede for full comment.
+            self.finalizingOwnerToken = nil
             self.connectionStateHub.setState(.disconnected)
             return r
         }
@@ -546,7 +599,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 return false
             }
             self.reconnectAttempt = 0
-            let (receive, barrier) = self.makeReceiveTask(myGen: myGen)
+            // r23 (F4-L #777 CS-race fix): bump install version
+            // BEFORE creating the barrier Task so the barrier body's
+            // captured `barrierVersion` matches what
+            // `scheduleReconnect` / watcher observe for this install.
+            self.receiveBarrierInstalledVersion &+= 1
+            let bv = self.receiveBarrierInstalledVersion
+            let (receive, barrier) = self.makeReceiveTask(myGen: myGen, barrierVersion: bv)
             self.setReceiveTaskLocked(receive)
             // r21 (F4-L #777 R2 fix): install the receive-completion
             // barrier mirroring the receive task 1:1 so the drop path
@@ -681,7 +740,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// (r7 blocker #2). The reconnect flow gates on `myGen` so a stale
     /// receive task cannot trigger reconnect after the user has
     /// explicitly disconnected or a newer generation has taken over.
-    private func makeReceiveTask(myGen: UInt64) -> (receive: Task<Void, Never>, barrier: Task<Void, Never>) {
+    private func makeReceiveTask(myGen: UInt64, barrierVersion: UInt64) -> (receive: Task<Void, Never>, barrier: Task<Void, Never>) {
         let invariants = self.lifecycleInvariants
         #if DEBUG
         let debugReceiveTaskID = UUID()
@@ -774,16 +833,30 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // barrier's await-of-`task.value` still provides the causal
         // synchronization gate between the outgoing receive's exit
         // and the successor owner's creation.
-        let barrier = Task { [weak self] in
+        let barrier = Task { [weak self, barrierVersion] in
             _ = await task.value
             #if DEBUG
-            guard let self else { return }
-            SignalRService.postDebugLifecycleEvent(
-                service: self,
-                event: "receiveCompleted",
-                taskID: debugReceiveTaskID
-            )
+            if let self {
+                SignalRService.postDebugLifecycleEvent(
+                    service: self,
+                    event: "receiveCompleted",
+                    taskID: debugReceiveTaskID
+                )
+            }
             #endif
+            // r23 (F4-L #777 CS-race fix): mark this barrier's
+            // install-generation as resolved so `scheduleReconnect`'s
+            // Fix-B check and the watcher's drain loop can
+            // distinguish a still-live receive barrier (installed >
+            // resolved) from a stale reference already fully awaited.
+            // Advance monotonically — a newer install's barrier body
+            // may race with an older one; use max-write semantics.
+            guard let self else { return }
+            self.lifecycleSync {
+                if self.receiveBarrierResolvedVersion < barrierVersion {
+                    self.receiveBarrierResolvedVersion = barrierVersion
+                }
+            }
         }
         return (task, barrier)
     }
@@ -991,12 +1064,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     /// Result of the owner-completion watcher's atomic
     /// release/consume step. `.retry` yields a barrier the watcher
-    /// must await before another atomic pass; `.done` means the slot
-    /// has been released (if owned) and, optionally, a successor
-    /// generation captured for dispatch outside `lifecycleSync`.
-    /// (F4-L #777 r22 R2 TOCTOU fix.)
+    /// must await before another atomic pass; the `isReceive` flag
+    /// tells the loop whether the retry corresponds to the
+    /// receive-completion barrier (updates
+    /// `lastAwaitedReceiveInstalledVersion`) or to a pending-
+    /// successor barrier (updates `lastAwaitedPendingVersion`).
+    /// `.done` means the slot has been released (if owned) and,
+    /// optionally, a successor generation captured for dispatch
+    /// outside `lifecycleSync`. (F4-L #777 r22 R2 TOCTOU fix,
+    /// r23 CS-race fix.)
     private enum DrainOutcome {
-        case retry(Task<Void, Never>, UInt64)
+        case retry(Task<Void, Never>, UInt64, isReceive: Bool)
         case done(UInt64?)
     }
 
@@ -1011,6 +1089,49 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         let (myGen0, reserved): (UInt64, Bool) = lifecycleSync {
             guard !self.intentionalDisconnect, self.generation == fromGen else {
                 return (self.generation, false)
+            }
+            // r23 (F4-L #777 CS-race fix): a same-generation receive
+            // task whose barrier is live/unresolved must NEVER take
+            // the fresh-reserve path, even if `reconnectToken` is
+            // temporarily nil (r22 CS window between a caller's
+            // `stillCurrent` check and this call, in which the owner
+            // watcher woke, saw no pending, and released the token).
+            // Record generation-scoped successor intent against
+            // whichever ownership marker is still valid — an active
+            // retry owner (`reconnectToken`) or a finalizing watcher
+            // (`finalizingOwnerToken`). The watcher's drain loop
+            // observes the version bump on its next iteration,
+            // awaits this barrier, and dispatches the successor only
+            // after the receive's `Task.value` (and, in DEBUG,
+            // `receiveCompleted`) has resolved.
+            //
+            // If neither an owner nor a finalizing owner exists,
+            // there is no completion watcher to observe intent —
+            // this can only happen in the type-7-post-successful-
+            // connect path where handleMessage runs inside the outer
+            // receive-body `lifecycleSync` (so no watcher race is
+            // possible) and no reconnectTask has been created yet.
+            // Fall through to the normal fresh-reserve path in that
+            // case so the reconnect actually happens.
+            let receiveBarrierLive: Bool =
+                self.receiveCompletionBarrier != nil
+                    && self.receiveBarrierInstalledVersion > self.receiveBarrierResolvedVersion
+            if receiveBarrierLive {
+                let ownerScope: UUID? =
+                    self.reconnectToken ?? self.finalizingOwnerToken
+                if let owner = ownerScope {
+                    self.pendingSuccessorForOwner = owner
+                    self.pendingSuccessorReceiveBarrier =
+                        self.receiveCompletionBarrier
+                    self.pendingSuccessorVersion &+= 1
+                    self.connectionStateHub.setState(.reconnecting)
+                    return (self.generation, false)
+                }
+                // No owner/finalizing-owner to record against; fall
+                // through so type-7-post-successful-connect can still
+                // initiate a fresh reconnect. In this path the outer
+                // receive-body `lifecycleSync` is held throughout,
+                // so no owner-watcher race is possible.
             }
             if let existingToken = self.reconnectToken {
                 // r20 (F4-L #777 successor-ownership fix): a retry
@@ -1310,63 +1431,133 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             _ = await reconnectTask.value
             guard let self else { return }
 
-            // r22 (F4-L #777 R2 TOCTOU fix): drain-loop with version
-            // check. Between the watcher's initial snapshot and its
-            // atomic release/consume step, a receive failure can
-            // record a NEW pending barrier (the drop path bumps
-            // `pendingSuccessorVersion` on every set). If we consumed
-            // pending without awaiting THAT barrier, we could
-            // dispatch B before its receive task's `.value` — a
-            // strict-order violation. The loop below repeatedly
-            // snapshots the barrier and awaits it until an atomic
-            // step under `lifecycleSync` can prove no newer barrier
-            // has arrived, at which point it releases the slot and
-            // (optionally) captures the successor generation.
-            var lastAwaitedVersion: UInt64 = 0
+            // r23 (F4-L #777 CS-race fix): claim owner-scoped
+            // finalizing authority BEFORE any release/consume step.
+            // While `finalizingOwnerToken == taskToken`,
+            // `scheduleReconnect`'s Fix-B branch can still find an
+            // ownership marker to record generation-scoped intent
+            // against, even if `reconnectToken` were transiently
+            // cleared. It also flags to any observer that this
+            // owner's watcher is actively finalizing — no other path
+            // needs to synthesize a successor for this generation.
+            self.lifecycleSync {
+                self.finalizingOwnerToken = taskToken
+            }
+
+            // r22 (F4-L #777 R2 TOCTOU fix) + r23 (CS-race fix):
+            // drain-loop with two independent version tracks —
+            //   * `lastAwaitedReceiveInstalled` tracks the version of
+            //     the current receive-completion barrier we've
+            //     already awaited. Bumped by `performConnect` step 4
+            //     when a new barrier is installed; resolved by the
+            //     barrier body itself after `await task.value`.
+            //     A same-generation receive whose barrier is live
+            //     (`installed > resolved AND installed > lastAwaited`)
+            //     must be awaited BEFORE finalizing, so a late
+            //     `scheduleReconnect` call from that receive's own
+            //     catch (r22 CS window) has a chance to record intent
+            //     via Fix B before we release the slot.
+            //   * `lastAwaitedPending` tracks the pending-successor
+            //     barrier version (r22 protocol) — bumped every time
+            //     the drop path or Fix B records new pending +
+            //     barrier.
+            // Each iteration snapshots both barriers, awaits the
+            // receive barrier first if unresolved (it is the
+            // production happens-before edge for the outgoing
+            // receive), then the pending barrier. The atomic step
+            // rechecks both versions and returns `.retry` if either
+            // has advanced past its `lastAwaited` (with `isReceive`
+            // distinguishing which track to update). Slot release
+            // and successor dispatch are impossible while any
+            // matching owner-scoped barrier has not been awaited.
+            var lastAwaitedPending: UInt64 = 0
+            var lastAwaitedReceiveInstalled: UInt64 = 0
             var successorFromGen: UInt64? = nil
             drainLoop: while true {
-                let snapshot: (barrier: Task<Void, Never>?, version: UInt64) =
-                    self.lifecycleSync {
-                        if self.pendingSuccessorForOwner == taskToken {
-                            return (
-                                self.pendingSuccessorReceiveBarrier,
-                                self.pendingSuccessorVersion
-                            )
-                        }
-                        return (nil, 0)
-                    }
-                if let barrier = snapshot.barrier,
-                   snapshot.version > lastAwaitedVersion {
-                    _ = await barrier.value
-                    lastAwaitedVersion = snapshot.version
+                let snapshot: (
+                    pending: Task<Void, Never>?, pendingV: UInt64,
+                    receive: Task<Void, Never>?, receiveV: UInt64
+                ) = self.lifecycleSync {
+                    let p: Task<Void, Never>? =
+                        (self.pendingSuccessorForOwner == taskToken)
+                        ? self.pendingSuccessorReceiveBarrier : nil
+                    let pv: UInt64 =
+                        (self.pendingSuccessorForOwner == taskToken)
+                        ? self.pendingSuccessorVersion : 0
+                    // A receive barrier is "live" (needs awaiting)
+                    // only while its install-version exceeds its
+                    // resolved-version. A resolved-but-still-
+                    // referenced barrier is safe to skip.
+                    let rLive: Bool =
+                        self.receiveCompletionBarrier != nil
+                            && self.receiveBarrierInstalledVersion
+                                > self.receiveBarrierResolvedVersion
+                    let r: Task<Void, Never>? =
+                        rLive ? self.receiveCompletionBarrier : nil
+                    let rv: UInt64 =
+                        rLive ? self.receiveBarrierInstalledVersion : 0
+                    return (p, pv, r, rv)
+                }
+                // Await receive barrier first — it is the
+                // production happens-before edge that R's late
+                // scheduleReconnect (r22 CS window) depends on.
+                if let rBarrier = snapshot.receive,
+                   snapshot.receiveV > lastAwaitedReceiveInstalled {
+                    _ = await rBarrier.value
+                    lastAwaitedReceiveInstalled = snapshot.receiveV
+                    continue drainLoop
+                }
+                if let pBarrier = snapshot.pending,
+                   snapshot.pendingV > lastAwaitedPending {
+                    _ = await pBarrier.value
+                    lastAwaitedPending = snapshot.pendingV
                     continue drainLoop
                 }
                 // No unawaited barrier at the snapshot moment.
                 // Attempt the atomic release/consume step. If a
-                // barrier newer than `lastAwaitedVersion` has been
-                // recorded between the snapshot and this
+                // barrier newer than `lastAwaited` on either track
+                // has been recorded between the snapshot and this
                 // `lifecycleSync`, it will be visible here and we
-                // yield it back for another await pass. Otherwise we
-                // release the slot (SOLE authority — r21 R1),
-                // consume pending, and capture the successor
-                // generation atomically.
+                // yield it back for another await pass. Otherwise
+                // we release the slot (SOLE authority — r21 R1),
+                // consume pending, clear finalizing authority, and
+                // capture the successor generation atomically.
                 let step: DrainOutcome = self.lifecycleSync {
-                    if self.pendingSuccessorForOwner == taskToken,
-                       self.pendingSuccessorVersion > lastAwaitedVersion,
-                       let b = self.pendingSuccessorReceiveBarrier {
-                        // Race window observed: pending was recorded
-                        // after our snapshot returned nil (or
-                        // returned an older version). Yield the new
-                        // barrier for another await pass. Slot is
-                        // NOT released; pending is NOT consumed.
-                        return .retry(b, self.pendingSuccessorVersion)
+                    // Re-check receive-barrier track first.
+                    if let rb = self.receiveCompletionBarrier,
+                       self.receiveBarrierInstalledVersion
+                           > lastAwaitedReceiveInstalled,
+                       self.receiveBarrierInstalledVersion
+                           > self.receiveBarrierResolvedVersion {
+                        return .retry(
+                            rb,
+                            self.receiveBarrierInstalledVersion,
+                            isReceive: true
+                        )
                     }
-                    // Safe: any pending barrier we care about has
-                    // been awaited (or none exists). Release the
-                    // slot iff still owned by this owner.
+                    // Then pending-successor track (r22 protocol).
+                    if self.pendingSuccessorForOwner == taskToken,
+                       self.pendingSuccessorVersion > lastAwaitedPending,
+                       let pb = self.pendingSuccessorReceiveBarrier {
+                        return .retry(
+                            pb,
+                            self.pendingSuccessorVersion,
+                            isReceive: false
+                        )
+                    }
+                    // Safe: no unawaited owner-scoped barriers.
+                    // Release the slot iff still owned by this
+                    // owner AND clear finalizing authority in the
+                    // SAME atomic step so no observer sees
+                    // `reconnectToken == nil` while
+                    // `finalizingOwnerToken == taskToken` is
+                    // still valid to record against.
                     if self.reconnectToken == taskToken {
                         self.reconnectTask = nil
                         self.setReconnectTokenLocked(nil)
+                    }
+                    if self.finalizingOwnerToken == taskToken {
+                        self.finalizingOwnerToken = nil
                     }
                     guard !self.intentionalDisconnect,
                           self.pendingSuccessorForOwner == taskToken
@@ -1388,9 +1579,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     return .done(self.generation)
                 }
                 switch step {
-                case .retry(let b, let v):
+                case .retry(let b, let v, let isReceive):
                     _ = await b.value
-                    lastAwaitedVersion = v
+                    if isReceive {
+                        lastAwaitedReceiveInstalled = v
+                    } else {
+                        lastAwaitedPending = v
+                    }
                     continue drainLoop
                 case .done(let gen):
                     successorFromGen = gen
