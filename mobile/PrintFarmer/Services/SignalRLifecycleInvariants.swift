@@ -31,6 +31,14 @@ import Foundation
 /// Access is protected by `NSLock` so tests can query snapshots from
 /// any Task without serializing through the lifecycle queue.
 final class SignalRLifecycleInvariants: @unchecked Sendable {
+#if DEBUG
+    enum DebugZeroWaiterFamily: Hashable, Sendable {
+        case transport
+        case receiveLoop
+        case reconnectOwner
+    }
+#endif
+
     struct Snapshot: Equatable, Sendable {
         let activeTransports: Int
         let activeReceiveLoops: Int
@@ -78,6 +86,11 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     private var reconnectOwnerExitCount = 0
 
     private var reconnectAttemptCount = 0
+
+#if DEBUG
+    private var debugZeroWaiterEnrollmentCallback:
+        (@Sendable (DebugZeroWaiterFamily, UUID) -> Void)?
+#endif
 
     // r15 (Hicks item 5): deterministic pre-enrollment barrier hooks.
     // Tests set these to controlled `@Sendable` closures. Each
@@ -207,6 +220,26 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         return (transportZeroWaiters.count, receiveLoopZeroWaiters.count, reconnectOwnerZeroWaiters.count)
     }
 
+#if DEBUG
+    func setDebugZeroWaiterEnrollmentCallback(
+        _ callback: @escaping @Sendable (DebugZeroWaiterFamily, UUID) -> Void
+    ) {
+        lock.lock()
+        precondition(
+            debugZeroWaiterEnrollmentCallback == nil,
+            "Debug zero-waiter enrollment callback is already installed"
+        )
+        debugZeroWaiterEnrollmentCallback = callback
+        lock.unlock()
+    }
+
+    func resetDebugZeroWaiterEnrollmentCallback() {
+        lock.lock()
+        debugZeroWaiterEnrollmentCallback = nil
+        lock.unlock()
+    }
+#endif
+
     // MARK: - Snapshot
 
     func snapshot() -> Snapshot {
@@ -286,7 +319,13 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
                     return
                 }
                 transportZeroWaiters.append((id: id, cont: cont))
+#if DEBUG
+                let enrollmentCallback = debugZeroWaiterEnrollmentCallback
+#endif
                 lock.unlock()
+#if DEBUG
+                enrollmentCallback?(.transport, id)
+#endif
             }
         } onCancel: {
             self.cancelTransportWaiter(id: id)
@@ -314,7 +353,13 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
                     return
                 }
                 receiveLoopZeroWaiters.append((id: id, cont: cont))
+#if DEBUG
+                let enrollmentCallback = debugZeroWaiterEnrollmentCallback
+#endif
                 lock.unlock()
+#if DEBUG
+                enrollmentCallback?(.receiveLoop, id)
+#endif
             }
         } onCancel: {
             self.cancelReceiveLoopWaiter(id: id)
@@ -342,7 +387,13 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
                     return
                 }
                 reconnectOwnerZeroWaiters.append((id: id, cont: cont))
+#if DEBUG
+                let enrollmentCallback = debugZeroWaiterEnrollmentCallback
+#endif
                 lock.unlock()
+#if DEBUG
+                enrollmentCallback?(.reconnectOwner, id)
+#endif
             }
         } onCancel: {
             self.cancelReconnectOwnerWaiter(id: id)

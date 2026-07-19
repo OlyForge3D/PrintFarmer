@@ -554,13 +554,13 @@ actor LifecycleControlledSleeper {
     /// r10 blocker #3: monotonic total of entered sleeps. Tests can
     /// snapshot before an event, then await a bounded window and
     /// re-read to prove no new sleep enrolled (deterministic
-    /// idle-gate for negative retry assertions replacing
-    /// `Task.yield()` polling).
+    /// idle-gate for negative retry assertions using an
+    /// acknowledgement-based enrollment proof).
     func totalSleepEntries() -> Int { sleepEnterCount }
 
     /// r12 blocker #2: bounded pure barrier. Parks the caller until
     /// `sleepEnterCount > baseline`. No wall-clock bound — the caller
-    /// is expected to run inside an outer `withTaskGroup` timeout
+    /// is expected to run inside an outer failure ceiling
     /// used **only as a failure ceiling** (never as evidence of
     /// absence). Uses a UUID-keyed waiter registered via the same
     /// `waitingForSleep` map used by `waitForNextSleep`, so it is
@@ -678,8 +678,8 @@ final class TerminalDisconnectLatch: @unchecked Sendable {
     /// cancelled (e.g. by the enclosing task-group's `cancelAll()`
     /// after the failure-ceiling timeout child fires), the waiter is
     /// removed and resumed with `Void` so the task-group can unwind
-    /// cleanly. Without this, `withThrowingTaskGroup` would await the
-    /// terminal-waiter child indefinitely past the ceiling.
+    /// cleanly. Without this, a cancelled waiter could remain parked
+    /// indefinitely past the ceiling.
     ///
     /// Pre-enrollment cancellation race: `withTaskCancellationHandler`'s
     /// `onCancel` may fire before the operation closure enqueues its
@@ -805,13 +805,28 @@ final class NegotiateCounter: @unchecked Sendable {
 /// prove the generation recheck rejects the frame without publishing
 /// `.connected`.
 final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendable {
+    enum CancellationMode {
+        case settleReceives
+        case preservePendingReceiveForStaleHandshake
+    }
+
+    private struct PendingReceive {
+        let id: UUID
+        let caller: String
+        let cont: CheckedContinuation<URLSessionWebSocketTask.Message, Error>
+    }
+
     private let lock = NSLock()
-    private var pendingReceives: [(id: UUID, cont: CheckedContinuation<URLSessionWebSocketTask.Message, Error>)] = []
+    private let cancellationMode: CancellationMode
+    private var pendingReceives: [PendingReceive] = []
     private var pendingSends: [CheckedContinuation<Void, Error>] = []
     private var sentMessages: [URLSessionWebSocketTask.Message] = []
-    private var resumed = false
-    private var cancelled = false
+    private var resumeCount = 0
+    private var cancelCount = 0
+    private var nextAnonymousCaller = 0
+    private var completionLog: [String] = []
     private var receiveWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cancellationWaiters: [(target: Int, cont: CheckedContinuation<Void, Never>)] = []
     // r15 (Hicks item 6): cumulative enrollment counter + target
     // waiters. Every successful `_enqueueReceive` bumps
     // `receiveEnrolledCount`; a test that needs "receiver B has
@@ -823,8 +838,27 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     private var receiveEnrolledCount: Int = 0
     private var enrollmentWaiters: [(target: Int, cont: CheckedContinuation<Void, Never>)] = []
 
+    // r16 fix F (Hicks): optional causal timeline injection lets tests
+    // observe socket-level lifecycle events (handedOut / cancelled)
+    // across multiple mocks in a shared ordered log. `tag` labels the
+    // socket (e.g., "W2", "W3") so tests can assert
+    // index(W2.cancelled) < index(W3.handedOut) via event identity.
+    let tag: String?
+    fileprivate let timeline: MockSocketTimeline?
+
+    init(
+        cancellationMode: CancellationMode = .settleReceives,
+        tag: String? = nil,
+        timeline: MockSocketTimeline? = nil
+    ) {
+        self.cancellationMode = cancellationMode
+        self.tag = tag
+        self.timeline = timeline
+        super.init()
+    }
+
     func resume() {
-        lock.lock(); resumed = true; lock.unlock()
+        lock.lock(); resumeCount += 1; lock.unlock()
     }
 
     /// r9 blocker #3 proof: the test intentionally lets the parked
@@ -835,7 +869,31 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     /// the socket-level cancellation. Draining here would short-circuit
     /// the proof (receive would throw before the gen guard runs).
     func cancel(with _: URLSessionWebSocketTask.CloseCode, reason _: Data?) {
-        lock.lock(); cancelled = true; lock.unlock()
+        var toFail: [PendingReceive] = []
+        var cancellationACKs: [CheckedContinuation<Void, Never>] = []
+        lock.lock()
+        cancelCount += 1
+        cancellationWaiters.removeAll { waiter in
+            if waiter.target <= cancelCount {
+                cancellationACKs.append(waiter.cont)
+                return true
+            }
+            return false
+        }
+        if cancellationMode == .settleReceives {
+            toFail = pendingReceives
+            pendingReceives.removeAll()
+            completionLog.append(contentsOf: toFail.map { "\($0.caller).cancelled" })
+        }
+        lock.unlock()
+        // r16 fix F: record socket-cancel event in the shared timeline
+        // AFTER releasing the internal lock so the timeline lock nesting
+        // stays flat. This is the causal ACK for W2's cancellation.
+        timeline?.record(.socketCancelled, tag: tag)
+        for entry in toFail {
+            entry.cont.resume(throwing: CancellationError())
+        }
+        for ack in cancellationACKs { ack.resume() }
     }
 
     func send(_ message: URLSessionWebSocketTask.Message) async throws {
@@ -850,6 +908,11 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     }
 
     func receive() async throws -> URLSessionWebSocketTask.Message {
+        let caller = _nextCallerLabel()
+        return try await receive(caller: caller)
+    }
+
+    func receive(caller: String) async throws -> URLSessionWebSocketTask.Message {
         // r13 (Hicks item 1): cancellation-aware receive. When the
         // caller's Task is cancelled (e.g. `tearDownLocked` calls
         // `receiveTask?.cancel()`), fail the pending continuation so
@@ -880,25 +943,50 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         // Message-delivery FIFO order via `completeReceive` /
         // `failReceive` is preserved — they still resume the
         // first-in continuation.
+        //
+        // r18 (Hicks fix F remaining edge): record
+        // `.receiveCompletionAcknowledged` in the shared socket
+        // timeline AFTER the continuation actually resumes on the
+        // caller's task (i.e., inside the do/catch that observes
+        // the throw or return). This is emitted on the caller's
+        // task context, so it can only run AFTER the pending
+        // continuation was resumed AND the caller side observed the
+        // completion — the "caller-specific handshake continuation
+        // resumes and completion is acknowledged" event Hicks
+        // required for the strict W2→W3 ordering proof.
         let id = UUID()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { cont in
-                let waiters = _enqueueReceive(id: id, cont: cont)
-                for w in waiters { w.resume() }
+        do {
+            let message = try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { cont in
+                    let waiters = _enqueueReceive(id: id, caller: caller, cont: cont)
+                    for w in waiters { w.resume() }
+                }
+            } onCancel: { [weak self] in
+                self?._failReceiveOnCancel(id: id)
             }
-        } onCancel: { [weak self] in
-            self?._failReceiveOnCancel(id: id)
+            timeline?.record(.receiveCompletionAcknowledged, tag: tag)
+            return message
+        } catch {
+            timeline?.record(.receiveCompletionAcknowledged, tag: tag)
+            throw error
         }
     }
 
     private func _failReceiveOnCancel(id: UUID) {
-        var toFail: CheckedContinuation<URLSessionWebSocketTask.Message, Error>?
+        var toFail: PendingReceive?
         lock.lock()
         if let idx = pendingReceives.firstIndex(where: { $0.id == id }) {
-            toFail = pendingReceives.remove(at: idx).cont
+            toFail = pendingReceives.remove(at: idx)
+            completionLog.append("\(toFail!.caller).cancelled")
         }
         lock.unlock()
-        toFail?.resume(throwing: CancellationError())
+        toFail?.cont.resume(throwing: CancellationError())
+    }
+
+    private func _nextCallerLabel() -> String {
+        lock.lock(); defer { lock.unlock() }
+        nextAnonymousCaller += 1
+        return "receive-\(nextAnonymousCaller)"
     }
 
     private func _recordSent(_ message: URLSessionWebSocketTask.Message) {
@@ -911,14 +999,18 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         pendingSends.append(cont)
     }
 
-    private func _enqueueReceive(id: UUID, cont: CheckedContinuation<URLSessionWebSocketTask.Message, Error>) -> [CheckedContinuation<Void, Never>] {
+    private func _enqueueReceive(
+        id: UUID,
+        caller: String,
+        cont: CheckedContinuation<URLSessionWebSocketTask.Message, Error>
+    ) -> [CheckedContinuation<Void, Never>] {
         lock.lock()
         if Task.isCancelled {
             lock.unlock()
             cont.resume(throwing: CancellationError())
             return []
         }
-        pendingReceives.append((id: id, cont: cont))
+        pendingReceives.append(PendingReceive(id: id, caller: caller, cont: cont))
         receiveEnrolledCount += 1
         let currentEnrolled = receiveEnrolledCount
         // Wake `waitForReceiveCall` waiters (FIFO one-shot).
@@ -990,6 +1082,47 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         return pendingReceives.count
     }
 
+    func pendingCallerLabels() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return pendingReceives.map(\.caller)
+    }
+
+    func receiveCompletionLog() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return completionLog
+    }
+
+    func lifecycleCounts() -> (creates: Int, resumes: Int, cancels: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (1, resumeCount, cancelCount)
+    }
+
+    func waitForCancellations(count target: Int = 1) async {
+        if cancellationCountReached(target) { return }
+        await withCheckedContinuation { cont in
+            enqueueCancellationWaiter(target, cont)
+        }
+    }
+
+    private func cancellationCountReached(_ target: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelCount >= target
+    }
+
+    private func enqueueCancellationWaiter(
+        _ target: Int,
+        _ cont: CheckedContinuation<Void, Never>
+    ) {
+        lock.lock()
+        if cancelCount >= target {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        cancellationWaiters.append((target: target, cont: cont))
+        lock.unlock()
+    }
+
     private func _hasPendingReceive() -> Bool {
         lock.lock(); defer { lock.unlock() }
         return !pendingReceives.isEmpty
@@ -1010,6 +1143,7 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         lock.lock()
         guard !pendingReceives.isEmpty else { lock.unlock(); return }
         let entry = pendingReceives.removeFirst()
+        completionLog.append("\(entry.caller).message")
         lock.unlock()
         entry.cont.resume(returning: message)
     }
@@ -1018,6 +1152,7 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         lock.lock()
         guard !pendingReceives.isEmpty else { lock.unlock(); return }
         let entry = pendingReceives.removeFirst()
+        completionLog.append("\(entry.caller).failed")
         lock.unlock()
         entry.cont.resume(throwing: error)
     }
@@ -1035,7 +1170,7 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
         return sentMessages
     }
 
-    func isCancelled() -> Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+    func isCancelled() -> Bool { lock.lock(); defer { lock.unlock() }; return cancelCount > 0 }
 }
 
 /// Reviewer-required real-transport lifecycle tests for r8 blocker #2
@@ -1313,7 +1448,9 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
             return (response, data)
         }
 
-        let mockWS = MockSignalRWebSocket()
+        let mockWS = MockSignalRWebSocket(
+            cancellationMode: .preservePendingReceiveForStaleHandshake
+        )
         let sleeper = LifecycleControlledSleeper()
         let service = SignalRService(
             serverURL: testURL,
@@ -1330,8 +1467,12 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
 
         // Wrap the interaction in a 15s bounded timeout so a bug in
         // this test path can never hang xcodebuild indefinitely.
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        await FailureCeiling.awaitOrFail(
+            seconds: 15,
+            label: "Test C body must complete within 15s",
+            testCase: self,
+            releaseGates: { mockWS.completeReceive(with: .string("{}\u{1e}")) }
+        ) {
                 let connectTask = Task { try? await service.connect() }
                 // Wait deterministically for handshake receive to park.
                 await mockWS.waitForReceiveCall()
@@ -1346,17 +1487,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 mockWS.completeReceive(with: .string("{}\u{1e}"))
                 _ = await connectTask.value
                 await recorder.waitFor(state: .disconnected)
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
         }
-        XCTAssertTrue(didComplete, "Test C body must complete within 15s")
 
         // r12 blocker #6b: prove the stale generation frame is inert.
         // A frame was delivered to the mock socket AFTER disconnect
@@ -1548,8 +1679,15 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         let sub = recordStates(service, into: recorder)
         _ = sub
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        await FailureCeiling.awaitOrFail(
+            seconds: 15,
+            label: "Type-7 close-frame path must not wedge the lifecycle queue (r10 blocker #1)",
+            testCase: self,
+            releaseGates: {
+                mockWS.completeReceive(with: .string("{}\u{1e}"))
+                Task { await sleeper.release() }
+            }
+        ) {
                 let connectTask = Task { try? await service.connect() }
 
                 // 1. Handshake receive parks first — release with a
@@ -1579,18 +1717,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 // 4. Clean halt.
                 await service.disconnect()
                 await recorder.waitFor(state: .disconnected)
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
         }
-
-        XCTAssertTrue(didComplete, "Type-7 close-frame path must not wedge the lifecycle queue (r10 blocker #1)")
 
         // r12 blocker #3 + r15 (Hicks item 4/8): prove the type-7
         // interleaving never ran with two active transports, receive
@@ -1694,8 +1821,15 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         let sub = recordStates(service, into: recorder)
         _ = sub
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        await FailureCeiling.awaitOrFail(
+            seconds: 15,
+            label: "Immediate-receive-failure reconnect hand-off must not hang (r10 blocker #2a)",
+            testCase: self,
+            releaseGates: {
+                mockWS.completeReceive(with: .string("{}\u{1e}"))
+                Task { await sleeper.release() }
+            }
+        ) {
                 // 1. First connect fails on 500 → schedules reconnect.
                 do {
                     try await service.connect()
@@ -1770,18 +1904,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 // 6. Clean halt.
                 await service.disconnect()
                 await recorder.waitFor(state: .disconnected)
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
         }
-
-        XCTAssertTrue(didComplete, "Immediate-receive-failure reconnect hand-off must not hang (r10 blocker #2a)")
 
         let states = recorder.snapshot()
         // Sequence must include: .disconnected (init) → .connecting
@@ -1872,8 +1995,16 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         let sub = recordStates(service, into: recorder)
         _ = sub
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        await FailureCeiling.awaitOrFail(
+            seconds: 15,
+            label: "connect() supersede + teardown must not hang (r11 blocker #2)",
+            testCase: self,
+            releaseGates: {
+                secondMock.failReceive(with: CancellationError())
+                thirdMock.completeReceive(with: .string("{}\u{1e}"))
+                Task { await sleeper.release() }
+            }
+        ) {
                 // 1. First connect: succeeds, .connected published,
                 //    firstMock parked in the connected-loop receive().
                 let firstConnect = Task { try? await service.connect() }
@@ -1962,18 +2093,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
 
                 await service.disconnect()
                 await recorder.waitFor(state: .disconnected)
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
         }
-
-        XCTAssertTrue(didComplete, "connect() supersede + teardown must not hang (r11 blocker #2)")
     }
 
     // MARK: - r12 blocker #2 direct sleeper-primitive proof
@@ -2030,8 +2150,16 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         let sub = recordStates(service, into: recorder)
         _ = sub
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        await FailureCeiling.awaitOrFail(
+            seconds: 15,
+            label: "Type-7 + immediate receive-error interleaving must complete within 15s",
+            testCase: self,
+            releaseGates: {
+                mockA.completeReceive(with: .string("{}\u{1e}"))
+                mockB.completeReceive(with: .string("{}\u{1e}"))
+                Task { await sleeper.release() }
+            }
+        ) {
                 // Phase 1: initial connect handshake → connected via mockA.
                 let connectTask = Task { try? await service.connect() }
                 await mockA.waitForReceiveCall()
@@ -2104,17 +2232,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
 
                 await service.disconnect()
                 await recorder.waitFor(state: .disconnected)
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
         }
-        XCTAssertTrue(didComplete, "Type-7 + immediate receive-error interleaving must complete within 15s")
     }
 
     /// r12 blocker #4 proof: repeated failed reconnects reach the
@@ -2166,19 +2284,22 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         }.1
         _ = latchSub
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            // Driver: on every new sleep enrollment, immediately
-            // release it so the retry loop advances. Terminates
-            // when the enclosing group cancels this task.
-            group.addTask {
-                while !Task.isCancelled {
-                    await sleeper.waitForNextSleep()
-                    if Task.isCancelled { return true }
-                    await sleeper.release()
-                }
-                return true
+        let driver = Task {
+            while !Task.isCancelled {
+                await sleeper.waitForNextSleep()
+                if Task.isCancelled { return }
+                await sleeper.release()
             }
-            group.addTask {
+        }
+        await FailureCeiling.awaitOrFail(
+            seconds: 30,
+            label: "Bounded terminal must be reached deterministically without wall-clock idle",
+            testCase: self,
+            releaseGates: {
+                driver.cancel()
+                Task { await sleeper.release() }
+            }
+        ) {
                 do {
                     try await service.connect()
                     XCTFail("connect() should have thrown on 500 negotiate")
@@ -2191,18 +2312,10 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 // Wait for the reconnect owner Task to actually
                 // exit — this is the positive completion event.
                 await service.lifecycleInvariants.waitForReconnectOwnersZero()
-                return true
-            }
-            group.addTask {
-                // Failure ceiling only; never the pass path.
-                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
+                driver.cancel()
+                await sleeper.release()
+                _ = await driver.value
         }
-        XCTAssertTrue(didComplete, "Bounded terminal must be reached deterministically without wall-clock idle")
 
         let attempts = counter.value()
         // Initial connect + up to 10 retries = 11 negotiate calls.
@@ -2320,24 +2433,18 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         let subB = recordStates(serviceB, into: recorderB)
         _ = (subA, subB)
 
-        let didComplete: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        await FailureCeiling.awaitOrFail(
+            seconds: 15,
+            label: "Service A connect must complete within 15s",
+            testCase: self,
+            releaseGates: { mockA.completeReceive(with: .string("{}\u{1e}")) }
+        ) {
                 let connectTask = Task { try? await serviceA.connect() }
                 await mockA.waitForReceiveCall()
                 mockA.completeReceive(with: .string("{}\u{1e}"))
                 _ = await connectTask.value
                 await recorderA.waitFor(state: .connected)
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
         }
-        XCTAssertTrue(didComplete, "Service A connect must complete within 15s")
 
         // Service A: counters must show activity.
         let invA = serviceA.lifecycleInvariants.snapshot()
@@ -2394,30 +2501,20 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         let sleeper = LifecycleControlledSleeper()
         let baseline = await sleeper.totalSleepEntries()
 
-        let observed: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                await sleeper.waitForSleepAfter(baseline: baseline)
-                return true
+        let sleepTask = Task { await sleeper.sleep(for: 0) }
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "waitForSleepAfter must wake on a new sleep enrollment (positive completion, not elapsed-time absence)",
+            testCase: self,
+            releaseGates: {
+                sleepTask.cancel()
+                Task { await sleeper.release() }
             }
-            group.addTask {
-                await sleeper.sleep(for: 0)
-                return true
-            }
-            group.addTask {
-                // Failure ceiling only; never the pass path.
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            // Release the parked sleeper so the "sleep child" and
-            // any pending waiters exit cleanly before we tear down
-            // the group.
+        ) {
+            await sleeper.waitForSleepAfter(baseline: baseline)
             await sleeper.release()
-            group.cancelAll()
-            return first
+            _ = await sleepTask.value
         }
-
-        XCTAssertTrue(observed, "waitForSleepAfter must wake on a new sleep enrollment (positive completion, not elapsed-time absence)")
     }
 }
 
@@ -2448,7 +2545,20 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
 ///     not stack or leak subscription registrations.
 ///
 /// Timing is used ONLY as failure ceilings.
+@MainActor
 final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
+
+    func testWaitForTransportsZero_cancelAtPreEnrollment_doesNotEnqueue() async {
+        await verifyPreEnrollmentCancellation(.transport)
+    }
+
+    func testWaitForReceiveLoopsZero_cancelAtPreEnrollment_doesNotEnqueue() async {
+        await verifyPreEnrollmentCancellation(.receiveLoop)
+    }
+
+    func testWaitForReconnectOwnersZero_cancelAtPreEnrollment_doesNotEnqueue() async {
+        await verifyPreEnrollmentCancellation(.reconnectOwner)
+    }
 
     /// r15 (Hicks item 5): deterministic barrier-based proof.
     /// Install a barrier that fires the moment a waiter reaches the
@@ -2482,8 +2592,14 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
         t.cancel()
         gate.signal() // Release the barrier so enrollment path runs.
 
-        let didComplete = await raceComplete(seconds: 5) { await t.value }
-        XCTAssertTrue(didComplete, "waitForReceiveLoopsZero must not hang when cancelled at the pre-enroll barrier")
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "waitForReceiveLoopsZero must not hang when cancelled at the pre-enroll barrier",
+            testCase: self,
+            releaseGates: { gate.signal() }
+        ) {
+            _ = await t.value
+        }
         let counts = inv.waiterCounts()
         XCTAssertEqual(counts.receiveLoops, 0,
                        "cancelled task must not have enqueued a continuation; observed receiveLoops waiters=\(counts.receiveLoops)")
@@ -2500,28 +2616,27 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
         inv.enterReceiveLoop()
         inv.enterTransport()
 
+        let barrier = CancellableAsyncGate()
+        let barrierID = UUID()
+        let driver = ZeroWaiterEnrollmentDriver()
+        let postBarrier = LifecycleSignal()
+        inv.setTransportPreEnrollBarrier {
+            try? await barrier.park(barrierID)
+            postBarrier.signal()
+        }
+
         // Spawn waiterB on transports family; it will park because
         // active transports > 0.
         let waiterB = Task<Bool, Never> {
-            await inv.waitForTransportsZero()
+            await driver.waitForTransportsZero(inv)
             return true
         }
 
-        // Deterministically wait until waiterB's enrollment is
-        // observable via `waiterCounts().transports >= 1`. Bounded
-        // failure ceiling; the pass path is a positive observation
-        // of the enrolled continuation count (not a wall-clock
-        // idle-window).
-        let deadline = Date().addingTimeInterval(5.0)
-        while inv.waiterCounts().transports < 1 {
-            if Date() >= deadline {
-                XCTFail("waiterB failed to enroll on transports family within 5s")
-                inv.exitReceiveLoop(); inv.exitTransport()
-                waiterB.cancel(); _ = await waiterB.value
-                return
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000) // 1ms poll, failure ceiling only
-        }
+        await barrier.awaitArrival(barrierID)
+        barrier.release(barrierID)
+        await postBarrier.wait()
+        await driver.fence()
+        XCTAssertEqual(inv.waiterCounts().transports, 1)
 
         // Spawn waiterA on a DIFFERENT family and cancel it.
         let waiterA = Task<Bool, Never> {
@@ -2542,6 +2657,7 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
         inv.exitTransport()
         _ = await waiterB.value
 
+        inv.setTransportPreEnrollBarrier(nil)
         inv.exitReceiveLoop()
     }
 
@@ -2556,8 +2672,13 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
         }
         t.cancel()
 
-        let didComplete = await raceComplete(seconds: 5) { await t.value }
-        XCTAssertTrue(didComplete, "TerminalDisconnectLatch.waitForTerminal() must not hang when its Task was cancelled at/before enrollment")
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "TerminalDisconnectLatch.waitForTerminal() must not hang when its Task was cancelled at/before enrollment",
+            testCase: self
+        ) {
+            _ = await t.value
+        }
         XCTAssertFalse(latch.hasFired(), "Cancellation must not synthesise a terminal-branch observation")
     }
 
@@ -2592,7 +2713,14 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
 
         // Deterministic: exactly two enrollments observed. Cancel A.
         receiverA.cancel()
-        let aWasCancelled = await raceComplete(seconds: 5) { await receiverA.value }
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "Caller-A receive cancellation must complete",
+            testCase: self
+        ) {
+            _ = await receiverA.value
+        }
+        let aWasCancelled = await receiverA.value
         XCTAssertTrue(aWasCancelled, "Caller-A must observe its own CancellationError")
 
         // Only B remains parked.
@@ -2651,6 +2779,1216 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
         XCTAssertEqual(snapAAfter, ["A:connected"],
                        "cancelled subscription A must remain untouched by post-reconfigure publishes; observed \(snapAAfter)")
     }
+
+    private func verifyPreEnrollmentCancellation(_ family: ZeroWaiterFamily) async {
+        let invariants = SignalRLifecycleInvariants()
+        let enrollmentRecorder = ZeroWaiterEnrollmentRecorder()
+        invariants.setDebugZeroWaiterEnrollmentCallback {
+            enrollmentRecorder.record(family: $0, id: $1)
+        }
+        defer { invariants.resetDebugZeroWaiterEnrollmentCallback() }
+        assertAllZero(invariants.snapshot())
+        family.enter(invariants)
+
+        let beforeCancellation = invariants.snapshot()
+        family.assertOnlyTargetEntered(beforeCancellation)
+
+        let gate = CancellableAsyncGate()
+        let callerID = UUID()
+        family.setBarrier(invariants) {
+            try? await gate.park(callerID)
+        }
+
+        let caller = Task {
+            await family.waitForZero(invariants)
+        }
+        await gate.awaitArrival(callerID)
+        caller.cancel()
+        gate.release(callerID)
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "\(family.label) waiter must complete after pre-enrollment cancellation",
+            testCase: self,
+            releaseGates: { gate.releaseAll() }
+        ) {
+            _ = await caller.value
+        }
+
+        let waiterCounts = invariants.waiterCounts()
+        XCTAssertEqual(enrollmentRecorder.totalACKs, 0)
+        XCTAssertEqual(enrollmentRecorder.count(for: family.debugFamily), 0)
+        XCTAssertEqual(waiterCounts.transports, 0)
+        XCTAssertEqual(waiterCounts.receiveLoops, 0)
+        XCTAssertEqual(waiterCounts.reconnectOwners, 0)
+        XCTAssertEqual(invariants.snapshot(), beforeCancellation)
+
+        family.setBarrier(invariants, nil)
+        family.exit(invariants)
+        family.assertFinalBalanced(invariants.snapshot())
+    }
+
+    private func assertAllZero(
+        _ snapshot: SignalRLifecycleInvariants.Snapshot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(snapshot.activeTransports, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReceiveLoops, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReconnectOwners, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.maxTransports, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.maxReceiveLoops, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.maxReconnectOwners, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.transportEnterCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopEnterCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerEnterCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.transportExitCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopExitCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerExitCount, 0, file: file, line: line)
+    }
+}
+
+@MainActor
+final class SignalRZeroWaiterCancellationTests: XCTestCase {
+    func testZeroWaiterCancellation_cancelTransportLeavesOtherFamiliesEnrolled() async {
+        await verifyCancellation(of: .transport)
+    }
+
+    func testZeroWaiterCancellation_cancelReceiveLeavesOtherFamiliesEnrolled() async {
+        await verifyCancellation(of: .receiveLoop)
+    }
+
+    func testZeroWaiterCancellation_cancelReconnectLeavesOtherFamiliesEnrolled() async {
+        await verifyCancellation(of: .reconnectOwner)
+    }
+
+    private func verifyCancellation(of selected: ZeroWaiterFamily) async {
+        let invariants = SignalRLifecycleInvariants()
+        let enrollmentRecorder = ZeroWaiterEnrollmentRecorder()
+        invariants.setDebugZeroWaiterEnrollmentCallback {
+            enrollmentRecorder.record(family: $0, id: $1)
+        }
+        defer { invariants.resetDebugZeroWaiterEnrollmentCallback() }
+
+        invariants.enterTransport()
+        invariants.enterReceiveLoop()
+        invariants.enterReconnectOwner()
+
+        let transportTask = Task { await invariants.waitForTransportsZero() }
+        let receiveTask = Task { await invariants.waitForReceiveLoopsZero() }
+        let reconnectTask = Task { await invariants.waitForReconnectOwnersZero() }
+        let transportProbe = ActualTaskCompletionProbe(observing: transportTask)
+        let receiveProbe = ActualTaskCompletionProbe(observing: receiveTask)
+        let reconnectProbe = ActualTaskCompletionProbe(observing: reconnectTask)
+
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "all zero-waiter families must causally acknowledge enrollment",
+            testCase: self,
+            releaseGates: {
+                transportTask.cancel()
+                receiveTask.cancel()
+                reconnectTask.cancel()
+            }
+        ) {
+            await enrollmentRecorder.awaitACK(family: .transport)
+            await enrollmentRecorder.awaitACK(family: .receiveLoop)
+            await enrollmentRecorder.awaitACK(family: .reconnectOwner)
+        }
+
+        // r16 fix B (Hicks): unconditional exact ACK assertions BEFORE
+        // any selected-family branch. No if/guard path skips these; if
+        // any fails, XCTest records the failure, then we run cleanup to
+        // avoid downstream state-dependent crashes cascading spurious
+        // failures. The identity checks (per-family count == 1, three
+        // distinct waiter IDs, totalACKs == 3) are all evaluated on
+        // every subcase, every run.
+        XCTAssertEqual(
+            enrollmentRecorder.totalACKs,
+            3,
+            "expected exactly three causal enrollment ACKs (one per family)"
+        )
+        XCTAssertEqual(enrollmentRecorder.count(for: .transport), 1)
+        XCTAssertEqual(enrollmentRecorder.count(for: .receiveLoop), 1)
+        XCTAssertEqual(enrollmentRecorder.count(for: .reconnectOwner), 1)
+        let allAcknowledgedIDs =
+            enrollmentRecorder.acknowledgedIDs(for: .transport)
+            + enrollmentRecorder.acknowledgedIDs(for: .receiveLoop)
+            + enrollmentRecorder.acknowledgedIDs(for: .reconnectOwner)
+        XCTAssertEqual(
+            Set(allAcknowledgedIDs).count,
+            3,
+            "expected three distinct waiter IDs across families; got \(allAcknowledgedIDs)"
+        )
+        // Post-failure cleanup only: if the ACK invariant is broken,
+        // exit the families, cancel tasks, and return so downstream
+        // state-dependent assertions do not cascade. The failing
+        // XCTAssertEqual calls above have already recorded the exact
+        // deviation.
+        if enrollmentRecorder.totalACKs != 3
+            || enrollmentRecorder.count(for: .transport) != 1
+            || enrollmentRecorder.count(for: .receiveLoop) != 1
+            || enrollmentRecorder.count(for: .reconnectOwner) != 1
+            || Set(allAcknowledgedIDs).count != 3 {
+            transportTask.cancel()
+            receiveTask.cancel()
+            reconnectTask.cancel()
+            invariants.exitTransport()
+            invariants.exitReceiveLoop()
+            invariants.exitReconnectOwner()
+            await settleAll(
+                transport: transportProbe,
+                receiveLoop: receiveProbe,
+                reconnectOwner: reconnectProbe
+            )
+            return
+        }
+        assertWaiterCounts(invariants, transports: 1, receiveLoops: 1, reconnectOwners: 1)
+        XCTAssertFalse(transportProbe.isCompleteSync)
+        XCTAssertFalse(receiveProbe.isCompleteSync)
+        XCTAssertFalse(reconnectProbe.isCompleteSync)
+        assertActiveSnapshot(invariants.snapshot())
+
+        switch selected {
+        case .transport:
+            transportTask.cancel()
+        case .receiveLoop:
+            receiveTask.cancel()
+        case .reconnectOwner:
+            reconnectTask.cancel()
+        }
+        let selectedProbe = selected.probe(
+            transport: transportProbe,
+            receiveLoop: receiveProbe,
+            reconnectOwner: reconnectProbe
+        )
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "\(selected.label) cancellation must complete only its caller",
+            testCase: self,
+            releaseGates: {
+                transportTask.cancel()
+                receiveTask.cancel()
+                reconnectTask.cancel()
+            }
+        ) {
+            await selectedProbe.awaitCompletion()
+        }
+        guard selectedProbe.isCompleteSync else {
+            transportTask.cancel()
+            receiveTask.cancel()
+            reconnectTask.cancel()
+            invariants.exitTransport()
+            invariants.exitReceiveLoop()
+            invariants.exitReconnectOwner()
+            await settleAll(
+                transport: transportProbe,
+                receiveLoop: receiveProbe,
+                reconnectOwner: reconnectProbe
+            )
+            return
+        }
+
+        XCTAssertEqual(enrollmentRecorder.totalACKs, 3)
+        assertActiveSnapshot(invariants.snapshot())
+        switch selected {
+        case .transport:
+            XCTAssertTrue(transportProbe.isCompleteSync)
+            XCTAssertFalse(receiveProbe.isCompleteSync)
+            XCTAssertFalse(reconnectProbe.isCompleteSync)
+            XCTAssertFalse(receiveTask.isCancelled)
+            XCTAssertFalse(reconnectTask.isCancelled)
+            assertWaiterCounts(invariants, transports: 0, receiveLoops: 1, reconnectOwners: 1)
+        case .receiveLoop:
+            XCTAssertFalse(transportProbe.isCompleteSync)
+            XCTAssertTrue(receiveProbe.isCompleteSync)
+            XCTAssertFalse(reconnectProbe.isCompleteSync)
+            XCTAssertFalse(transportTask.isCancelled)
+            XCTAssertFalse(reconnectTask.isCancelled)
+            assertWaiterCounts(invariants, transports: 1, receiveLoops: 0, reconnectOwners: 1)
+        case .reconnectOwner:
+            XCTAssertFalse(transportProbe.isCompleteSync)
+            XCTAssertFalse(receiveProbe.isCompleteSync)
+            XCTAssertTrue(reconnectProbe.isCompleteSync)
+            XCTAssertFalse(transportTask.isCancelled)
+            XCTAssertFalse(receiveTask.isCancelled)
+            assertWaiterCounts(invariants, transports: 1, receiveLoops: 1, reconnectOwners: 0)
+        }
+
+        invariants.exitTransport()
+        invariants.exitReceiveLoop()
+        invariants.exitReconnectOwner()
+
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "all surviving zero waiters must complete after their families exit",
+            testCase: self
+        ) {
+            await transportProbe.awaitCompletion()
+            await receiveProbe.awaitCompletion()
+            await reconnectProbe.awaitCompletion()
+        }
+
+        assertWaiterCounts(invariants, transports: 0, receiveLoops: 0, reconnectOwners: 0)
+        let final = invariants.snapshot()
+        XCTAssertEqual(final.transportEnterCount, 1)
+        XCTAssertEqual(final.transportExitCount, 1)
+        XCTAssertEqual(final.receiveLoopEnterCount, 1)
+        XCTAssertEqual(final.receiveLoopExitCount, 1)
+        XCTAssertEqual(final.reconnectOwnerEnterCount, 1)
+        XCTAssertEqual(final.reconnectOwnerExitCount, 1)
+        XCTAssertEqual(final.activeTransports, 0)
+        XCTAssertEqual(final.activeReceiveLoops, 0)
+        XCTAssertEqual(final.activeReconnectOwners, 0)
+        XCTAssertEqual(final.maxTransports, 1)
+        XCTAssertEqual(final.maxReceiveLoops, 1)
+        XCTAssertEqual(final.maxReconnectOwners, 1)
+        XCTAssertEqual(final.reconnectAttemptCount, 0)
+    }
+
+    private func settleAll(
+        transport: ActualTaskCompletionProbe<Void, Never>,
+        receiveLoop: ActualTaskCompletionProbe<Void, Never>,
+        reconnectOwner: ActualTaskCompletionProbe<Void, Never>
+    ) async {
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "zero-waiter failure cleanup must settle every task",
+            testCase: self
+        ) {
+            await transport.awaitCompletion()
+            await receiveLoop.awaitCompletion()
+            await reconnectOwner.awaitCompletion()
+        }
+    }
+
+    private func assertActiveSnapshot(
+        _ snapshot: SignalRLifecycleInvariants.Snapshot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(snapshot.activeTransports, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReceiveLoops, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReconnectOwners, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.maxTransports, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.maxReceiveLoops, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.maxReconnectOwners, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.transportEnterCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopEnterCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerEnterCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.transportExitCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopExitCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerExitCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectAttemptCount, 0, file: file, line: line)
+    }
+
+    private func assertWaiterCounts(
+        _ invariants: SignalRLifecycleInvariants,
+        transports: Int,
+        receiveLoops: Int,
+        reconnectOwners: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let counts = invariants.waiterCounts()
+        XCTAssertEqual(
+            counts.transports,
+            transports,
+            "waiter counts=\(counts)",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            counts.receiveLoops,
+            receiveLoops,
+            "waiter counts=\(counts)",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            counts.reconnectOwners,
+            reconnectOwners,
+            "waiter counts=\(counts)",
+            file: file,
+            line: line
+        )
+    }
+
+}
+
+@MainActor
+final class SignalRCausalMockReceiveTests: XCTestCase {
+    func testMockReceive_cancelCallerA_preservesCallerBUntilExplicitCompletion() async throws {
+        let socket = MockSignalRWebSocket()
+        XCTAssertEqual(socket.pendingCallerLabels(), [])
+        XCTAssertEqual(socket.receiveCompletionLog(), [])
+
+        let callerB = Task {
+            try await socket.receive(caller: "B")
+        }
+        await socket.waitForReceiveEnrollments(count: 1)
+
+        let callerA = Task {
+            try await socket.receive(caller: "A")
+        }
+        await socket.waitForReceiveEnrollments(count: 2)
+
+        callerA.cancel()
+        let callerAProbe = ActualTaskCompletionProbe(observing: callerA)
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "caller A cancellation must settle caller A",
+            testCase: self
+        ) {
+            await callerAProbe.awaitCompletion()
+        }
+        do {
+            _ = try await callerA.value
+            XCTFail("caller A must throw CancellationError")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("caller A threw unexpected error: \(error)")
+        }
+        XCTAssertEqual(socket.pendingCallerLabels(), ["B"])
+
+        socket.completeReceive(with: .string("payload-for-B"))
+        let message = try await callerB.value
+        guard case .string(let payload) = message else {
+            XCTFail("caller B must receive a string frame")
+            return
+        }
+        XCTAssertEqual(payload, "payload-for-B")
+        XCTAssertEqual(socket.pendingCallerLabels(), [])
+        XCTAssertEqual(socket.receiveCompletionLog(), ["A.cancelled", "B.message"])
+    }
+}
+
+@MainActor
+final class SignalRServiceBindingHarnessTests: XCTestCase {
+    nonisolated(unsafe) private var session: URLSession!
+    private let testURL = URL(string: "https://signalr-binding.test.invalid")!
+
+    override func setUp() {
+        super.setUp()
+        MockURLProtocol.reset()
+        session = MockURLProtocol.mockSession()
+    }
+
+    override func tearDown() {
+        MockURLProtocol.reset()
+        session = nil
+        super.tearDown()
+    }
+
+    func testRealService_immediateReceiveFailureWhileReconnectOwnerAlive_neverCreatesSecondOwner() async {
+        let negotiateCount = NegotiateCounter()
+        installNegotiateHandler(counter: negotiateCount, failFirst: true)
+        let sleeper = LifecycleControlledSleeper()
+        let socket = MockSignalRWebSocket()
+        let service = makeService(sleeper: sleeper, sockets: MockWebSocketSwitcher([socket]))
+        let states = LifecycleStateObserver()
+        let stateSubscription = recordStates(service, into: states)
+        let lifecycle = LifecycleEventRecorder(service: service)
+        let payloadCallbacks = LockedIntPair()
+        let payloadSubscription = service.onPrinterUpdated { _ in payloadCallbacks.bumpA() }
+        _ = (stateSubscription, payloadSubscription)
+
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "missing owner lifecycle event for immediate receive-failure handoff",
+            testCase: self,
+            releaseGates: {
+                lifecycle.releaseHandoffOpen()
+                socket.failReceive(with: CancellationError())
+                Task {
+                    await sleeper.release()
+                    await service.disconnect()
+                }
+            }
+        ) {
+            do {
+                try await service.connect()
+                XCTFail("initial negotiate must fail")
+            } catch {
+            }
+            await states.waitFor(state: .reconnecting)
+            await sleeper.waitForNextSleep()
+            await lifecycle.awaitEvent("ownerCreated")
+            if Task.isCancelled { return }
+            let ownerA = lifecycle.events().first { $0.kind == "ownerCreated" }!.payload.taskID
+            await lifecycle.awaitEvent("ownerStarted") { $0.taskID == ownerA }
+            await lifecycle.awaitEvent("attemptStarted") {
+                $0.ownerID == ownerA && $0.attempt == 1
+            }
+
+            lifecycle.blockNextHandoffOpen()
+            await sleeper.release()
+            await socket.waitForReceiveEnrollments(count: 1)
+            socket.completeReceive(with: .string("{}\u{1e}"))
+            await states.waitFor(state: .connected)
+            await socket.waitForReceiveEnrollments(count: 2)
+            await lifecycle.awaitEvent("handoffOpen") { $0.ownerID == ownerA }
+
+            let receiveStarted = lifecycle.events().last { $0.kind == "receiveStarted" }!
+            socket.failReceive(with: URLError(.networkConnectionLost))
+            await lifecycle.awaitEvent("receiveCompleted") {
+                $0.taskID == receiveStarted.payload.taskID
+            }
+            await states.waitFor(state: .reconnecting)
+            XCTAssertFalse(
+                lifecycle.events().contains {
+                    $0.kind == "ownerCreated" && $0.payload.taskID != ownerA
+                }
+            )
+
+            lifecycle.releaseHandoffOpen()
+            await lifecycle.awaitEvent("ownerCompleted") { $0.taskID == ownerA }
+            await lifecycle.awaitEvent("ownerCreated") { $0.taskID != ownerA }
+            let ownerB = lifecycle.events().first {
+                $0.kind == "ownerCreated" && $0.payload.taskID != ownerA
+            }!.payload.taskID
+            await lifecycle.awaitEvent("ownerStarted") { $0.taskID == ownerB }
+            await lifecycle.awaitEvent("attemptStarted") {
+                $0.ownerID == ownerB && $0.attempt == 1
+            }
+            assertLifecycleStrictOrder(
+                lifecycle.events(),
+                [
+                    .task(kind: "receiveCompleted", taskID: receiveStarted.payload.taskID),
+                    .task(kind: "ownerCompleted", taskID: ownerA),
+                    .task(kind: "ownerCreated", taskID: ownerB),
+                    .task(kind: "ownerStarted", taskID: ownerB),
+                    .attempt(ownerID: ownerB, attempt: 1)
+                ]
+            )
+
+            await service.disconnect()
+            await states.waitFor(state: .disconnected)
+            await service.lifecycleInvariants.waitForReconnectOwnersZero()
+            let snapshot = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(snapshot.reconnectOwnerEnterCount, 2)
+            XCTAssertEqual(snapshot.reconnectOwnerExitCount, 2)
+            XCTAssertEqual(snapshot.maxReconnectOwners, 1)
+            XCTAssertEqual(snapshot.reconnectAttemptCount, 2)
+            XCTAssertEqual(snapshot.transportEnterCount, 1)
+            XCTAssertEqual(snapshot.transportExitCount, 1)
+            XCTAssertEqual(snapshot.receiveLoopEnterCount, 1)
+            XCTAssertEqual(snapshot.receiveLoopExitCount, 1)
+            XCTAssertEqual(socket.lifecycleCounts().creates, 1)
+            XCTAssertEqual(socket.lifecycleCounts().resumes, 1)
+            XCTAssertEqual(socket.lifecycleCounts().cancels, 1)
+            XCTAssertEqual(negotiateCount.value(), 2)
+            XCTAssertEqual(
+                states.snapshot(),
+                [.disconnected, .connecting, .reconnecting, .connected, .reconnecting, .disconnected]
+            )
+            XCTAssertEqual(payloadCallbacks.snapshot().0, 0)
+            XCTAssertEqual(socket.pendingCallerLabels(), [])
+        }
+    }
+
+    func testRealService_connectSupersedesReconnect_finishesEveryStartedLifetime() async {
+        let negotiateCount = NegotiateCounter()
+        installNegotiateHandler(counter: negotiateCount)
+        let sleeper = LifecycleControlledSleeper()
+        // r16 fix F (Hicks): tag sockets W1/W2/W3 and share a
+        // MockSocketTimeline so we can causally assert
+        // index(W2.socketCancelled) < index(W3.socketHandedOut) by
+        // event identity — not counters and not timing. This uses
+        // the socket-level lifecycle ACK from the caller-specific
+        // test transport, which is emitted even while W2 is
+        // handshake-parked (unlike a receive-task event).
+        let socketTimeline = MockSocketTimeline()
+        let socket1 = MockSignalRWebSocket(tag: "W1", timeline: socketTimeline)
+        let socket2 = MockSignalRWebSocket(tag: "W2", timeline: socketTimeline)
+        let socket3 = MockSignalRWebSocket(tag: "W3", timeline: socketTimeline)
+        let service = makeService(
+            sleeper: sleeper,
+            sockets: MockWebSocketSwitcher([socket1, socket2, socket3])
+        )
+        let states = LifecycleStateObserver()
+        let stateSubscription = recordStates(service, into: states)
+        let lifecycle = LifecycleEventRecorder(service: service)
+        _ = stateSubscription
+
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "missing owner lifecycle event for explicit-connect supersede",
+            testCase: self,
+            releaseGates: {
+                socket1.failReceive(with: CancellationError())
+                socket2.failReceive(with: CancellationError())
+                socket3.failReceive(with: CancellationError())
+                Task {
+                    await sleeper.release()
+                    await service.disconnect()
+                }
+            }
+        ) {
+            let firstConnect = Task { try? await service.connect() }
+            await socket1.waitForReceiveEnrollments(count: 1)
+            socket1.completeReceive(with: .string("{}\u{1e}"))
+            _ = await firstConnect.value
+            await states.waitFor(state: .connected)
+            await socket1.waitForReceiveEnrollments(count: 2)
+            socket1.failReceive(with: URLError(.networkConnectionLost))
+            await states.waitFor(state: .reconnecting)
+            await sleeper.waitForNextSleep()
+            await lifecycle.awaitEvent("ownerCreated")
+            if Task.isCancelled { return }
+            let ownerA = lifecycle.events().first { $0.kind == "ownerCreated" }!.payload.taskID
+            await lifecycle.awaitEvent("attemptStarted") {
+                $0.ownerID == ownerA && $0.attempt == 1
+            }
+
+            await sleeper.release()
+            await socket2.waitForReceiveEnrollments(count: 1)
+            let beforeSupersede = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(
+                states.snapshot(),
+                [.disconnected, .connecting, .connected, .reconnecting]
+            )
+            XCTAssertEqual(negotiateCount.value(), 2)
+            XCTAssertEqual(socket1.lifecycleCounts().cancels, 1)
+            XCTAssertEqual(socket2.lifecycleCounts().cancels, 0)
+            XCTAssertEqual(beforeSupersede.transportEnterCount, 2)
+            XCTAssertEqual(beforeSupersede.transportExitCount, 1)
+            XCTAssertEqual(beforeSupersede.activeTransports, 1)
+            XCTAssertEqual(beforeSupersede.receiveLoopEnterCount, 1)
+            XCTAssertEqual(beforeSupersede.receiveLoopExitCount, 1)
+            XCTAssertEqual(beforeSupersede.reconnectOwnerEnterCount, 1)
+            XCTAssertEqual(beforeSupersede.reconnectOwnerExitCount, 0)
+            XCTAssertEqual(socket2.pendingReceiveCount(), 1)
+
+            // r18 fix F (Hicks): baseline the socket timeline before
+            // supersede. At this point W1 has been handed out, its
+            // handshake and receive-loop have both completed on the
+            // caller side (success frame, then failReceive), the
+            // socket has been cancelled, and W2 has been handed out
+            // (handshake-parked). W3 has NOT been handed out, W2 has
+            // NOT been cancelled, and W2's receive has NOT yet been
+            // acknowledged as complete on the caller side.
+            let timelineBeforeSupersede = socketTimeline.events()
+            XCTAssertEqual(
+                timelineBeforeSupersede,
+                [
+                    .init(kind: .socketHandedOut, tag: "W1"),
+                    .init(kind: .receiveCompletionAcknowledged, tag: "W1"),
+                    .init(kind: .receiveCompletionAcknowledged, tag: "W1"),
+                    .init(kind: .socketCancelled, tag: "W1"),
+                    .init(kind: .socketHandedOut, tag: "W2")
+                ]
+            )
+            XCTAssertNil(socketTimeline.firstIndex(of: .socketCancelled, tag: "W2"))
+            XCTAssertNil(socketTimeline.firstIndex(of: .receiveCompletionAcknowledged, tag: "W2"))
+            XCTAssertNil(socketTimeline.firstIndex(of: .socketHandedOut, tag: "W3"))
+
+            let replacementConnect = Task { try? await service.connect() }
+            await socket2.waitForCancellations()
+            await lifecycle.awaitEvent("ownerCompleted") { $0.taskID == ownerA }
+            await socket3.waitForReceiveEnrollments(count: 1)
+
+            // r18 fix F (Hicks): prove W2's HANDSHAKE COMPLETION
+            // (caller-side acknowledgement that the parked receive
+            // continuation actually resumed and the caller observed
+            // the throw) strictly precedes W3's socket
+            // creation/handshake enrollment. `.receiveCompletionAcknowledged`
+            // is recorded from INSIDE the mock's `receive(caller:)`
+            // do/catch — it can only run on the caller's task AFTER
+            // the withCheckedThrowingContinuation actually resumed
+            // AND the caller-side has processed the completion. This
+            // is a true post-completion event, not a cancellation
+            // initiation. `.socketHandedOut(W3)` is recorded when the
+            // switcher hands socket3 to the service for creation. Both
+            // are appended to a single shared ordered log by event
+            // identity — no aggregate counters, no receive-task
+            // lifecycle events, no timing. `.socketCancelled(W2)`
+            // (which fires when the mock's `cancel()` initiates
+            // cancellation, BEFORE the caller has observed the resume)
+            // remains in the timeline for diagnostics but cannot
+            // satisfy this ordering by itself.
+            let w2CompletionIndex = socketTimeline.firstIndex(
+                of: .receiveCompletionAcknowledged,
+                tag: "W2"
+            )
+            let w2CancelledIndex = socketTimeline.firstIndex(
+                of: .socketCancelled,
+                tag: "W2"
+            )
+            let w3HandedOutIndex = socketTimeline.firstIndex(
+                of: .socketHandedOut,
+                tag: "W3"
+            )
+            XCTAssertNotNil(
+                w2CancelledIndex,
+                "W2 socketCancelled event (cancellation initiation) must have been recorded"
+            )
+            XCTAssertNotNil(
+                w2CompletionIndex,
+                "W2 receiveCompletionAcknowledged event (caller-side handshake completion) must have been recorded"
+            )
+            XCTAssertNotNil(
+                w3HandedOutIndex,
+                "W3 socketHandedOut event must have been recorded"
+            )
+            if let cancelIdx = w2CancelledIndex, let complIdx = w2CompletionIndex {
+                XCTAssertLessThan(
+                    cancelIdx,
+                    complIdx,
+                    "W2 cancellation initiation must precede W2 caller-side completion acknowledgement (diagnostic); got \(socketTimeline.events())"
+                )
+            }
+            if let w2Idx = w2CompletionIndex, let w3Idx = w3HandedOutIndex {
+                XCTAssertLessThan(
+                    w2Idx,
+                    w3Idx,
+                    "W2 handshake caller-side completion must strictly precede W3 socket creation/handshake enrollment in the shared timeline; got \(socketTimeline.events())"
+                )
+            }
+
+            socket3.completeReceive(with: .string("{}\u{1e}"))
+            _ = await replacementConnect.value
+            await states.waitFor(state: .connected)
+            await socket3.waitForReceiveEnrollments(count: 2)
+            await service.disconnect()
+            await socket3.waitForCancellations()
+            await states.waitFor(state: .disconnected)
+
+            let final = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(
+                states.snapshot(),
+                [.disconnected, .connecting, .connected, .reconnecting, .connecting, .connected, .disconnected]
+            )
+            XCTAssertEqual(negotiateCount.value(), 3)
+            for socket in [socket1, socket2, socket3] {
+                XCTAssertEqual(socket.lifecycleCounts().creates, 1)
+                XCTAssertEqual(socket.lifecycleCounts().resumes, 1)
+                XCTAssertEqual(socket.lifecycleCounts().cancels, 1)
+                XCTAssertEqual(socket.pendingReceiveCount(), 0)
+            }
+            XCTAssertEqual(final.transportEnterCount, 3)
+            XCTAssertEqual(final.transportExitCount, 3)
+            XCTAssertEqual(final.maxTransports, 1)
+            XCTAssertEqual(final.receiveLoopEnterCount, 2)
+            XCTAssertEqual(final.receiveLoopExitCount, 2)
+            XCTAssertEqual(final.maxReceiveLoops, 1)
+            XCTAssertEqual(final.reconnectOwnerEnterCount, 1)
+            XCTAssertEqual(final.reconnectOwnerExitCount, 1)
+            XCTAssertEqual(final.maxReconnectOwners, 1)
+            XCTAssertEqual(final.reconnectAttemptCount, 1)
+        }
+    }
+
+    func testRealService_type7ThenImmediateReceiveError_exactDeltasAndFinalQuiescence() async {
+        let negotiateCount = NegotiateCounter()
+        installNegotiateHandler(counter: negotiateCount)
+        let sleeper = LifecycleControlledSleeper()
+        let socket1 = MockSignalRWebSocket()
+        let socket2 = MockSignalRWebSocket()
+        let service = makeService(
+            sleeper: sleeper,
+            sockets: MockWebSocketSwitcher([socket1, socket2])
+        )
+        let states = LifecycleStateObserver()
+        let stateSubscription = recordStates(service, into: states)
+        let lifecycle = LifecycleEventRecorder(service: service)
+        let payloadCallbacks = LockedIntPair()
+        let payloadSubscription = service.onPrinterUpdated { _ in payloadCallbacks.bumpA() }
+        _ = (stateSubscription, payloadSubscription)
+
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "missing owner lifecycle event for type-7 receive-error handoff",
+            testCase: self,
+            releaseGates: {
+                lifecycle.releaseHandoffOpen()
+                socket1.failReceive(with: CancellationError())
+                socket2.failReceive(with: CancellationError())
+                Task {
+                    await sleeper.release()
+                    await service.disconnect()
+                }
+            }
+        ) {
+            let connect = Task { try? await service.connect() }
+            await socket1.waitForReceiveEnrollments(count: 1)
+            socket1.completeReceive(with: .string("{}\u{1e}"))
+            _ = await connect.value
+            await states.waitFor(state: .connected)
+            await socket1.waitForReceiveEnrollments(count: 2)
+            let beforeType7 = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(states.snapshot(), [.disconnected, .connecting, .connected])
+            XCTAssertEqual(socket1.lifecycleCounts().resumes, 1)
+            XCTAssertEqual(socket1.lifecycleCounts().cancels, 0)
+            XCTAssertEqual(beforeType7.transportEnterCount, 1)
+            XCTAssertEqual(beforeType7.transportExitCount, 0)
+            XCTAssertEqual(beforeType7.receiveLoopEnterCount, 1)
+            XCTAssertEqual(beforeType7.receiveLoopExitCount, 0)
+            XCTAssertEqual(beforeType7.reconnectOwnerEnterCount, 0)
+
+            socket1.completeReceive(with: .string("{\"type\":7,\"error\":\"server-close\"}\u{1e}"))
+            await states.waitFor(state: .reconnecting)
+            await sleeper.waitForNextSleep()
+            await lifecycle.awaitEvent("ownerCreated")
+            if Task.isCancelled { return }
+            let ownerA = lifecycle.events().first { $0.kind == "ownerCreated" }!.payload.taskID
+            let afterType7 = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(socket1.lifecycleCounts().cancels, 1)
+            XCTAssertEqual(afterType7.transportEnterCount, 1)
+            XCTAssertEqual(afterType7.transportExitCount, 1)
+            XCTAssertEqual(afterType7.receiveLoopEnterCount, 1)
+            XCTAssertEqual(afterType7.receiveLoopExitCount, 1)
+            XCTAssertEqual(afterType7.reconnectOwnerEnterCount, 1)
+            XCTAssertEqual(afterType7.reconnectOwnerExitCount, 0)
+            XCTAssertEqual(afterType7.reconnectAttemptCount, 1)
+
+            lifecycle.blockNextHandoffOpen()
+            await sleeper.release()
+            await socket2.waitForReceiveEnrollments(count: 1)
+            socket2.completeReceive(with: .string("{}\u{1e}"))
+            await states.waitFor(state: .connected)
+            await socket2.waitForReceiveEnrollments(count: 2)
+            await lifecycle.awaitEvent("handoffOpen") { $0.ownerID == ownerA }
+            let receiveStarted = lifecycle.events().last { $0.kind == "receiveStarted" }!
+            socket2.failReceive(with: URLError(.networkConnectionLost))
+            await lifecycle.awaitEvent("receiveCompleted") {
+                $0.taskID == receiveStarted.payload.taskID
+            }
+            XCTAssertFalse(
+                lifecycle.events().contains {
+                    $0.kind == "ownerCreated" && $0.payload.taskID != ownerA
+                }
+            )
+
+            lifecycle.releaseHandoffOpen()
+            await lifecycle.awaitEvent("ownerCompleted") { $0.taskID == ownerA }
+            await lifecycle.awaitEvent("ownerCreated") { $0.taskID != ownerA }
+            let ownerB = lifecycle.events().first {
+                $0.kind == "ownerCreated" && $0.payload.taskID != ownerA
+            }!.payload.taskID
+            await lifecycle.awaitEvent("ownerStarted") { $0.taskID == ownerB }
+            assertLifecycleStrictOrder(
+                lifecycle.events(),
+                [
+                    ("ownerCompleted", ownerA),
+                    ("ownerCreated", ownerB),
+                    ("ownerStarted", ownerB)
+                ]
+            )
+
+            await service.disconnect()
+            await states.waitFor(state: .disconnected)
+            await service.lifecycleInvariants.waitForReconnectOwnersZero()
+            let final = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(
+                states.snapshot(),
+                [.disconnected, .connecting, .connected, .reconnecting, .connected, .reconnecting, .disconnected]
+            )
+            XCTAssertEqual(negotiateCount.value(), 2)
+            for socket in [socket1, socket2] {
+                XCTAssertEqual(socket.lifecycleCounts().creates, 1)
+                XCTAssertEqual(socket.lifecycleCounts().resumes, 1)
+                XCTAssertEqual(socket.lifecycleCounts().cancels, 1)
+                XCTAssertEqual(socket.pendingReceiveCount(), 0)
+            }
+            XCTAssertEqual(final.transportEnterCount, 2)
+            XCTAssertEqual(final.transportExitCount, 2)
+            XCTAssertEqual(final.receiveLoopEnterCount, 2)
+            XCTAssertEqual(final.receiveLoopExitCount, 2)
+            XCTAssertEqual(final.reconnectOwnerEnterCount, 2)
+            XCTAssertEqual(final.reconnectOwnerExitCount, 2)
+            XCTAssertEqual(final.maxReconnectOwners, 1)
+            XCTAssertEqual(final.reconnectAttemptCount, 2)
+            XCTAssertEqual(service.lifecycleInvariants.waiterCounts().transports, 0)
+            XCTAssertEqual(service.lifecycleInvariants.waiterCounts().receiveLoops, 0)
+            XCTAssertEqual(service.lifecycleInvariants.waiterCounts().reconnectOwners, 0)
+            XCTAssertEqual(payloadCallbacks.snapshot().0, 0)
+        }
+    }
+
+    private func installNegotiateHandler(counter: NegotiateCounter, failFirst: Bool = false) {
+        MockURLProtocol.requestHandler = { request in
+            let call = counter.increment()
+            if failFirst && call == 1 {
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 500,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data()
+                )
+            }
+            let payload: [String: Any] = [
+                "connectionId": "binding-\(call)",
+                "connectionToken": "binding-\(call)",
+                "negotiateVersion": 1,
+                "availableTransports": [[
+                    "transport": "WebSockets",
+                    "transferFormats": ["Text", "Binary"]
+                ]]
+            ]
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            )
+        }
+    }
+
+    private func makeService(
+        sleeper: LifecycleControlledSleeper,
+        sockets: MockWebSocketSwitcher
+    ) -> SignalRService {
+        SignalRService(
+            serverURL: testURL,
+            session: session,
+            tokenProvider: { nil },
+            reconnectBackoff: { _ in 1 },
+            reconnectSleeper: sleeper.makeSleeper(),
+            webSocketFactory: { _ in sockets.next() }
+        )
+    }
+
+    private func recordStates(
+        _ service: SignalRService,
+        into recorder: LifecycleStateObserver
+    ) -> SignalRSubscription {
+        let (initial, subscription) = service.onConnectionStateChanged {
+            recorder.append($0)
+        }
+        recorder.append(initial)
+        return subscription
+    }
+
+}
+
+@MainActor
+final class SignalRSubscriptionOwnerLifecycleTests: XCTestCase {
+    func testSubscriptionOwner_reconfigureThenDeinit_restoresBaselineWithoutExplicitTestCancellation() async {
+        let service = MockSignalRService()
+        let callbacks = LockedQuadCounter()
+        let deinitGate = CancellableAsyncGate()
+        let deinitID = UUID()
+        var owner: SignalRSubscriptionTestOwner? = SignalRSubscriptionTestOwner(
+            callbacks: callbacks,
+            deinitGate: deinitGate,
+            deinitID: deinitID
+        )
+        let weakOwner = WeakReference(owner)
+
+        assertSubscriberCounts(service, expected: 0)
+        owner?.configure(service)
+        assertSubscriberCounts(service, expected: 1)
+        publishAllFamilies(service)
+        XCTAssertEqual(callbacks.snapshot(), [1, 1, 1, 1])
+
+        owner?.configure(service)
+        assertSubscriberCounts(service, expected: 1)
+        publishAllFamilies(service)
+        XCTAssertEqual(callbacks.snapshot(), [2, 2, 2, 2])
+
+        let deinitWait = Task { try? await deinitGate.park(deinitID) }
+        await deinitGate.awaitArrival(deinitID)
+        owner = nil
+        let deinitProbe = ActualTaskCompletionProbe(observing: deinitWait)
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "subscription owner deinit must acknowledge completion",
+            testCase: self,
+            releaseGates: { deinitGate.releaseAll() }
+        ) {
+            await deinitProbe.awaitCompletion()
+        }
+
+        XCTAssertNil(weakOwner.value)
+        assertSubscriberCounts(service, expected: 0)
+        publishAllFamilies(service)
+        XCTAssertEqual(callbacks.snapshot(), [2, 2, 2, 2])
+    }
+
+    private func assertSubscriberCounts(
+        _ service: MockSignalRService,
+        expected: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(service.connectionStateSubscriberCount, expected, file: file, line: line)
+        XCTAssertEqual(service.printerUpdateSubscriberCount, expected, file: file, line: line)
+        XCTAssertEqual(service.jobQueueSubscriberCount, expected, file: file, line: line)
+        XCTAssertEqual(service.attentionSubscriberCount, expected, file: file, line: line)
+    }
+
+    private func publishAllFamilies(_ service: MockSignalRService) {
+        service.simulateConnectionStateChange(
+            service.connectionState == .connected ? .reconnecting : .connected
+        )
+        service.simulatePrinterUpdate(PrinterStatusUpdate(
+            id: UUID(), isOnline: true, state: nil, progress: nil,
+            jobName: nil, fileName: nil, thumbnailUrl: nil, cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+            hotendTarget: nil, bedTarget: nil, homedAxes: nil,
+            spoolInfo: nil, mmuStatus: nil
+        ))
+        service.simulateJobQueueUpdate(JobQueueUpdate(printerId: UUID(), jobs: []))
+        service.simulateAttentionChanged(AttentionChangedEvent(
+            itemId: "test", changeKind: .updated, occurredAt: Date()
+        ))
+    }
+}
+
+@MainActor
+final class SignalRHarnessCompletionProbeTests: XCTestCase {
+    func testActualTaskCompletionProbe_doesNotCompleteWhileTaskIsBlockedInFinalDefer() async {
+        let deferGate = FinalDeferGate()
+        let task = Task.detached {
+            defer { deferGate.blockUntilReleased() }
+            deferGate.reachEndOfBody()
+        }
+        let probe = ActualTaskCompletionProbe(observing: task)
+
+        await deferGate.awaitBlocked()
+        XCTAssertFalse(probe.isCompleteSync)
+        deferGate.release()
+        await FailureCeiling.awaitOrFail(
+            seconds: 5,
+            label: "completion probe must acknowledge actual task completion",
+            testCase: self,
+            releaseGates: { deferGate.release() }
+        ) {
+            await probe.awaitCompletion()
+        }
+        XCTAssertTrue(probe.isCompleteSync)
+    }
+}
+
+private enum ZeroWaiterFamily: String, Sendable {
+    case transport
+    case receiveLoop
+    case reconnectOwner
+
+    var label: String { rawValue }
+
+    var debugFamily: SignalRLifecycleInvariants.DebugZeroWaiterFamily {
+        switch self {
+        case .transport: .transport
+        case .receiveLoop: .receiveLoop
+        case .reconnectOwner: .reconnectOwner
+        }
+    }
+
+    func enter(_ invariants: SignalRLifecycleInvariants) {
+        switch self {
+        case .transport: invariants.enterTransport()
+        case .receiveLoop: invariants.enterReceiveLoop()
+        case .reconnectOwner: invariants.enterReconnectOwner()
+        }
+    }
+
+    func exit(_ invariants: SignalRLifecycleInvariants) {
+        switch self {
+        case .transport: invariants.exitTransport()
+        case .receiveLoop: invariants.exitReceiveLoop()
+        case .reconnectOwner: invariants.exitReconnectOwner()
+        }
+    }
+
+    func waitForZero(_ invariants: SignalRLifecycleInvariants) async {
+        switch self {
+        case .transport: await invariants.waitForTransportsZero()
+        case .receiveLoop: await invariants.waitForReceiveLoopsZero()
+        case .reconnectOwner: await invariants.waitForReconnectOwnersZero()
+        }
+    }
+
+    func setBarrier(
+        _ invariants: SignalRLifecycleInvariants,
+        _ barrier: (@Sendable () async -> Void)?
+    ) {
+        switch self {
+        case .transport: invariants.setTransportPreEnrollBarrier(barrier)
+        case .receiveLoop: invariants.setReceiveLoopPreEnrollBarrier(barrier)
+        case .reconnectOwner: invariants.setReconnectOwnerPreEnrollBarrier(barrier)
+        }
+    }
+
+    func probe(
+        transport: ActualTaskCompletionProbe<Void, Never>,
+        receiveLoop: ActualTaskCompletionProbe<Void, Never>,
+        reconnectOwner: ActualTaskCompletionProbe<Void, Never>
+    ) -> ActualTaskCompletionProbe<Void, Never> {
+        switch self {
+        case .transport: transport
+        case .receiveLoop: receiveLoop
+        case .reconnectOwner: reconnectOwner
+        }
+    }
+
+    func assertOnlyTargetEntered(
+        _ snapshot: SignalRLifecycleInvariants.Snapshot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(snapshot.activeTransports, self == .transport ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReceiveLoops, self == .receiveLoop ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReconnectOwners, self == .reconnectOwner ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.maxTransports, self == .transport ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.maxReceiveLoops, self == .receiveLoop ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.maxReconnectOwners, self == .reconnectOwner ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.transportEnterCount, self == .transport ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopEnterCount, self == .receiveLoop ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerEnterCount, self == .reconnectOwner ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.transportExitCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopExitCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerExitCount, 0, file: file, line: line)
+    }
+
+    func assertFinalBalanced(
+        _ snapshot: SignalRLifecycleInvariants.Snapshot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(snapshot.activeTransports, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReceiveLoops, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.activeReconnectOwners, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.transportEnterCount, self == .transport ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.transportExitCount, self == .transport ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopEnterCount, self == .receiveLoop ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.receiveLoopExitCount, self == .receiveLoop ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerEnterCount, self == .reconnectOwner ? 1 : 0, file: file, line: line)
+        XCTAssertEqual(snapshot.reconnectOwnerExitCount, self == .reconnectOwner ? 1 : 0, file: file, line: line)
+    }
+}
+
+private actor ZeroWaiterEnrollmentDriver {
+    func waitForTransportsZero(_ invariants: SignalRLifecycleInvariants) async {
+        await invariants.waitForTransportsZero()
+    }
+
+    func waitForReceiveLoopsZero(_ invariants: SignalRLifecycleInvariants) async {
+        await invariants.waitForReceiveLoopsZero()
+    }
+
+    func waitForReconnectOwnersZero(_ invariants: SignalRLifecycleInvariants) async {
+        await invariants.waitForReconnectOwnersZero()
+    }
+
+    func fence() {}
+}
+
+private final class LockedQuadCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values = [0, 0, 0, 0]
+
+    func increment(_ index: Int) {
+        lock.lock()
+        values[index] += 1
+        lock.unlock()
+    }
+
+    func snapshot() -> [Int] {
+        lock.lock(); defer { lock.unlock() }
+        return values
+    }
+}
+
+private final class WeakReference<Value: AnyObject> {
+    weak var value: Value?
+
+    init(_ value: Value?) {
+        self.value = value
+    }
+}
+
+private final class SignalRSubscriptionTestOwner {
+    private let callbacks: LockedQuadCounter
+    private let deinitGate: CancellableAsyncGate
+    private let deinitID: UUID
+    private var subscriptions: [SignalRSubscription] = []
+
+    init(callbacks: LockedQuadCounter, deinitGate: CancellableAsyncGate, deinitID: UUID) {
+        self.callbacks = callbacks
+        self.deinitGate = deinitGate
+        self.deinitID = deinitID
+    }
+
+    func configure(_ service: MockSignalRService) {
+        subscriptions.forEach { $0.cancel() }
+        subscriptions.removeAll()
+        subscriptions.append(service.onConnectionStateChanged { [callbacks] _ in
+            callbacks.increment(0)
+        }.subscription)
+        subscriptions.append(service.onPrinterUpdated { [callbacks] _ in
+            callbacks.increment(1)
+        })
+        subscriptions.append(service.onJobQueueUpdated { [callbacks] _ in
+            callbacks.increment(2)
+        })
+        subscriptions.append(service.onAttentionChanged { [callbacks] _ in
+            callbacks.increment(3)
+        })
+    }
+
+    deinit {
+        deinitGate.release(deinitID)
+    }
+}
+
+private final class FinalDeferGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private var blocked = false
+    private var released = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func reachEndOfBody() {}
+
+    func blockUntilReleased() {
+        let waiters: [CheckedContinuation<Void, Never>]
+        lock.lock()
+        blocked = true
+        waiters = blockedWaiters
+        blockedWaiters.removeAll()
+        let shouldWait = !released
+        lock.unlock()
+        for waiter in waiters { waiter.resume() }
+        if shouldWait { releaseSemaphore.wait() }
+    }
+
+    func awaitBlocked() async {
+        if isBlocked { return }
+        await withCheckedContinuation { cont in
+            enqueueBlockedWaiter(cont)
+        }
+    }
+
+    func release() {
+        lock.lock()
+        let shouldSignal = !released
+        released = true
+        lock.unlock()
+        if shouldSignal { releaseSemaphore.signal() }
+    }
+
+    private var isBlocked: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return blocked
+    }
+
+    private func enqueueBlockedWaiter(_ cont: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if blocked {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        blockedWaiters.append(cont)
+        lock.unlock()
+    }
 }
 
 /// r15 helper: deterministic one-shot signal for pre-enroll barrier
@@ -2695,19 +4033,452 @@ final class LifecycleSignal: @unchecked Sendable {
     }
 }
 
-/// r15 helper: race a work closure against a wall-clock ceiling.
-/// Returns `true` if the work completed within `seconds`.
-private func raceComplete(seconds: UInt64, work: @Sendable @escaping () async -> Bool) async -> Bool {
-    await withTaskGroup(of: Bool.self) { group in
-        group.addTask { await work() }
-        group.addTask {
-            do { try await Task.sleep(nanoseconds: seconds * 1_000_000_000); return false }
-            catch { return false }
+private final class CancellableAsyncGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var parked: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var arrivals: Set<UUID> = []
+    private var arrivalWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
+
+    func park(_ id: UUID) async throws {
+        try Task.checkCancellation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (cont: CheckedContinuation<Void, Error>) in
+                var arrivalACKs: [CheckedContinuation<Void, Never>] = []
+                lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    cont.resume(throwing: CancellationError())
+                    return
+                }
+                parked[id] = cont
+                arrivals.insert(id)
+                arrivalACKs = arrivalWaiters.removeValue(forKey: id) ?? []
+                lock.unlock()
+                for ack in arrivalACKs { ack.resume() }
+            }
+        } onCancel: {
+            self.cancel(id)
         }
-        let first = await group.next() ?? false
-        group.cancelAll()
-        return first
     }
+
+    func awaitArrival(_ id: UUID) async {
+        if hasArrived(id) { return }
+        await withCheckedContinuation { cont in
+            enqueueArrivalWaiter(id, cont)
+        }
+    }
+
+    func release(_ id: UUID) {
+        let cont: CheckedContinuation<Void, Error>?
+        lock.lock()
+        cont = parked.removeValue(forKey: id)
+        lock.unlock()
+        cont?.resume()
+    }
+
+    func releaseAll() {
+        let continuations: [CheckedContinuation<Void, Error>]
+        lock.lock()
+        continuations = Array(parked.values)
+        parked.removeAll()
+        lock.unlock()
+        for cont in continuations { cont.resume() }
+    }
+
+    private func hasArrived(_ id: UUID) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return arrivals.contains(id)
+    }
+
+    private func enqueueArrivalWaiter(_ id: UUID, _ cont: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if arrivals.contains(id) {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        arrivalWaiters[id, default: []].append(cont)
+        lock.unlock()
+    }
+
+    private func cancel(_ id: UUID) {
+        let cont: CheckedContinuation<Void, Error>?
+        lock.lock()
+        cont = parked.removeValue(forKey: id)
+        lock.unlock()
+        cont?.resume(throwing: CancellationError())
+    }
+}
+
+private enum FailureCeiling {
+    @MainActor
+    static func awaitOrFail(
+        seconds: TimeInterval,
+        label: String,
+        testCase _: XCTestCase,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        releaseGates: @Sendable @escaping () -> Void = {},
+        work: @Sendable @escaping () async -> Void
+    ) async {
+        let completed = XCTestExpectation(description: label)
+        let task = Task {
+            await work()
+            completed.fulfill()
+        }
+        let result = await XCTWaiter.fulfillment(of: [completed], timeout: seconds)
+        guard result == .completed else {
+            XCTFail(label, file: file, line: line)
+            task.cancel()
+            releaseGates()
+            return
+        }
+        _ = await task.value
+    }
+}
+
+private final class ActualTaskCompletionProbe<
+    Success: Sendable,
+    Failure: Error
+>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var complete = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(observing task: Task<Success, Failure>) {
+        Task { [weak self] in
+            _ = try? await task.value
+            self?.markComplete()
+        }
+    }
+
+    func awaitCompletion() async {
+        if isCompleteSync { return }
+        await withCheckedContinuation { cont in
+            enqueue(cont)
+        }
+    }
+
+    var isCompleteSync: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return complete
+    }
+
+    private func enqueue(_ cont: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if complete {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        waiters.append(cont)
+        lock.unlock()
+    }
+
+    private func markComplete() {
+        let toResume: [CheckedContinuation<Void, Never>]
+        lock.lock()
+        guard !complete else { lock.unlock(); return }
+        complete = true
+        toResume = waiters
+        waiters.removeAll()
+        lock.unlock()
+        for cont in toResume { cont.resume() }
+    }
+}
+
+private final class ZeroWaiterEnrollmentRecorder: @unchecked Sendable {
+    typealias Family = SignalRLifecycleInvariants.DebugZeroWaiterFamily
+
+    private struct ACKWaiter {
+        let id: UUID
+        let family: Family
+        let count: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private let lock = NSLock()
+    private var acknowledgements: [(family: Family, waiterID: UUID)] = []
+    private var waiters: [ACKWaiter] = []
+
+    func record(family: Family, id: UUID) {
+        var toResume: [CheckedContinuation<Void, Never>] = []
+        lock.lock()
+        acknowledgements.append((family: family, waiterID: id))
+        waiters.removeAll { waiter in
+            if waiter.family == family,
+               acknowledgements.lazy.filter({ $0.family == family }).count >= waiter.count {
+                toResume.append(waiter.continuation)
+                return true
+            }
+            return false
+        }
+        lock.unlock()
+        for continuation in toResume { continuation.resume() }
+    }
+
+    func awaitACK(family: Family, count: Int = 1) async {
+        let waiterID = UUID()
+        await withTaskCancellationHandler {
+            if Task.isCancelled || self.count(for: family) >= count { return }
+            await withCheckedContinuation { continuation in
+                enqueue(
+                    ACKWaiter(
+                        id: waiterID,
+                        family: family,
+                        count: count,
+                        continuation: continuation
+                    )
+                )
+            }
+        } onCancel: {
+            self.cancelWaiter(waiterID)
+        }
+    }
+
+    var totalACKs: Int {
+        lock.lock(); defer { lock.unlock() }
+        return acknowledgements.count
+    }
+
+    func acknowledgedIDs(for family: Family) -> [UUID] {
+        lock.lock(); defer { lock.unlock() }
+        return acknowledgements.compactMap {
+            $0.family == family ? $0.waiterID : nil
+        }
+    }
+
+    func count(for family: Family) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return acknowledgements.lazy.filter { $0.family == family }.count
+    }
+
+    private func enqueue(_ waiter: ACKWaiter) {
+        lock.lock()
+        if Task.isCancelled
+            || acknowledgements.lazy.filter({ $0.family == waiter.family }).count >= waiter.count {
+            lock.unlock()
+            waiter.continuation.resume()
+            return
+        }
+        waiters.append(waiter)
+        lock.unlock()
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        let continuation: CheckedContinuation<Void, Never>?
+        lock.lock()
+        if let index = waiters.firstIndex(where: { $0.id == id }) {
+            continuation = waiters.remove(at: index).continuation
+        } else {
+            continuation = nil
+        }
+        lock.unlock()
+        continuation?.resume()
+    }
+}
+
+private extension Notification.Name {
+    static let signalRTaskLifecycleTest = Notification.Name("PrintFarmer.SignalRTaskLifecycle.test")
+}
+
+private final class LifecycleEventRecorder: @unchecked Sendable {
+    struct Payload: Sendable {
+        let taskID: UUID
+        let attempt: Int?
+        let ownerID: UUID?
+    }
+
+    struct Event: Sendable {
+        let kind: String
+        let payload: Payload
+    }
+
+    private struct Waiter {
+        let id: UUID
+        let kind: String
+        let matching: @Sendable (Payload) -> Bool
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private let lock = NSLock()
+    private weak var service: AnyObject?
+    private var observer: NSObjectProtocol?
+    private var recorded: [Event] = []
+    private var waiters: [Waiter] = []
+    private var shouldBlockNextHandoff = false
+    private var handoffRelease: DispatchSemaphore?
+
+    init(service: AnyObject) {
+        self.service = service
+        observer = NotificationCenter.default.addObserver(
+            forName: .signalRTaskLifecycleTest,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            self?.record(notification)
+        }
+    }
+
+    deinit {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        releaseHandoffOpen()
+    }
+
+    func awaitEvent(
+        _ kind: String,
+        matching: @Sendable @escaping (Payload) -> Bool = { _ in true }
+    ) async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            if Task.isCancelled || contains(kind, matching: matching) { return }
+            await withCheckedContinuation { cont in
+                enqueue(id, kind, matching: matching, continuation: cont)
+            }
+        } onCancel: {
+            self.cancelWaiter(id)
+        }
+    }
+
+    func events() -> [Event] {
+        lock.lock(); defer { lock.unlock() }
+        return recorded
+    }
+
+    func blockNextHandoffOpen() {
+        lock.lock()
+        shouldBlockNextHandoff = true
+        handoffRelease = DispatchSemaphore(value: 0)
+        lock.unlock()
+    }
+
+    func releaseHandoffOpen() {
+        let semaphore: DispatchSemaphore?
+        lock.lock()
+        semaphore = handoffRelease
+        handoffRelease = nil
+        shouldBlockNextHandoff = false
+        lock.unlock()
+        semaphore?.signal()
+    }
+
+    private func record(_ notification: Notification) {
+        guard let service, notification.object as AnyObject? === service,
+              let kind = notification.userInfo?["event"] as? String,
+              let taskID = notification.userInfo?["taskID"] as? UUID else { return }
+        let payload = Payload(
+            taskID: taskID,
+            attempt: notification.userInfo?["attempt"] as? Int,
+            ownerID: notification.userInfo?["ownerID"] as? UUID
+        )
+        let event = Event(kind: kind, payload: payload)
+        var toResume: [CheckedContinuation<Void, Never>] = []
+        var block: DispatchSemaphore?
+        lock.lock()
+        recorded.append(event)
+        waiters.removeAll { waiter in
+            if waiter.kind == kind, waiter.matching(payload) {
+                toResume.append(waiter.continuation)
+                return true
+            }
+            return false
+        }
+        if kind == "handoffOpen", shouldBlockNextHandoff {
+            shouldBlockNextHandoff = false
+            block = handoffRelease
+        }
+        lock.unlock()
+        for cont in toResume { cont.resume() }
+        block?.wait()
+    }
+
+    private func contains(
+        _ kind: String,
+        matching: @Sendable (Payload) -> Bool
+    ) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return recorded.contains { $0.kind == kind && matching($0.payload) }
+    }
+
+    private func enqueue(
+        _ id: UUID,
+        _ kind: String,
+        matching: @Sendable @escaping (Payload) -> Bool,
+        continuation: CheckedContinuation<Void, Never>
+    ) {
+        lock.lock()
+        if recorded.contains(where: { $0.kind == kind && matching($0.payload) }) {
+            lock.unlock()
+            continuation.resume()
+            return
+        }
+        if Task.isCancelled {
+            lock.unlock()
+            continuation.resume()
+            return
+        }
+        waiters.append(Waiter(id: id, kind: kind, matching: matching, continuation: continuation))
+        lock.unlock()
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        let continuation: CheckedContinuation<Void, Never>?
+        lock.lock()
+        if let index = waiters.firstIndex(where: { $0.id == id }) {
+            continuation = waiters.remove(at: index).continuation
+        } else {
+            continuation = nil
+        }
+        lock.unlock()
+        continuation?.resume()
+    }
+}
+
+private func assertLifecycleStrictOrder(
+    _ events: [LifecycleEventRecorder.Event],
+    _ expected: [(kind: String, taskID: UUID)],
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let indices = expected.compactMap { edge in
+        events.firstIndex {
+            $0.kind == edge.kind && $0.payload.taskID == edge.taskID
+        }
+    }
+    XCTAssertEqual(indices.count, expected.count, file: file, line: line)
+    XCTAssertEqual(indices, indices.sorted(), file: file, line: line)
+    XCTAssertEqual(Set(indices).count, indices.count, file: file, line: line)
+}
+
+private enum LifecycleEventIdentity {
+    case task(kind: String, taskID: UUID)
+    case attempt(ownerID: UUID, attempt: Int)
+}
+
+private func assertLifecycleStrictOrder(
+    _ events: [LifecycleEventRecorder.Event],
+    _ expected: [LifecycleEventIdentity],
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let indices = expected.compactMap { identity in
+        events.firstIndex { event in
+            switch identity {
+            case .task(let kind, let taskID):
+                event.kind == kind && event.payload.taskID == taskID
+            case .attempt(let ownerID, let attempt):
+                event.kind == "attemptStarted"
+                    && event.payload.ownerID == ownerID
+                    && event.payload.attempt == attempt
+            }
+        }
+    }
+    XCTAssertEqual(indices.count, expected.count, file: file, line: line)
+    XCTAssertEqual(indices, indices.sorted(), file: file, line: line)
+    XCTAssertEqual(Set(indices).count, indices.count, file: file, line: line)
 }
 
 /// Helper: hands out mock websocket instances in FIFO order so tests
@@ -2731,12 +4502,62 @@ final class MockWebSocketSwitcher: @unchecked Sendable {
     }
 
     func next() -> MockSignalRWebSocket {
-        lock.lock(); defer { lock.unlock() }
-        guard !remaining.isEmpty else {
+        lock.lock()
+        let mock: MockSignalRWebSocket
+        if !remaining.isEmpty {
+            mock = remaining.removeFirst()
+        } else {
             // Return a fresh mock rather than crashing — the test's
             // assertions will catch unexpected extra sockets.
-            return MockSignalRWebSocket()
+            mock = MockSignalRWebSocket()
         }
-        return remaining.removeFirst()
+        lock.unlock()
+        // r16 fix F: record the "socket handed out" moment in the shared
+        // timeline. This is the exact causal moment the service creates
+        // (installs) the transport — i.e., W3 creation. Recording happens
+        // OUTSIDE the switcher lock so timeline is the only lock in scope.
+        mock.timeline?.record(.socketHandedOut, tag: mock.tag)
+        return mock
+    }
+}
+
+// MARK: - r16 fix F: shared cross-socket lifecycle timeline
+
+/// Test-file-scoped ordered timeline of socket-level lifecycle events
+/// shared across multiple `MockSignalRWebSocket` instances. Used to
+/// prove causal ordering by event identity (not counters, not timing).
+///
+/// Sockets record `.socketHandedOut` when the switcher hands them to
+/// the service (= service-side socket creation / handshake enrollment)
+/// and `.socketCancelled` when `cancel(with:reason:)` is invoked.
+/// Tests then compare event indices in `events()` to assert order.
+final class MockSocketTimeline: @unchecked Sendable {
+    enum Kind: String, Sendable {
+        case socketHandedOut
+        case socketCancelled
+        case receiveCompletionAcknowledged
+    }
+
+    struct Event: Equatable, Sendable {
+        let kind: Kind
+        let tag: String?
+    }
+
+    private let lock = NSLock()
+    private var recorded: [Event] = []
+
+    func record(_ kind: Kind, tag: String?) {
+        lock.lock()
+        recorded.append(Event(kind: kind, tag: tag))
+        lock.unlock()
+    }
+
+    func events() -> [Event] {
+        lock.lock(); defer { lock.unlock() }
+        return recorded
+    }
+
+    func firstIndex(of kind: Kind, tag: String) -> Int? {
+        events().firstIndex { $0.kind == kind && $0.tag == tag }
     }
 }
