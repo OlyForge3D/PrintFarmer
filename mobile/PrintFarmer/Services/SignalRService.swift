@@ -601,7 +601,19 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// explicitly disconnected or a newer generation has taken over.
     private func makeReceiveTask(myGen: UInt64) -> Task<Void, Never> {
         let invariants = self.lifecycleInvariants
-        return Task { [weak self] in
+        #if DEBUG
+        let debugReceiveTaskID = UUID()
+        #endif
+        let task = Task { [weak self] in
+            #if DEBUG
+            if let svc = self {
+                SignalRService.postDebugLifecycleEvent(
+                    service: svc,
+                    event: "receiveStarted",
+                    taskID: debugReceiveTaskID
+                )
+            }
+            #endif
             // r13 (Hicks item 1): task-lifetime instrumentation. Enter
             // at the top of the actual running task body; exit in
             // `defer` so the counter reflects real concurrent
@@ -657,6 +669,18 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 }
             }
         }
+        #if DEBUG
+        Task { [weak self] in
+            _ = await task.value
+            guard let self else { return }
+            SignalRService.postDebugLifecycleEvent(
+                service: self,
+                event: "receiveCompleted",
+                taskID: debugReceiveTaskID
+            )
+        }
+        #endif
+        return task
     }
 
     private func makePingTask() -> Task<Void, Never> {
@@ -857,8 +881,23 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         }
         if !reserved { return }
 
+        #if DEBUG
+        SignalRService.postDebugLifecycleEvent(
+            service: self,
+            event: "ownerCreated",
+            taskID: taskToken
+        )
+        #endif
+
         let reconnectTask = Task.detached { [weak self] in
             guard let self else { return }
+            #if DEBUG
+            SignalRService.postDebugLifecycleEvent(
+                service: self,
+                event: "ownerStarted",
+                taskID: taskToken
+            )
+            #endif
             let invariants = self.lifecycleInvariants
             // r13 (Hicks item 1): reconnect-owner lifetime = the
             // detached Task's actual body execution. Enter at top,
@@ -881,6 +920,16 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 // `reconnectOwnerEnterCount == 1`.
                 invariants.recordReconnectAttempt()
                 self.lifecycleSync { self.reconnectAttempt = attempt }
+
+                #if DEBUG
+                SignalRService.postDebugLifecycleEvent(
+                    service: self,
+                    event: "attemptStarted",
+                    taskID: taskToken,
+                    attempt: attempt,
+                    ownerID: taskToken
+                )
+                #endif
 
                 let delay = self.reconnectBackoff(attempt)
                 self.logger.info("Reconnecting in \(delay)s (attempt \(attempt))")
@@ -905,6 +954,18 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
                 do {
                     try await self.performConnect(myGen: currentGen)
+                    #if DEBUG
+                    // Synchronous post: recorder may block here to
+                    // hold the owner alive while B is triggered. Fires
+                    // AFTER receive task install / .connected publish
+                    // (r10 #2a) and BEFORE clearReconnectSlotIfOwned.
+                    SignalRService.postDebugLifecycleEvent(
+                        service: self,
+                        event: "handoffOpen",
+                        taskID: taskToken,
+                        ownerID: taskToken
+                    )
+                    #endif
                     // Success. `performConnect` step 4 already cleared
                     // `reconnectToken` atomically with `.connected`
                     // publish and receive-task install (r10 #2a). Our
@@ -957,6 +1018,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             self.logger.error("Gave up reconnecting after \(Self.maxReconnectAttempts) attempts")
         }
+        #if DEBUG
+        Task { [weak self, reconnectTask] in
+            _ = await reconnectTask.value
+            guard let self else { return }
+            SignalRService.postDebugLifecycleEvent(
+                service: self,
+                event: "ownerCompleted",
+                taskID: taskToken
+            )
+        }
+        #endif
         // Install the task handle only if we still own the token. A
         // disconnect() racing this call between the token reservation
         // above and now will have cleared `reconnectToken` — in that
@@ -997,3 +1069,46 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         setWebSocketTaskLocked(nil)
     }
 }
+
+#if DEBUG
+// MARK: - DEBUG-only lifecycle event wire (F4-L #777 hook-only checkpoint)
+//
+// Emits Notification-based test-observable lifecycle events. This
+// entire block is compiled out of Release builds — no symbols,
+// strings, or behavior leak into shipped binaries. Production logic
+// (reconnect ownership, sequencing, cancellation, state transitions,
+// retries, counters) is unchanged; the callers merely post a
+// synchronous notification at defined points and, for owner/receive
+// completion, an external unstructured observer awaits `Task.value`
+// before posting.
+//
+// Contract (from approved harness `LifecycleEventRecorder`):
+//   name:   "PrintFarmer.SignalRTaskLifecycle.test"
+//   object: SignalRService instance (filter: `notification.object === service`)
+//   userInfo:
+//     "event":   String   (required)
+//     "taskID":  UUID     (required)
+//     "attempt": Int      (optional; attemptStarted only)
+//     "ownerID": UUID     (optional; attemptStarted, handoffOpen)
+extension SignalRService {
+    fileprivate static let debugLifecycleEventNotification =
+        Notification.Name("PrintFarmer.SignalRTaskLifecycle.test")
+
+    fileprivate static func postDebugLifecycleEvent(
+        service: SignalRService,
+        event: String,
+        taskID: UUID,
+        attempt: Int? = nil,
+        ownerID: UUID? = nil
+    ) {
+        var userInfo: [String: Any] = ["event": event, "taskID": taskID]
+        if let attempt { userInfo["attempt"] = attempt }
+        if let ownerID { userInfo["ownerID"] = ownerID }
+        NotificationCenter.default.post(
+            name: debugLifecycleEventNotification,
+            object: service,
+            userInfo: userInfo
+        )
+    }
+}
+#endif
