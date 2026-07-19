@@ -132,6 +132,22 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private var reconnectToken: UUID?
     private var reconnectAttempt = 0
     private var intentionalDisconnect = false
+    /// Deferred successor request from an immediate receive-failure /
+    /// type-7 that arrived while the reconnect slot was still held by
+    /// the current retry owner. Keyed by the OWNING owner's token so
+    /// the owner-scoped completion watcher (spawned alongside every
+    /// retry owner) only schedules a successor after that specific
+    /// owner's actual `Task.value` has completed AND the slot was
+    /// released via the owner's own clean exit
+    /// (`reconnectToken == nil`). Cleared on `disconnect()`,
+    /// `connect()` supersede, retry-terminal exit, and by the
+    /// completion watcher on consumption. Never restored as an
+    /// unowned global flag: reads require token equality so a stale
+    /// pending from a superseded chain cannot spawn a successor for a
+    /// different owner. Guarded by `lifecycleQueue`
+    /// (`lifecycleSync`). (F4-L #777 externally-awaited successor
+    /// ownership contract.)
+    private var pendingSuccessorForOwner: UUID?
     /// Monotonic connection generation. Bumped on every explicit
     /// `disconnect()`, on every `tearDown()`, and on every reconnect
     /// scheduling. `performConnect()` snapshots this once at entry and
@@ -306,6 +322,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             let priorReconnect = self.reconnectTask
             self.reconnectTask = nil
             self.setReconnectTokenLocked(nil)
+            self.pendingSuccessorForOwner = nil
             self.intentionalDisconnect = false
             self.generation &+= 1
             self.reconnectAttempt = 0
@@ -365,6 +382,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             let r = self.reconnectTask
             self.reconnectTask = nil
             self.setReconnectTokenLocked(nil)
+            self.pendingSuccessorForOwner = nil
             self.connectionStateHub.setState(.disconnected)
             return r
         }
@@ -465,13 +483,27 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // `clearReconnectSlotIfOwned` becomes a no-op via its token
         // guard, and a normal `connect()` cleared the slot already so
         // this is a redundant no-op there.
+        //
+        // r20 (F4-L #777 successor-ownership fix): the r10 clear was
+        // moved OUT of this step. Eagerly wiping `reconnectToken` /
+        // `reconnectTask` before the owner's actual `Task.value`
+        // completion allowed an immediate receive failure while the
+        // owner was still parked at `handoffOpen` to reserve a fresh
+        // slot for a SECOND concurrent owner (violating
+        // `maxReconnectOwners <= 1` and the frozen strict order
+        // `A.completed < B.created`). The slot is now released only
+        // on the owner's own clean exit paths
+        // (`clearReconnectSlotIfOwned` on retry-success return, and
+        // the retry-exhausted terminal below), and the deferred
+        // successor request is dispatched by the owner-scoped
+        // completion watcher AFTER `await owner.value` returns. See
+        // the `scheduleReconnect` drop path for the pending-request
+        // side.
         let started: Bool = lifecycleSync {
             guard self.generation == myGen, !self.intentionalDisconnect else {
                 return false
             }
             self.reconnectAttempt = 0
-            self.reconnectTask = nil
-            self.setReconnectTokenLocked(nil)
             self.setReceiveTaskLocked(self.makeReceiveTask(myGen: myGen))
             self.pingTask = self.makePingTask()
             self.connectionStateHub.setState(.connected)
@@ -865,8 +897,31 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             guard !self.intentionalDisconnect, self.generation == fromGen else {
                 return (self.generation, false)
             }
-            if self.reconnectToken != nil {
-                // Another scheduleReconnect already owns the slot.
+            if let existingToken = self.reconnectToken {
+                // r20 (F4-L #777 successor-ownership fix): a retry
+                // owner already holds the slot (e.g. this call came
+                // from an immediate receive-failure while the owner
+                // was parked at `handoffOpen` — the r20 change to
+                // `performConnect` step 4 no longer eagerly clears
+                // the token, so this branch is now the ordinary
+                // "same-generation successor requested" path).
+                // Instead of silently dropping, record a deferred
+                // successor request keyed to the OWNING owner's
+                // token. The owner-scoped completion watcher spawned
+                // alongside `existingToken` will consume this request
+                // AFTER `await owner.value` returns and schedule the
+                // successor at that point — guaranteeing the frozen
+                // `A.completed < B.created` strict order and
+                // `maxReconnectOwners <= 1`.
+                //
+                // Publish `.reconnecting` here so subscribers observe
+                // the transition out of `.connected` at the moment
+                // the receive fails, without waiting for the current
+                // owner to release. The state hub de-duplicates
+                // consecutive same-state publishes, so if we are
+                // already in `.reconnecting` this is a no-op.
+                self.pendingSuccessorForOwner = existingToken
+                self.connectionStateHub.setState(.reconnecting)
                 return (self.generation, false)
             }
             self.generation &+= 1
@@ -876,6 +931,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // installed below once we've created it.
             self.setReconnectTokenLocked(taskToken)
             self.reconnectTask = nil
+            // Defensive: a fresh reservation starts a new retry
+            // chain, so any pending flag left over from a prior
+            // owner's tail is stale by construction. Clear it so a
+            // late completion watcher from that prior chain cannot
+            // observe a stale token equality against the wrong
+            // owner.
+            self.pendingSuccessorForOwner = nil
             self.connectionStateHub.setState(.reconnecting)
             return (self.generation, true)
         }
@@ -1011,6 +1073,14 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 if self.reconnectToken == taskToken {
                     self.reconnectTask = nil
                     self.setReconnectTokenLocked(nil)
+                    // r20 (F4-L #777): a giving-up owner clears its
+                    // own pending flag so a late completion watcher
+                    // does not misinterpret a request that was tied
+                    // to THIS owner as still valid after the
+                    // terminal `.disconnected` publish.
+                    if self.pendingSuccessorForOwner == taskToken {
+                        self.pendingSuccessorForOwner = nil
+                    }
                     if !self.intentionalDisconnect {
                         self.connectionStateHub.setState(.disconnected)
                     }
@@ -1018,17 +1088,90 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             self.logger.error("Gave up reconnecting after \(Self.maxReconnectAttempts) attempts")
         }
-        #if DEBUG
+        // r20 (F4-L #777): owner-scoped completion watcher.
+        //
+        // This Task runs in ALL build configurations (production +
+        // Debug). It awaits the retry owner's actual `Task.value`,
+        // then — inside a single `lifecycleSync` — checks the
+        // owner-scoped successor contract:
+        //   * `!intentionalDisconnect`  — user has not disconnected.
+        //   * `pendingSuccessorForOwner == taskToken` — the
+        //     deferred successor request was recorded for THIS
+        //     owner (not a stale request from a prior chain, and
+        //     not `nil`).
+        //   * `reconnectToken == nil` — the owner exited via its
+        //     own clean release path (retry-success
+        //     `clearReconnectSlotIfOwned` or retry-exhausted
+        //     terminal). If a superseding `connect()` or a
+        //     `disconnect()` yanked the slot, the token is either
+        //     `nil` (yanked and re-reserved by nobody yet) with
+        //     `pending` also cleared by the yanker, or a different
+        //     token if some other owner reserved after — the token
+        //     equality on `pending` alone would already gate this;
+        //     the additional `reconnectToken == nil` check keeps
+        //     the semantics symmetric with the "owner exited
+        //     cleanly" case.
+        //
+        // If satisfied: consume the pending flag and dispatch a
+        // successor `scheduleReconnect(fromGen: currentGen)` OUTSIDE
+        // the `lifecycleSync` (that call takes the queue itself).
+        // If unsatisfied but `pending == taskToken` (stale request
+        // that can no longer be honoured), clear it defensively so
+        // it cannot leak into a future owner's completion watcher
+        // via token collision (UUIDs collide only astronomically —
+        // this is belt-and-braces).
+        //
+        // Ordering by construction:
+        //   * The awaited `Task.value` returns strictly AFTER the
+        //     owner Task's body finishes (past its `defer
+        //     exitReconnectOwner`, past its terminal
+        //     `.disconnected` publish if applicable, past any
+        //     `clearReconnectSlotIfOwned`).
+        //   * In DEBUG, the `ownerCompleted` post fires first
+        //     inside this same Task — GUARANTEEING
+        //     `ownerCompleted(A)` precedes any successor B's
+        //     `ownerCreated`/`ownerStarted`/`attemptStarted`
+        //     because those are emitted synchronously from the
+        //     downstream `scheduleReconnect` and its detached body.
+        //     This is the frozen E-test strict-order proof.
+        //   * The successor's own detached body then runs and, if
+        //     it likewise triggers another deferred request, its
+        //     own completion watcher (spawned here again) will
+        //     schedule the next successor after ITS `Task.value` —
+        //     preserving the invariant for arbitrary chains.
         Task { [weak self, reconnectTask] in
             _ = await reconnectTask.value
             guard let self else { return }
+            #if DEBUG
             SignalRService.postDebugLifecycleEvent(
                 service: self,
                 event: "ownerCompleted",
                 taskID: taskToken
             )
+            #endif
+            let successorFromGen: UInt64? = self.lifecycleSync {
+                guard !self.intentionalDisconnect,
+                      self.pendingSuccessorForOwner == taskToken,
+                      self.reconnectToken == nil
+                else {
+                    // Owner was superseded / disconnected, or no
+                    // successor was requested. Clear a stale
+                    // pending flag tied specifically to this owner
+                    // (defensive: the yanking paths already clear
+                    // it, but a token-scoped clear here costs
+                    // nothing and prevents pending leaks).
+                    if self.pendingSuccessorForOwner == taskToken {
+                        self.pendingSuccessorForOwner = nil
+                    }
+                    return nil
+                }
+                self.pendingSuccessorForOwner = nil
+                return self.generation
+            }
+            if let successorFromGen {
+                self.scheduleReconnect(fromGen: successorFromGen)
+            }
         }
-        #endif
         // Install the task handle only if we still own the token. A
         // disconnect() racing this call between the token reservation
         // above and now will have cleared `reconnectToken` — in that
