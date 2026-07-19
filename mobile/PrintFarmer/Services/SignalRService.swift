@@ -166,6 +166,20 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// happens-before edge still holds. Guarded by `lifecycleQueue`.
     /// (F4-L #777 r21 R2 fix.)
     private var pendingSuccessorReceiveBarrier: Task<Void, Never>?
+    /// Monotonically incremented every time `pendingSuccessorForOwner`
+    /// + `pendingSuccessorReceiveBarrier` are recorded by
+    /// `scheduleReconnect`'s drop path. The owner-scoped completion
+    /// watcher tracks the LAST version it awaited; if the watcher
+    /// re-enters `lifecycleSync` and observes `version >
+    /// lastAwaited`, a NEW pending barrier was recorded during the
+    /// TOCTOU race window between the watcher's initial snapshot and
+    /// its atomic release/consume step (Rubber Duck R2 correction).
+    /// The watcher then loops back to await the newly recorded
+    /// barrier before dispatching any successor, so token release
+    /// and successor dispatch are impossible while any matching
+    /// owner-scoped barrier has not been awaited. Guarded by
+    /// `lifecycleQueue`. (F4-L #777 r22 R2 fix.)
+    private var pendingSuccessorVersion: UInt64 = 0
     /// The receive-completion barrier for the current receive-loop
     /// task, if any. Mirrored 1:1 with `receiveTask`: installed
     /// atomically in `performConnect` step 4 next to
@@ -822,7 +836,38 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             let error = json["error"] as? String
             logger.info("SignalR close frame received: \(error ?? "no error")")
             let (myGen, shouldReconnect) = lifecycleSync {
-                (self.generation, !self.intentionalDisconnect)
+                // r22 (F4-L #777) type-7 liveness: the receive loop's
+                // outer `guard let wsTask else { break }` depends on
+                // `webSocketTask` becoming nil to exit. Without an
+                // explicit cancel+clear here, the receive body relies
+                // on a subsequent TCP FIN/error from the peer to
+                // unstick `wsTask.receive()` — but a well-behaved
+                // SignalR server may send type-7 and legitimately not
+                // close the transport for some time. If the drop
+                // path below records
+                // `pendingSuccessorReceiveBarrier` = this receive's
+                // barrier, that barrier's `await task.value` would
+                // never resolve, and the owner-completion watcher
+                // would await forever.
+                //
+                // Cancel the WebSocket and clear the slot so the
+                // NEXT iteration of the receive loop sees
+                // `wsTask == nil` and breaks cleanly. The current
+                // handleMessage call is post-receive (we're between
+                // `wsTask.receive()` calls), so this does not fight
+                // an in-flight receive.
+                //
+                // Deliberately do NOT touch `receiveTask` or
+                // `receiveCompletionBarrier` here: the barrier that
+                // the drop path will snapshot below must remain
+                // mirrored to the CURRENT receive task so awaiting
+                // its `.value` gives us the causal edge to that same
+                // receive body's exit.
+                if let ws = self.webSocketTask {
+                    ws.cancel(with: .normalClosure, reason: nil)
+                    self.setWebSocketTaskLocked(nil)
+                }
+                return (self.generation, !self.intentionalDisconnect)
             }
             if shouldReconnect {
                 scheduleReconnect(fromGen: myGen)
@@ -944,6 +989,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// no other owner or slot can consume this owner's state.
     private static let maxReconnectAttempts: Int = 10
 
+    /// Result of the owner-completion watcher's atomic
+    /// release/consume step. `.retry` yields a barrier the watcher
+    /// must await before another atomic pass; `.done` means the slot
+    /// has been released (if owned) and, optionally, a successor
+    /// generation captured for dispatch outside `lifecycleSync`.
+    /// (F4-L #777 r22 R2 TOCTOU fix.)
+    private enum DrainOutcome {
+        case retry(Task<Void, Never>, UInt64)
+        case done(UInt64?)
+    }
+
     private func scheduleReconnect(fromGen: UInt64) {
         // r9 blocker #2: reserve `reconnectToken` under lifecycleQueue
         // BEFORE any detached Task exists. The token IS the ownership
@@ -992,6 +1048,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 // receive task's own body (which just called us) has
                 // fully exited.
                 self.pendingSuccessorReceiveBarrier = self.receiveCompletionBarrier
+                // r22 (F4-L #777 R2 TOCTOU fix): bump the pending
+                // version so any concurrent completion watcher can
+                // detect that a NEW barrier was recorded after its
+                // last snapshot and loop back to await it before
+                // releasing the slot / dispatching a successor.
+                self.pendingSuccessorVersion &+= 1
                 self.connectionStateHub.setState(.reconnecting)
                 return (self.generation, false)
             }
@@ -1247,50 +1309,111 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         Task { [weak self, reconnectTask] in
             _ = await reconnectTask.value
             guard let self else { return }
-            let pendingBarrier: Task<Void, Never>? = self.lifecycleSync {
-                self.pendingSuccessorForOwner == taskToken
-                    ? self.pendingSuccessorReceiveBarrier
-                    : nil
+
+            // r22 (F4-L #777 R2 TOCTOU fix): drain-loop with version
+            // check. Between the watcher's initial snapshot and its
+            // atomic release/consume step, a receive failure can
+            // record a NEW pending barrier (the drop path bumps
+            // `pendingSuccessorVersion` on every set). If we consumed
+            // pending without awaiting THAT barrier, we could
+            // dispatch B before its receive task's `.value` — a
+            // strict-order violation. The loop below repeatedly
+            // snapshots the barrier and awaits it until an atomic
+            // step under `lifecycleSync` can prove no newer barrier
+            // has arrived, at which point it releases the slot and
+            // (optionally) captures the successor generation.
+            var lastAwaitedVersion: UInt64 = 0
+            var successorFromGen: UInt64? = nil
+            drainLoop: while true {
+                let snapshot: (barrier: Task<Void, Never>?, version: UInt64) =
+                    self.lifecycleSync {
+                        if self.pendingSuccessorForOwner == taskToken {
+                            return (
+                                self.pendingSuccessorReceiveBarrier,
+                                self.pendingSuccessorVersion
+                            )
+                        }
+                        return (nil, 0)
+                    }
+                if let barrier = snapshot.barrier,
+                   snapshot.version > lastAwaitedVersion {
+                    _ = await barrier.value
+                    lastAwaitedVersion = snapshot.version
+                    continue drainLoop
+                }
+                // No unawaited barrier at the snapshot moment.
+                // Attempt the atomic release/consume step. If a
+                // barrier newer than `lastAwaitedVersion` has been
+                // recorded between the snapshot and this
+                // `lifecycleSync`, it will be visible here and we
+                // yield it back for another await pass. Otherwise we
+                // release the slot (SOLE authority — r21 R1),
+                // consume pending, and capture the successor
+                // generation atomically.
+                let step: DrainOutcome = self.lifecycleSync {
+                    if self.pendingSuccessorForOwner == taskToken,
+                       self.pendingSuccessorVersion > lastAwaitedVersion,
+                       let b = self.pendingSuccessorReceiveBarrier {
+                        // Race window observed: pending was recorded
+                        // after our snapshot returned nil (or
+                        // returned an older version). Yield the new
+                        // barrier for another await pass. Slot is
+                        // NOT released; pending is NOT consumed.
+                        return .retry(b, self.pendingSuccessorVersion)
+                    }
+                    // Safe: any pending barrier we care about has
+                    // been awaited (or none exists). Release the
+                    // slot iff still owned by this owner.
+                    if self.reconnectToken == taskToken {
+                        self.reconnectTask = nil
+                        self.setReconnectTokenLocked(nil)
+                    }
+                    guard !self.intentionalDisconnect,
+                          self.pendingSuccessorForOwner == taskToken
+                    else {
+                        // Owner was superseded / disconnected, no
+                        // successor requested, or retry-exhausted
+                        // terminal already cleared pending.
+                        // Defensively clear a stale pending tied
+                        // specifically to this owner.
+                        if self.pendingSuccessorForOwner == taskToken {
+                            self.pendingSuccessorForOwner = nil
+                            self.pendingSuccessorReceiveBarrier = nil
+                        }
+                        return .done(nil)
+                    }
+                    // Consume pending + capture generation.
+                    self.pendingSuccessorForOwner = nil
+                    self.pendingSuccessorReceiveBarrier = nil
+                    return .done(self.generation)
+                }
+                switch step {
+                case .retry(let b, let v):
+                    _ = await b.value
+                    lastAwaitedVersion = v
+                    continue drainLoop
+                case .done(let gen):
+                    successorFromGen = gen
+                    break drainLoop
+                }
             }
-            if let pendingBarrier {
-                _ = await pendingBarrier.value
-            }
+
             #if DEBUG
+            // r22: `ownerCompleted` is posted after the drain loop
+            // exits with `.done`, guaranteeing every pending barrier
+            // (i.e. every `receiveCompleted` DEBUG post) has already
+            // been awaited to completion, and before any successor
+            // dispatch (which posts `ownerCreated`). Order:
+            //     receiveCompleted (from awaited barrier's body)
+            //         < ownerCompleted (here)
+            //         < ownerCreated(B) (from scheduleReconnect below).
             SignalRService.postDebugLifecycleEvent(
                 service: self,
                 event: "ownerCompleted",
                 taskID: taskToken
             )
             #endif
-            let successorFromGen: UInt64? = self.lifecycleSync {
-                // r21 R1: release slot iff still owned by this
-                // owner. If a superseding `connect()` /
-                // `disconnect()` cleared or replaced the token, this
-                // is a no-op — those paths cleared the slot
-                // themselves.
-                if self.reconnectToken == taskToken {
-                    self.reconnectTask = nil
-                    self.setReconnectTokenLocked(nil)
-                }
-                guard !self.intentionalDisconnect,
-                      self.pendingSuccessorForOwner == taskToken
-                else {
-                    // Owner was superseded / disconnected, or no
-                    // successor was requested (or the
-                    // retry-exhausted terminal already cleared
-                    // pending for this owner). Defensively clear a
-                    // stale pending + barrier tied specifically to
-                    // this owner.
-                    if self.pendingSuccessorForOwner == taskToken {
-                        self.pendingSuccessorForOwner = nil
-                        self.pendingSuccessorReceiveBarrier = nil
-                    }
-                    return nil
-                }
-                self.pendingSuccessorForOwner = nil
-                self.pendingSuccessorReceiveBarrier = nil
-                return self.generation
-            }
+
             if let successorFromGen {
                 self.scheduleReconnect(fromGen: successorFromGen)
             }
