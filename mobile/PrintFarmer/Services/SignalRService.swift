@@ -137,9 +137,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// the current retry owner. Keyed by the OWNING owner's token so
     /// the owner-scoped completion watcher (spawned alongside every
     /// retry owner) only schedules a successor after that specific
-    /// owner's actual `Task.value` has completed AND the slot was
-    /// released via the owner's own clean exit
-    /// (`reconnectToken == nil`). Cleared on `disconnect()`,
+    /// owner's actual `Task.value` has completed AND the outgoing
+    /// receive task's completion has itself been acknowledged (see
+    /// `pendingSuccessorReceiveBarrier`). Cleared on `disconnect()`,
     /// `connect()` supersede, retry-terminal exit, and by the
     /// completion watcher on consumption. Never restored as an
     /// unowned global flag: reads require token equality so a stale
@@ -148,6 +148,32 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// (`lifecycleSync`). (F4-L #777 externally-awaited successor
     /// ownership contract.)
     private var pendingSuccessorForOwner: UUID?
+    /// Receive-completion barrier snapshotted at the moment the
+    /// deferred successor request was recorded. This is the barrier
+    /// Task for the specific receive-loop task that FAILED and
+    /// triggered `scheduleReconnect`'s drop path (i.e. the receive
+    /// task installed by the current owner's most recent successful
+    /// `performConnect`). It is a Task whose body is
+    /// `_ = await task.value; #if DEBUG postDebugLifecycleEvent(...)
+    /// #endif; return` — so awaiting `barrier.value` is guaranteed
+    /// to complete strictly AFTER the receive task's own body has
+    /// exited AND (in DEBUG) after `receiveCompleted` has posted.
+    /// The completion watcher awaits this barrier BEFORE posting
+    /// `ownerCompleted` and dispatching the successor, which is the
+    /// production happens-before edge required by the frozen
+    /// `R1.completed < A.completed < B.created` strict order. In
+    /// Release the barrier body is `await task.value; return` — the
+    /// happens-before edge still holds. Guarded by `lifecycleQueue`.
+    /// (F4-L #777 r21 R2 fix.)
+    private var pendingSuccessorReceiveBarrier: Task<Void, Never>?
+    /// The receive-completion barrier for the current receive-loop
+    /// task, if any. Mirrored 1:1 with `receiveTask`: installed
+    /// atomically in `performConnect` step 4 next to
+    /// `setReceiveTaskLocked`, cleared in `tearDownLocked`. Used by
+    /// `scheduleReconnect`'s drop path to snapshot the barrier that
+    /// the completion watcher must await before dispatching the
+    /// successor. (F4-L #777 r21 R2 fix.)
+    private var receiveCompletionBarrier: Task<Void, Never>?
     /// Monotonic connection generation. Bumped on every explicit
     /// `disconnect()`, on every `tearDown()`, and on every reconnect
     /// scheduling. `performConnect()` snapshots this once at entry and
@@ -323,6 +349,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.reconnectTask = nil
             self.setReconnectTokenLocked(nil)
             self.pendingSuccessorForOwner = nil
+            self.pendingSuccessorReceiveBarrier = nil
             self.intentionalDisconnect = false
             self.generation &+= 1
             self.reconnectAttempt = 0
@@ -383,6 +410,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.reconnectTask = nil
             self.setReconnectTokenLocked(nil)
             self.pendingSuccessorForOwner = nil
+            self.pendingSuccessorReceiveBarrier = nil
             self.connectionStateHub.setState(.disconnected)
             return r
         }
@@ -504,7 +532,15 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 return false
             }
             self.reconnectAttempt = 0
-            self.setReceiveTaskLocked(self.makeReceiveTask(myGen: myGen))
+            let (receive, barrier) = self.makeReceiveTask(myGen: myGen)
+            self.setReceiveTaskLocked(receive)
+            // r21 (F4-L #777 R2 fix): install the receive-completion
+            // barrier mirroring the receive task 1:1 so the drop path
+            // in `scheduleReconnect` can snapshot it, and the owner
+            // completion watcher can await it before dispatching a
+            // successor. Cleared in `tearDownLocked` alongside the
+            // receive task.
+            self.receiveCompletionBarrier = barrier
             self.pingTask = self.makePingTask()
             self.connectionStateHub.setState(.connected)
             return true
@@ -631,7 +667,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// (r7 blocker #2). The reconnect flow gates on `myGen` so a stale
     /// receive task cannot trigger reconnect after the user has
     /// explicitly disconnected or a newer generation has taken over.
-    private func makeReceiveTask(myGen: UInt64) -> Task<Void, Never> {
+    private func makeReceiveTask(myGen: UInt64) -> (receive: Task<Void, Never>, barrier: Task<Void, Never>) {
         let invariants = self.lifecycleInvariants
         #if DEBUG
         let debugReceiveTaskID = UUID()
@@ -701,18 +737,41 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 }
             }
         }
-        #if DEBUG
-        Task { [weak self] in
+        // r21 (F4-L #777 R2 fix): receive-completion barrier.
+        //
+        // This Task exists in ALL build configurations. Its body
+        // awaits the receive task's actual `Task.value` (which
+        // resolves only after the receive body's `defer
+        // { exitReceiveLoop() }` has run and the body has returned),
+        // then — in DEBUG only — synchronously posts the
+        // `receiveCompleted` lifecycle event, and returns.
+        //
+        // `barrier.value` therefore resolves strictly AFTER the
+        // receive task's own `.value` has resolved and (in DEBUG)
+        // after `receiveCompleted` has posted. `scheduleReconnect`'s
+        // drop path snapshots this barrier alongside
+        // `pendingSuccessorForOwner`, and the owning retry owner's
+        // completion watcher awaits `barrier.value` BEFORE posting
+        // `ownerCompleted` and dispatching the successor. This is the
+        // production happens-before edge required by the frozen
+        // strict order `R1.completed < A.completed < B.created`
+        // (Rubber Duck R2 correction): the order holds even in
+        // Release, where the DEBUG post is compiled out but the
+        // barrier's await-of-`task.value` still provides the causal
+        // synchronization gate between the outgoing receive's exit
+        // and the successor owner's creation.
+        let barrier = Task { [weak self] in
             _ = await task.value
+            #if DEBUG
             guard let self else { return }
             SignalRService.postDebugLifecycleEvent(
                 service: self,
                 event: "receiveCompleted",
                 taskID: debugReceiveTaskID
             )
+            #endif
         }
-        #endif
-        return task
+        return (task, barrier)
     }
 
     private func makePingTask() -> Task<Void, Never> {
@@ -921,6 +980,18 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 // consecutive same-state publishes, so if we are
                 // already in `.reconnecting` this is a no-op.
                 self.pendingSuccessorForOwner = existingToken
+                // r21 (F4-L #777 R2 fix): snapshot the current
+                // receive-completion barrier alongside the pending
+                // token so the owning owner's completion watcher can
+                // await this specific barrier before dispatching the
+                // successor. This is the production happens-before
+                // edge that guarantees the frozen strict order
+                // `R1.completed < A.completed < B.created` even in
+                // Release, without any DEBUG-only test barrier: the
+                // barrier's `.value` resolves only after the current
+                // receive task's own body (which just called us) has
+                // fully exited.
+                self.pendingSuccessorReceiveBarrier = self.receiveCompletionBarrier
                 self.connectionStateHub.setState(.reconnecting)
                 return (self.generation, false)
             }
@@ -938,6 +1009,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // observe a stale token equality against the wrong
             // owner.
             self.pendingSuccessorForOwner = nil
+            self.pendingSuccessorReceiveBarrier = nil
             self.connectionStateHub.setState(.reconnecting)
             return (self.generation, true)
         }
@@ -1010,7 +1082,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                         !Task.isCancelled
                 }
                 if !stillOwn {
-                    self.clearReconnectSlotIfOwned(token: taskToken)
+                    // r21 (F4-L #777 R1 fix): DO NOT clear the
+                    // reconnect slot here. The owner-scoped
+                    // completion watcher spawned below awaits this
+                    // Task's actual `.value` and is the SOLE
+                    // authority that releases the slot (Rubber Duck
+                    // R1 correction: an in-body clear opens a
+                    // token-release gap in which a same-generation
+                    // receive failure can observe `reconnectToken
+                    // == nil` and take the direct reserve path,
+                    // spawning B before A's `Task.value` completes,
+                    // violating the frozen strict order).
                     return
                 }
 
@@ -1020,7 +1102,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     // Synchronous post: recorder may block here to
                     // hold the owner alive while B is triggered. Fires
                     // AFTER receive task install / .connected publish
-                    // (r10 #2a) and BEFORE clearReconnectSlotIfOwned.
+                    // (r10 #2a). The completion watcher — not this
+                    // in-body path — is the sole authority that
+                    // releases the reconnect slot after the owner's
+                    // `Task.value` completes (r21 R1 fix).
                     SignalRService.postDebugLifecycleEvent(
                         service: self,
                         event: "handoffOpen",
@@ -1028,11 +1113,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                         ownerID: taskToken
                     )
                     #endif
-                    // Success. `performConnect` step 4 already cleared
-                    // `reconnectToken` atomically with `.connected`
-                    // publish and receive-task install (r10 #2a). Our
-                    // `clearReconnectSlotIfOwned` here is defensive.
-                    self.clearReconnectSlotIfOwned(token: taskToken)
+                    // r21 (F4-L #777 R1 fix): success path returns
+                    // without releasing the slot. Slot release
+                    // happens in the completion watcher AFTER `await
+                    // reconnectTask.value` — this closes the
+                    // token-release gap on the retry-loop success
+                    // path (the Rubber Duck R1 defect). See the
+                    // watcher below for the sole slot-release site.
                     return
                 } catch {
                     self.logger.warning("Reconnect attempt \(attempt) failed: \(error.localizedDescription)")
@@ -1057,7 +1144,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                         return (self.generation, true)
                     }
                     if !shouldContinue {
-                        self.clearReconnectSlotIfOwned(token: taskToken)
+                        // r21 (F4-L #777 R1 fix): no in-body slot
+                        // release. Watcher clears the slot after
+                        // `await reconnectTask.value`.
                         return
                     }
                     currentGen = nextGen
@@ -1080,6 +1169,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     // terminal `.disconnected` publish.
                     if self.pendingSuccessorForOwner == taskToken {
                         self.pendingSuccessorForOwner = nil
+                        self.pendingSuccessorReceiveBarrier = nil
                     }
                     if !self.intentionalDisconnect {
                         self.connectionStateHub.setState(.disconnected)
@@ -1088,60 +1178,83 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             self.logger.error("Gave up reconnecting after \(Self.maxReconnectAttempts) attempts")
         }
-        // r20 (F4-L #777): owner-scoped completion watcher.
+        // r21 (F4-L #777) owner-scoped completion watcher.
         //
-        // This Task runs in ALL build configurations (production +
-        // Debug). It awaits the retry owner's actual `Task.value`,
-        // then — inside a single `lifecycleSync` — checks the
-        // owner-scoped successor contract:
-        //   * `!intentionalDisconnect`  — user has not disconnected.
-        //   * `pendingSuccessorForOwner == taskToken` — the
-        //     deferred successor request was recorded for THIS
-        //     owner (not a stale request from a prior chain, and
-        //     not `nil`).
-        //   * `reconnectToken == nil` — the owner exited via its
-        //     own clean release path (retry-success
-        //     `clearReconnectSlotIfOwned` or retry-exhausted
-        //     terminal). If a superseding `connect()` or a
-        //     `disconnect()` yanked the slot, the token is either
-        //     `nil` (yanked and re-reserved by nobody yet) with
-        //     `pending` also cleared by the yanker, or a different
-        //     token if some other owner reserved after — the token
-        //     equality on `pending` alone would already gate this;
-        //     the additional `reconnectToken == nil` check keeps
-        //     the semantics symmetric with the "owner exited
-        //     cleanly" case.
+        // This Task runs in ALL build configurations. It is the SOLE
+        // authority that releases the reconnect slot for this owner
+        // (R1 correction: no in-body `clearReconnectSlotIfOwned`
+        // remains on the success or cancel-exit paths — see the
+        // retry-loop above), and it enforces the receive-completion
+        // happens-before edge required by the frozen strict order
+        // `R1.completed < A.completed < B.created` (R2 correction).
         //
-        // If satisfied: consume the pending flag and dispatch a
-        // successor `scheduleReconnect(fromGen: currentGen)` OUTSIDE
-        // the `lifecycleSync` (that call takes the queue itself).
-        // If unsatisfied but `pending == taskToken` (stale request
-        // that can no longer be honoured), clear it defensively so
-        // it cannot leak into a future owner's completion watcher
-        // via token collision (UUIDs collide only astronomically —
-        // this is belt-and-braces).
+        // Sequence:
+        //   1. `await reconnectTask.value` — owner A's body has
+        //      returned (past its `defer exitReconnectOwner`).
+        //   2. Snapshot `pendingSuccessorReceiveBarrier` under
+        //      `lifecycleSync` (read-only): if a same-generation
+        //      receive failure recorded a pending successor for this
+        //      owner (drop path in `scheduleReconnect`), it also
+        //      snapshotted the receive task's completion barrier at
+        //      that moment. We do not clear it here yet — the second
+        //      lifecycleSync below atomically consumes both the
+        //      pending flag and the barrier alongside slot release.
+        //   3. `await barrier.value` (if any). The barrier's body is
+        //      `_ = await task.value; #if DEBUG post receiveCompleted
+        //      #endif` — its `.value` therefore resolves only AFTER
+        //      the receive task's `.value` (i.e. R1's body has
+        //      returned) AND (in DEBUG) after `receiveCompleted` has
+        //      been posted. This is the production happens-before
+        //      edge required by the frozen `R1.completed <
+        //      A.completed` proof — it holds in Release too, where
+        //      the DEBUG post is compiled out but the barrier's
+        //      await-of-`task.value` still provides the causal
+        //      synchronization gate.
+        //   4. `#if DEBUG ownerCompleted #endif` — now emitted
+        //      strictly AFTER `receiveCompleted` (both due to (3)
+        //      above and because it lives further down this same
+        //      Task).
+        //   5. Second `lifecycleSync`: release the slot iff still
+        //      owned by this token (sole authority), consume pending
+        //      + barrier tied to this owner, evaluate whether a
+        //      successor should be dispatched. `!intentionalDisconnect
+        //      && pendingSuccessorForOwner == taskToken` gates
+        //      dispatch; otherwise (superseded/disconnected/no
+        //      request/retry-exhausted terminal has already cleared
+        //      pending) we return without dispatching. Note we no
+        //      longer require `reconnectToken == nil` (the r20 gate)
+        //      because THIS watcher is the site that clears the
+        //      token; the retry-exhausted terminal is the only other
+        //      in-body clear and it also clears pending, so pending
+        //      equality against this owner suffices.
+        //   6. Dispatch `scheduleReconnect(fromGen:)` OUTSIDE the
+        //      lifecycleSync (that call takes the queue itself).
         //
-        // Ordering by construction:
-        //   * The awaited `Task.value` returns strictly AFTER the
-        //     owner Task's body finishes (past its `defer
-        //     exitReconnectOwner`, past its terminal
-        //     `.disconnected` publish if applicable, past any
-        //     `clearReconnectSlotIfOwned`).
-        //   * In DEBUG, the `ownerCompleted` post fires first
-        //     inside this same Task — GUARANTEEING
-        //     `ownerCompleted(A)` precedes any successor B's
-        //     `ownerCreated`/`ownerStarted`/`attemptStarted`
-        //     because those are emitted synchronously from the
-        //     downstream `scheduleReconnect` and its detached body.
-        //     This is the frozen E-test strict-order proof.
-        //   * The successor's own detached body then runs and, if
-        //     it likewise triggers another deferred request, its
-        //     own completion watcher (spawned here again) will
-        //     schedule the next successor after ITS `Task.value` —
-        //     preserving the invariant for arbitrary chains.
+        // Ordering guarantees (Rubber Duck R1+R2 corrections):
+        //   * Slot release always happens AFTER `await
+        //     reconnectTask.value` — no token-release gap.
+        //   * `ownerCompleted(A)` (DEBUG) always follows
+        //     `receiveCompleted(R1)` because the barrier's body
+        //     posts receiveCompleted before its own `.value`
+        //     resolves, and only then does the watcher continue to
+        //     its ownerCompleted post.
+        //   * Successor B's `ownerCreated` (emitted synchronously
+        //     from the downstream `scheduleReconnect`) therefore
+        //     follows both ownerCompleted(A) and receiveCompleted
+        //     (R1), satisfying the frozen strict order in
+        //     production, not merely under the DEBUG `handoffOpen`
+        //     barrier.
         Task { [weak self, reconnectTask] in
             _ = await reconnectTask.value
             guard let self else { return }
+            let pendingBarrier: Task<Void, Never>? = self.lifecycleSync {
+                self.pendingSuccessorForOwner == taskToken
+                    ? self.pendingSuccessorReceiveBarrier
+                    : nil
+            }
+            if let pendingBarrier {
+                _ = await pendingBarrier.value
+            }
             #if DEBUG
             SignalRService.postDebugLifecycleEvent(
                 service: self,
@@ -1150,22 +1263,32 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             )
             #endif
             let successorFromGen: UInt64? = self.lifecycleSync {
+                // r21 R1: release slot iff still owned by this
+                // owner. If a superseding `connect()` /
+                // `disconnect()` cleared or replaced the token, this
+                // is a no-op — those paths cleared the slot
+                // themselves.
+                if self.reconnectToken == taskToken {
+                    self.reconnectTask = nil
+                    self.setReconnectTokenLocked(nil)
+                }
                 guard !self.intentionalDisconnect,
-                      self.pendingSuccessorForOwner == taskToken,
-                      self.reconnectToken == nil
+                      self.pendingSuccessorForOwner == taskToken
                 else {
                     // Owner was superseded / disconnected, or no
-                    // successor was requested. Clear a stale
-                    // pending flag tied specifically to this owner
-                    // (defensive: the yanking paths already clear
-                    // it, but a token-scoped clear here costs
-                    // nothing and prevents pending leaks).
+                    // successor was requested (or the
+                    // retry-exhausted terminal already cleared
+                    // pending for this owner). Defensively clear a
+                    // stale pending + barrier tied specifically to
+                    // this owner.
                     if self.pendingSuccessorForOwner == taskToken {
                         self.pendingSuccessorForOwner = nil
+                        self.pendingSuccessorReceiveBarrier = nil
                     }
                     return nil
                 }
                 self.pendingSuccessorForOwner = nil
+                self.pendingSuccessorReceiveBarrier = nil
                 return self.generation
             }
             if let successorFromGen {
@@ -1206,6 +1329,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private func tearDownLocked() {
         receiveTask?.cancel()
         setReceiveTaskLocked(nil)
+        // r21 (F4-L #777 R2 fix): the receive-completion barrier is
+        // mirrored 1:1 with `receiveTask`. Clearing it here on
+        // teardown so a subsequent `performConnect` step 4 installs a
+        // fresh barrier. Note the CURRENT barrier Task itself is not
+        // cancelled — it merely awaits the cancelled receive task's
+        // `.value` and then posts (in DEBUG) / returns. Any pending
+        // successor request that snapshotted this barrier still holds
+        // its own strong reference and awaits it independently, which
+        // is exactly the causal edge we want to preserve across
+        // teardown.
+        receiveCompletionBarrier = nil
         pingTask?.cancel()
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
