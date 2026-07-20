@@ -1,10 +1,13 @@
 import Foundation
 
-enum DemoShiftTaskScenario {
+enum DemoShiftTaskScenario: Equatable {
     case standard
+    #if DEBUG
     case mutationFailureThenSuccess
+    #endif
 }
 
+#if DEBUG
 enum DemoShiftTaskError: LocalizedError, Sendable {
     case forcedMutationFailure
     case duplicateRetry
@@ -18,6 +21,7 @@ enum DemoShiftTaskError: LocalizedError, Sendable {
         }
     }
 }
+#endif
 
 actor DemoShiftTaskService: ShiftTaskServiceProtocol {
     private let scenario: DemoShiftTaskScenario
@@ -26,9 +30,13 @@ actor DemoShiftTaskService: ShiftTaskServiceProtocol {
 
     init(scenario: DemoShiftTaskScenario = .standard) {
         self.scenario = scenario
+        #if DEBUG
         self.tasks = scenario == .standard
             ? Self.standardTasks
             : [Self.mutationTask]
+        #else
+        self.tasks = Self.standardTasks
+        #endif
     }
 
     func loadSnapshot(shiftPlanEnabled: Bool) async throws -> ShiftTaskSnapshot {
@@ -63,21 +71,22 @@ actor DemoShiftTaskService: ShiftTaskServiceProtocol {
 
     func complete(taskID: String, idempotencyKey: String) async throws {
         _ = idempotencyKey
-        guard scenario == .mutationFailureThenSuccess else {
-            tasks.removeAll { $0.id == taskID }
+        #if DEBUG
+        if scenario == .mutationFailureThenSuccess {
+            completeAttemptCount += 1
+            switch completeAttemptCount {
+            case 1:
+                throw DemoShiftTaskError.forcedMutationFailure
+            case 2:
+                tasks.removeAll { $0.id == taskID }
+            default:
+                tasks = [Self.mutationTask]
+                throw DemoShiftTaskError.duplicateRetry
+            }
             return
         }
-
-        completeAttemptCount += 1
-        switch completeAttemptCount {
-        case 1:
-            throw DemoShiftTaskError.forcedMutationFailure
-        case 2:
-            tasks.removeAll { $0.id == taskID }
-        default:
-            tasks = [Self.mutationTask]
-            throw DemoShiftTaskError.duplicateRetry
-        }
+        #endif
+        tasks.removeAll { $0.id == taskID }
     }
 
     func skip(taskID: String) async throws {
