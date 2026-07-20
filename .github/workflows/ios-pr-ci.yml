@@ -123,6 +123,8 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             test-without-building \
             -only-testing:PrintFarmerTests \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
             -resultBundlePath build/TestResults.xcresult
 
       - name: Upload test results

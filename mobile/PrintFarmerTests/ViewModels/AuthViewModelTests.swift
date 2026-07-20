@@ -1,4 +1,5 @@
 import XCTest
+import Observation
 @testable import PrintFarmer
 
 /// AuthViewModel tests. AuthViewModel depends on the concrete AuthService actor,
@@ -235,11 +236,38 @@ final class AuthViewModelTests: XCTestCase {
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
         XCTAssertTrue(viewModel.isAuthenticated)
 
+        // Deterministically observe the real AuthViewModel logout transition
+        // instead of sleeping. Posting `.sessionExpired` drives the production
+        // observer's async logout chain, which ultimately clears
+        // `isAuthenticated` on the main actor. `withObservationTracking` fires
+        // `onChange` causally on that exact @Observable mutation; the
+        // expectation is fulfilled only once the state has actually become
+        // false — i.e. downstream of, and caused by, `logout()` completing.
+        // The wait timeout is a failure ceiling, never a success condition: if
+        // the logout chain never clears state the expectation is never
+        // fulfilled and the test fails. This mirrors the production observation
+        // idiom in `ServiceContainer.observeActiveServer()` and contains no
+        // `Task.sleep`, `Task.yield`, polling loop, retry, or elapsed-time
+        // success condition.
+        let loggedOut = XCTestExpectation(description: "session expiry drives AuthViewModel logout to completion")
+        let observedViewModel = viewModel!
+        withObservationTracking {
+            _ = observedViewModel.isAuthenticated
+        } onChange: {
+            // `onChange` fires on the will-change edge, before the new value is
+            // observable. Hop to the next main-actor step so the mutation is
+            // fully applied, then latch success only on the real cleared state.
+            Task { @MainActor in
+                if observedViewModel.isAuthenticated == false {
+                    loggedOut.fulfill()
+                }
+            }
+        }
+
         NotificationCenter.default.post(name: .sessionExpired, object: nil)
 
-        // Give the async Task time to process
-        try? await Task.sleep(nanoseconds: 200_000_000)
-
+        let result = await XCTWaiter.fulfillment(of: [loggedOut], timeout: 5)
+        XCTAssertEqual(result, .completed, "session-expiry logout did not drive isAuthenticated to false")
         XCTAssertFalse(viewModel.isAuthenticated)
         XCTAssertNil(viewModel.currentUser)
     }
