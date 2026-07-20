@@ -83,8 +83,10 @@ final class PredictiveViewModelTests: XCTestCase {
         
         // predictFailure() logs via `logger.warning` on failure and clears any
         // stale prediction; it does not surface `viewModel.error`, so the UI
-        // renders the neutral risk level rather than a red banner. Issue #810
-        // tracks presenting that failure to users.
+        // renders the neutral risk level rather than a red banner. Issue #808
+        // tracks presenting that failure to users. This test intentionally
+        // preserves the current clear-to-nil behavior of `error`; it does not
+        // bless it as correct UX.
         let request = mockPredictiveService.predictJobFailureCalledWith
         XCTAssertEqual(request?.printerId, testPrinterId)
         XCTAssertEqual(request?.material, "PETG")
@@ -145,6 +147,7 @@ final class PredictiveViewModelTests: XCTestCase {
                 recommendedAction: "Keep monitoring"
             )
         ]
+        viewModel.error = "prior-predictive-alerts-error-sentinel"
         mockPredictiveService.errorToThrow = TestError.generic
         
         await viewModel.loadAlerts(printerId: testPrinterId)
@@ -152,11 +155,13 @@ final class PredictiveViewModelTests: XCTestCase {
         // loadAlerts() is a secondary load: it logs via `logger.warning`
         // and does not populate `viewModel.error` so a background alerts hiccup
         // never blocks the primary prediction UI or clears prior alerts.
+        // Seeding a nonnil sentinel proves the secondary path preserves both
+        // prior alerts and the primary error channel.
         XCTAssertTrue(mockPredictiveService.getActiveAlertsCalled)
         XCTAssertEqual(mockPredictiveService.getActiveAlertsCalledWithPrinterId, testPrinterId)
         XCTAssertEqual(viewModel.alerts.count, 1)
         XCTAssertEqual(viewModel.alerts.first?.alertType, "previous_alert")
-        XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.error, "prior-predictive-alerts-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
     
@@ -196,17 +201,20 @@ final class PredictiveViewModelTests: XCTestCase {
                 upcomingTasks: []
             )
         ]
+        viewModel.error = "prior-predictive-forecasts-error-sentinel"
         mockPredictiveService.errorToThrow = TestError.generic
         
         await viewModel.loadForecasts(printerId: testPrinterId)
         
         // loadForecasts() is a secondary load: it logs via `logger.warning`
         // and preserves prior forecasts without surfacing `viewModel.error`.
+        // Seeding a nonnil sentinel proves the secondary path preserves both
+        // prior forecasts and the primary error channel.
         XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWith, 30)
         XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWithPrinterId, testPrinterId)
         XCTAssertEqual(viewModel.forecasts.count, 1)
         XCTAssertEqual(viewModel.forecasts.first?.printerName, "Previous Printer")
-        XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.error, "prior-predictive-forecasts-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
     

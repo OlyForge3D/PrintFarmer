@@ -171,20 +171,23 @@ final class JobAnalyticsViewModelTests: XCTestCase {
                 averageQueueWaitMinutes: 12
             )
         ]
+        viewModel.error = "prior-analytics-error-sentinel"
         mockJobAnalyticsService.errorToThrow = TestError.generic
 
         await viewModel.loadStats()
 
         // loadStats() is a secondary load: it logs the failure via `logger.warning`
         // and leaves `viewModel.error` untouched so a stats hiccup never blocks the
-        // primary jobs list or clears the last successful statistics.
+        // primary jobs list or clears the last successful statistics. Seeding a
+        // nonnil sentinel proves the secondary path preserves both prior data
+        // and the primary error channel.
         XCTAssertTrue(mockJobAnalyticsService.getStatsCalled)
         XCTAssertTrue(mockJobAnalyticsService.getModelStatsCalled)
         XCTAssertEqual(viewModel.stats?.totalQueued, 7)
         XCTAssertEqual(viewModel.stats?.totalPrinting, 2)
         XCTAssertEqual(viewModel.modelStats.count, 1)
         XCTAssertEqual(viewModel.modelStats.first?.modelName, "Previously Loaded Model")
-        XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.error, "prior-analytics-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
     

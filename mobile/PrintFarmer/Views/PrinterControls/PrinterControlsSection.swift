@@ -20,13 +20,28 @@ struct PrinterControlsSection: View {
     @StateObject private var viewModel: PrinterControlsViewModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    /// Production init. `StateObject(wrappedValue:)` takes an `@autoclosure
+    /// @escaping` argument, so wrapping the view-model construction directly
+    /// here defers `PrinterControlsViewModel.init` to the first SwiftUI
+    /// installation of the view — SwiftUI redraws that reinit the section
+    /// struct do NOT reconstruct the view-model, matching the design
+    /// contract in `mobile/docs/design/printer-controls-section.md`.
+    ///
+    /// Delegating to the injected-VM initializer (as the pre-revision code
+    /// did) would eagerly evaluate the VM allocation on every parent redraw
+    /// before the autoclosure captured it, defeating the `@StateObject`
+    /// lifetime guarantee. The injected-VM initializer below is retained
+    /// only for deterministic snapshot / unit-test injection.
     init(printer: Printer, printerService: any PrinterServiceProtocol) {
-        self.init(
-            printer: printer,
-            viewModel: PrinterControlsViewModel(printerService: printerService, printer: printer)
+        self.printer = printer
+        _viewModel = StateObject(
+            wrappedValue: PrinterControlsViewModel(printerService: printerService, printer: printer)
         )
     }
 
+    /// Test-only injection init. Not part of the production surface — every
+    /// production caller must route through `init(printer:printerService:)`
+    /// so `@StateObject`'s autoclosure semantics keep VM construction lazy.
     init(printer: Printer, viewModel: PrinterControlsViewModel) {
         self.printer = printer
         _viewModel = StateObject(wrappedValue: viewModel)

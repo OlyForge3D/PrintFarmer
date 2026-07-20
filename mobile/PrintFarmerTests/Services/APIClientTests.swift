@@ -746,45 +746,142 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(result?.name, "Prusa MK4")
     }
 
-    func testMockURLProtocolHandlersAreIsolatedPerSession() async throws {
+    func testMockURLProtocolHandlersAreIsolatedPerSession_underDeterministicOverlap() async throws {
         let firstURL = URL(string: "https://mock.invalid/first")!
         let secondURL = URL(string: "https://mock.invalid/second")!
         let firstSession = MockURLProtocol.makeSession()
         let secondSession = MockURLProtocol.makeSession()
 
+        // Explicit two-phase barrier: each handler signals `entryLatch` when
+        // it is inside `startLoading`, then blocks on `releaseLatch`. The
+        // test drains two entry signals — proving both handlers were live
+        // concurrently — before it releases either. Handler waits use a
+        // 10-second timeout so that if URLProtocol serialization ever
+        // starves one handler, the test fails fast with an explicit
+        // diagnostic instead of hanging XCTest. There is no `Task.sleep`,
+        // yield, polling, elapsed-time correctness, or ignored timeout.
+        //
+        // Against the rejected process-global-handler implementation this
+        // test fails deterministically: setting `secondSession.requestHandler`
+        // overwrites the shared handler, so both URL requests would invoke
+        // the second handler and both bodies would decode to
+        // `"second-handler"`.
+        let entryLatch = DispatchSemaphore(value: 0)
+        let releaseLatch = DispatchSemaphore(value: 0)
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
         firstSession.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
             let response = TestData.httpResponse(url: request.url, statusCode: 200)
             return (response, Data("first-handler".utf8))
         }
 
         secondSession.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
             let response = TestData.httpResponse(url: request.url, statusCode: 200)
             return (response, Data("second-handler".utf8))
         }
 
         async let firstData = firstSession.urlSession.data(from: firstURL).0
         async let secondData = secondSession.urlSession.data(from: secondURL).0
-        let bodies = try await (
-            String(decoding: firstData, as: UTF8.self),
-            String(decoding: secondData, as: UTF8.self)
+
+        // Drain two entry signals on a background dispatch thread so the
+        // Swift concurrency executor is never blocked. Both handlers must
+        // be simultaneously parked on `releaseLatch` before either returns.
+        let bothEntered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let firstEntered = entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                let secondEntered = firstEntered
+                    ? entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                    : false
+                cont.resume(returning: firstEntered && secondEntered)
+            }
+        }
+        XCTAssertTrue(
+            bothEntered,
+            "Both per-session MockURLProtocol handlers must be simultaneously live inside startLoading before release. If this fails, sessions are sharing handler dispatch and the per-session isolation is broken."
         )
 
-        XCTAssertEqual(bodies.0, "first-handler")
-        XCTAssertEqual(bodies.1, "second-handler")
+        // Both handlers are provably parked; release them.
+        releaseLatch.signal()
+        releaseLatch.signal()
+
+        let firstBody = String(decoding: try await firstData, as: UTF8.self)
+        let secondBody = String(decoding: try await secondData, as: UTF8.self)
+
+        XCTAssertEqual(firstBody, "first-handler")
+        XCTAssertEqual(secondBody, "second-handler")
+        XCTAssertEqual(firstSession.capturedRequests.count, 1)
+        XCTAssertEqual(firstSession.capturedRequests.first?.url, firstURL)
+        XCTAssertEqual(secondSession.capturedRequests.count, 1)
+        XCTAssertEqual(secondSession.capturedRequests.first?.url, secondURL)
     }
 
-    func testConcurrentMockAPIClientsKeepResponsesAndCapturesIsolated() async throws {
+    func testConcurrentMockAPIClientsKeepResponsesAndCapturesIsolated_underDeterministicOverlap() async throws {
         let firstMockAPIClient = MockAPIClient(baseURL: URL(string: "https://first.mock.invalid")!)
         let secondMockAPIClient = MockAPIClient(baseURL: URL(string: "https://second.mock.invalid")!)
-        firstMockAPIClient.stubResponse(json: #"{"value":"first"}"#)
-        secondMockAPIClient.stubResponse(json: #"{"value":"second"}"#)
+
+        // Same barrier discipline as the raw-URLSession isolation test, but
+        // exercising real `APIClient` actors and their captured requests.
+        // Overlap is enforced by the semaphore protocol; correctness never
+        // depends on scheduling luck. Handler waits use a bounded timeout
+        // so a starved handler produces an explicit diagnostic instead of
+        // hanging XCTest. Against the rejected global-handler
+        // implementation this test fails deterministically because both
+        // APIClients would receive the second stub's payload.
+        let entryLatch = DispatchSemaphore(value: 0)
+        let releaseLatch = DispatchSemaphore(value: 0)
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
+        firstMockAPIClient.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data(#"{"value":"first"}"#.utf8))
+        }
+
+        secondMockAPIClient.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data(#"{"value":"second"}"#.utf8))
+        }
 
         async let firstValue: TransportValue = firstMockAPIClient.apiClient.get("/value")
         async let secondValue: TransportValue = secondMockAPIClient.apiClient.get("/value")
-        let values = try await (firstValue, secondValue)
 
-        XCTAssertEqual(values.0, TransportValue(value: "first"))
-        XCTAssertEqual(values.1, TransportValue(value: "second"))
+        let bothEntered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let firstEntered = entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                let secondEntered = firstEntered
+                    ? entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                    : false
+                cont.resume(returning: firstEntered && secondEntered)
+            }
+        }
+        XCTAssertTrue(
+            bothEntered,
+            "Both APIClient actors must have concurrent MockURLProtocol handlers live inside startLoading before release. If this fails, per-session handler dispatch is serialized and the isolation contract is broken."
+        )
+
+        releaseLatch.signal()
+        releaseLatch.signal()
+
+        let firstResolved = try await firstValue
+        let secondResolved = try await secondValue
+
+        XCTAssertEqual(firstResolved, TransportValue(value: "first"))
+        XCTAssertEqual(secondResolved, TransportValue(value: "second"))
         XCTAssertEqual(firstMockAPIClient.capturedRequests.count, 1)
         XCTAssertEqual(firstMockAPIClient.capturedRequests.first?.url?.host, "first.mock.invalid")
         XCTAssertEqual(secondMockAPIClient.capturedRequests.count, 1)

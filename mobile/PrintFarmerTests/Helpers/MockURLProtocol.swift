@@ -88,13 +88,20 @@ final class MockURLProtocol: URLProtocol {
             return
         }
 
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
+        // Dispatch handler execution off the shared URLProtocol thread so per-session
+        // handlers cannot serialize each other when one intentionally blocks (needed to
+        // prove per-session isolation deterministically in APIClientTests overlap tests).
+        let capturedRequest = request
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                let (response, data) = try handler(capturedRequest)
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                self.client?.urlProtocol(self, didLoad: data)
+                self.client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                self.client?.urlProtocol(self, didFailWithError: error)
+            }
         }
     }
 

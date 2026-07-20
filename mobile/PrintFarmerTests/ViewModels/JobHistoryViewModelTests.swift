@@ -199,13 +199,16 @@ final class JobHistoryViewModelTests: XCTestCase {
         let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
         viewModel.dateFrom = dateFrom
         viewModel.dateTo = dateTo
+        viewModel.error = "prior-job-history-error-sentinel"
         mockJobAnalyticsService.errorToThrow = TestError.generic
         
         await viewModel.loadMore()
         
         // loadMore() is a secondary paginator: on failure it logs via `logger.warning`
         // and leaves `viewModel.error` untouched so the already-loaded page keeps rendering.
-        // Issue #809 tracks recovery of the mutable offset after a failed request.
+        // Issue #810 tracks recovery of the mutable offset after a failed request.
+        // Seeding a nonnil sentinel proves the error channel is neither cleared
+        // nor overwritten by the secondary path.
         let called = mockJobAnalyticsService.getHistoryCalledWith
         XCTAssertEqual(called?.limit, 30)
         XCTAssertEqual(called?.offset, 30)
@@ -217,7 +220,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.historyPage?.entries.first?.id, "previous")
         XCTAssertEqual(viewModel.historyPage?.totalCount, 100)
         XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
-        XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.error, "prior-job-history-error-sentinel")
         XCTAssertFalse(viewModel.isLoadingMore)
     }
     
@@ -267,13 +270,16 @@ final class JobHistoryViewModelTests: XCTestCase {
         viewModel.timeline = [previousEvent]
         let dateFrom = Date(timeIntervalSince1970: 1_700_000_000)
         let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
+        viewModel.error = "prior-timeline-error-sentinel"
         mockJobAnalyticsService.errorToThrow = TestError.generic
         
         await viewModel.loadTimeline(dateFrom: dateFrom, dateTo: dateTo)
         
         // loadTimeline() is a secondary load: it logs via `logger.warning`
         // and does not surface `viewModel.error` — the primary history page still owns
-        // any error state that gets rendered or clear the previous timeline.
+        // any error state that gets rendered and the previous timeline is preserved.
+        // Seeding a nonnil sentinel proves the secondary path never clobbers
+        // the primary error channel.
         let called = mockJobAnalyticsService.getTimelineCalledWith
         XCTAssertEqual(called?.dateFrom, dateFrom)
         XCTAssertEqual(called?.dateTo, dateTo)
@@ -283,7 +289,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.timeline.count, 1)
         XCTAssertEqual(viewModel.timeline.first?.jobId, "previous")
         XCTAssertEqual(viewModel.timeline.first?.state, "completed")
-        XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.error, "prior-timeline-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
     

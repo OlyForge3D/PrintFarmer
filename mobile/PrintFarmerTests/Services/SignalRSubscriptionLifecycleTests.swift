@@ -1439,7 +1439,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                     ]
                 ]
             ]
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -1655,7 +1655,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
             ]
         ]
         mockSession.requestHandler = { request in
-            let data = (try? JSONSerialization.data(withJSONObject: negotiatePayload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: negotiatePayload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -1797,7 +1797,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                     ]
                 ]
             ]
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -1966,7 +1966,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
             ]
         ]
         mockSession.requestHandler = { request in
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -2124,7 +2124,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
             ]
         ]
         mockSession.requestHandler = { request in
-            let data = (try? JSONSerialization.data(withJSONObject: negotiatePayload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: negotiatePayload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -2395,7 +2395,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                     ]
                 ]
             ]
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -3637,7 +3637,7 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+                try JSONSerialization.data(withJSONObject: payload)
             )
         }
     }
