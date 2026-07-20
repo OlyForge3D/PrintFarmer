@@ -58,6 +58,7 @@ final class PrinterDetailViewModel {
     private var nfcScanner: (any SpoolScannerProtocol)?
     private var autoDispatchService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
+    @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
     private var predictiveService: (any PredictiveServiceProtocol)?
     private var failureDetectionService: (any FailureDetectionServiceProtocol)?
     private var snapshotPollingTask: Task<Void, Never>?
@@ -115,13 +116,15 @@ final class PrinterDetailViewModel {
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
         self.signalRService = service
-        service.onPrinterUpdated { [weak self] update in
+        for subscription in signalRSubscriptions { subscription.cancel() }
+        signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
             guard update.id == self?.printerId else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.isViewActive else { return }
                 self.applyLiveUpdate(update)
             }
-        }
+        })
     }
 
     private func applyLiveUpdate(_ update: PrinterStatusUpdate) {

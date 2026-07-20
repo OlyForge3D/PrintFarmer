@@ -24,6 +24,7 @@ final class PrinterListViewModel {
     private var printerService: (any PrinterServiceProtocol)?
     private var autoPrintService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
+    @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
 
     func configure(printerService: any PrinterServiceProtocol, autoPrintService: any AutoDispatchServiceProtocol) {
         self.printerService = printerService
@@ -32,11 +33,13 @@ final class PrinterListViewModel {
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
         self.signalRService = service
-        service.onPrinterUpdated { [weak self] update in
+        for subscription in signalRSubscriptions { subscription.cancel() }
+        signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
             Task { @MainActor [weak self] in
                 self?.applyListUpdate(update)
             }
-        }
+        })
     }
 
     private func applyListUpdate(_ update: PrinterStatusUpdate) {

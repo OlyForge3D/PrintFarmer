@@ -215,6 +215,135 @@
 		D610P5000000000000000002 /* ServerSwitcherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000001 /* ServerSwitcherViewModel.swift */; };
 		D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000003 /* ServerSwitcherMenu.swift */; };
 		D610P5000000000000000006 /* ServerSwitcherViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */; };
+		D610F2000000000000000002 /* ServerCredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000001 /* ServerCredentialsStore.swift */; };
+		D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */; };
+		D61000000000000000000002 /* RegisteredServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000001 /* RegisteredServer.swift */; };
+		D61000000000000000000004 /* ServerRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000003 /* ServerRegistry.swift */; };
+		D61000000000000000000006 /* ServerRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61000000000000000000005 /* ServerRegistryTests.swift */; };
+		G1C5E77D0F5644239382149E /* MockMaintenanceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G15023AB18C74D619A437C5B /* MockMaintenanceService.swift */; };
+		G1B2DE97C03D425FABD4BDD4 /* MockAutoDispatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1A0D67EA5BA48C685032FBA /* MockAutoDispatchService.swift */; };
+		G1D0E211DA844BED9C0F19BD /* MockJobAnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1A233F477344637B2AC9E9C /* MockJobAnalyticsService.swift */; };
+		G1B41151FD1F4B23ABEC59AE /* MockPredictiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1FDD71A064346A897BF9641 /* MockPredictiveService.swift */; };
+		G1C2B28DFB034685948B821C /* MockDispatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1F98AD41C304A60BBBD3F43 /* MockDispatchService.swift */; };
+		G1B1DA79316F4F3D80379370 /* MaintenanceViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G12FAAFBDCE94613835D3E58 /* MaintenanceViewModelTests.swift */; };
+		G1A3398318B240EABC22E536 /* AutoDispatchViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G182EDAEF7D149C4935156CB /* AutoDispatchViewModelTests.swift */; };
+		G1FA23A10AE54780B6CF1B3F /* JobAnalyticsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1E89C5DD6EE494193525CAA /* JobAnalyticsViewModelTests.swift */; };
+		G1DB496BA05449D7B73D5824 /* JobHistoryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1ABD0C2A6934D9D81A7CC12 /* JobHistoryViewModelTests.swift */; };
+		G13C385F68A34608B4182DD2 /* PredictiveViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G126761F6D6E49CEA681556E /* PredictiveViewModelTests.swift */; };
+		G142D92FBF824D7ABB0E5813 /* DispatchViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1324516876342C9A7B5305E /* DispatchViewModelTests.swift */; };
+		G127C8AD0BA949758A364AB4 /* UptimeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1EE99D3914544B496FD266B /* UptimeViewModelTests.swift */; };
+		0165CA554584E940BBCF8A15 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534568DC689B743CE69E44A4 /* EmptyStateView.swift */; };
+		13A9714DB66389EFE231ED4E /* ActionButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46DEBCDF7D99C0F2AEFB6AEC /* ActionButtonStyle.swift */; };
+		05882F81ABFBD68C96376608 /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D49DAAAE1D5A8AC05429321 /* MockAuthService.swift */; };
+		137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */; };
+		14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */; };
+		A70A710000000000A0000101 /* AttentionModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */; };
+		BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */; };
+		174F8F2B2DBC083C8D2425E9 /* ServiceError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */; };
+		1D1B7EDF3FD6B2A17D268882 /* PrinterServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288048764D1B47272B433307 /* PrinterServiceProtocol.swift */; };
+		1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574F629AF29665D4872351E8 /* LoginView.swift */; };
+		BCEF91EF40EA431F928DB79F /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C70E99B5CA4E578AF3AAA6 /* OnboardingView.swift */; };
+		FF2EE1DD0CC9BB8AA7F6E5D4 /* LocalNetworkAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1BB2CC3DD4EE5FF6A7B8C9 /* LocalNetworkAuthorization.swift */; };
+		C6B5A4F3E2D1C0B9A8F7E6D5 /* LocalNetworkPermissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E6F7A8B9C0D1E2F3A4B5C6 /* LocalNetworkPermissionView.swift */; };
+		2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FD237969E9A136249F6351A /* AppRouter.swift */; };
+		2145660BC57194889CDBC78A /* JobCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B8E20F526E7CE3E92BE781 /* JobCardView.swift */; };
+		238D3CB78DB178A6F10855ED /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D809C1522119BD07956A1A7 /* AuthService.swift */; };
+		264690BE3784294A9AADB33B /* SpoolPickerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03EF6ADCC3760C1BFE7D60FB /* SpoolPickerViewModel.swift */; };
+		26F5D2EC28D2FD075AF12C08 /* AddSpoolViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34D860B7B852D3B6814A7CAF /* AddSpoolViewModel.swift */; };
+		2868397DE77379D694A2172C /* PFarmApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDDEAB7ED1DC689B3B4FB5FB /* PFarmApp.swift */; };
+		2C63FB5B0F84E05DBBED37FF /* NotificationsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C832D8E0EECDD622BBEB9A68 /* NotificationsViewModelTests.swift */; };
+		2CB42A860B669F5B702F984D /* FilamentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4E2EE087E92C131271B37F /* FilamentModels.swift */; };
+		317FBEA2115393EBB15E8035 /* StatisticsServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10120F9FBE4ED41F47B5FDBB /* StatisticsServiceProtocol.swift */; };
+		34A13F4F8A2F168BA6B3E859 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6121AF27098BBC7AC438846 /* LocationService.swift */; };
+		3D4D27461FC81A2D849419A4 /* JobServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9C17AD264628260EACB8E5E /* JobServiceProtocol.swift */; };
+		3F2B3B9AEAE8DF4B91541072 /* SpoolInventoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2510EA192FD0D4DA2159C88 /* SpoolInventoryViewModel.swift */; };
+		3F2C3545841C1FABF8086E77 /* JobListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2FA2A4FEFE32F898CA6799D /* JobListView.swift */; };
+		4097E554D29B3551A59C943D /* AppDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83CE3867D23C7CA26C423AB /* AppDestination.swift */; };
+		14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */; };
+		42EB02BCF9914C6BAF27AD77 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8D7C5C4CE62E9F3684E5B1F /* Models.swift */; };
+		A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */; };
+		4AF7E845E7195CD9D93A7CA3 /* JobService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAA04408A2539F908022484D /* JobService.swift */; };
+		4BF27ADE0992B441FDBEAD6E /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B45A5C9AA17194A8ED47D1F /* MockURLProtocol.swift */; };
+		4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6208E685EEDD0498124C143A /* SignalRModels.swift */; };
+		4F679582C671B972DF8C69C5 /* NotificationsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8090CB206CE8E8AE1084796 /* NotificationsViewModel.swift */; };
+		0D7D6FE112414AE495990773 /* PendingReadyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61A5AAA3D1E4BAD9CA3FE7D /* PendingReadyMonitor.swift */; };
+		CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0002 /* ConnectionMonitor.swift */; };
+		CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */; };
+		CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */; };
+		4FFB267499981D7206071A85 /* AddSpoolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013F7A319FAE93072F4272D2 /* AddSpoolView.swift */; };
+		50223C7434476DC0B6673E8B /* SignalRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45FDB4137FE34914C387AE17 /* SignalRService.swift */; };
+		CA110D6A7E1234567890AB03 /* SignalRSubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */; };
+		CA110D6A7E1234567890AD03 /* CompletionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */; };
+		CA110D6A7E1234567890B003 /* SignalRLifecycleInvariants.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */; };
+		CA110D6A7E1234567890AB05 /* SignalRSubscriptionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AB06 /* SignalRSubscriptionLifecycleTests.swift */; };
+		CA110D6A7E1234567890AF03 /* SignalRCrossHubFIFOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AF04 /* SignalRCrossHubFIFOTests.swift */; };
+		CA110D6A7E1234567890AE01 /* CompletionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AE02 /* CompletionRegistryTests.swift */; };
+		CA110D6A7E1234567890AC01 /* AsyncAssertions.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AC02 /* AsyncAssertions.swift */; };
+		CA110D6A7E1234567890AB01 /* CallOrderGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA110D6A7E1234567890AB02 /* CallOrderGate.swift */; };
+		57E23E107ED77369284AF9D4 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E45A19848758E2DB8543C2A /* StatusBadge.swift */; };
+		5B82756AC8306EB8A20E68EE /* SpoolServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D21023EEB533787E494E2B82 /* SpoolServiceProtocol.swift */; };
+		5E141422FB3849E6169FA79E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 255B7030A4CC2759FC7FC79B /* ContentView.swift */; };
+		660DA45F179749438845EEE1 /* SpoolmanSpool+ColorName.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C6B85B1BB446FB9FACBC8D /* SpoolmanSpool+ColorName.swift */; };
+		66C4475E3B8413EDE2498086 /* ServiceContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967769D7BBE893354EE7158A /* ServiceContainer.swift */; };
+		676E7DBB0DA21342C6F6B86E /* JobDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42FBB38EFCA394CA24A5B3E /* JobDetailView.swift */; };
+		69BA22247633D68EB315F6C3 /* PrinterListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */; };
+		6FB5573AA419B929334A449D /* JobListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0CD24EBD01E5889869039C /* JobListViewModel.swift */; };
+		709F2758FA2B8BF406D1813C /* PrinterListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A59E2A16E7C0B2D793C038A6 /* PrinterListViewModelTests.swift */; };
+		71A9C2DF9F18FDC75CE11E43 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC9740564FFEA02088E0E2C8 /* AuthViewModel.swift */; };
+		72ADD2FE13E9535610CF1D7E /* ModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA22CAC2DD8479E1B2EE791A /* ModelsTests.swift */; };
+		762008F3419AB9A3D8FD178E /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 962BFA7750A020B42AECBFA4 /* AppConfig.swift */; };
+		77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9524FF48521543684E184052 /* MockStatisticsService.swift */; };
+		7D155E1D7B0A440C7D112FE6 /* MockPrinterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9334431C714598BE7A00152B /* MockPrinterService.swift */; };
+		810501B5434D7BC2DBC2CFD6 /* StatisticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07BDD1556443A5859F5EE43F /* StatisticsService.swift */; };
+		814473DF28A49641B79766BA /* LoginViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016588B049630508F9B77403 /* LoginViewModelTests.swift */; };
+		8227ECB595FD6058EFBE3E3C /* SignalRServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809149B9D7E0B339296A7E1E /* SignalRServiceProtocol.swift */; };
+		85C011BBD5210E14D6B6C4D7 /* MockNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C4C4D554DEEE8404DCF48B /* MockNotificationService.swift */; };
+		8A0E52A04D22061CB28D06BE /* LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFDAD6E115B4CFF2CCC862D /* LoginViewModel.swift */; };
+		8BF25372E6C0C5D86559801C /* MockSignalRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C12D0C96BEDCD759DF8A6F1 /* MockSignalRService.swift */; };
+		8E016F38A846594333A70CEB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0262E35EBDB310533C010A /* SettingsView.swift */; };
+		8ED9E2039EB36A33F0B9850D /* Formatting+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C9719B51C89BBC3E717E76E /* Formatting+Extensions.swift */; };
+		8F2654878B838B7E5AA35AAC /* PrinterListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E94D9CC41318FFA43B8B260 /* PrinterListView.swift */; };
+		937FF5DB1F58D068175C1581 /* MockAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E4E6FB4888EBB6541E982BC /* MockAPIClient.swift */; };
+		940708CCB42A9134DABC1B06 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DDD6FCA23053FB398C63F95 /* APIClient.swift */; };
+		9496A75515E3FA0FAF3DEB95 /* AuthViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1706B0E2CB9F9ADFA2B914EB /* AuthViewModelTests.swift */; };
+		7AE737FB217E411CA2B277FB /* PageIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96FDDDBE9704424E9A42D5A2 /* PageIndicator.swift */; };
+		977E6F182EC8F10888253205 /* PrintProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44789FEC15B2FCE4E3A02174 /* PrintProgressBar.swift */; };
+		98213E171862DBCDFD587795 /* ThemeColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0C8B18479C00C8058A3260 /* ThemeColors.swift */; };
+		A1B2C3D4E5F6789012345678 /* MockAPIServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F67890ABCDEF01 /* MockAPIServer.swift */; };
+		A2FC4CAC97D64CC8E4D8FDED /* LocationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23554EB41DA88AD092EB5C1 /* LocationListView.swift */; };
+		A391E9CBE39F5EAF1A94264D /* SpoolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D305E8384A01A3EBE5866CF /* SpoolPickerView.swift */; };
+		A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */; };
+		A5DAEF79F0E6036756BD6A96 /* SpoolInventoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9A3AD3F5C5DD33CAF7C6CB /* SpoolInventoryView.swift */; };
+		A7F6E5D4C3B2A1F2E1D0C9B8 /* MockQRSpoolScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7B8C9D0E1F2A3B4C5D6E7 /* MockQRSpoolScannerService.swift */; };
+		AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62BAD7F52A9EFEE471AA461C /* RequestModels.swift */; };
+		AF352938B522CA875FCD9E66 /* PrinterDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */; };
+		A1C5DEF1234567890ABC0001 /* PrinterControlsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0002 /* PrinterControlsViewModel.swift */; };
+		A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */; };
+		A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */; };
+		A1C5DEF1234567890ABC0011 /* PreheatSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C5DEF1234567890ABC0010 /* PreheatSubgroup.swift */; };
+		A3E7287000000000000000A2 /* PrinterControlsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E7287000000000000000A1 /* PrinterControlsSection.swift */; };
+		B1C2D3E4F5A6B7C8D9E0F1A2 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* AppDelegate.swift */; };
+		B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */; };
+		B8A7F6E5D4C3B2A1F2E1D0C9 /* NFCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */; };
+		BADFC6669F70FAF0AF21DB37 /* SpoolService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF23D467957EDEE89DB0A90A /* SpoolService.swift */; };
+		BCB617F9B1642391E9805237 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 277D5F88316714ECC4B60E5C /* Color+Hex.swift */; };
+		BD4B3C1A942D0E9675E2B73A /* JobListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 264B18486158F15238D0788D /* JobListViewModelTests.swift */; };
+		C0BEC42C218A8055A23740FD /* JobDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB279A2CAF8BE1C1BD61D6B2 /* JobDetailViewModelTests.swift */; };
+		C0CF42E5C08F7567EDD6E459 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B16CA4D9FC52BF34ADB51B /* DashboardView.swift */; };
+		C36E71E0B8D651B87256150D /* PrinterCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57A3A3E21352CC6A4514221E /* PrinterCardView.swift */; };
+		2B0A1CAE11FC88565FA288EA /* iPadPrinterCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */; };
+		C3C22EFA772CBD5125E9F2FE /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 007F057316513D6585B3D53A /* NotificationService.swift */; };
+		C46CED04E8CBA839846568BC /* TemperatureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DEEFD9852661DAA2637C25 /* TemperatureView.swift */; };
+		77F7448C2D183C8F140C41CB /* MJPEGStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFD389576B18CC0E5ADBB63 /* MJPEGStreamView.swift */; };
+		2C6155264C934670F2278DC9 /* CustomIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F15146257C59F44A210F002 /* CustomIcons.swift */; };
+		C9B8A7F6E5D4C3B2A1F2E1D0 /* QRSpoolScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* QRSpoolScannerService.swift */; };
+		CB2A92710AD3D33CE4B22717 /* PrinterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6F328EBCA1FFAB87F2E1347 /* PrinterService.swift */; };
+		CD8577F6945003EB16C1FF53 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */; };
+		CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */; };
+		A70A710000000000A0000102 /* AttentionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000102 /* AttentionServiceTests.swift */; };
+		D0C9B8A7F6E5D4C3B2A1F2E1 /* NFCTagParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParser.swift */; };
+		D1E2F3A4B5C6D7E8F9A0B1C2 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */; };
+		D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0630DF455D4C1F4FA86F892 /* PrinterDetailView.swift */; };
 		D71037FADE952266CE7F84B8 /* NotificationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2099E58B96BAECC1E27BEE93 /* NotificationsView.swift */; };
 		D8F9A0B1C2E3D4F5A6B7C8D9 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */; };
 		D99CD2AB46AD4834B0BC33CA /* PredictiveInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B82175969F41E18F12CE414 /* PredictiveInsightsView.swift */; };
@@ -352,6 +481,14 @@
 		45FDB4137FE34914C387AE17 /* SignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRService.swift; sourceTree = "<group>"; };
 		46DEBCDF7D99C0F2AEFB6AEC /* ActionButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionButtonStyle.swift; sourceTree = "<group>"; };
 		49036340D262B04245686D66 /* AutoDispatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchService.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRSubscription.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionRegistry.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRLifecycleInvariants.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890AB06 /* SignalRSubscriptionLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRSubscriptionLifecycleTests.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890AF04 /* SignalRCrossHubFIFOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRCrossHubFIFOTests.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890AE02 /* CompletionRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionRegistryTests.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890AC02 /* AsyncAssertions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncAssertions.swift; sourceTree = "<group>"; };
+		CA110D6A7E1234567890AB02 /* CallOrderGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallOrderGate.swift; sourceTree = "<group>"; };
 		4AB0049295C7EA8B4B2FF0CA /* PrinterDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailViewModel.swift; sourceTree = "<group>"; };
 		4B4E2EE087E92C131271B37F /* FilamentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentModels.swift; sourceTree = "<group>"; };
 		4D2DC48D9E2512C6FD68D6E3 /* MaintenanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceView.swift; sourceTree = "<group>"; };
@@ -670,6 +807,8 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F67890ABCDEF01 /* MockAPIServer.swift */,
+				CA110D6A7E1234567890AC02 /* AsyncAssertions.swift */,
+				CA110D6A7E1234567890AB02 /* CallOrderGate.swift */,
 				0B45A5C9AA17194A8ED47D1F /* MockURLProtocol.swift */,
 				1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */,
 			);
@@ -694,6 +833,9 @@
 				967769D7BBE893354EE7158A /* ServiceContainer.swift */,
 				F7060001000000000000A041 /* SystemCapabilitiesService.swift */,
 				45FDB4137FE34914C387AE17 /* SignalRService.swift */,
+				CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */,
+				CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */,
+				CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */,
 				CF11AA0000000000000C0002 /* ConnectionMonitor.swift */,
 				BF23D467957EDEE89DB0A90A /* SpoolService.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */,
@@ -1067,6 +1209,9 @@
 				D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */,
 				A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */,
 				1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */,
+				CA110D6A7E1234567890AB06 /* SignalRSubscriptionLifecycleTests.swift */,
+				CA110D6A7E1234567890AF04 /* SignalRCrossHubFIFOTests.swift */,
+				CA110D6A7E1234567890AE02 /* CompletionRegistryTests.swift */,
 				CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */,
 				F7060001000000000000B011 /* SystemCapabilitiesTests.swift */,
 				F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */,
@@ -1332,6 +1477,8 @@
 				D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */,
 				4BF27ADE0992B441FDBEAD6E /* MockURLProtocol.swift in Sources */,
 				A1B2C3D4E5F6789012345678 /* MockAPIServer.swift in Sources */,
+				CA110D6A7E1234567890AC01 /* AsyncAssertions.swift in Sources */,
+				CA110D6A7E1234567890AB01 /* CallOrderGate.swift in Sources */,
 				137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */,
 				937FF5DB1F58D068175C1581 /* MockAPIClient.swift in Sources */,
 				05882F81ABFBD68C96376608 /* MockAuthService.swift in Sources */,
@@ -1339,6 +1486,9 @@
 				85C011BBD5210E14D6B6C4D7 /* MockNotificationService.swift in Sources */,
 				7D155E1D7B0A440C7D112FE6 /* MockPrinterService.swift in Sources */,
 				8BF25372E6C0C5D86559801C /* MockSignalRService.swift in Sources */,
+				CA110D6A7E1234567890AB05 /* SignalRSubscriptionLifecycleTests.swift in Sources */,
+				CA110D6A7E1234567890AF03 /* SignalRCrossHubFIFOTests.swift in Sources */,
+				CA110D6A7E1234567890AE01 /* CompletionRegistryTests.swift in Sources */,
 				77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */,
 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
@@ -1458,6 +1608,9 @@
 				CB2A92710AD3D33CE4B22717 /* PrinterService.swift in Sources */,
 				66C4475E3B8413EDE2498086 /* ServiceContainer.swift in Sources */,
 				50223C7434476DC0B6673E8B /* SignalRService.swift in Sources */,
+				CA110D6A7E1234567890AB03 /* SignalRSubscription.swift in Sources */,
+				CA110D6A7E1234567890AD03 /* CompletionRegistry.swift in Sources */,
+				CA110D6A7E1234567890B003 /* SignalRLifecycleInvariants.swift in Sources */,
 				810501B5434D7BC2DBC2CFD6 /* StatisticsService.swift in Sources */,
 				762008F3419AB9A3D8FD178E /* AppConfig.swift in Sources */,
 				71A9C2DF9F18FDC75CE11E43 /* AuthViewModel.swift in Sources */,
