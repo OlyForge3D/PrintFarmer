@@ -155,3 +155,14 @@
 - **Issue #281**: All 11 happy-path tests already present on development (setTemperatures x3, home x3, homeXY/homeZ wrappers, move x3).
 - **Branch**: squad/280-281-printer-controls-networking; **PR**: https://github.com/OlyForge3D/PrintFarmer/pull/417
 - **Build note**: swiftc -typecheck not runnable locally (CoreSimulator out of date). Relying on CI.
+
+### 2026-07-19 — Hudson #785 Continued Lock Status
+
+- **Issue:** #785
+- **Lock Status:** LOCKED OUT (continuing from previous cycle)
+- **Directive:** Do not advise or contribute to #785
+- **Reason:** Contamination & boundary violation incident; preserve review independence
+- **Candidate Details:** SHA 536bce0650d24c186b8c12a939046212bd8fc5b6; Bishop & Hicks REQUEST_CHANGES; Vasquez read-only violation
+- **Handoff Status:** Hudson locked out; Anvil authorized for independent third revision
+- **Available:** Unrelated tasks
+- **Orchestration:** `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md`

@@ -81,3 +81,15 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+### 2026-07-19 — Hudson #785 Contamination Incident (read-only violation)
+
+- **Incident Type:** Reviewer boundary violation during #785 final review round
+- **Violation:** Modified Hudson worktree while assigned read-only reviewer role
+- **Contaminated Artifacts:**
+  - Old worktree: `/Users/jpapiez/s/copilot-worktrees/PFarm1/jpapiez-stunning-memory`
+  - 5 tracked files modified + patch scripts
+  - Retained for audit; excluded from review use
+- **Impact:** Final consensus round (Vasquez part of 3-way) invalidated; Bishop + Hicks REQUEST_CHANGES stands as interim; independent re-review required
+- **Status:** Vasquez final review voided; reviewer boundary enforcement policy reinforced
+- **Orchestration:** `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md`

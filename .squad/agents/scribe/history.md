@@ -236,3 +236,57 @@ PendingReady fix fully documented. No pending squad state. Branch clean after pu
 
 **Outcome:** Camera management history now captures the completed UI, API, DTO, and validation work. No commit was made because the user requested no additional commit beyond agent-pushed work.
 
+---
+
+## 2026-07-19T21:38:40Z — #807 Rejection Record & Orchestration
+
+**Task:** Record unanimous two-round rejection of Kane #807 candidate; document evidence, blockers, follow-ups, and Anvil revision session.
+
+**Status:** ✅ COMPLETE — Decision record created, rejection evidence logged, downstream issues tracked.
+
+**Rejection Details:**
+- **Verdict:** Unanimous REQUEST_CHANGES/REJECT (Bishop, Hicks, Vasquez)
+- **Candidate SHA:** 62e49d9ba2663acc10f429b9c6ce8ca1b7f56159 (parent: 967474c1bc2d4b44aa9bbbf1c3730d0df8fb5019)
+- **Rounds:** Two-round adversarial consensus
+
+**Evidence:**
+- Focused suite: 168 pass / 2 fail / 6 skip
+- Full suite: 1062 pass / 1 fail / 7 skip
+- SignalR isolated pass (separate tracking required)
+
+**Blocking Issues (Unanimously Rejected):**
+1. Permanent snapshot skips, no PNG artifact tracking, missing path docs
+2. Vacuous log-only error tests (no behavior recovery verification)
+3. Unresolved URLProtocol shared isolation; focused failures remain
+4. Inaccurate evidence totals
+5. Workflow retries/continue-on-error not adequately reassessed
+6. Production bugs incorrectly normalized in comments
+
+**Downstream Actions:**
+- Reopened: #289 (snapshot issue)
+- Opened: #808 (SignalR type-7 suite-order leak), #809 (pagination-offset-on-failure), #810 (predictive failure presentation)
+
+**Parallel Tracking:**
+- Kane locked out for #807; instructed to freeze exact SHA
+- Anvil revision session: d362d58b-3bc5-4256-b420-4622b0bd62b2 (jpapiez-redesigned-train branch, verified exact rejected SHA)
+- Hudson #785/#782 revisions continue in parallel
+
+**Orchestration File:** `.squad/decisions/inbox/scribe-807-rejection-record-2026-07-19.md`
+
+**Outcome:** Pre-PR review gate enforced; unanimous rejection recorded; blockers clearly documented for next iteration. Kane frozen; Anvil authorized for independent revision. Follow-up issues provide scoped work paths.
+
+
+### 2026-07-19T22:29:26Z — Hudson #785 Review Cycle & Contamination Incident Recording
+
+- **Requested by:** Lambert (Squad)
+- **Scope:** Record second-round review results; document Vasquez boundary violation; formalize agent locks; authorize Anvil independent revision
+- **Artifacts Created:**
+  - Orchestration log: `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md` (4,682 bytes)
+  - Appended to: Bishop, Hicks, Vasquez, Hudson, Gorman histories
+  - Created: Anvil history (first entry)
+- **State Health Verified:**
+  - decisions.md: 3,082 bytes (healthy, <20KB)
+  - Scribe history: 14,330 bytes → ~15.5KB after session (near 15KB threshold; archive needed next session)
+  - Inbox: 2 files (Dallas #786, Scribe 807 pending merger)
+- **Session Status:** ✅ Complete; no product edits; orchestration metadata only
+- **Timestamp-Safe Naming:** Used `2026-07-19T22-29-26Z` format for artifacts

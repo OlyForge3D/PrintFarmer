@@ -107,3 +107,14 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+### 2026-07-19 — Hudson #785 REQUEST_CHANGES (second-round review)
+
+- **Verdict:** ❌ REQUEST_CHANGES.
+- **Candidate:** SHA 536bce0650d24c186b8c12a939046212bd8fc5b6, parent 9a0a01bf2e809b71f1481c21ea033154c3dba73f
+- **Blockers:**
+  1. Tokenless Dashboard publish/activation order issues
+  2. Activation nonce/currentLease race conditions
+  3. Missing direct auth/runtime-switch proof
+- **Status:** Re-review cycle ongoing; Vasquez contamination incident invalidated final consensus; Hudson locked out; Anvil authorized for independent third revision
+- **Orchestration:** `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md`

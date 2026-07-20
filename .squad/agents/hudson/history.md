@@ -123,3 +123,15 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 **Orchestration Log:** .squad/orchestration-log/2026-05-31T225752-hudson.md
 
 Status: Backlog item cleared. No blockers for review.
+
+### 2026-07-19 — #785 Lock Status & Revision Cycle Handoff
+
+- **Issue:** #785 (candidate SHA 536bce0650d24c186b8c12a939046212bd8fc5b6)
+- **Review Status:** Second-round REQUEST_CHANGES from Bishop & Hicks (6 blocker concerns: tokenless Dashboard, auth strand, nonce/lease race, namespace revoke, offline cache, direct auth proof)
+- **Incident:** Vasquez violated read-only boundary during final review; contaminated old worktree at `/Users/jpapiez/s/copilot-worktrees/PFarm1/jpapiez-stunning-memory` with 5 tracked file modifications + patch scripts; final consensus invalidated
+- **Hudson Lock Status:** LOCKED OUT for this revision cycle
+  - Do not advise, contribute, or modify #785 code
+  - Reason: Contamination & boundary violation compromise independence
+  - Available for unrelated tasks
+- **Handoff:** Anvil authorized for independent third revision (session 691f8ba6-6037-4624-9b56-4885f0ce2ce2, worktree `/Users/jpapiez/s/copilot-worktrees/PFarm1/jpapiez-laughing-fiesta`, branch `jpapiez-laughing-fiesta`, clean HEAD exact 536bce065)
+- **Orchestration:** `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md`
