@@ -1076,6 +1076,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private enum DrainOutcome {
         case retry(Task<Void, Never>, UInt64, isReceive: Bool)
         case done(UInt64?)
+        /// r24 (F4-L #777 cross-generation ownership fix): the
+        /// watcher's atomic step observed that ownership was lost
+        /// mid-drain (a `connect()`/`disconnect()`/terminal supersede
+        /// cleared `reconnectToken` and/or bumped `generation` and/or
+        /// cleared `finalizingOwnerToken` between snapshots). The
+        /// supersede path is authoritative for slot release and any
+        /// successor dispatch belonging to the replacement
+        /// generation; the stale watcher must silently early-exit
+        /// without touching `finalizingOwnerToken`, `pendingSuccessor*`,
+        /// or the replacement generation's receive barrier.
+        case lost
     }
 
     private func scheduleReconnect(fromGen: UInt64) {
@@ -1431,23 +1442,74 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             _ = await reconnectTask.value
             guard let self else { return }
 
-            // r23 (F4-L #777 CS-race fix): claim owner-scoped
-            // finalizing authority BEFORE any release/consume step.
-            // While `finalizingOwnerToken == taskToken`,
-            // `scheduleReconnect`'s Fix-B branch can still find an
-            // ownership marker to record generation-scoped intent
-            // against, even if `reconnectToken` were transiently
-            // cleared. It also flags to any observer that this
-            // owner's watcher is actively finalizing — no other path
-            // needs to synthesize a successor for this generation.
-            self.lifecycleSync {
+            // r24 (F4-L #777 cross-generation ownership fix): claim
+            // finalizing authority atomically ONLY if this watcher
+            // still legitimately owns the chain at the moment its
+            // owner task returned. A superseding call to
+            // `connect()`/`disconnect()`/retry-exhausted terminal may
+            // have run while this owner was still executing/awaited,
+            // clearing our `reconnectToken`, bumping `generation`,
+            // and clearing `finalizingOwnerToken`. In that case the
+            // supersede path is authoritative — it has already
+            // handled slot release, pending clearing, and any
+            // successor logic for the replacement generation. A
+            // stale watcher must NOT reassert `finalizingOwnerToken`
+            // (it no longer owns it), must NOT touch pending state
+            // (it belongs to another owner or is intentionally
+            // cleared), and must NOT drain the replacement
+            // generation's receive barrier (which now belongs to R2,
+            // not to this watcher's owner). Silent early-exit.
+            //
+            // The claim predicate matches the reservation predicate
+            // exactly: `reconnectToken == taskToken` (still the
+            // current owner slot), `generation == myGen0` (no
+            // generation bump has occurred), and
+            // `!intentionalDisconnect` (user has not disconnected).
+            // `myGen0` was captured as a `let` at reservation time
+            // above (line ~1089) and is immutable for the lifetime
+            // of this closure — a defining reference to the owner
+            // generation this watcher belongs to.
+            let claimed: Bool = self.lifecycleSync {
+                guard self.reconnectToken == taskToken,
+                      self.generation == myGen0,
+                      !self.intentionalDisconnect else {
+                    return false
+                }
                 self.finalizingOwnerToken = taskToken
+                return true
+            }
+            if !claimed {
+                // r24 (F4-L #777 cross-generation): superseded
+                // before we could claim. Do NOT touch any state
+                // (reconnectToken/finalizingOwnerToken/pending/
+                // barrier/version fields all belong to a different
+                // owner or the replacement generation). But we MUST
+                // still emit `ownerCompleted` for this taskToken:
+                // the frozen "every started lifetime completes"
+                // contract (SignalRServiceBindingHarnessTests
+                // .testRealService_connectSupersedesReconnect_
+                // finishesEveryStartedLifetime) requires an
+                // `ownerCompleted` for every `ownerStarted`, and
+                // the supersede path itself does not emit it. In
+                // production Release this branch is a no-op; the
+                // DEBUG post is the only side-effect and it does
+                // not mutate service state.
+                #if DEBUG
+                SignalRService.postDebugLifecycleEvent(
+                    service: self,
+                    event: "ownerCompleted",
+                    taskID: taskToken
+                )
+                #endif
+                return
             }
 
-            // r22 (F4-L #777 R2 TOCTOU fix) + r23 (CS-race fix):
-            // drain-loop with two independent version tracks —
-            //   * `lastAwaitedReceiveInstalled` tracks the version of
-            //     the current receive-completion barrier we've
+            // r22 (F4-L #777 R2 TOCTOU fix) + r23 (CS-race fix) +
+            // r24 (cross-generation ownership fix): drain-loop with
+            // two independent version tracks and ownership
+            // revalidation at every lifecycleSync entry.
+            //   * `lastAwaitedReceiveInstalled` tracks the version
+            //     of the current receive-completion barrier we've
             //     already awaited. Bumped by `performConnect` step 4
             //     when a new barrier is installed; resolved by the
             //     barrier body itself after `await task.value`.
@@ -1461,23 +1523,31 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             //     barrier version (r22 protocol) — bumped every time
             //     the drop path or Fix B records new pending +
             //     barrier.
-            // Each iteration snapshots both barriers, awaits the
-            // receive barrier first if unresolved (it is the
-            // production happens-before edge for the outgoing
-            // receive), then the pending barrier. The atomic step
-            // rechecks both versions and returns `.retry` if either
-            // has advanced past its `lastAwaited` (with `isReceive`
-            // distinguishing which track to update). Slot release
-            // and successor dispatch are impossible while any
-            // matching owner-scoped barrier has not been awaited.
+            // r24: every `lifecycleSync` block that reads barrier
+            // state or advances state re-checks ownership before
+            // acting. If ownership is lost mid-drain (supersede),
+            // the block returns `nil`/`.lost` and the loop exits
+            // silently. This ensures a stale watcher can never park
+            // on the replacement generation's receive barrier nor
+            // intercept its reconnect intent via Fix B's
+            // `reconnectToken ?? finalizingOwnerToken` fallback.
             var lastAwaitedPending: UInt64 = 0
             var lastAwaitedReceiveInstalled: UInt64 = 0
             var successorFromGen: UInt64? = nil
             drainLoop: while true {
+                // Ownership-gated snapshot. Returns nil if we no
+                // longer own the chain; otherwise the current pair
+                // of barriers scoped to this owner.
                 let snapshot: (
-                    pending: Task<Void, Never>?, pendingV: UInt64,
-                    receive: Task<Void, Never>?, receiveV: UInt64
-                ) = self.lifecycleSync {
+                    receive: Task<Void, Never>?, receiveV: UInt64,
+                    pending: Task<Void, Never>?, pendingV: UInt64
+                )? = self.lifecycleSync {
+                    guard self.reconnectToken == taskToken,
+                          self.generation == myGen0,
+                          self.finalizingOwnerToken == taskToken,
+                          !self.intentionalDisconnect else {
+                        return nil
+                    }
                     let p: Task<Void, Never>? =
                         (self.pendingSuccessorForOwner == taskToken)
                         ? self.pendingSuccessorReceiveBarrier : nil
@@ -1487,7 +1557,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     // A receive barrier is "live" (needs awaiting)
                     // only while its install-version exceeds its
                     // resolved-version. A resolved-but-still-
-                    // referenced barrier is safe to skip.
+                    // referenced barrier is safe to skip. Because
+                    // ownership is confirmed above, the barrier we
+                    // read here belongs to THIS generation — a
+                    // supersede would have failed the guard.
                     let rLive: Bool =
                         self.receiveCompletionBarrier != nil
                             && self.receiveBarrierInstalledVersion
@@ -1496,33 +1569,53 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                         rLive ? self.receiveCompletionBarrier : nil
                     let rv: UInt64 =
                         rLive ? self.receiveBarrierInstalledVersion : 0
-                    return (p, pv, r, rv)
+                    return (r, rv, p, pv)
+                }
+                guard let snap = snapshot else {
+                    // Ownership lost mid-drain. Supersede path
+                    // owns slot release + successor dispatch for
+                    // the replacement generation. Still emit
+                    // `ownerCompleted` for the frozen "every
+                    // started lifetime completes" contract; see
+                    // the claim-failed branch above for full
+                    // rationale.
+                    #if DEBUG
+                    SignalRService.postDebugLifecycleEvent(
+                        service: self,
+                        event: "ownerCompleted",
+                        taskID: taskToken
+                    )
+                    #endif
+                    return
                 }
                 // Await receive barrier first — it is the
                 // production happens-before edge that R's late
                 // scheduleReconnect (r22 CS window) depends on.
-                if let rBarrier = snapshot.receive,
-                   snapshot.receiveV > lastAwaitedReceiveInstalled {
+                if let rBarrier = snap.receive,
+                   snap.receiveV > lastAwaitedReceiveInstalled {
                     _ = await rBarrier.value
-                    lastAwaitedReceiveInstalled = snapshot.receiveV
+                    lastAwaitedReceiveInstalled = snap.receiveV
                     continue drainLoop
                 }
-                if let pBarrier = snapshot.pending,
-                   snapshot.pendingV > lastAwaitedPending {
+                if let pBarrier = snap.pending,
+                   snap.pendingV > lastAwaitedPending {
                     _ = await pBarrier.value
-                    lastAwaitedPending = snapshot.pendingV
+                    lastAwaitedPending = snap.pendingV
                     continue drainLoop
                 }
                 // No unawaited barrier at the snapshot moment.
-                // Attempt the atomic release/consume step. If a
-                // barrier newer than `lastAwaited` on either track
-                // has been recorded between the snapshot and this
-                // `lifecycleSync`, it will be visible here and we
-                // yield it back for another await pass. Otherwise
-                // we release the slot (SOLE authority — r21 R1),
-                // consume pending, clear finalizing authority, and
-                // capture the successor generation atomically.
+                // Attempt the atomic release/consume step, with a
+                // final ownership revalidation. r24: if we've been
+                // superseded between the snapshot and here, the
+                // atomic step returns `.lost` and we early-exit
+                // without touching any state — the supersede path
+                // has already cleared everything on our behalf.
                 let step: DrainOutcome = self.lifecycleSync {
+                    guard self.reconnectToken == taskToken,
+                          self.generation == myGen0,
+                          self.finalizingOwnerToken == taskToken else {
+                        return .lost
+                    }
                     // Re-check receive-barrier track first.
                     if let rb = self.receiveCompletionBarrier,
                        self.receiveBarrierInstalledVersion
@@ -1550,8 +1643,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     // owner AND clear finalizing authority in the
                     // SAME atomic step so no observer sees
                     // `reconnectToken == nil` while
-                    // `finalizingOwnerToken == taskToken` is
-                    // still valid to record against.
+                    // `finalizingOwnerToken == taskToken` is still
+                    // valid to record against.
                     if self.reconnectToken == taskToken {
                         self.reconnectTask = nil
                         self.setReconnectTokenLocked(nil)
@@ -1579,6 +1672,19 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     return .done(self.generation)
                 }
                 switch step {
+                case .lost:
+                    // r24: ownership lost between snapshot and
+                    // atomic step. Same rationale as above —
+                    // early-exit and emit `ownerCompleted` for
+                    // the frozen lifetime-pairing contract.
+                    #if DEBUG
+                    SignalRService.postDebugLifecycleEvent(
+                        service: self,
+                        event: "ownerCompleted",
+                        taskID: taskToken
+                    )
+                    #endif
+                    return
                 case .retry(let b, let v, let isReceive):
                     _ = await b.value
                     if isReceive {
@@ -1602,6 +1708,11 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             //     receiveCompleted (from awaited barrier's body)
             //         < ownerCompleted (here)
             //         < ownerCreated(B) (from scheduleReconnect below).
+            // r24: only reached on a legitimate `.done` outcome —
+            // a lost/superseded watcher returned early above and
+            // does NOT post `ownerCompleted` (the supersede path
+            // is responsible for the replacement generation's
+            // lifecycle events).
             SignalRService.postDebugLifecycleEvent(
                 service: self,
                 event: "ownerCompleted",
@@ -1613,6 +1724,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 self.scheduleReconnect(fromGen: successorFromGen)
             }
         }
+
         // Install the task handle only if we still own the token. A
         // disconnect() racing this call between the token reservation
         // above and now will have cleared `reconnectToken` — in that
