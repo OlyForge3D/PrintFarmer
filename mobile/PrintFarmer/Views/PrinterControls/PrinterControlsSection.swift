@@ -21,10 +21,15 @@ struct PrinterControlsSection: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(printer: Printer, printerService: any PrinterServiceProtocol) {
-        self.printer = printer
-        _viewModel = StateObject(
-            wrappedValue: PrinterControlsViewModel(printerService: printerService, printer: printer)
+        self.init(
+            printer: printer,
+            viewModel: PrinterControlsViewModel(printerService: printerService, printer: printer)
         )
+    }
+
+    init(printer: Printer, viewModel: PrinterControlsViewModel) {
+        self.printer = printer
+        _viewModel = StateObject(wrappedValue: viewModel)
     }
 
     /// Hides the entire section only when the printer is offline. During a

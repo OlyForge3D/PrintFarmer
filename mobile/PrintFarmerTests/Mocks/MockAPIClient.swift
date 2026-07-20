@@ -5,27 +5,34 @@ import Foundation
 /// Uses MockURLProtocol under the hood for real APIClient testing.
 final class MockAPIClient: @unchecked Sendable {
 
-    /// Recorded request info for assertions.
-    struct CapturedRequest: Sendable {
-        let path: String
-        let method: String
-        let body: Data?
-        let headers: [String: String]
+    private let transport: MockURLProtocol.Session
+    let apiClient: APIClient
+
+    init(baseURL: URL = TestData.testBaseURL) {
+        let transport = MockURLProtocol.makeSession()
+        self.transport = transport
+        apiClient = APIClient(baseURL: baseURL, session: transport.urlSession)
     }
 
-    private(set) var capturedRequests: [CapturedRequest] = []
-    var responsesToReturn: [String: (Int, Data)] = [:]
-    var errorToThrow: Error?
-
-    /// Creates a real APIClient backed by MockURLProtocol.
-    static func makeAPIClient(baseURL: URL = TestData.testBaseURL) -> APIClient {
-        let session = MockURLProtocol.mockSession()
-        return APIClient(baseURL: baseURL, session: session)
+    var capturedRequests: [URLRequest] {
+        transport.capturedRequests
     }
 
-    /// Configures MockURLProtocol to return a JSON response for any request.
-    static func stubResponse(json: String, statusCode: Int = 200) {
-        MockURLProtocol.requestHandler = { request in
+    var urlSession: URLSession {
+        transport.urlSession
+    }
+
+    var requestHandler: MockURLProtocol.RequestHandler? {
+        get { transport.requestHandler }
+        set { transport.requestHandler = newValue }
+    }
+
+    func reset() {
+        transport.reset()
+    }
+
+    func stubResponse(json: String, statusCode: Int = 200) {
+        requestHandler = { request in
             let response = TestData.httpResponse(url: request.url, statusCode: statusCode)
             return (response, json.data(using: .utf8)!)
         }
@@ -40,8 +47,8 @@ final class MockAPIClient: @unchecked Sendable {
     /// suffix beats a generic prefix. Ties on start position resolve to the longer
     /// key. This makes dispatch deterministic regardless of `Dictionary` iteration
     /// order (which is not stable across processes).
-    static func stubResponses(_ responses: [String: (statusCode: Int, json: String)]) {
-        MockURLProtocol.requestHandler = { request in
+    func stubResponses(_ responses: [String: (statusCode: Int, json: String)]) {
+        requestHandler = { request in
             let path = request.url?.path ?? ""
             let matches: [(key: String, start: Int)] = responses.keys.compactMap { key in
                 guard let range = path.range(of: key) else { return nil }
@@ -61,16 +68,14 @@ final class MockAPIClient: @unchecked Sendable {
         }
     }
 
-    /// Configures MockURLProtocol to return an error.
-    static func stubError(_ error: URLError.Code) {
-        MockURLProtocol.requestHandler = { _ in
+    func stubError(_ error: URLError.Code) {
+        requestHandler = { _ in
             throw URLError(error)
         }
     }
 
-    /// Configures MockURLProtocol to return empty success.
-    static func stubEmptySuccess() {
-        MockURLProtocol.requestHandler = { request in
+    func stubEmptySuccess() {
+        requestHandler = { request in
             let response = TestData.httpResponse(url: request.url, statusCode: 200)
             return (response, Data())
         }

@@ -20,17 +20,18 @@ import XCTest
 @MainActor
 final class SystemCapabilitiesTests: XCTestCase {
 
+    nonisolated(unsafe) private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         apiClient = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -156,7 +157,7 @@ final class SystemCapabilitiesTests: XCTestCase {
     // MARK: - SystemCapabilitiesService
 
     func testRefreshUpdatesResolvedOnSuccessfulResponse() async {
-        MockAPIClient.stubResponse(json: """
+        mockAPIClient.stubResponse(json: """
         {
             "attentionEnabled": false,
             "nativePushEnabled": true
@@ -178,7 +179,7 @@ final class SystemCapabilitiesTests: XCTestCase {
         // Simulates a server that predates #725 and has no
         // `/api/system/capabilities` route. Must NOT throw and must
         // leave resolved at defaults (fully-enabled snapshot).
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             let response = TestData.httpResponse(url: request.url, statusCode: 404)
             return (response, Data("{}".utf8))
         }
@@ -192,7 +193,7 @@ final class SystemCapabilitiesTests: XCTestCase {
     func testRefreshFailsOpenOnTransportError() async {
         // Transient network failure must not disable any feature —
         // documented contract in #725 is fail-open on unavailability.
-        MockAPIClient.stubError(.notConnectedToInternet)
+        mockAPIClient.stubError(.notConnectedToInternet)
 
         let service = SystemCapabilitiesService(apiClient: apiClient)
         await service.refresh()
@@ -204,7 +205,7 @@ final class SystemCapabilitiesTests: XCTestCase {
         // First a successful refresh sets attentionEnabled=false; a
         // subsequent transport error must NOT flip it back to the
         // enabled default (fail-open means "don't touch existing state").
-        MockAPIClient.stubResponse(json: """
+        mockAPIClient.stubResponse(json: """
         { "attentionEnabled": false }
         """)
 
@@ -212,7 +213,7 @@ final class SystemCapabilitiesTests: XCTestCase {
         await service.refresh()
         XCTAssertFalse(service.resolved.attentionEnabled)
 
-        MockAPIClient.stubError(.timedOut)
+        mockAPIClient.stubError(.timedOut)
         await service.refresh()
 
         XCTAssertFalse(service.resolved.attentionEnabled,

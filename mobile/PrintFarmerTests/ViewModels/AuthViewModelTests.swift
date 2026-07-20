@@ -7,6 +7,7 @@ import XCTest
 @MainActor
 final class AuthViewModelTests: XCTestCase {
 
+    nonisolated(unsafe) private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var authService: AuthService!
     private var services: ServiceContainer!
@@ -14,8 +15,8 @@ final class AuthViewModelTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
         authService = AuthService(apiClient: apiClient)
         services = ServiceContainer()
         services.authService = authService
@@ -23,12 +24,12 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
         viewModel = nil
         services = nil
         authService = nil
         apiClient = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -44,7 +45,7 @@ final class AuthViewModelTests: XCTestCase {
     // MARK: - Login Success
 
     func testLoginSuccessSetsAuthenticated() async {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
 
@@ -58,7 +59,7 @@ final class AuthViewModelTests: XCTestCase {
     // MARK: - Login Errors
 
     func testLoginUnauthorizedSetsMessage() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 401)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 401)
 
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "wrong")
 
@@ -68,7 +69,7 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginForbiddenSetsMessage() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 403)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 403)
 
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
 
@@ -78,7 +79,7 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginServerErrorSetsMessage() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 500)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 500)
 
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
 
@@ -88,7 +89,7 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginNetworkErrorSetsMessage() async {
-        MockAPIClient.stubError(.notConnectedToInternet)
+        mockAPIClient.stubError(.notConnectedToInternet)
 
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
 
@@ -97,11 +98,12 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginPrivateHTTPSConnectFailureShowsTransportErrorDetails() async {
-        apiClient = MockAPIClient.makeAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        mockAPIClient = MockAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        apiClient = mockAPIClient.apiClient
         authService = AuthService(apiClient: apiClient)
         services.authService = authService
         viewModel = AuthViewModel(services: services)
-        MockAPIClient.stubError(.cannotConnectToHost)
+        mockAPIClient.stubError(.cannotConnectToHost)
 
         await viewModel.login(serverURL: "https://10.0.0.20", username: "admin", password: "password")
 
@@ -112,11 +114,12 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginPrivateHTTPSConnectionRefusedShowsPreTLSHint() async {
-        apiClient = MockAPIClient.makeAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        mockAPIClient = MockAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        apiClient = mockAPIClient.apiClient
         authService = AuthService(apiClient: apiClient)
         services.authService = authService
         viewModel = AuthViewModel(services: services)
-        MockURLProtocol.requestHandler = { _ in
+        mockAPIClient.requestHandler = { _ in
             throw URLError(
                 .cannotConnectToHost,
                 userInfo: ["_kCFStreamErrorCodeKey": 61]
@@ -133,11 +136,12 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginPrivateHTTPSCertificateUsageErrorShowsTrustHint() async {
-        apiClient = MockAPIClient.makeAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        mockAPIClient = MockAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        apiClient = mockAPIClient.apiClient
         authService = AuthService(apiClient: apiClient)
         services.authService = authService
         viewModel = AuthViewModel(services: services)
-        MockURLProtocol.requestHandler = { _ in
+        mockAPIClient.requestHandler = { _ in
             TLSDiagnostics.recordChallenge(
                 host: "10.0.0.20",
                 authenticationMethod: NSURLAuthenticationMethodServerTrust,
@@ -158,11 +162,12 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginPrivateHTTPSMissingIntermediateShowsTrustHint() async {
-        apiClient = MockAPIClient.makeAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        mockAPIClient = MockAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        apiClient = mockAPIClient.apiClient
         authService = AuthService(apiClient: apiClient)
         services.authService = authService
         viewModel = AuthViewModel(services: services)
-        MockURLProtocol.requestHandler = { _ in
+        mockAPIClient.requestHandler = { _ in
             TLSDiagnostics.recordChallenge(
                 host: "10.0.0.20",
                 authenticationMethod: NSURLAuthenticationMethodServerTrust,
@@ -183,11 +188,11 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testLoginClearsErrorOnSuccess() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 401)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 401)
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "wrong")
         XCTAssertNotNil(viewModel.errorMessage)
 
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
 
         XCTAssertNil(viewModel.errorMessage)
@@ -197,7 +202,7 @@ final class AuthViewModelTests: XCTestCase {
     // MARK: - Logout
 
     func testLogoutClearsState() async {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
         XCTAssertTrue(viewModel.isAuthenticated)
 
@@ -218,7 +223,7 @@ final class AuthViewModelTests: XCTestCase {
     }
 
     func testRestoreSessionCompletesLoadingCycle() async {
-        MockAPIClient.stubResponse(json: TestJSON.userDTO)
+        mockAPIClient.stubResponse(json: TestJSON.userDTO)
         await viewModel.restoreSession()
         XCTAssertFalse(viewModel.isLoading)
     }
@@ -226,7 +231,7 @@ final class AuthViewModelTests: XCTestCase {
     // MARK: - Session Expired Notification
 
     func testSessionExpiredNotificationTriggersLogout() async {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
         await viewModel.login(serverURL: "https://print.example.com", username: "admin", password: "password")
         XCTAssertTrue(viewModel.isAuthenticated)
 

@@ -180,16 +180,44 @@ final class JobHistoryViewModelTests: XCTestCase {
     }
     
     func testLoadMoreHandlesError() async {
-        let page = QueueHistoryPage(entries: [], totalCount: 100, currentPage: 1, pageSize: 30, stats: nil)
-        mockJobAnalyticsService.historyPageToReturn = page
-        await viewModel.loadHistory()
-        
+        let previousEntry = QueueHistoryEntry(
+            id: "previous",
+            jobName: "previous.gcode",
+            printerName: "Previous Printer",
+            status: "completed",
+            completedAt: Date(),
+            durationSeconds: 600
+        )
+        viewModel.historyPage = QueueHistoryPage(
+            entries: [previousEntry],
+            totalCount: 100,
+            currentPage: 1,
+            pageSize: 30,
+            stats: nil
+        )
+        let dateFrom = Date(timeIntervalSince1970: 1_700_000_000)
+        let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
+        viewModel.dateFrom = dateFrom
+        viewModel.dateTo = dateTo
         mockJobAnalyticsService.errorToThrow = TestError.generic
         
         await viewModel.loadMore()
         
         // loadMore() is a secondary paginator: on failure it logs via `logger.warning`
         // and leaves `viewModel.error` untouched so the already-loaded page keeps rendering.
+        // Issue #809 tracks recovery of the mutable offset after a failed request.
+        let called = mockJobAnalyticsService.getHistoryCalledWith
+        XCTAssertEqual(called?.limit, 30)
+        XCTAssertEqual(called?.offset, 30)
+        XCTAssertNil(called?.sortBy)
+        XCTAssertNil(called?.statuses)
+        XCTAssertEqual(called?.dateStart, dateFrom)
+        XCTAssertEqual(called?.dateEnd, dateTo)
+        XCTAssertEqual(viewModel.historyPage?.entries.count, 1)
+        XCTAssertEqual(viewModel.historyPage?.entries.first?.id, "previous")
+        XCTAssertEqual(viewModel.historyPage?.totalCount, 100)
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
+        XCTAssertNil(viewModel.error)
         XCTAssertFalse(viewModel.isLoadingMore)
     }
     
@@ -225,14 +253,38 @@ final class JobHistoryViewModelTests: XCTestCase {
     }
     
     func testLoadTimelineHandlesError() async {
+        let previousEvent = TimelineEvent(
+            jobId: "previous",
+            jobName: "previous.gcode",
+            printerName: "Previous Printer",
+            state: "completed",
+            enteredAtUtc: Date(timeIntervalSince1970: 1_699_999_000),
+            exitedAtUtc: Date(timeIntervalSince1970: 1_700_000_000),
+            durationSeconds: 1_000,
+            estimatedDurationSeconds: 900,
+            variancePercent: 11.1
+        )
+        viewModel.timeline = [previousEvent]
+        let dateFrom = Date(timeIntervalSince1970: 1_700_000_000)
+        let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
         mockJobAnalyticsService.errorToThrow = TestError.generic
         
-        await viewModel.loadTimeline(dateFrom: Date(), dateTo: Date())
+        await viewModel.loadTimeline(dateFrom: dateFrom, dateTo: dateTo)
         
         // loadTimeline() is a secondary load: it logs via `logger.warning`
         // and does not surface `viewModel.error` — the primary history page still owns
-        // any error state that gets rendered.
-        XCTAssertTrue(viewModel.timeline.isEmpty)
+        // any error state that gets rendered or clear the previous timeline.
+        let called = mockJobAnalyticsService.getTimelineCalledWith
+        XCTAssertEqual(called?.dateFrom, dateFrom)
+        XCTAssertEqual(called?.dateTo, dateTo)
+        XCTAssertNil(called?.printerId)
+        XCTAssertNil(called?.filterStatus)
+        XCTAssertEqual(called?.limit, 100)
+        XCTAssertEqual(viewModel.timeline.count, 1)
+        XCTAssertEqual(viewModel.timeline.first?.jobId, "previous")
+        XCTAssertEqual(viewModel.timeline.first?.state, "completed")
+        XCTAssertNil(viewModel.error)
+        XCTAssertFalse(viewModel.isLoading)
     }
     
     // MARK: - Load Job State History

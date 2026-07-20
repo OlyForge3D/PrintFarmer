@@ -7,20 +7,21 @@ import XCTest
 /// (URL building, JSON encoding, error mapping) instead of stubbing it out.
 final class AttentionServiceTests: XCTestCase {
 
+    private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var service: AttentionService!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
         service = AttentionService(apiClient: apiClient)
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         apiClient = nil
         service = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -30,11 +31,11 @@ final class AttentionServiceTests: XCTestCase {
         let json = """
         { "items": [], "nextCursor": null, "healthyPrinterCount": 0 }
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
 
         _ = try await service.getFeed()
 
-        let request = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.url?.path, "/api/attention")
         XCTAssertNil(request.url?.query,
@@ -45,11 +46,11 @@ final class AttentionServiceTests: XCTestCase {
         let json = """
         { "items": [], "nextCursor": null, "healthyPrinterCount": 0 }
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
 
         _ = try await service.getFeed(cursor: "eyJvIjozLCJpIjoiZm9vIn0", limit: 25)
 
-        let request = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
         let items = components?.queryItems ?? []
         XCTAssertEqual(items.first(where: { $0.name == "cursor" })?.value,
@@ -71,7 +72,7 @@ final class AttentionServiceTests: XCTestCase {
           "code": "featureDisabled"
         }
         """
-        MockAPIClient.stubResponse(json: json, statusCode: 404)
+        mockAPIClient.stubResponse(json: json, statusCode: 404)
 
         do {
             _ = try await service.getFeed()
@@ -97,7 +98,7 @@ final class AttentionServiceTests: XCTestCase {
           "attentionItemAnchorAtUtc": "2026-06-01T12:00:00Z"
         }
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
 
         let until = Date(timeIntervalSince1970: 1_800_000_000)
         _ = try await service.snooze(
@@ -105,7 +106,7 @@ final class AttentionServiceTests: XCTestCase {
             snoozedUntilUtc: until
         )
 
-        let request = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         XCTAssertEqual(request.httpMethod, "POST")
         // The `:` in the attention id MUST be percent-encoded (`%3A`) or
         // ASP.NET Core route matching would split the id at the colon and
@@ -145,11 +146,11 @@ final class AttentionServiceTests: XCTestCase {
     // MARK: - DELETE /api/attention/{id}/snooze
 
     func testClearSnoozeIssuesDelete() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
 
         try await service.clearSnooze(itemId: "runout:aa")
 
-        let request = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         XCTAssertEqual(request.httpMethod, "DELETE")
         XCTAssertTrue(request.url?.path.hasSuffix("/snooze") == true)
     }
@@ -158,7 +159,7 @@ final class AttentionServiceTests: XCTestCase {
 
     func testExecuteActionPostsToTypedActionRoute() async throws {
         let json = "{ \"outcome\": \"Ok\" }"
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
 
         let result = try await service.executeAction(
             itemId: "harvest:bb",
@@ -166,7 +167,7 @@ final class AttentionServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(result.outcome, "Ok")
-        let request = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertTrue(request.url?.path.hasSuffix("/actions/harvest") == true,
             "actionKind must be dispatched via the typed route segment.")
@@ -176,7 +177,7 @@ final class AttentionServiceTests: XCTestCase {
         // A future backend enum value we don't know about → we must NOT
         // silently POST to `/actions/unknown` because the client cannot
         // describe the outcome to the user.
-        MockAPIClient.stubResponse(json: "{\"outcome\":\"Ok\"}")
+        mockAPIClient.stubResponse(json: "{\"outcome\":\"Ok\"}")
 
         do {
             _ = try await service.executeAction(itemId: "x:1", actionKind: .unknown)
@@ -191,7 +192,7 @@ final class AttentionServiceTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error type: \(error)")
         }
-        XCTAssertTrue(MockURLProtocol.capturedRequests.isEmpty,
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty,
             "Guard must fire before any network call is made.")
     }
 }

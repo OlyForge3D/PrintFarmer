@@ -8,48 +8,11 @@ import SnapshotTesting
 ///
 /// Closes OlyForge3D/PrintFarmer#289.
 ///
-/// Baselines are recorded on iOS 17 simulator (iPhone 15). When the SDK
-/// drifts (e.g., iOS 26.x), re-record on the CI simulator: set
-/// `isRecording = true` locally, run the suite, commit the regenerated
-/// `__Snapshots__/` directory, then flip back to false.
-///
-/// **Baseline gating (Kane, Refs #807):** these tests fail deterministically
-/// when the reference PNG has not been committed, because
-/// `pointfreeco/swift-snapshot-testing` writes a new baseline on the first run
-/// and returns `failed - No reference was found on disk`. Ephemeral CI runners
-/// never persist that first-run write, so PR after PR reports the same six
-/// failures. Each test now short-circuits with `XCTSkip` when its baseline PNG
-/// is missing; commit the recorded PNGs (or set
-/// `PFARM_RUN_SNAPSHOT_TESTS_WITHOUT_BASELINE=1` locally when recording) to
-/// re-enable coverage.
+/// SnapshotTesting stores references relative to this file under
+/// `Views/__Snapshots__/PrinterControlsSectionSnapshotTests/`. See the adjacent
+/// `__Snapshots__/README.md` before regenerating SDK-sensitive images.
 @MainActor
 final class PrinterControlsSectionSnapshotTests: XCTestCase {
-
-    // MARK: - Baseline availability
-
-    private static let snapshotsRoot: URL = {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("__Snapshots__")
-            .appendingPathComponent("PrinterControlsSectionSnapshotTests")
-    }()
-
-    /// Throws `XCTSkip` when the reference PNG for `testName` has not been
-    /// committed and the record-mode escape hatch is not set. Any test in this
-    /// suite must call this at the top of its body.
-    private func requireBaseline(_ testName: String, file: StaticString = #filePath, line: UInt = #line) throws {
-        if ProcessInfo.processInfo.environment["PFARM_RUN_SNAPSHOT_TESTS_WITHOUT_BASELINE"] == "1" {
-            return
-        }
-        let baseline = Self.snapshotsRoot.appendingPathComponent("\(testName).1.png")
-        if !FileManager.default.fileExists(atPath: baseline.path) {
-            throw XCTSkip(
-                "Missing snapshot baseline at \(baseline.path). Record on the CI simulator then commit the PNG (see __Snapshots__/README.md). Set PFARM_RUN_SNAPSHOT_TESTS_WITHOUT_BASELINE=1 to bypass while recording.",
-                file: file,
-                line: line
-            )
-        }
-    }
 
     // MARK: - Capability fixtures (per backend)
 
@@ -95,6 +58,15 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         return svc
     }
 
+    private func loadedSection(
+        printer: Printer,
+        service: MockPrinterService
+    ) async -> PrinterControlsSection {
+        let viewModel = PrinterControlsViewModel(printerService: service, printer: printer)
+        await viewModel.loadCapabilities()
+        return PrinterControlsSection(printer: printer, viewModel: viewModel)
+    }
+
     private func host(_ view: some View) -> UIViewController {
         let host = UIHostingController(rootView: view.frame(width: 390))
         host.view.backgroundColor = .systemBackground
@@ -103,27 +75,24 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     // MARK: - Backend profile snapshots
 
-    func test_snapshot_moonrakerProfile() throws {
-        try requireBaseline("test_snapshot_moonrakerProfile")
+    func test_snapshot_moonrakerProfile() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let svc = makeService(caps: Self.moonrakerCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
-    func test_snapshot_flashForgeProfile() throws {
-        try requireBaseline("test_snapshot_flashForgeProfile")
+    func test_snapshot_flashForgeProfile() async throws {
         let printer = try makePrinter(backend: .flashForge)
         let svc = makeService(caps: Self.flashForgeCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
-    func test_snapshot_sdcpProfile() throws {
-        try requireBaseline("test_snapshot_sdcpProfile")
+    func test_snapshot_sdcpProfile() async throws {
         let printer = try makePrinter(backend: .sdcp)
         let svc = makeService(caps: Self.sdcpCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
@@ -133,7 +102,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     /// resolves is the race window flagged in Bishop's #299 review. Asserting
     /// it here pins the loading-state pixels.
     func test_snapshot_loadingState_capabilitiesNil() throws {
-        try requireBaseline("test_snapshot_loadingState_capabilitiesNil")
         let printer = try makePrinter(backend: .moonraker)
         let svc = MockPrinterService()
         // Hold the capabilities call open by throwing — viewModel keeps caps == nil.
@@ -142,15 +110,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
-    /// Disabled stripe modifier from #288: triggered when the printer is
-    /// online but not in an idle/ready state that accepts control input.
-    /// `"error"` is not in the hidden-state set (offline only); the section
-    /// renders with disabled subgroup controls per spec §2.4.
-    func test_snapshot_disabledState_printerInError() throws {
-        try requireBaseline("test_snapshot_disabledState_printerInError")
-        let printer = try makePrinter(backend: .moonraker, state: "error")
+    /// The starting state keeps the section visible while `canControl` is false,
+    /// exercising disabled subgroup controls without the printing lockout banner.
+    func test_snapshot_disabledState_printerStarting() async throws {
+        let printer = try makePrinter(backend: .moonraker, state: "starting")
         let svc = makeService(caps: Self.moonrakerCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
     // MARK: - Lockout banner (spec §2.2 — visible during print with disabled controls)
@@ -158,11 +123,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     /// Section remains visible during a print; a lockout banner is shown and
     /// all subgroup controls are disabled. The section is NOT hidden — only
     /// the offline state hides it (spec §2.2, §2.4).
-    func test_snapshot_lockoutBanner_printingState() throws {
-        try requireBaseline("test_snapshot_lockoutBanner_printingState")
+    func test_snapshot_lockoutBanner_printingState() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "printing")
         let svc = makeService(caps: Self.moonrakerCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 }

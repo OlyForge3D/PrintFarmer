@@ -69,14 +69,28 @@ final class PredictiveViewModelTests: XCTestCase {
     }
     
     func testPredictFailureHandlesError() async {
+        viewModel.prediction = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 30,
+            predictedFailureLikelihood: 85.0,
+            riskLevel: "critical",
+            factors: []
+        )
         mockPredictiveService.errorToThrow = TestError.generic
         
         await viewModel.predictFailure(printerId: testPrinterId, material: "PETG", duration: 7200)
         
         // predictFailure() logs via `logger.warning` on failure and clears any
         // stale prediction; it does not surface `viewModel.error`, so the UI
-        // renders the neutral risk level rather than a red banner.
+        // renders the neutral risk level rather than a red banner. Issue #810
+        // tracks presenting that failure to users.
+        let request = mockPredictiveService.predictJobFailureCalledWith
+        XCTAssertEqual(request?.printerId, testPrinterId)
+        XCTAssertEqual(request?.material, "PETG")
+        XCTAssertEqual(request?.estimatedDurationSeconds, 7200)
         XCTAssertNil(viewModel.prediction)
+        XCTAssertNil(viewModel.error)
         XCTAssertFalse(viewModel.isLoading)
     }
     
@@ -123,14 +137,26 @@ final class PredictiveViewModelTests: XCTestCase {
     }
     
     func testLoadAlertsHandlesError() async {
+        viewModel.alerts = [
+            PredictiveAlert(
+                alertType: "previous_alert",
+                severity: "info",
+                message: "Previously loaded alert",
+                recommendedAction: "Keep monitoring"
+            )
+        ]
         mockPredictiveService.errorToThrow = TestError.generic
         
         await viewModel.loadAlerts(printerId: testPrinterId)
         
         // loadAlerts() is a secondary load: it logs via `logger.warning`
         // and does not populate `viewModel.error` so a background alerts hiccup
-        // never blocks the primary prediction UI.
-        XCTAssertTrue(viewModel.alerts.isEmpty)
+        // never blocks the primary prediction UI or clears prior alerts.
+        XCTAssertTrue(mockPredictiveService.getActiveAlertsCalled)
+        XCTAssertEqual(mockPredictiveService.getActiveAlertsCalledWithPrinterId, testPrinterId)
+        XCTAssertEqual(viewModel.alerts.count, 1)
+        XCTAssertEqual(viewModel.alerts.first?.alertType, "previous_alert")
+        XCTAssertNil(viewModel.error)
         XCTAssertFalse(viewModel.isLoading)
     }
     
@@ -163,13 +189,24 @@ final class PredictiveViewModelTests: XCTestCase {
     }
     
     func testLoadForecastsHandlesError() async {
+        viewModel.forecasts = [
+            MaintenanceForecast(
+                printerId: testPrinterId,
+                printerName: "Previous Printer",
+                upcomingTasks: []
+            )
+        ]
         mockPredictiveService.errorToThrow = TestError.generic
         
         await viewModel.loadForecasts(printerId: testPrinterId)
         
         // loadForecasts() is a secondary load: it logs via `logger.warning`
-        // and leaves `viewModel.error` untouched, matching the alerts/stats pattern.
-        XCTAssertTrue(viewModel.forecasts.isEmpty)
+        // and preserves prior forecasts without surfacing `viewModel.error`.
+        XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWith, 30)
+        XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWithPrinterId, testPrinterId)
+        XCTAssertEqual(viewModel.forecasts.count, 1)
+        XCTAssertEqual(viewModel.forecasts.first?.printerName, "Previous Printer")
+        XCTAssertNil(viewModel.error)
         XCTAssertFalse(viewModel.isLoading)
     }
     

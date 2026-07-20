@@ -5,17 +5,22 @@ import XCTest
 /// error mapping, and base URL configuration.
 final class APIClientTests: XCTestCase {
 
+    private struct TransportValue: Decodable, Equatable, Sendable {
+        let value: String
+    }
+
+    private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         apiClient = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -229,91 +234,91 @@ final class APIClientTests: XCTestCase {
     func testRequestIncludesAuthorizationHeader() async throws {
         let token = "test-jwt-token-123"
         await apiClient.setAccessToken(token)
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertNotNil(captured)
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Authorization"), "Bearer \(token)")
     }
 
     func testRequestOmitsAuthorizationWhenNoToken() async throws {
         await apiClient.setAccessToken(nil)
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
     }
 
     func testRequestIncludesAcceptHeader() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Accept"), "application/json")
     }
 
     // MARK: - Request Building (HTTP Methods)
 
     func testGetRequestUsesCorrectMethod() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "GET")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers") ?? false)
     }
 
     func testPostRequestUsesCorrectMethodAndBody() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         let loginRequest = LoginRequest(usernameOrEmail: "admin", password: "pass", rememberMe: true)
         let _: AuthResponse = try await apiClient.post("/api/auth/login", body: loginRequest)
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "POST")
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertNotNil(captured?.capturedHTTPBody())
     }
 
     func testPostVoidRequestUsesCorrectMethod() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
 
         try await apiClient.postVoid("/api/printers/\(TestData.testUUID)/pause")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "POST")
     }
 
     func testPutRequestUsesCorrectMethodAndBody() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printer)
+        mockAPIClient.stubResponse(json: TestJSON.printer)
 
         let update = UpdatePrinterRequest(name: "Renamed")
         let _: Printer = try await apiClient.put("/api/printers/\(TestData.testUUID)", body: update)
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "PUT")
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Content-Type"), "application/json")
     }
 
     func testDeleteRequestUsesCorrectMethod() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
 
         try await apiClient.delete("/api/printers/\(TestData.testUUID)")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "DELETE")
     }
 
     // MARK: - Error Response Parsing
 
     func testUnauthorizedResponseThrows401() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 401)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 401)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -330,7 +335,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testForbiddenResponseThrows403() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 403)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 403)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -347,7 +352,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testNotFoundResponseThrows404() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 404)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 404)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -378,7 +383,7 @@ final class APIClientTests: XCTestCase {
             "code": "featureDisabled"
         }
         """
-        MockAPIClient.stubResponse(json: json, statusCode: 404)
+        mockAPIClient.stubResponse(json: json, statusCode: 404)
 
         do {
             let _: Printer = try await apiClient.get("/api/attention")
@@ -408,7 +413,7 @@ final class APIClientTests: XCTestCase {
             "detail": "Printer not found."
         }
         """
-        MockAPIClient.stubResponse(json: json, statusCode: 404)
+        mockAPIClient.stubResponse(json: json, statusCode: 404)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -426,7 +431,7 @@ final class APIClientTests: XCTestCase {
 
     /// Empty 404 body (legacy server behavior) maps to `.notFound`.
     func testEmpty404BodyFallsBackToNotFound() async {
-        MockAPIClient.stubResponse(json: "", statusCode: 404)
+        mockAPIClient.stubResponse(json: "", statusCode: 404)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -445,7 +450,7 @@ final class APIClientTests: XCTestCase {
     /// Malformed JSON in a 404 body must safely fall back to `.notFound`
     /// instead of surfacing a decode error.
     func testMalformed404BodyFallsBackToNotFound() async {
-        MockAPIClient.stubResponse(json: "{ not valid json", statusCode: 404)
+        mockAPIClient.stubResponse(json: "{ not valid json", statusCode: 404)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -472,7 +477,7 @@ final class APIClientTests: XCTestCase {
             "code": "someOtherCode"
         }
         """
-        MockAPIClient.stubResponse(json: json, statusCode: 404)
+        mockAPIClient.stubResponse(json: json, statusCode: 404)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -489,7 +494,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testServerErrorResponseThrows500() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 500)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 500)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -506,7 +511,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testConflictResponseThrows409() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 409)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 409)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -523,7 +528,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testClientErrorParseAPIError() async {
-        MockAPIClient.stubResponse(json: TestJSON.apiError, statusCode: 400)
+        mockAPIClient.stubResponse(json: TestJSON.apiError, statusCode: 400)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -542,7 +547,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testMethodNotAllowedResponseHasActionableMessage() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 405)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 405)
 
         do {
             let _: SpoolmanFilament = try await apiClient.get("/api/spoolman/filaments/by-barcode?code=STALE")
@@ -565,7 +570,7 @@ final class APIClientTests: XCTestCase {
     // MARK: - Network Errors
 
     func testNoConnectionThrowsNetworkError() async {
-        MockAPIClient.stubError(.notConnectedToInternet)
+        mockAPIClient.stubError(.notConnectedToInternet)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -582,7 +587,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testTimeoutThrowsNetworkError() async {
-        MockAPIClient.stubError(.timedOut)
+        mockAPIClient.stubError(.timedOut)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -599,7 +604,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testCannotFindHostThrowsServerUnreachable() async {
-        MockAPIClient.stubError(.cannotFindHost)
+        mockAPIClient.stubError(.cannotFindHost)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -616,8 +621,9 @@ final class APIClientTests: XCTestCase {
     }
 
     func testCannotConnectToPrivateHTTPSHostThrowsTransportError() async {
-        let privateHTTPSClient = MockAPIClient.makeAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
-        MockAPIClient.stubError(.cannotConnectToHost)
+        let privateHTTPSMockAPIClient = MockAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        let privateHTTPSClient = privateHTTPSMockAPIClient.apiClient
+        privateHTTPSMockAPIClient.stubError(.cannotConnectToHost)
 
         do {
             let _: [Printer] = try await privateHTTPSClient.get("/api/printers")
@@ -636,7 +642,7 @@ final class APIClientTests: XCTestCase {
     // MARK: - Decoding
 
     func testDecodingFailureThrowsDecodingError() async {
-        MockAPIClient.stubResponse(json: "{ \"invalid\": true }")
+        mockAPIClient.stubResponse(json: "{ \"invalid\": true }")
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -653,7 +659,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testDecodingFailureDescriptionIncludesPathTypeAndServerVersionHint() async {
-        MockAPIClient.stubResponse(
+        mockAPIClient.stubResponse(
             json: """
             {
               "id": "not-an-int",
@@ -688,7 +694,7 @@ final class APIClientTests: XCTestCase {
     // MARK: - Empty Response Handling
     
     func testEmptyResponseWithOptionalTypeReturnsNil() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         
         let result: Printer? = try await apiClient.get("/api/printers/\(TestData.testUUID)")
         
@@ -696,7 +702,7 @@ final class APIClientTests: XCTestCase {
     }
     
     func testEmptyResponseWithNonOptionalTypeThrows() async {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -713,7 +719,7 @@ final class APIClientTests: XCTestCase {
     }
     
     func testEmptyResponseWith204StatusReturnsNilForOptional() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             let response = TestData.httpResponse(url: request.url, statusCode: 204)
             return (response, Data())
         }
@@ -724,7 +730,7 @@ final class APIClientTests: XCTestCase {
     }
     
     func testEmptyResponseWithOptionalArrayReturnsNil() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         
         let result: [Printer]? = try await apiClient.get("/api/printers")
         
@@ -732,12 +738,57 @@ final class APIClientTests: XCTestCase {
     }
     
     func testNonEmptyResponseWithOptionalTypeDecodesProperly() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printer)
+        mockAPIClient.stubResponse(json: TestJSON.printer)
         
         let result: Printer? = try await apiClient.get("/api/printers/\(TestData.testUUID)")
         
         XCTAssertNotNil(result, "Non-empty response should decode the value")
         XCTAssertEqual(result?.name, "Prusa MK4")
+    }
+
+    func testMockURLProtocolHandlersAreIsolatedPerSession() async throws {
+        let firstURL = URL(string: "https://mock.invalid/first")!
+        let secondURL = URL(string: "https://mock.invalid/second")!
+        let firstSession = MockURLProtocol.makeSession()
+        let secondSession = MockURLProtocol.makeSession()
+
+        firstSession.requestHandler = { request in
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data("first-handler".utf8))
+        }
+
+        secondSession.requestHandler = { request in
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data("second-handler".utf8))
+        }
+
+        async let firstData = firstSession.urlSession.data(from: firstURL).0
+        async let secondData = secondSession.urlSession.data(from: secondURL).0
+        let bodies = try await (
+            String(decoding: firstData, as: UTF8.self),
+            String(decoding: secondData, as: UTF8.self)
+        )
+
+        XCTAssertEqual(bodies.0, "first-handler")
+        XCTAssertEqual(bodies.1, "second-handler")
+    }
+
+    func testConcurrentMockAPIClientsKeepResponsesAndCapturesIsolated() async throws {
+        let firstMockAPIClient = MockAPIClient(baseURL: URL(string: "https://first.mock.invalid")!)
+        let secondMockAPIClient = MockAPIClient(baseURL: URL(string: "https://second.mock.invalid")!)
+        firstMockAPIClient.stubResponse(json: #"{"value":"first"}"#)
+        secondMockAPIClient.stubResponse(json: #"{"value":"second"}"#)
+
+        async let firstValue: TransportValue = firstMockAPIClient.apiClient.get("/value")
+        async let secondValue: TransportValue = secondMockAPIClient.apiClient.get("/value")
+        let values = try await (firstValue, secondValue)
+
+        XCTAssertEqual(values.0, TransportValue(value: "first"))
+        XCTAssertEqual(values.1, TransportValue(value: "second"))
+        XCTAssertEqual(firstMockAPIClient.capturedRequests.count, 1)
+        XCTAssertEqual(firstMockAPIClient.capturedRequests.first?.url?.host, "first.mock.invalid")
+        XCTAssertEqual(secondMockAPIClient.capturedRequests.count, 1)
+        XCTAssertEqual(secondMockAPIClient.capturedRequests.first?.url?.host, "second.mock.invalid")
     }
 
     func testLiveHTTPSLoginAgainstRealServer() async throws {

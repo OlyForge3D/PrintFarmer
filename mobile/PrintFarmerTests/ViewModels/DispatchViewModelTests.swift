@@ -143,14 +143,30 @@ final class DispatchViewModelTests: XCTestCase {
     }
     
     func testLoadHistoryHandlesError() async {
+        let previousEntry = DispatchHistoryEntry(
+            id: UUID(),
+            printJobId: UUID(),
+            jobName: "previous.gcode",
+            printerId: UUID(),
+            printerName: "Previous Printer",
+            action: "manual_dispatch",
+            score: 75.0,
+            reason: "Previously loaded",
+            createdAtUtc: Date()
+        )
+        viewModel.history = [previousEntry]
         mockDispatchService.errorToThrow = TestError.generic
         
         await viewModel.loadHistory()
         
         // loadHistory() is a secondary load: it logs the failure via `logger.warning`
-        // and does not set `viewModel.error`. `history` is a non-optional array that
-        // stays empty when the load throws before assignment.
-        XCTAssertTrue(viewModel.history.isEmpty)
+        // and preserves the last successful history without setting `viewModel.error`.
+        XCTAssertEqual(viewModel.history.count, 1)
+        XCTAssertEqual(viewModel.history.first?.id, previousEntry.id)
+        XCTAssertEqual(viewModel.history.first?.jobName, "previous.gcode")
+        XCTAssertEqual(mockDispatchService.getHistoryCalledWith?.page, 1)
+        XCTAssertEqual(mockDispatchService.getHistoryCalledWith?.pageSize, 50)
+        XCTAssertNil(viewModel.error)
         XCTAssertFalse(viewModel.isLoading)
     }
     

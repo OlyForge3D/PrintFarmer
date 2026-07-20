@@ -4,17 +4,20 @@ import KeychainSwift
 
 @MainActor
 final class ServerRegistryTests: XCTestCase {
+    nonisolated(unsafe) private var mockAPIClient: MockAPIClient!
     private var userDefaults: UserDefaults!
     private var userDefaultsSuiteName: String!
 
     override func setUp() {
         super.setUp()
+        mockAPIClient = MockAPIClient()
         userDefaultsSuiteName = "ServerRegistryTests-\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: userDefaultsSuiteName)!
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
     }
 
     override func tearDown() {
+        mockAPIClient = nil
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         userDefaults = nil
         userDefaultsSuiteName = nil
@@ -287,7 +290,7 @@ final class ServerRegistryTests: XCTestCase {
             signalRRecorder: signalRRecorder
         )
         let printerID = UUID()
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             let supportsMovement = request.url?.host == "two.example.com"
             let json = Self.capabilitiesJSON(printerID: printerID, supportsMovement: supportsMovement)
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data(json.utf8))
@@ -319,7 +322,7 @@ final class ServerRegistryTests: XCTestCase {
         let oldClient = try XCTUnwrap(container.apiClient)
         let requestStarted = DispatchSemaphore(value: 0)
         let allowResponse = DispatchSemaphore(value: 0)
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             requestStarted.signal()
             _ = allowResponse.wait(timeout: .now() + 5)
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data(TestJSON.printerArray.utf8))
@@ -362,7 +365,7 @@ final class ServerRegistryTests: XCTestCase {
         let oldClient = try XCTUnwrap(container.apiClient)
         let requestStarted = DispatchSemaphore(value: 0)
         let allowResponse = DispatchSemaphore(value: 0)
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             requestStarted.signal()
             _ = allowResponse.wait(timeout: .now() + 5)
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data("old-server-bytes".utf8))
@@ -408,7 +411,7 @@ final class ServerRegistryTests: XCTestCase {
             apiClientFactory: { baseURL, generation, accessToken in
                 APIClient(
                     baseURL: baseURL,
-                    session: MockURLProtocol.mockSession(),
+                    session: self.mockAPIClient.urlSession,
                     serverGeneration: generation,
                     accessToken: accessToken
                 )

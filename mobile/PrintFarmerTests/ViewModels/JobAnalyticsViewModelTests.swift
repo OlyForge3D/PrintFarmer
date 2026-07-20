@@ -155,15 +155,36 @@ final class JobAnalyticsViewModelTests: XCTestCase {
     }
     
     func testLoadStatsHandlesError() async {
+        viewModel.stats = QueueStats(
+            totalQueued: 7,
+            totalPrinting: 2,
+            totalPaused: 1,
+            averageWaitTimeMinutes: 15,
+            byModel: []
+        )
+        viewModel.modelStats = [
+            QueuePrinterModelStats(
+                modelName: "Previously Loaded Model",
+                totalQueued: 4,
+                currentlyPrinting: 1,
+                oldestQueuedAtUtc: nil,
+                averageQueueWaitMinutes: 12
+            )
+        ]
         mockJobAnalyticsService.errorToThrow = TestError.generic
 
         await viewModel.loadStats()
 
         // loadStats() is a secondary load: it logs the failure via `logger.warning`
         // and leaves `viewModel.error` untouched so a stats hiccup never blocks the
-        // primary jobs list. Assert only the observable outputs.
-        XCTAssertNil(viewModel.stats)
-        XCTAssertTrue(viewModel.modelStats.isEmpty)
+        // primary jobs list or clears the last successful statistics.
+        XCTAssertTrue(mockJobAnalyticsService.getStatsCalled)
+        XCTAssertTrue(mockJobAnalyticsService.getModelStatsCalled)
+        XCTAssertEqual(viewModel.stats?.totalQueued, 7)
+        XCTAssertEqual(viewModel.stats?.totalPrinting, 2)
+        XCTAssertEqual(viewModel.modelStats.count, 1)
+        XCTAssertEqual(viewModel.modelStats.first?.modelName, "Previously Loaded Model")
+        XCTAssertNil(viewModel.error)
         XCTAssertFalse(viewModel.isLoading)
     }
     
