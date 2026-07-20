@@ -32,12 +32,29 @@ final class MockAPIClient: @unchecked Sendable {
     }
 
     /// Configures MockURLProtocol to return different responses per path.
+    ///
+    /// Keys are matched against `request.url.path` via substring containment.
+    /// When multiple keys match a single path (e.g. `/api/printers/{id}` and
+    /// `backend-capabilities` both matching `/api/printers/{id}/backend-capabilities`),
+    /// the key whose match starts **latest** in the URL wins so a more specific
+    /// suffix beats a generic prefix. Ties on start position resolve to the longer
+    /// key. This makes dispatch deterministic regardless of `Dictionary` iteration
+    /// order (which is not stable across processes).
     static func stubResponses(_ responses: [String: (statusCode: Int, json: String)]) {
         MockURLProtocol.requestHandler = { request in
             let path = request.url?.path ?? ""
-            if let match = responses.first(where: { path.contains($0.key) }) {
-                let response = TestData.httpResponse(url: request.url, statusCode: match.value.statusCode)
-                return (response, Data(match.value.json.utf8))
+            let matches: [(key: String, start: Int)] = responses.keys.compactMap { key in
+                guard let range = path.range(of: key) else { return nil }
+                return (key, path.distance(from: path.startIndex, to: range.lowerBound))
+            }
+            let best = matches.max { lhs, rhs in
+                lhs.start != rhs.start
+                    ? lhs.start < rhs.start
+                    : lhs.key.count < rhs.key.count
+            }
+            if let match = best, let value = responses[match.key] {
+                let response = TestData.httpResponse(url: request.url, statusCode: value.statusCode)
+                return (response, Data(value.json.utf8))
             }
             let response = TestData.httpResponse(url: request.url, statusCode: 404)
             return (response, Data("{}".utf8))

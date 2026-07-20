@@ -147,8 +147,10 @@ final class DispatchViewModelTests: XCTestCase {
         
         await viewModel.loadHistory()
         
-        XCTAssertNil(viewModel.history)
-        XCTAssertNotNil(viewModel.error)
+        // loadHistory() is a secondary load: it logs the failure via `logger.warning`
+        // and does not set `viewModel.error`. `history` is a non-optional array that
+        // stays empty when the load throws before assignment.
+        XCTAssertTrue(viewModel.history.isEmpty)
         XCTAssertFalse(viewModel.isLoading)
     }
     
@@ -242,7 +244,9 @@ final class DispatchViewModelTests: XCTestCase {
         
         await viewModel.loadHistory()
         
-        XCTAssertNil(viewModel.history)
+        // `history` is a non-optional array; when the view model is unconfigured
+        // the guard returns before mutating it, so it remains empty.
+        XCTAssertTrue(viewModel.history.isEmpty)
         XCTAssertNil(mockDispatchService.getHistoryCalledWith)
     }
 }

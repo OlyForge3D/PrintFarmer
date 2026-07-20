@@ -110,7 +110,10 @@ final class PrinterServiceTests: XCTestCase {
         let captured = MockURLProtocol.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "PUT")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)") ?? false)
-        XCTAssertNotNil(captured?.httpBody)
+        // URLSession/URLProtocol may relocate the request body onto an httpBodyStream
+        // when the request is passed through the mock protocol. `capturedHTTPBody()`
+        // reads whichever the runtime chose so the assertion is stable.
+        XCTAssertNotNil(captured?.capturedHTTPBody())
     }
 
     // MARK: - delete()
