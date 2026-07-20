@@ -1447,31 +1447,39 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // still legitimately owns the chain at the moment its
             // owner task returned. A superseding call to
             // `connect()`/`disconnect()`/retry-exhausted terminal may
-            // have run while this owner was still executing/awaited,
-            // clearing our `reconnectToken`, bumping `generation`,
-            // and clearing `finalizingOwnerToken`. In that case the
-            // supersede path is authoritative — it has already
-            // handled slot release, pending clearing, and any
-            // successor logic for the replacement generation. A
-            // stale watcher must NOT reassert `finalizingOwnerToken`
-            // (it no longer owns it), must NOT touch pending state
-            // (it belongs to another owner or is intentionally
-            // cleared), and must NOT drain the replacement
-            // generation's receive barrier (which now belongs to R2,
-            // not to this watcher's owner). Silent early-exit.
+            // r25 (F4-L #777 retry-generation predicate fix):
+            // ownership must be identified by the owner-instance
+            // UUID (`reconnectToken == taskToken`), NOT by the
+            // reservation-time generation (`generation == myGen0`).
+            // A legitimate SAME-OWNER retry (see the retry catch at
+            // ~line 1337) atomically bumps `self.generation` while
+            // KEEPING `reconnectToken == taskToken`, then attempt N+1
+            // performs a fresh `performConnect` under the new
+            // generation. If we required `generation == myGen0` here,
+            // a watcher whose owner survived a retry would fail the
+            // claim, exit as if superseded, and never release the
+            // token — wedging all future reconnects.
             //
-            // The claim predicate matches the reservation predicate
-            // exactly: `reconnectToken == taskToken` (still the
-            // current owner slot), `generation == myGen0` (no
-            // generation bump has occurred), and
-            // `!intentionalDisconnect` (user has not disconnected).
-            // `myGen0` was captured as a `let` at reservation time
-            // above (line ~1089) and is immutable for the lifetime
-            // of this closure — a defining reference to the owner
-            // generation this watcher belongs to.
+            // Genuine supersede paths (connect/disconnect/fresh-
+            // reserve) either clear `reconnectToken` (connect,
+            // disconnect, retry-exhausted terminal) OR REPLACE it
+            // with a new UUID (fresh-reserve at ~line 1186 —
+            // `setReconnectTokenLocked(taskToken)` with the caller's
+            // fresh `taskToken`). In every genuine supersede,
+            // `reconnectToken != taskToken` after the fact, so the
+            // owner-instance identity check catches all of them.
+            // r23 cross-generation fix is preserved: a stale watcher
+            // whose owner was superseded fails
+            // `reconnectToken == taskToken` and early-exits without
+            // touching replacement state.
+            //
+            // `myGen0` remains captured as the retry loop's starting
+            // generation (`var currentGen = myGen0` at ~line 1242)
+            // and is still authoritative for the retry loop itself.
+            // It is intentionally NOT part of the watcher's identity
+            // predicate.
             let claimed: Bool = self.lifecycleSync {
                 guard self.reconnectToken == taskToken,
-                      self.generation == myGen0,
                       !self.intentionalDisconnect else {
                     return false
                 }
@@ -1542,8 +1550,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     receive: Task<Void, Never>?, receiveV: UInt64,
                     pending: Task<Void, Never>?, pendingV: UInt64
                 )? = self.lifecycleSync {
+                    // r25: owner-instance identity via taskToken
+                    // only; NOT `generation == myGen0` — a same-
+                    // owner retry legitimately bumps generation
+                    // while keeping the token, and must not
+                    // trigger a spurious lost-ownership exit.
                     guard self.reconnectToken == taskToken,
-                          self.generation == myGen0,
                           self.finalizingOwnerToken == taskToken,
                           !self.intentionalDisconnect else {
                         return nil
@@ -1611,8 +1623,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 // without touching any state — the supersede path
                 // has already cleared everything on our behalf.
                 let step: DrainOutcome = self.lifecycleSync {
+                    // r25: owner-instance identity via taskToken
+                    // only. See snapshot for full rationale.
                     guard self.reconnectToken == taskToken,
-                          self.generation == myGen0,
                           self.finalizingOwnerToken == taskToken else {
                         return .lost
                     }
