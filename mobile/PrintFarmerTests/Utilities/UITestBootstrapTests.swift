@@ -83,6 +83,37 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    func test_shiftTaskMutationErrorLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.shiftTaskMutationErrorLaunchArgument,
+            "--uitesting-shift-task-mutation-error"
+        )
+    }
+
+    func test_mode_isShiftTaskMutationError_whenArgumentPresent() {
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-shift-task-mutation-error"
+            ]),
+            .authenticatedShiftTaskMutationError
+        )
+    }
+
+    func test_makeBundle_shiftTaskMutationError_usesScriptedTaskService() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedShiftTaskMutationError,
+            defaults: defaults
+        )
+
+        XCTAssertTrue(bundle.services.shiftTaskService is DemoShiftTaskService)
+        XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+        XCTAssertTrue(
+            bundle.services.capabilitiesService.resolved.shiftPlanEnabled
+        )
+    }
+
     func test_makeBundle_attentionDisabled_overridesCapabilities() throws {
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(

@@ -37,7 +37,7 @@ struct ContentView: View {
                 .badge(router.pendingReadyCount)
                 .accessibilityIdentifier("tab.farm")
 
-            JobListView()
+            ShiftTasksView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
                 .tag(AppTab.tasks)
                 .accessibilityIdentifier("tab.tasks")
@@ -156,7 +156,7 @@ struct ContentView: View {
         case .farm:
             PrinterListView()
         case .tasks:
-            JobListView()
+            ShiftTasksView()
         case .scan:
             ScanView()
         case .inventory:

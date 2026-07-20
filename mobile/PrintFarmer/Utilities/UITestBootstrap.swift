@@ -53,6 +53,8 @@ enum UITestBootstrap {
     /// Dashboard / Maintenance sheets. Required by issue #727 UI tests
     /// which need deterministic access to the fallback Notifications sheet.
     static let attentionDisabledLaunchArgument = "--uitesting-attention-disabled"
+    static let shiftTaskMutationErrorLaunchArgument =
+        "--uitesting-shift-task-mutation-error"
 
     /// Deterministic launch modes selectable from the UI-test harness.
     enum Mode: Equatable {
@@ -64,6 +66,9 @@ enum UITestBootstrap {
         /// feature gate forced to disabled — `AttentionView` renders the
         /// fallback so the legacy Notifications sheet is reachable.
         case authenticatedAttentionDisabled
+        /// Pre-authenticated shell with a scripted task mutation that fails
+        /// once, succeeds exactly once on retry, and fails on duplicate retry.
+        case authenticatedShiftTaskMutationError
     }
 
     /// Dedicated `UserDefaults` suite. Isolated from `.standard` so a
@@ -102,6 +107,9 @@ enum UITestBootstrap {
     static func mode(in arguments: [String]) -> Mode {
         if arguments.contains(attentionDisabledLaunchArgument) {
             return .authenticatedAttentionDisabled
+        }
+        if arguments.contains(shiftTaskMutationErrorLaunchArgument) {
+            return .authenticatedShiftTaskMutationError
         }
         return arguments.contains(unauthenticatedLaunchArgument) ? .unauthenticated : .authenticated
     }
@@ -161,9 +169,16 @@ enum UITestBootstrap {
             disabled.attentionEnabled = false
             services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
         }
+        if mode == .authenticatedShiftTaskMutationError {
+            services.shiftTaskService = DemoShiftTaskService(
+                scenario: .mutationFailureThenSuccess
+            )
+        }
 
         let auth = AuthViewModel(services: services)
-        if mode == .authenticated || mode == .authenticatedAttentionDisabled {
+        if mode == .authenticated
+            || mode == .authenticatedAttentionDisabled
+            || mode == .authenticatedShiftTaskMutationError {
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         }
 

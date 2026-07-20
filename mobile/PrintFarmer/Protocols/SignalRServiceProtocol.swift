@@ -39,6 +39,15 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     @discardableResult
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription
 
+    /// Subscribes to the exact lowercase task invalidation targets shipped by
+    /// the server: `taskcreated`, `taskupdated`, and `pendingtaskcount`.
+    /// Payloads are refetch hints only; handlers must load `/api/tasks`
+    /// canonically before publishing task state.
+    @discardableResult
+    func onTaskInvalidated(
+        _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
+    ) -> SignalRSubscription
+
     /// Subscribes to the lowercase `fallbackgroupsupdated` invalidation
     /// event (issue #711, F6) emitted after any fallback-group mutation.
     /// The payload is a refetch hint — handlers must trigger

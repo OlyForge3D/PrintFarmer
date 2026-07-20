@@ -21,6 +21,7 @@ final class ServiceContainer: @unchecked Sendable {
     var barcodeIntakeService: any BarcodeIntakeServiceProtocol
     var maintenanceService: any MaintenanceServiceProtocol
     var attentionService: any AttentionServiceProtocol
+    var shiftTaskService: any ShiftTaskServiceProtocol
     var partsInventoryService: any PartsInventoryServiceProtocol
     var autoPrintService: any AutoDispatchServiceProtocol
     var jobAnalyticsService: any JobAnalyticsServiceProtocol
@@ -99,6 +100,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
         self.attentionService = AttentionService(apiClient: client)
+        self.shiftTaskService = ShiftTaskService(apiClient: client)
         self.partsInventoryService = PartsInventoryService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
         self.jobAnalyticsService = JobAnalyticsService(apiClient: client)
@@ -140,6 +142,7 @@ final class ServiceContainer: @unchecked Sendable {
             barcodeIntakeService: DemoBarcodeIntakeService(),
             maintenanceService: DemoMaintenanceService(),
             attentionService: DemoAttentionService(),
+            shiftTaskService: DemoShiftTaskService(),
             partsInventoryService: DemoPartsInventoryService(),
             autoPrintService: DemoAutoDispatchService(),
             jobAnalyticsService: DemoJobAnalyticsService(),
@@ -164,6 +167,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeIntakeService = DemoBarcodeIntakeService()
         self.maintenanceService = DemoMaintenanceService()
         self.attentionService = DemoAttentionService()
+        self.shiftTaskService = DemoShiftTaskService()
         self.partsInventoryService = DemoPartsInventoryService()
         self.autoPrintService = DemoAutoDispatchService()
         self.jobAnalyticsService = DemoJobAnalyticsService()
@@ -291,6 +295,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
         self.attentionService = AttentionService(apiClient: client)
+        self.shiftTaskService = ShiftTaskService(apiClient: client)
         self.partsInventoryService = PartsInventoryService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
         self.jobAnalyticsService = JobAnalyticsService(apiClient: client)
@@ -341,6 +346,7 @@ final class ServiceContainer: @unchecked Sendable {
         barcodeIntakeService: any BarcodeIntakeServiceProtocol,
         maintenanceService: any MaintenanceServiceProtocol,
         attentionService: any AttentionServiceProtocol,
+        shiftTaskService: any ShiftTaskServiceProtocol,
         partsInventoryService: any PartsInventoryServiceProtocol,
         autoPrintService: any AutoDispatchServiceProtocol,
         jobAnalyticsService: any JobAnalyticsServiceProtocol,
@@ -378,6 +384,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeIntakeService = barcodeIntakeService
         self.maintenanceService = maintenanceService
         self.attentionService = attentionService
+        self.shiftTaskService = shiftTaskService
         self.partsInventoryService = partsInventoryService
         self.autoPrintService = autoPrintService
         self.jobAnalyticsService = jobAnalyticsService
