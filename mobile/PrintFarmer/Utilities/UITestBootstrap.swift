@@ -53,6 +53,12 @@ enum UITestBootstrap {
     /// Dashboard / Maintenance sheets. Required by issue #727 UI tests
     /// which need deterministic access to the fallback Notifications sheet.
     static let attentionDisabledLaunchArgument = "--uitesting-attention-disabled"
+    #if DEBUG
+    static let shiftTaskMutationErrorLaunchArgument =
+        "--uitesting-shift-task-mutation-error"
+    static let shiftTaskInitialLoadFailureLaunchArgument =
+        "--uitesting-shift-task-initial-load-failure"
+    #endif
 
     /// Deterministic launch modes selectable from the UI-test harness.
     enum Mode: Equatable {
@@ -64,6 +70,10 @@ enum UITestBootstrap {
         /// feature gate forced to disabled — `AttentionView` renders the
         /// fallback so the legacy Notifications sheet is reachable.
         case authenticatedAttentionDisabled
+        #if DEBUG
+        case authenticatedShiftTaskMutationError
+        case authenticatedShiftTaskInitialLoadFailure
+        #endif
     }
 
     /// Dedicated `UserDefaults` suite. Isolated from `.standard` so a
@@ -103,6 +113,14 @@ enum UITestBootstrap {
         if arguments.contains(attentionDisabledLaunchArgument) {
             return .authenticatedAttentionDisabled
         }
+        #if DEBUG
+        if arguments.contains(shiftTaskMutationErrorLaunchArgument) {
+            return .authenticatedShiftTaskMutationError
+        }
+        if arguments.contains(shiftTaskInitialLoadFailureLaunchArgument) {
+            return .authenticatedShiftTaskInitialLoadFailure
+        }
+        #endif
         return arguments.contains(unauthenticatedLaunchArgument) ? .unauthenticated : .authenticated
     }
 
@@ -161,10 +179,31 @@ enum UITestBootstrap {
             disabled.attentionEnabled = false
             services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
         }
+        #if DEBUG
+        if mode == .authenticatedShiftTaskMutationError {
+            services.shiftTaskService = DemoShiftTaskService(
+                scenario: .mutationFailureThenSuccess
+            )
+        }
+        if mode == .authenticatedShiftTaskInitialLoadFailure {
+            services.shiftTaskService = DemoShiftTaskService(
+                scenario: .initialLoadFailureThenSuccess
+            )
+        }
+        #endif
 
         let auth = AuthViewModel(services: services)
-        if mode == .authenticated || mode == .authenticatedAttentionDisabled {
+        switch mode {
+        case .authenticated, .authenticatedAttentionDisabled:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+        case .unauthenticated:
+            break
+        #if DEBUG
+        case .authenticatedShiftTaskMutationError:
+            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+        case .authenticatedShiftTaskInitialLoadFailure:
+            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+        #endif
         }
 
         return Environment(

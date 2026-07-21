@@ -581,6 +581,14 @@ actor APIClient {
         try await executeVoid(request)
     }
 
+    func postVoid(_ path: String, headers: [String: String]) async throws {
+        var request = try buildRequest(path: path, method: "POST")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        try await executeVoid(request)
+    }
+
     func postVoid<B: Encodable & Sendable>(_ path: String, body: B) async throws {
         var request = try buildRequest(path: path, method: "POST")
         request.httpBody = try encoder.encode(body)

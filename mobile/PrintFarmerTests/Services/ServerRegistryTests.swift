@@ -507,6 +507,13 @@ final class ServerRegistryTests: XCTestCase {
             SignalRSubscription {}
         }
 
+        @discardableResult
+        func onTaskInvalidated(
+            _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
+        ) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
         func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {}
 
         func resumeDisconnect() {

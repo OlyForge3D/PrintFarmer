@@ -56,6 +56,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private let printerUpdateHub: SignalREventHub<PrinterStatusUpdate>
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
+    private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
 
     /// Race-free connection-state read. Delegates to the hub's serial
     /// executor so any pending `setConnectionState` block has been applied
@@ -97,7 +98,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private let webSocketFactory: @Sendable (URL) -> SignalRWebSocket
 
     /// 0x1E — ASCII Record Separator, SignalR message terminator
-    private static let recordSeparator: UInt8 = 0x1E
+    private static let recordSeparator = SignalRFrameParser.recordSeparator
 
     /// Serial queue guarding every mutable lifecycle field below.
     /// `webSocketTask`, `receiveTask`, `pingTask`, `reconnectTask`,
@@ -242,6 +243,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// `.connected` after the user requested disconnect or a newer
     /// connect ran.
     private var generation: UInt64 = 0
+    /// Incremental SignalR record parser. Guarded by `lifecycleQueue`; split
+    /// records survive across WebSocket receives and teardown clears any
+    /// incomplete record before a replacement transport starts.
+    private var frameParser = SignalRFrameParser()
 
     // Handler storage for #711 F6 `fallbackGroupsUpdated` follows the
     // simple handler-array pattern rather than a SignalREventHub because
@@ -288,6 +293,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.printerUpdateHub = SignalREventHub<PrinterStatusUpdate>(coordinator: coordinator)
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
+        self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
 
         self.decoder = JSONDecoder()
         // r10 blocker #1: register a per-instance specific value on
@@ -505,6 +511,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     @discardableResult
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
         attentionChangedHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onTaskInvalidated(
+        _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
+    ) -> SignalRSubscription {
+        taskInvalidationHub.subscribe(handler)
     }
 
     func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {
@@ -888,25 +901,36 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             return
         }
 
-        // Split by record separator — a single WebSocket frame can contain multiple SignalR messages
-        let frames = rawData.split(separator: Self.recordSeparator)
-        for frame in frames {
-            guard !frame.isEmpty else { continue }
-            processFrame(Data(frame))
+        processIncomingData(rawData)
+    }
+
+    #if DEBUG
+    func processIncomingDataForTesting(_ data: Data) {
+        lifecycleSync {
+            processIncomingData(data)
+        }
+    }
+    #endif
+
+    private func processIncomingData(_ data: Data) {
+        do {
+            for frame in try frameParser.append(data) {
+                processFrame(frame)
+            }
+        } catch let error as SignalRFrameParserError {
+            logger.warning("Dropping oversized SignalR frame: \(String(describing: error))")
+        } catch {
+            logger.warning("Dropping invalid SignalR frame: \(error.localizedDescription)")
         }
     }
 
     private func processFrame(_ data: Data) {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        guard let type = json["type"] as? Int else { return }
-
-        switch type {
-        case 1: // Invocation
-            handleInvocation(json, rawData: data)
-        case 6: // Ping
+        switch SignalRProtocolMessage.decode(data) {
+        case .invocation(let target, let firstArgument):
+            handleInvocation(target: target, firstArgument: firstArgument)
+        case .ping:
             break
-        case 7: // Close
-            let error = json["error"] as? String
+        case .close(let error):
             logger.info("SignalR close frame received: \(error ?? "no error")")
             let (myGen, shouldReconnect) = lifecycleSync {
                 // r22 (F4-L #777) type-7 liveness: the receive loop's
@@ -945,17 +969,25 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             if shouldReconnect {
                 scheduleReconnect(fromGen: myGen)
             }
-        default:
+        case .unsupported:
+            break
+        case .malformed:
             break
         }
     }
 
-    private func handleInvocation(_ json: [String: Any], rawData: Data) {
-        guard let target = (json["target"] as? String)?.lowercased(),
-              let arguments = json["arguments"] as? [Any],
-              let firstArg = arguments.first else { return }
+    private func handleInvocation(target rawTarget: String, firstArgument argData: Data?) {
+        if ShiftTaskInvalidation.supportedTargets.contains(rawTarget) {
+            taskInvalidationHub.deliver(ShiftTaskInvalidation(target: rawTarget))
+            return
+        }
 
-        guard let argData = try? JSONSerialization.data(withJSONObject: firstArg) else { return }
+        guard let argData else { return }
+
+        // Preserve existing tolerance for non-task events. Task targets are
+        // intentionally matched before normalization so PascalCase variants
+        // cannot create duplicate task delivery paths.
+        let target = rawTarget.lowercased()
 
         switch target {
         case "printerupdated":
@@ -1783,6 +1815,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // is exactly the causal edge we want to preserve across
         // teardown.
         receiveCompletionBarrier = nil
+        frameParser.reset()
         pingTask?.cancel()
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)

@@ -10,6 +10,7 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let printerUpdateHub: SignalREventHub<PrinterStatusUpdate>
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
+    private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
     private var simulationTask: Task<Void, Never>?
 
     init() {
@@ -17,6 +18,7 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         self.printerUpdateHub = SignalREventHub<PrinterStatusUpdate>(coordinator: coordinator)
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
+        self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
     }
 
     var connectionState: SignalRConnectionState { connectionStateHub.snapshot() }
@@ -52,6 +54,13 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     @discardableResult
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
         attentionChangedHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onTaskInvalidated(
+        _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
+    ) -> SignalRSubscription {
+        taskInvalidationHub.subscribe(handler)
     }
 
     func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {

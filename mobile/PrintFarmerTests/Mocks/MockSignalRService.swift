@@ -15,12 +15,14 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let printerUpdateHub: SignalREventHub<PrinterStatusUpdate>
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
+    private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
 
     init() {
         self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
         self.printerUpdateHub = SignalREventHub<PrinterStatusUpdate>(coordinator: coordinator)
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
+        self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
     }
 
     /// Race-free connection-state read; drains any pending mutation before
@@ -72,11 +74,22 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         attentionChangedHub.subscribe(handler)
     }
 
+    @discardableResult
+    func onTaskInvalidated(
+        _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
+    ) -> SignalRSubscription {
+        taskInvalidationHub.subscribe(handler)
+    }
+
     /// Simulate an attention-invalidation event for testing. Uses the hub's
     /// synchronous delivery path so callers observe the effect immediately
     /// on return without a fixed sleep.
     func simulateAttentionChanged(_ event: AttentionChangedEvent) {
         attentionChangedHub.deliverSync(event)
+    }
+
+    func simulateTaskInvalidation(target: String) {
+        taskInvalidationHub.deliverSync(ShiftTaskInvalidation(target: target))
     }
 
     func simulateConnectionStateChange(_ state: SignalRConnectionState) {
@@ -103,6 +116,7 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     var connectionStateSubscriberCount: Int { connectionStateHub.handlerCountForTesting }
     var attentionSubscriberCount: Int { attentionChangedHub.handlerCountForTesting }
+    var taskInvalidationSubscriberCount: Int { taskInvalidationHub.handlerCountForTesting }
     var printerUpdateSubscriberCount: Int { printerUpdateHub.handlerCountForTesting }
     var jobQueueSubscriberCount: Int { jobQueueUpdateHub.handlerCountForTesting }
 }

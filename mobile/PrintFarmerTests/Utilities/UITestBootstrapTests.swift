@@ -83,6 +83,103 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    func test_shiftTaskMutationErrorLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.shiftTaskMutationErrorLaunchArgument,
+            "--uitesting-shift-task-mutation-error"
+        )
+    }
+
+    func test_mode_isShiftTaskMutationError_whenArgumentPresent() {
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-shift-task-mutation-error"
+            ]),
+            .authenticatedShiftTaskMutationError
+        )
+    }
+
+    func test_makeBundle_shiftTaskMutationError_usesScriptedTaskService() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedShiftTaskMutationError,
+            defaults: defaults
+        )
+
+        XCTAssertTrue(bundle.services.shiftTaskService is DemoShiftTaskService)
+        XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+        XCTAssertTrue(
+            bundle.services.capabilitiesService.resolved.shiftPlanEnabled
+        )
+    }
+
+    func test_shiftTaskInitialLoadFailureLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.shiftTaskInitialLoadFailureLaunchArgument,
+            "--uitesting-shift-task-initial-load-failure"
+        )
+    }
+
+    func test_mode_isShiftTaskInitialLoadFailure_whenArgumentPresent() {
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-shift-task-initial-load-failure"
+            ]),
+            .authenticatedShiftTaskInitialLoadFailure
+        )
+    }
+
+    func test_mode_mutationError_takesPrecedenceOverInitialLoadFailure() {
+        // The two shift-task scenarios are mutually exclusive; when both
+        // flags are present the mutation-error scenario wins so the
+        // resolution stays deterministic.
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-shift-task-mutation-error",
+                "--uitesting-shift-task-initial-load-failure"
+            ]),
+            .authenticatedShiftTaskMutationError
+        )
+    }
+
+    func test_makeBundle_shiftTaskInitialLoadFailure_usesScriptedTaskService() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedShiftTaskInitialLoadFailure,
+            defaults: defaults
+        )
+
+        XCTAssertTrue(bundle.services.shiftTaskService is DemoShiftTaskService)
+        XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+        XCTAssertTrue(
+            bundle.services.capabilitiesService.resolved.shiftPlanEnabled
+        )
+    }
+
+    func test_makeBundle_shiftTaskInitialLoadFailure_failsFirstLoadThenRecovers() async throws {
+        // Contract for the failed-state pull-to-refresh XCUI proof: the
+        // first canonical load throws (drives `.failed`), the next load
+        // recovers to the grouped plan.
+        let service = DemoShiftTaskService(scenario: .initialLoadFailureThenSuccess)
+
+        do {
+            _ = try await service.loadSnapshot(shiftPlanEnabled: true)
+            XCTFail("The first load must fail so the view reaches its .failed terminal state")
+        } catch {
+            // expected
+        }
+
+        let recovered = try await service.loadSnapshot(shiftPlanEnabled: true)
+        XCTAssertEqual(recovered.mode, .grouped)
+        XCTAssertFalse(
+            recovered.groups.isEmpty,
+            "Recovery must publish the grouped multi-section plan"
+        )
+    }
+
     func test_makeBundle_attentionDisabled_overridesCapabilities() throws {
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(
