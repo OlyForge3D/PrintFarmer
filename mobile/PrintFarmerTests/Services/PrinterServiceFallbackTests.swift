@@ -7,6 +7,7 @@ import XCTest
 /// of `NetworkError.featureDisabled` / `.forbidden`.
 final class PrinterServiceFallbackTests: XCTestCase {
 
+    private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var printerService: PrinterService!
 
@@ -16,15 +17,15 @@ final class PrinterServiceFallbackTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
         printerService = PrinterService(apiClient: apiClient)
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         apiClient = nil
         printerService = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -41,13 +42,13 @@ final class PrinterServiceFallbackTests: XCTestCase {
           "fallbackGroups": []
         }
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
 
         let details = try await printerService.getDetails(id: printerId)
 
         XCTAssertEqual(details.id, printerId)
         XCTAssertTrue(details.supportsPerToolAttribution)
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "GET")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(printerId.uuidString)/details") ?? false)
     }
@@ -55,12 +56,12 @@ final class PrinterServiceFallbackTests: XCTestCase {
     // MARK: - listFallbackGroups
 
     func testListFallbackGroups_callsCorrectEndpoint() async throws {
-        MockAPIClient.stubResponse(json: "[]")
+        mockAPIClient.stubResponse(json: "[]")
 
         let groups = try await printerService.listFallbackGroups(printerId: printerId)
 
         XCTAssertTrue(groups.isEmpty)
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "GET")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(printerId.uuidString)/fallback-groups") ?? false)
     }
@@ -70,7 +71,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
         let body = """
         {"code":"featureDisabled","title":"Not Found","status":404}
         """
-        MockURLProtocol.requestHandler = { req in
+        mockAPIClient.requestHandler = { req in
             let response = TestData.httpResponse(url: req.url, statusCode: 404)
             return (response, Data(body.utf8))
         }
@@ -97,12 +98,12 @@ final class PrinterServiceFallbackTests: XCTestCase {
           "createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-01T00:00:00Z","members":[]
         }
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
 
         let group = try await printerService.getFallbackGroup(printerId: printerId, groupId: groupId)
 
         XCTAssertEqual(group.id, groupId)
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "GET")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(printerId.uuidString)/fallback-groups/\(groupId.uuidString)") ?? false)
     }
@@ -116,7 +117,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
           "createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-01T00:00:00Z","members":[]
         }
         """
-        MockAPIClient.stubResponse(json: json, statusCode: 201)
+        mockAPIClient.stubResponse(json: json, statusCode: 201)
 
         let request = CreateFilamentFallbackGroupRequest(
             name: "pla",
@@ -126,10 +127,10 @@ final class PrinterServiceFallbackTests: XCTestCase {
         )
         _ = try await printerService.createFallbackGroup(printerId: printerId, request)
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "POST")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(printerId.uuidString)/fallback-groups") ?? false)
-        let body = MockURLProtocol.capturedRequests.first?.capturedHTTPBody() ?? Data()
+        let body = mockAPIClient.capturedRequests.first?.capturedHTTPBody() ?? Data()
         let json2 = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         XCTAssertEqual(json2?["name"] as? String, "pla")
         XCTAssertEqual(json2?["materialType"] as? String, "PLA")
@@ -138,7 +139,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
     }
 
     func testCreateFallbackGroup_forbiddenPropagatesAsForbidden() async {
-        MockURLProtocol.requestHandler = { req in
+        mockAPIClient.requestHandler = { req in
             let response = TestData.httpResponse(url: req.url, statusCode: 403)
             return (response, Data())
         }
@@ -166,13 +167,13 @@ final class PrinterServiceFallbackTests: XCTestCase {
           "createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-01T00:00:00Z","members":[]
         }
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
         let request = UpdateFilamentFallbackGroupRequest(
             name: "n", materialType: "PLA", displayOrder: 0, toolheadIds: [toolheadId]
         )
         _ = try await printerService.updateFallbackGroup(printerId: printerId, groupId: groupId, request)
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "PUT")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(printerId.uuidString)/fallback-groups/\(groupId.uuidString)") ?? false)
     }
@@ -180,10 +181,10 @@ final class PrinterServiceFallbackTests: XCTestCase {
     // MARK: - deleteFallbackGroup
 
     func testDeleteFallbackGroup_usesDELETE() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         try await printerService.deleteFallbackGroup(printerId: printerId, groupId: groupId)
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "DELETE")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(printerId.uuidString)/fallback-groups/\(groupId.uuidString)") ?? false)
     }
@@ -194,7 +195,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
         let json = """
         {"groupId":"\(groupId.uuidString)","memberId":"\(TestData.testUUID3.uuidString)","toolheadId":"\(toolheadId.uuidString)","position":1,"loadedMaterial":"PLA","loadedSpoolId":null}
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
 
         let member = try await printerService.getAvailableFallback(
             printerId: printerId,
@@ -204,7 +205,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
 
         XCTAssertNotNil(member)
         XCTAssertEqual(member?.loadedMaterial, "PLA")
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "GET")
         let url = captured?.url?.absoluteString ?? ""
         XCTAssertTrue(url.contains("fallback-groups/available"))
@@ -218,7 +219,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
     func testGetAvailableFallback_204ReturnsNil() async throws {
         // Emit a literal 204 (not 200 + empty body) so this test actually
         // exercises the "204 → nil" branch of the Optional-decoding path.
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             let response = TestData.httpResponse(url: request.url, statusCode: 204)
             return (response, Data())
         }
@@ -246,7 +247,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
         let json = """
         {"groupId":"\(groupId.uuidString)","memberId":"\(TestData.testUUID3.uuidString)","toolheadId":"\(toolheadId.uuidString)","position":1,"loadedMaterial":"PLA","loadedSpoolId":null}
         """
-        MockAPIClient.stubResponse(json: json)
+        mockAPIClient.stubResponse(json: json)
     }
 
     /// Parses the single captured request URL and returns
@@ -254,7 +255,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
     /// values as percent-decoded strings. Returns `nil` if the capture is
     /// missing or malformed so the caller can fail loudly.
     private func decodedQueryOfCapturedRequest() -> (sourceToolheadId: String?, material: String?, names: [String])? {
-        guard let url = MockURLProtocol.capturedRequests.first?.url,
+        guard let url = mockAPIClient.capturedRequests.first?.url,
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return nil
         }
@@ -278,7 +279,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
 
         // Raw wire form: `&` MUST be `%26` and `=` MUST be `%3D`, otherwise
         // the server would parse an injected `x=1` parameter.
-        let rawURL = MockURLProtocol.capturedRequests.first?.url?.absoluteString ?? ""
+        let rawURL = mockAPIClient.capturedRequests.first?.url?.absoluteString ?? ""
         XCTAssertTrue(rawURL.contains("material=PLA%26x%3D1"),
                       "raw URL must percent-encode `&` and `=` in material; got: \(rawURL)")
         XCTAssertFalse(rawURL.contains("&x=1"),
@@ -305,7 +306,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
         // Raw wire form: `+` MUST be `%2B`. If it is emitted literally,
         // ASP.NET Core (and every RFC 1738 form parser) will bind it as a
         // space, so `PLA+` would be received as `PLA `.
-        let rawURL = MockURLProtocol.capturedRequests.first?.url?.absoluteString ?? ""
+        let rawURL = mockAPIClient.capturedRequests.first?.url?.absoluteString ?? ""
         XCTAssertTrue(rawURL.contains("material=PLA%2B"),
                       "raw URL must encode `+` as `%2B`; got: \(rawURL)")
         XCTAssertFalse(rawURL.contains("material=PLA+"),
@@ -329,7 +330,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
             material: "PLA?y=1#frag"
         )
 
-        let rawURL = MockURLProtocol.capturedRequests.first?.url?.absoluteString ?? ""
+        let rawURL = mockAPIClient.capturedRequests.first?.url?.absoluteString ?? ""
         XCTAssertTrue(rawURL.contains("material=PLA%3Fy%3D1%23frag"),
                       "raw URL must percent-encode `?`, `=`, and `#` inside material; got: \(rawURL)")
         // There is only one `?` in the raw URL: the one that starts the

@@ -1193,18 +1193,19 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
 @MainActor
 final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
 
+    nonisolated(unsafe) private var mockSession: MockURLProtocol.Session!
     private var session: URLSession!
     private let testURL = URL(string: "https://signalr-lifecycle.test.invalid")!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        session = MockURLProtocol.mockSession()
+        mockSession = MockURLProtocol.makeSession()
+        session = mockSession.urlSession
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         session = nil
+        mockSession = nil
         super.tearDown()
     }
 
@@ -1222,7 +1223,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
     /// must never be published; final state must be `.disconnected`.
     func testRealService_negotiateFailurePlusDisconnect_neverPublishesConnected() async throws {
         let counter = NegotiateCounter()
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             _ = counter.increment()
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -1329,7 +1330,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         // (sync context, non-async), so it stays. The async test
         // side never calls `.wait()` on it.
         let gate = DispatchSemaphore(value: 0)
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             began.signal()
             gate.wait() // hold until test releases
             let payload: [String: Any] = [
@@ -1426,7 +1427,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
     func testRealService_disconnectDuringHandshakeReceive_neverPublishesConnected() async throws {
         // Negotiate returns success immediately with a fully-decodable
         // payload (SignalRTransport requires `transferFormats`).
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             let payload: [String: Any] = [
                 "connectionId": "test-conn",
                 "connectionToken": "test-conn",
@@ -1438,7 +1439,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                     ]
                 ]
             ]
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -1520,7 +1521,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
     /// check.
     func testRealService_repeatedFailedReconnects_gateReleasedTwice_thenDisconnectHalts() async throws {
         let counter = NegotiateCounter()
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             _ = counter.increment()
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -1653,8 +1654,8 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 ]
             ]
         ]
-        MockURLProtocol.requestHandler = { request in
-            let data = (try? JSONSerialization.data(withJSONObject: negotiatePayload)) ?? Data()
+        mockSession.requestHandler = { request in
+            let data = try JSONSerialization.data(withJSONObject: negotiatePayload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -1775,7 +1776,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         // negotiate 200 (reconnect's performConnect succeeds → the
         // hand-off race is the point of interest).
         let counter = NegotiateCounter()
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             let n = counter.increment()
             if n == 1 {
                 let response = HTTPURLResponse(
@@ -1796,7 +1797,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                     ]
                 ]
             ]
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -1964,8 +1965,8 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 ]
             ]
         ]
-        MockURLProtocol.requestHandler = { request in
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+        mockSession.requestHandler = { request in
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -2122,8 +2123,8 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                 ]
             ]
         ]
-        MockURLProtocol.requestHandler = { request in
-            let data = (try? JSONSerialization.data(withJSONObject: negotiatePayload)) ?? Data()
+        mockSession.requestHandler = { request in
+            let data = try JSONSerialization.data(withJSONObject: negotiatePayload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -2248,7 +2249,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
     /// `activeReconnectOwners == 0` when the owner task exits.
     func testRealService_boundedTerminalAfterMaxReconnectAttempts_publishesDisconnected() async throws {
         let counter = NegotiateCounter()
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             _ = counter.increment()
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -2383,7 +2384,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
     /// service A must not surface as counter increments, callback
     /// invocations, or state transitions on service B.
     func testTwoServiceInstances_haveIndependentLifecycleCountersAndCallbacks() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             let payload: [String: Any] = [
                 "connectionId": "conn-\(UUID().uuidString)",
                 "connectionToken": "tok-\(UUID().uuidString)",
@@ -2394,7 +2395,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
                     ]
                 ]
             ]
-            let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+            let data = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 200,
@@ -3164,18 +3165,19 @@ final class SignalRCausalMockReceiveTests: XCTestCase {
 
 @MainActor
 final class SignalRServiceBindingHarnessTests: XCTestCase {
+    nonisolated(unsafe) private var mockSession: MockURLProtocol.Session!
     nonisolated(unsafe) private var session: URLSession!
     private let testURL = URL(string: "https://signalr-binding.test.invalid")!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        session = MockURLProtocol.mockSession()
+        mockSession = MockURLProtocol.makeSession()
+        session = mockSession.urlSession
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         session = nil
+        mockSession = nil
         super.tearDown()
     }
 
@@ -3606,7 +3608,7 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
     }
 
     private func installNegotiateHandler(counter: NegotiateCounter, failFirst: Bool = false) {
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             let call = counter.increment()
             if failFirst && call == 1 {
                 return (
@@ -3635,7 +3637,7 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+                try JSONSerialization.data(withJSONObject: payload)
             )
         }
     }
