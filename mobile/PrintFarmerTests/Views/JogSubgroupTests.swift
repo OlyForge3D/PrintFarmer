@@ -35,6 +35,21 @@ final class JogSubgroupTests: XCTestCase {
         supportedAxes: []
     )
 
+    // MARK: - Fixtures
+
+    /// Decodes the canonical printer JSON and forces `state` to `"idle"` so
+    /// `PrinterControlsViewModel.canControl` evaluates `true`. The default
+    /// fixture reports `state: "printing"`, which triggers the disabled hint
+    /// ("Disabled while printing.") and hides the direction-specific spec §4.1
+    /// text these tests exercise.
+    static func idlePrinter() throws -> Printer {
+        let json = TestJSON.printer.replacingOccurrences(
+            of: "\"state\": \"printing\"",
+            with: "\"state\": \"idle\""
+        )
+        return try TestData.decodePrinter(from: json)
+    }
+
     // MARK: - visibleAxes
 
     func test_visibleAxes_whenCapabilitiesNil_returnsAllCanonicalAxes() {
@@ -106,7 +121,7 @@ final class JogSubgroupTests: XCTestCase {
     func test_jogAccessibilityHint_positive_usesPositiveDirection() throws {
         let vm = PrinterControlsViewModel(
             printerService: MockPrinterService(),
-            printer: try TestData.decodePrinter()
+            printer: try Self.idlePrinter()
         )
         let view = JogSubgroup(viewModel: vm)
         let hint = view.jogAccessibilityHint(direction: 1, stepLabelText: "1", hasError: false)
@@ -116,7 +131,7 @@ final class JogSubgroupTests: XCTestCase {
     func test_jogAccessibilityHint_negative_usesNegativeDirection() throws {
         let vm = PrinterControlsViewModel(
             printerService: MockPrinterService(),
-            printer: try TestData.decodePrinter()
+            printer: try Self.idlePrinter()
         )
         let view = JogSubgroup(viewModel: vm)
         let hint = view.jogAccessibilityHint(direction: -1, stepLabelText: "1", hasError: false)

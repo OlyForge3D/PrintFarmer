@@ -63,12 +63,9 @@ jobs:
             build
 
   test:
-    name: Unit Tests (iOS) — Informational
+    name: Unit Tests (iOS)
     runs-on: macos-latest
     needs: build
-    # Keep informational until the macOS runner proves simulator launch stability;
-    # promote by removing continue-on-error after repeated green CI runs.
-    continue-on-error: true
     defaults:
       run:
         working-directory: mobile
@@ -122,8 +119,8 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             test-without-building \
             -only-testing:PrintFarmerTests \
-            -retry-tests-on-failure \
-            -test-iterations 2 \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
             -resultBundlePath build/TestResults.xcresult
 
       - name: Upload test results
