@@ -3,17 +3,18 @@ import XCTest
 @testable import PrintFarmer
 
 final class ShiftTaskModelsServiceTests: XCTestCase {
+    private var mockAPIClient: MockAPIClient!
     private var service: ShiftTaskService!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        service = ShiftTaskService(apiClient: MockAPIClient.makeAPIClient())
+        mockAPIClient = MockAPIClient()
+        service = ShiftTaskService(apiClient: mockAPIClient.apiClient)
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         service = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -115,7 +116,7 @@ final class ShiftTaskModelsServiceTests: XCTestCase {
     }
 
     func testGroupedLoadUsesExactShiftEndpoint() async throws {
-        MockAPIClient.stubResponse(
+        mockAPIClient.stubResponse(
             json: """
             { "groups": [], "generatedAt": "2026-03-08T09:30:00Z" }
             """
@@ -124,14 +125,14 @@ final class ShiftTaskModelsServiceTests: XCTestCase {
         let snapshot = try await service.loadSnapshot(shiftPlanEnabled: true)
 
         XCTAssertEqual(snapshot.mode, .grouped)
-        let request = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.url?.path, "/api/tasks")
         XCTAssertEqual(request.url?.query, "view=shift")
     }
 
     func testFeatureDisabled404LoadsFlatCompatibilityAsCapabilityState() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             if request.url?.query == "view=shift" {
                 return (
                     TestData.httpResponse(url: request.url, statusCode: 404),
@@ -155,11 +156,11 @@ final class ShiftTaskModelsServiceTests: XCTestCase {
 
         XCTAssertEqual(snapshot.mode, .featureDisabled)
         XCTAssertEqual(snapshot.taskCount, 1)
-        XCTAssertEqual(MockURLProtocol.capturedRequests.count, 2)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
     }
 
     func testFeatureDisabledFlatFailureIsVisibleInsteadOfFalseEmptySuccess() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             if request.url?.query == "view=shift" {
                 return (
                     TestData.httpResponse(url: request.url, statusCode: 404),
@@ -184,11 +185,11 @@ final class ShiftTaskModelsServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.mode, .featureDisabled)
         XCTAssertEqual(snapshot.taskCount, 0)
         XCTAssertEqual(snapshot.compatibilityErrorMessage, "Server error (500)")
-        XCTAssertEqual(MockURLProtocol.capturedRequests.count, 2)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
     }
 
     func testLegacy404FallsBackToFlatEndpoint() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             if request.url?.query == "view=shift" {
                 return (
                     TestData.httpResponse(url: request.url, statusCode: 404),
@@ -205,11 +206,11 @@ final class ShiftTaskModelsServiceTests: XCTestCase {
 
         XCTAssertEqual(snapshot.mode, .legacyFallback)
         XCTAssertEqual(snapshot.taskCount, 1)
-        XCTAssertEqual(MockURLProtocol.capturedRequests.map(\.url?.query), ["view=shift", nil])
+        XCTAssertEqual(mockAPIClient.capturedRequests.map(\.url?.query), ["view=shift", nil])
     }
 
     func testMutationEndpointsEncodeIDAndCompleteHeaderExactly() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         let taskID = "harvest:782/task"
         let key = "782-complete-intent"
 
@@ -217,8 +218,8 @@ final class ShiftTaskModelsServiceTests: XCTestCase {
         try await service.skip(taskID: taskID)
         try await service.dismiss(taskID: taskID)
 
-        XCTAssertEqual(MockURLProtocol.capturedRequests.count, 3)
-        let complete = MockURLProtocol.capturedRequests[0]
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 3)
+        let complete = mockAPIClient.capturedRequests[0]
         XCTAssertEqual(complete.httpMethod, "POST")
         XCTAssertTrue(
             try XCTUnwrap(complete.url?.absoluteString)
@@ -226,15 +227,15 @@ final class ShiftTaskModelsServiceTests: XCTestCase {
         )
         XCTAssertEqual(complete.value(forHTTPHeaderField: "Idempotency-Key"), key)
         XCTAssertTrue(
-            try XCTUnwrap(MockURLProtocol.capturedRequests[1].url?.absoluteString)
+            try XCTUnwrap(mockAPIClient.capturedRequests[1].url?.absoluteString)
                 .contains("harvest%3A782%2Ftask/skip")
         )
         XCTAssertTrue(
-            try XCTUnwrap(MockURLProtocol.capturedRequests[2].url?.absoluteString)
+            try XCTUnwrap(mockAPIClient.capturedRequests[2].url?.absoluteString)
                 .contains("harvest%3A782%2Ftask/dismiss")
         )
         XCTAssertNil(
-            MockURLProtocol.capturedRequests[1]
+            mockAPIClient.capturedRequests[1]
                 .value(forHTTPHeaderField: "Idempotency-Key")
         )
     }
