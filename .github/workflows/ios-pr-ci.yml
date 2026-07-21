@@ -63,13 +63,9 @@ jobs:
             build
 
   test:
-    name: Unit Tests (iOS) — Informational
+    name: Unit Tests (iOS)
     runs-on: macos-latest
     needs: build
-    # Temporary for #809's SignalR type-7 suite-order lifecycle failure.
-    # Remove continue-on-error after three consecutive clean, single-pass
-    # PrintFarmerTests runs on this workflow's Xcode/simulator configuration.
-    continue-on-error: true
     defaults:
       run:
         working-directory: mobile
