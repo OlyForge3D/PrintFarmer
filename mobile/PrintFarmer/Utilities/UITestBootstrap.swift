@@ -56,6 +56,8 @@ enum UITestBootstrap {
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
         "--uitesting-shift-task-mutation-error"
+    static let shiftTaskInitialLoadFailureLaunchArgument =
+        "--uitesting-shift-task-initial-load-failure"
     #endif
 
     /// Deterministic launch modes selectable from the UI-test harness.
@@ -70,6 +72,7 @@ enum UITestBootstrap {
         case authenticatedAttentionDisabled
         #if DEBUG
         case authenticatedShiftTaskMutationError
+        case authenticatedShiftTaskInitialLoadFailure
         #endif
     }
 
@@ -113,6 +116,9 @@ enum UITestBootstrap {
         #if DEBUG
         if arguments.contains(shiftTaskMutationErrorLaunchArgument) {
             return .authenticatedShiftTaskMutationError
+        }
+        if arguments.contains(shiftTaskInitialLoadFailureLaunchArgument) {
+            return .authenticatedShiftTaskInitialLoadFailure
         }
         #endif
         return arguments.contains(unauthenticatedLaunchArgument) ? .unauthenticated : .authenticated
@@ -179,6 +185,11 @@ enum UITestBootstrap {
                 scenario: .mutationFailureThenSuccess
             )
         }
+        if mode == .authenticatedShiftTaskInitialLoadFailure {
+            services.shiftTaskService = DemoShiftTaskService(
+                scenario: .initialLoadFailureThenSuccess
+            )
+        }
         #endif
 
         let auth = AuthViewModel(services: services)
@@ -189,6 +200,8 @@ enum UITestBootstrap {
             break
         #if DEBUG
         case .authenticatedShiftTaskMutationError:
+            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+        case .authenticatedShiftTaskInitialLoadFailure:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         #endif
         }

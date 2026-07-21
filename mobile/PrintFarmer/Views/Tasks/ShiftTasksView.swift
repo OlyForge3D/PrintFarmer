@@ -114,10 +114,15 @@ struct ShiftTasksView: View {
                 }
             } else {
                 ForEach(snapshot.groups) { group in
-                    Section(group.anchorKind.groupTitle) {
+                    Section {
                         ForEach(group.tasks) { task in
                             ShiftTaskRow(task: task, viewModel: viewModel)
                         }
+                    } header: {
+                        Text(group.anchorKind.groupTitle)
+                            .accessibilityIdentifier(
+                                "shiftTasks.group.\(group.anchorKind.wireValue)"
+                            )
                     }
                 }
             }
@@ -150,24 +155,45 @@ struct ShiftTasksView: View {
     }
 
     private var loadError: some View {
-        ContentUnavailableView {
-            Label("Unable to load tasks", systemImage: "exclamationmark.triangle")
-        } description: {
-            Text(viewModel.loadFailure?.message ?? "The current server did not return a task list.")
-        } actions: {
-            if let failure = viewModel.loadFailure {
-                Button("Retry") {
-                    Task {
-                        _ = await viewModel.retryLoad(failureID: failure.id)
+        // The initial-load `.failed` terminal state must offer functional
+        // pull-to-refresh. `.refreshable` only drives a genuine scroll
+        // container, so the error content is hosted in a `ScrollView` whose
+        // content fills the viewport and always bounces; a bare
+        // `ContentUnavailableView` leaves pull-to-refresh inert. Only the
+        // error is rendered here (snapshot stays nil until the canonical
+        // reload resolves), so recovery cannot flash a false all-clear. The
+        // explicit Retry control and accessibility semantics are preserved.
+        ScrollView(.vertical) {
+            ContentUnavailableView {
+                Label("Unable to load tasks", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(viewModel.loadFailure?.message ?? "The current server did not return a task list.")
+            } actions: {
+                if let failure = viewModel.loadFailure {
+                    Button("Retry") {
+                        Task {
+                            _ = await viewModel.retryLoad(failureID: failure.id)
+                        }
                     }
+                    .frame(minHeight: 44)
+                    .accessibilityLabel("Retry task refresh")
+                    .accessibilityHint("Reloads the canonical task list from the current server.")
+                    .accessibilityIdentifier("shiftTasks.load.retry")
                 }
-                .frame(minHeight: 44)
-                .accessibilityLabel("Retry task refresh")
-                .accessibilityHint("Reloads the canonical task list from the current server.")
-                .accessibilityIdentifier("shiftTasks.load.retry")
             }
+            .frame(maxWidth: .infinity)
+            .containerRelativeFrame(.vertical)
+            .accessibilityIdentifier("shiftTasks.load.error")
         }
-        .accessibilityIdentifier("shiftTasks.load.error")
+        .scrollBounceBehavior(.always)
+        .refreshable {
+            // The canonical reload is attached directly to this scroll
+            // container so pull-to-refresh is functional from the `.failed`
+            // terminal state; `.always` bounce keeps the single error view
+            // pullable so the gesture can engage the refresh control.
+            await reloadCapabilitiesAndTasks()
+        }
+        .accessibilityIdentifier("shiftTasks.load.errorList")
     }
 
     private func reloadCapabilitiesAndTasks() async {

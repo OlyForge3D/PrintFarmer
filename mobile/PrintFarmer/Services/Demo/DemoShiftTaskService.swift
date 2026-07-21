@@ -4,6 +4,7 @@ enum DemoShiftTaskScenario: Equatable {
     case standard
     #if DEBUG
     case mutationFailureThenSuccess
+    case initialLoadFailureThenSuccess
     #endif
 }
 
@@ -11,6 +12,7 @@ enum DemoShiftTaskScenario: Equatable {
 enum DemoShiftTaskError: LocalizedError, Sendable {
     case forcedMutationFailure
     case duplicateRetry
+    case forcedInitialLoadFailure
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +20,8 @@ enum DemoShiftTaskError: LocalizedError, Sendable {
             "The demo task action failed."
         case .duplicateRetry:
             "The retry operation was invoked more than once."
+        case .forcedInitialLoadFailure:
+            "The demo shift plan failed to load."
         }
     }
 }
@@ -27,19 +31,37 @@ actor DemoShiftTaskService: ShiftTaskServiceProtocol {
     private let scenario: DemoShiftTaskScenario
     private var tasks: [ShiftTask]
     private var completeAttemptCount = 0
+    #if DEBUG
+    private var loadAttemptCount = 0
+    #endif
 
     init(scenario: DemoShiftTaskScenario = .standard) {
         self.scenario = scenario
         #if DEBUG
-        self.tasks = scenario == .standard
-            ? Self.standardTasks
-            : [Self.mutationTask]
+        switch scenario {
+        case .standard, .initialLoadFailureThenSuccess:
+            self.tasks = Self.standardTasks
+        case .mutationFailureThenSuccess:
+            self.tasks = [Self.mutationTask]
+        }
         #else
         self.tasks = Self.standardTasks
         #endif
     }
 
     func loadSnapshot(shiftPlanEnabled: Bool) async throws -> ShiftTaskSnapshot {
+        #if DEBUG
+        if scenario == .initialLoadFailureThenSuccess {
+            loadAttemptCount += 1
+            // The first canonical load fails so the view lands in its
+            // `.failed` terminal state; the next load (triggered by the
+            // failed-state pull-to-refresh) recovers to the grouped plan.
+            if loadAttemptCount == 1 {
+                throw DemoShiftTaskError.forcedInitialLoadFailure
+            }
+        }
+        #endif
+
         guard shiftPlanEnabled else {
             return .flat(tasks, mode: .featureDisabled)
         }
