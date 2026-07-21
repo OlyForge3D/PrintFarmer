@@ -55,6 +55,7 @@ final class AuthViewModel {
         if let user = await services.authService.restoreSession() {
             currentUser = user
             isAuthenticated = true
+            await services.activateFarmSnapshotForActiveServer()
         }
         isLoading = false
         hasCheckedAuth = true
@@ -89,6 +90,7 @@ final class AuthViewModel {
             )
             currentUser = response.user
             isAuthenticated = true
+            await services.activateFarmSnapshotForActiveServer()
         } catch let error as NetworkError {
             errorMessage = friendlyMessage(for: error)
         } catch {
@@ -99,6 +101,9 @@ final class AuthViewModel {
     }
 
     func logout() async {
+        // Revoke snapshot authority (synchronous) and await store deactivation
+        // before the auth service tears down the session.
+        await services.revokeFarmSnapshot()
         await services.authService.logout()
         isAuthenticated = false
         currentUser = nil

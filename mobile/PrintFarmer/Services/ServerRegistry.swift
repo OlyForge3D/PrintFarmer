@@ -5,6 +5,8 @@ enum ServerRegistryError: LocalizedError, Equatable {
     case invalidURL(String)
     case duplicateURL(String)
     case serverNotFound(UUID)
+    case purgeUnavailable(UUID)
+    case purgeFailed(UUID)
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +16,10 @@ enum ServerRegistryError: LocalizedError, Equatable {
             return "Server already registered: \(value)"
         case .serverNotFound(let id):
             return "Server not found: \(id.uuidString)"
+        case .purgeUnavailable:
+            return "Cannot remove this server because its cached data cannot be cleared safely."
+        case .purgeFailed:
+            return "Could not clear this server's cached data. The server was not removed."
         }
     }
 }
@@ -32,6 +38,13 @@ final class ServerRegistry {
 
     var servers: [RegisteredServer]
     var activeServerID: UUID?
+
+    /// Awaited snapshot purge authority, wired by `ServiceContainer`. Server
+    /// removal is gated on this: a successful purge must complete before the
+    /// registry entry is dropped, and its absence fails closed (see
+    /// `purgeAndRemove`). Kept out of observation — it is infrastructure wiring,
+    /// not view state.
+    @ObservationIgnored var snapshotPurgeHandler: (@Sendable (UUID) async -> FarmSnapshotPurgeResult)?
 
     @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private let now: () -> Date
@@ -112,7 +125,10 @@ final class ServerRegistry {
         persist()
     }
 
-    func remove(id: UUID) throws {
+    /// Raw registry removal. Deliberately `private` so no caller outside this
+    /// type can drop a server without going through the awaited
+    /// `purgeAndRemove(id:)` purge gate (issue #816, Gate E).
+    private func removeEntry(id: UUID) throws {
         guard let index = servers.firstIndex(where: { $0.id == id }) else {
             throw ServerRegistryError.serverNotFound(id)
         }
@@ -122,6 +138,23 @@ final class ServerRegistry {
             activeServerID = servers.first?.id
         }
         persist()
+    }
+
+    /// Remove a server only after its snapshot namespace has been fully purged.
+    /// Fails closed: without a wired purge handler, or when the purge reports a
+    /// failure, the server is retained so its cached bytes cannot be orphaned.
+    func purgeAndRemove(id: UUID) async throws {
+        guard servers.contains(where: { $0.id == id }) else {
+            throw ServerRegistryError.serverNotFound(id)
+        }
+        guard let handler = snapshotPurgeHandler else {
+            throw ServerRegistryError.purgeUnavailable(id)
+        }
+        let result = await handler(id)
+        guard case .purged = result else {
+            throw ServerRegistryError.purgeFailed(id)
+        }
+        try removeEntry(id: id)
     }
 
     func setActive(id: UUID?) throws {

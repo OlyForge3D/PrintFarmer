@@ -16,19 +16,22 @@ actor AuthService: AuthServiceProtocol {
     private let userDefaultsBox: AuthServiceUserDefaultsBox
     private let migrateLegacyServerURL: Bool
     private let serverRegistry: ServerRegistry?
+    private let snapshotOwnerStore: FarmSnapshotOwnerStore
 
     init(
         apiClient: APIClient,
         credentialsStore: ServerCredentialsStore = ServerCredentialsStore(),
         userDefaultsBox: AuthServiceUserDefaultsBox = AuthServiceUserDefaultsBox(.standard),
         migrateLegacyServerURL: Bool = true,
-        serverRegistry: ServerRegistry? = nil
+        serverRegistry: ServerRegistry? = nil,
+        snapshotOwnerStore: FarmSnapshotOwnerStore = FarmSnapshotOwnerStore()
     ) {
         self.apiClient = apiClient
         self.credentialsStore = credentialsStore
         self.userDefaultsBox = userDefaultsBox
         self.migrateLegacyServerURL = migrateLegacyServerURL
         self.serverRegistry = serverRegistry
+        self.snapshotOwnerStore = snapshotOwnerStore
     }
 
     /// Authenticate against a Printfarmer server.
@@ -57,6 +60,11 @@ actor AuthService: AuthServiceProtocol {
             ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
             serverId: server.id
         )
+        // Persist the verified non-secret owner for this server so cold-offline
+        // restore and switching can recover the exact prior owner (issue #816).
+        if let user = response.user {
+            snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
+        }
         await apiClient.updateBaseURL(server.baseURL)
         await apiClient.setAccessToken(token)
         await registerTokenExpiryChecker(for: server)
@@ -69,6 +77,8 @@ actor AuthService: AuthServiceProtocol {
         try? await apiClient.postVoid("/api/auth/logout")
         if let server = currentServer {
             credentialsStore.clear(serverId: server.id)
+            // Explicit logout clears the persisted owner identity for this server.
+            snapshotOwnerStore.clearOwner(serverID: server.id)
         }
         await apiClient.setAccessToken(nil)
     }
@@ -86,10 +96,14 @@ actor AuthService: AuthServiceProtocol {
 
         do {
             let user: UserDTO = try await apiClient.get("/api/auth/me")
+            // Online-verified restore: persist the owner (transient offline never
+            // reaches here, so the last verified owner is preserved).
+            snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
             return user
         } catch {
             if isDefinitiveAuthRejection(error) {
                 credentialsStore.clear(serverId: server.id)
+                snapshotOwnerStore.clearOwner(serverID: server.id)
                 await apiClient.setAccessToken(nil)
             }
             return nil

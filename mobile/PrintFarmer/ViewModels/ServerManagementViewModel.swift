@@ -153,9 +153,9 @@ final class ServerManagementViewModel {
         }
     }
 
-    func delete(_ server: RegisteredServer) {
+    func delete(_ server: RegisteredServer) async {
         do {
-            try registry.remove(id: server.id)
+            try await registry.purgeAndRemove(id: server.id)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

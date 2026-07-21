@@ -46,10 +46,20 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
-    @ObservationIgnored private let observesRegistry: Bool
+    @ObservationIgnored private var observesRegistry: Bool
     @ObservationIgnored private var activeServerID: UUID?
     @ObservationIgnored private var activeServerSwitchTask: Task<Void, Never>?
     @ObservationIgnored private var activeServerSwitchRequested = false
+
+    // MARK: Farm snapshot lifecycle authority (issue #816)
+    /// Shared synchronous authority for origin-pinned snapshot sessions. A
+    /// container-side revoke/tombstone has program-order happens-before with the
+    /// store's durable promotion, so no stale/cross-bound write can slip through.
+    @ObservationIgnored let farmSnapshotAuthority: FarmSnapshotAuthority
+    @ObservationIgnored let farmSnapshotStore: any FarmSnapshotStoring
+    /// Non-secret per-server owner identity. Activation resolves the settled
+    /// server's OWN owner from here — never a carried cross-server user id.
+    @ObservationIgnored let farmSnapshotOwnerStore: FarmSnapshotOwnerStore
 
     init(
         baseURL: URL? = nil,
@@ -57,6 +67,9 @@ final class ServiceContainer: @unchecked Sendable {
         credentialsStore: ServerCredentialsStore = ServerCredentialsStore(),
         userDefaultsBox: AuthServiceUserDefaultsBox = AuthServiceUserDefaultsBox(.standard),
         observeRegistry: Bool = true,
+        farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
+        farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
+        farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
         apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken in
             APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken)
         },
@@ -77,6 +90,12 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
 
+        let authority = farmSnapshotAuthority ?? FarmSnapshotAuthority()
+        let ownerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore(userDefaults: userDefaultsBox.userDefaults)
+        self.farmSnapshotAuthority = authority
+        self.farmSnapshotOwnerStore = ownerStore
+        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority)
+
         let activeServer = serverRegistry.activeServer
         let resolvedURL = activeServer?.baseURL
             ?? baseURL
@@ -91,7 +110,8 @@ final class ServiceContainer: @unchecked Sendable {
             credentialsStore: credentialsStore,
             userDefaultsBox: userDefaultsBox,
             migrateLegacyServerURL: false,
-            serverRegistry: serverRegistry
+            serverRegistry: serverRegistry,
+            snapshotOwnerStore: ownerStore
         )
         self.printerService = PrinterService(apiClient: client)
         self.jobService = JobService(apiClient: client)
@@ -128,10 +148,32 @@ final class ServiceContainer: @unchecked Sendable {
         if observeRegistry {
             observeActiveServer()
         }
+
+        wireSnapshotPurgeHandler()
+    }
+
+    /// Route registry deletion through the store's awaited purge (Gate E). Wired
+    /// for every production composition that exposes a real registry, so deletion
+    /// can never drop a server without first clearing its cached namespace.
+    private func wireSnapshotPurgeHandler() {
+        guard let serverRegistry else { return }
+        let store = farmSnapshotStore
+        serverRegistry.snapshotPurgeHandler = { serverID in
+            await store.purge(serverID: serverID)
+        }
     }
 
     /// Creates a ServiceContainer wired with demo (mock) services.
-    static func demo() -> ServiceContainer {
+    ///
+    /// A production `serverRegistry` may be supplied so that persisted-demo mode
+    /// still routes server deletion through the awaited snapshot purge and can
+    /// reattach the registry observer on demo exit (issue #816, Gate D/B).
+    static func demo(
+        serverRegistry: ServerRegistry? = nil,
+        farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
+        farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
+        farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil
+    ) -> ServiceContainer {
         return ServiceContainer(
             authService: DemoAuthService(),
             printerService: DemoPrinterService(),
@@ -152,12 +194,19 @@ final class ServiceContainer: @unchecked Sendable {
             predictiveService: DemoPredictiveService(),
             dispatchService: DemoDispatchService(),
             failureDetectionService: DemoFailureDetectionService(),
-            capabilitiesService: StubSystemCapabilitiesService()
+            capabilitiesService: StubSystemCapabilitiesService(),
+            serverRegistry: serverRegistry,
+            farmSnapshotAuthority: farmSnapshotAuthority,
+            farmSnapshotStore: farmSnapshotStore,
+            farmSnapshotOwnerStore: farmSnapshotOwnerStore
         )
     }
 
     /// Replaces all services with demo implementations at runtime.
     func switchToDemo() {
+        // Revoke synchronously before advancing the generation so no stale
+        // snapshot commit can apply across the demo transition.
+        farmSnapshotAuthority.revoke()
         self.apiClient = nil
         self.authService = DemoAuthService()
         self.printerService = DemoPrinterService()
@@ -190,6 +239,8 @@ final class ServiceContainer: @unchecked Sendable {
 
     /// Replaces all services with real implementations backed by the active or given base URL.
     func switchToReal(baseURL: URL? = nil) {
+        // Revoke synchronously before the composition changes.
+        farmSnapshotAuthority.revoke()
         let server = serverRegistry?.activeServer
         let resolvedURL = server?.baseURL
             ?? baseURL
@@ -197,6 +248,10 @@ final class ServiceContainer: @unchecked Sendable {
             ?? AppConfig.baseURL
         let accessToken = Self.validAccessToken(for: server, credentialsStore: credentialsStore)
         let client = rebuildRealServices(baseURL: resolvedURL, server: server, accessToken: accessToken)
+        // Persisted-demo exit: reattach the production registry observer so
+        // subsequent real login/restore activates snapshots and observes switches
+        // in the same process (issue #816, Gate B).
+        ensureObservingRegistry()
         if let server {
             Task { await self.configureTokenExpiryChecker(client: client, serverID: server.id) }
         }
@@ -205,6 +260,60 @@ final class ServiceContainer: @unchecked Sendable {
     func switchToServer(_ server: RegisteredServer) async {
         guard activeServerID != server.id else { return }
         await switchToActiveServer(server)
+    }
+
+    // MARK: - Farm snapshot lifecycle authority (issue #816)
+
+    /// Activate the snapshot session for the settled active server. Awaits any
+    /// pending registry-driven switch so binding happens against the truly-settled
+    /// server, then resolves that server's OWN verified owner. A user verified on
+    /// one server can never activate under another — `(serverB, userA)` is
+    /// structurally impossible because the owner is read by the settled server id.
+    func activateFarmSnapshotForActiveServer() async {
+        await activeServerSwitchTask?.value
+        await bindSnapshotToActiveServer()
+    }
+
+    /// Synchronously revoke authority, then await the store's deactivation.
+    func revokeFarmSnapshot() async {
+        farmSnapshotAuthority.revoke()
+        await farmSnapshotStore.deactivate()
+    }
+
+    /// Bind the snapshot session to the current active server using only that
+    /// server's persisted owner identity. Does not await the switch task, so it is
+    /// safe to call from inside the switch loop.
+    private func bindSnapshotToActiveServer() async {
+        guard let serverRegistry, let active = serverRegistry.activeServer else {
+            await revokeFarmSnapshot()
+            return
+        }
+        guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: active.id) else {
+            // Token-only / unverified server: fail closed, no hydrate until an
+            // online verification establishes the owner.
+            await revokeFarmSnapshot()
+            return
+        }
+        let namespace = FarmSnapshotNamespace(serverID: active.id, userID: ownerID)
+        guard let session = farmSnapshotAuthority.mint(namespace: namespace, generation: activeGeneration.current) else {
+            // Tombstoned (purged) server — do not resurrect.
+            return
+        }
+        await farmSnapshotStore.activate(session: session)
+        // Revalidate that the active server did not change under us during the
+        // await; if it did, the newer switch owns activation.
+        guard serverRegistry.activeServerID == active.id, farmSnapshotAuthority.isCurrent(session) else {
+            await revokeFarmSnapshot()
+            return
+        }
+    }
+
+    /// Attach the registry observer if a production registry is present and not
+    /// already observed. Used to reattach after a persisted-demo exit.
+    private func ensureObservingRegistry() {
+        guard serverRegistry != nil, !observesRegistry else { return }
+        observesRegistry = true
+        observeActiveServer()
     }
 
     private func observeActiveServer() {
@@ -253,12 +362,19 @@ final class ServiceContainer: @unchecked Sendable {
     private func switchToActiveServer(_ server: RegisteredServer) async {
         let oldSignalRService = signalRService
         await oldSignalRService.disconnect()
+        // Revoke-before-authority-change: synchronous revoke + awaited store
+        // deactivation must complete before the generation advances.
+        await revokeFarmSnapshot()
         activeServerGeneration = activeGeneration.advance()
 
         let accessToken = Self.validAccessToken(for: server, credentialsStore: credentialsStore)
         let client = rebuildRealServices(baseURL: server.baseURL, server: server, accessToken: accessToken)
         userDefaultsBox.userDefaults.set(server.normalizedURLString, forKey: APIClient.serverURLKey)
         await configureTokenExpiryChecker(client: client, serverID: server.id)
+
+        // Re-bind the snapshot session to THIS server's own verified owner. Never
+        // carries an identity across from the previously-active server.
+        await bindSnapshotToActiveServer()
 
         guard accessToken != nil else { return }
         do {
@@ -272,6 +388,7 @@ final class ServiceContainer: @unchecked Sendable {
         guard activeServerID != nil else { return }
         let oldSignalRService = signalRService
         await oldSignalRService.disconnect()
+        await revokeFarmSnapshot()
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
     }
@@ -289,7 +406,8 @@ final class ServiceContainer: @unchecked Sendable {
             credentialsStore: credentialsStore,
             userDefaultsBox: userDefaultsBox,
             migrateLegacyServerURL: false,
-            serverRegistry: serverRegistry
+            serverRegistry: serverRegistry,
+            snapshotOwnerStore: farmSnapshotOwnerStore
         )
         self.printerService = PrinterService(apiClient: client)
         self.jobService = JobService(apiClient: client)
@@ -359,9 +477,13 @@ final class ServiceContainer: @unchecked Sendable {
         predictiveService: any PredictiveServiceProtocol,
         dispatchService: any DispatchServiceProtocol,
         failureDetectionService: any FailureDetectionServiceProtocol,
-        capabilitiesService: any SystemCapabilitiesServiceProtocol
+        capabilitiesService: any SystemCapabilitiesServiceProtocol,
+        serverRegistry: ServerRegistry? = nil,
+        farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
+        farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
+        farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil
     ) {
-        self.serverRegistry = nil
+        self.serverRegistry = serverRegistry
         self.credentialsStore = ServerCredentialsStore()
         self.userDefaultsBox = AuthServiceUserDefaultsBox(.standard)
         self.apiClientFactory = { baseURL, generation, accessToken in
@@ -376,7 +498,13 @@ final class ServiceContainer: @unchecked Sendable {
             }
         }
         self.activeGeneration = ActiveServerGeneration()
+        // Demo composition does not rebuild real services on registry changes, so
+        // it does not observe until a real login reattaches the observer.
         self.observesRegistry = false
+        let authority = farmSnapshotAuthority ?? FarmSnapshotAuthority()
+        self.farmSnapshotAuthority = authority
+        self.farmSnapshotOwnerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore()
+        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority)
         self.activeServerID = nil
         self.apiClient = nil
         self.authService = authService
@@ -404,5 +532,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeScannerService = nil
         self.nfcService = nil
         #endif
+
+        wireSnapshotPurgeHandler()
     }
 }

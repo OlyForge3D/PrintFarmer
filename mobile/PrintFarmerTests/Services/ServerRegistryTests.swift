@@ -72,13 +72,14 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertEqual(updated.updatedAt, updatedDate)
     }
 
-    func testRemoveActiveServerSelectsNextServer() throws {
+    func testRemoveActiveServerSelectsNextServer() async throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
         let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
         let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
 
         try registry.setActive(id: first.id)
-        try registry.remove(id: first.id)
+        try await registry.purgeAndRemove(id: first.id)
 
         XCTAssertEqual(registry.servers.map(\.id), [second.id])
         XCTAssertEqual(registry.activeServerID, second.id)
@@ -175,12 +176,13 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertFalse(userDefaults.bool(forKey: ServerRegistry.legacyMigrationCompletedKey))
     }
 
-    func testLegacyMigrationDoesNotResurrectDeletedServerWhenRegistryIsEmpty() throws {
+    func testLegacyMigrationDoesNotResurrectDeletedServerWhenRegistryIsEmpty() async throws {
         userDefaults.set("https://legacy.example.com", forKey: APIClient.serverURLKey)
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
         let server = try registry.add(displayName: "Existing", baseURL: URL(string: "https://existing.example.com")!)
 
-        try registry.remove(id: server.id)
+        try await registry.purgeAndRemove(id: server.id)
         let reloaded = ServerRegistry(userDefaults: userDefaults)
 
         XCTAssertTrue(reloaded.servers.isEmpty)
