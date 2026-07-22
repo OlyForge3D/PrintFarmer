@@ -57,6 +57,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
+    /// Lowercase `filamentcoveragechanged` invalidation hub (issue #778 /
+    /// PR #732). Delivery is a refetch hint; consumers must call the
+    /// canonical `/api/printers/*` coverage endpoints and never persist
+    /// any field of the event payload as the coverage state. Owned by
+    /// the same coordinator as the other hubs so nested cross-hub
+    /// deliveries FIFO through the service-wide guard.
+    private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
 
     /// Race-free connection-state read. Delegates to the hub's serial
     /// executor so any pending `setConnectionState` block has been applied
@@ -294,6 +301,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
+        self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
 
         self.decoder = JSONDecoder()
         // r10 blocker #1: register a per-instance specific value on
@@ -511,6 +519,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     @discardableResult
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
         attentionChangedHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onFilamentCoverageChanged(
+        _ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void
+    ) -> SignalRSubscription {
+        filamentCoverageChangedHub.subscribe(handler)
     }
 
     @discardableResult
@@ -1017,6 +1032,20 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 attentionChangedHub.deliver(event)
             } catch {
                 logger.warning("Failed to decode attentionchanged: \(error.localizedDescription)")
+            }
+
+        // issue #778 / PR #732: `filamentcoveragechanged` is a lowercase
+        // invalidation event on `/hubs/printers`. The payload carries
+        // `{printerId?, reason, occurredAt}` — it is a refetch hint, not
+        // coverage truth. Clients refetch the canonical
+        // `/api/printers/*` coverage endpoints; malformed frames are
+        // logged and dropped.
+        case "filamentcoveragechanged":
+            do {
+                let event = try decoder.decode(FilamentCoverageChangedEvent.self, from: argData)
+                filamentCoverageChangedHub.deliver(event)
+            } catch {
+                logger.warning("Failed to decode filamentcoveragechanged: \(error.localizedDescription)")
             }
 
         case "toolheadupdate", "extruderupdate", "heaterbedupdate":

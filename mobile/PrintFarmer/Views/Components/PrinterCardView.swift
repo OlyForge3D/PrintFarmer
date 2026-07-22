@@ -4,6 +4,11 @@ import SwiftUI
 struct PrinterCardView: View {
     let printer: Printer
     var isPendingReady: Bool = false
+    /// Optional coverage snapshot for the badge overlay. When `nil`,
+    /// or when the snapshot's status is `.unknown`, no coverage badge
+    /// is shown (per the #778 contract: `unknown` must not surface a
+    /// covers/runout claim).
+    var coverage: PrinterFilamentCoverage? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,6 +51,17 @@ struct PrinterCardView: View {
 
                 // Filament row — always visible
                 filamentSection
+
+                // Filament coverage badge (#778) — hidden for .unknown.
+                if let coverage, coverage.status != .unknown {
+                    HStack {
+                        FilamentCoverageBadge(
+                            status: coverage.status,
+                            earliestPredictedRunoutAt: coverage.earliestPredictedRunoutAt
+                        )
+                        Spacer()
+                    }
+                }
             }
             .padding(14)
         }

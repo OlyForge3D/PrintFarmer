@@ -3,7 +3,22 @@ import Foundation
 // MARK: - Demo Printer Service
 
 final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
-    private let printers = DemoData.printers
+    private let printers: [Printer]
+
+    /// Default demo constructor (all callers except UI-test bootstrap):
+    /// exposes exactly the demo fleet from `DemoData.printers`.
+    init() {
+        self.printers = DemoData.printers
+    }
+
+    /// UI-test bootstrap constructor (F4-M / #778 cycle-3): appends
+    /// scenario-only printers to the base demo fleet without mutating
+    /// `DemoData`. Used by `--uitesting-filament-coverage-scenario`
+    /// to seed a duplicate display-name pair so XCUI can prove stable-
+    /// id scoping. Non-Farm demo behavior is unaffected.
+    init(additionalPrinters: [Printer]) {
+        self.printers = DemoData.printers + additionalPrinters
+    }
 
     func list(includeDisabled: Bool) async throws -> [Printer] {
         printers

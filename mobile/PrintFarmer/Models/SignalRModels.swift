@@ -78,6 +78,32 @@ struct AttentionChangedEvent: Codable, Sendable, Equatable {
     let occurredAt: Date
 }
 
+// MARK: - Filament Coverage Invalidation (F4-M / issue #778)
+
+/// Invalidation payload for the lowercase `filamentcoveragechanged`
+/// SignalR event emitted by the backend broadcaster shipped in PR #732.
+///
+/// This is an **invalidation hint only**. The client refetches the
+/// canonical `/api/printers/*` coverage endpoints and never persists any
+/// field of this payload as the coverage truth — the wire event was
+/// designed as a debounced "something changed" ping, not a
+/// consistency-preserving delta.
+///
+/// - `printerId` scopes the invalidation. When `nil`, the event covers
+///   the whole fleet (e.g. Spoolman reindex) and every open list/detail
+///   view must invalidate. Detail view models filter by matching id or
+///   this nil scope.
+/// - `reason` is a machine-readable tag (e.g. `printer-status-change`,
+///   `job-lifecycle`, `spool-loaded`). Callers may log it but MUST NOT
+///   branch coverage rendering on it.
+/// - `occurredAt` is the server-side commit timestamp; used for
+///   deterministic logging only.
+struct FilamentCoverageChangedEvent: Codable, Sendable, Equatable {
+    let printerId: UUID?
+    let reason: String
+    let occurredAt: Date
+}
+
 // MARK: - SignalR Connection State
 
 enum SignalRConnectionState: String, Sendable {

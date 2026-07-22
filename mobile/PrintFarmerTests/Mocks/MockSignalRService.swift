@@ -16,6 +16,7 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
+    private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
 
     init() {
         self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
@@ -23,6 +24,7 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
+        self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
     }
 
     /// Race-free connection-state read; drains any pending mutation before
@@ -75,6 +77,13 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     }
 
     @discardableResult
+    func onFilamentCoverageChanged(
+        _ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void
+    ) -> SignalRSubscription {
+        filamentCoverageChangedHub.subscribe(handler)
+    }
+
+    @discardableResult
     func onTaskInvalidated(
         _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
     ) -> SignalRSubscription {
@@ -86,6 +95,13 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     /// on return without a fixed sleep.
     func simulateAttentionChanged(_ event: AttentionChangedEvent) {
         attentionChangedHub.deliverSync(event)
+    }
+
+    /// Simulate a `filamentcoveragechanged` invalidation event for
+    /// testing. Uses the hub's synchronous delivery so tests observe the
+    /// effect before the call returns — no sleeps required.
+    func simulateFilamentCoverageChanged(_ event: FilamentCoverageChangedEvent) {
+        filamentCoverageChangedHub.deliverSync(event)
     }
 
     func simulateTaskInvalidation(target: String) {
@@ -116,6 +132,7 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     var connectionStateSubscriberCount: Int { connectionStateHub.handlerCountForTesting }
     var attentionSubscriberCount: Int { attentionChangedHub.handlerCountForTesting }
+    var filamentCoverageSubscriberCount: Int { filamentCoverageChangedHub.handlerCountForTesting }
     var taskInvalidationSubscriberCount: Int { taskInvalidationHub.handlerCountForTesting }
     var printerUpdateSubscriberCount: Int { printerUpdateHub.handlerCountForTesting }
     var jobQueueSubscriberCount: Int { jobQueueUpdateHub.handlerCountForTesting }

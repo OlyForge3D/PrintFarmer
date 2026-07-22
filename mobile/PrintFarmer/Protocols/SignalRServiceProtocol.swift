@@ -39,6 +39,17 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     @discardableResult
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription
 
+    /// Subscribes to the lowercase `filamentcoveragechanged` invalidation
+    /// event (issue #778 / PR #732). The payload is a refetch hint;
+    /// handlers must trigger a canonical
+    /// `GET /api/printers/{id}/filament-coverage` or
+    /// `GET /api/printers/filament-coverage` refetch and never persist
+    /// any field of the payload as the coverage state.
+    @discardableResult
+    func onFilamentCoverageChanged(
+        _ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void
+    ) -> SignalRSubscription
+
     /// Subscribes to the exact lowercase task invalidation targets shipped by
     /// the server: `taskcreated`, `taskupdated`, and `pendingtaskcount`.
     /// Payloads are refetch hints only; handlers must load `/api/tasks`
