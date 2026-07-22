@@ -122,3 +122,18 @@ Owner (jpapiez) has rescinded the #785/#816/#817 clean-room lockout policy. The 
 **Coordinator handoff:** feature/705 session (this coordinator, `10d59103`) now owns the mobile snapshot coordination end-to-end. Prior coordinator session (`7188e04c`) stood down after handing over.
 
 **References:** #785, #816, #817
+
+---
+## Decision: Sync Feature 705 After Every Merge
+
+**Date:** 2026-07-22
+**Author:** coordinator (via owner directive from jpapiez)
+**Status:** ACTIVE
+
+After each issue pull request merges, immediately synchronize the local
+`feature/705-operator-redesign` branch with
+`origin/feature/705-operator-redesign` before dispatching, rebasing,
+validating, or integrating dependent work.
+
+Confirm local and remote alignment, then use the refreshed remote tip as the
+base for subsequent issue branches and immutable-SHA reviews.
