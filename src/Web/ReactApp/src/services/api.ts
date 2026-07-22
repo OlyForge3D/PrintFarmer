@@ -116,6 +116,13 @@ import {
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
+import type {
+  ModelCollection,
+  ModelCollectionMembership,
+  CreateModelCollectionRequest,
+  UpdateModelCollectionRequest,
+} from "@/types/models";
+import type { TagOption, UpdateTagRequest } from "@/types/admin";
 
 const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
 
@@ -285,6 +292,7 @@ export class ApiClient {
           message: error.message,
           statusCode: error.response?.status || 500,
           details: detailMessage,
+          data: responseData,
         };
         return Promise.reject(apiError);
       }
@@ -2394,6 +2402,26 @@ export class ApiClient {
     return response.data || null;
   }
 
+  /**
+   * Get a single tag by id with its revision/concurrencyToken, typed for the
+   * optimistic-concurrency edit flow (#844/#846).
+   */
+  async getTag(tagId: string): Promise<TagOption | null> {
+    const response = await this.client.get(`/tags/${tagId}`);
+    return (response.data as TagOption) || null;
+  }
+
+  /**
+   * Updates a tag's metadata using optimistic concurrency (#844). `dto.expectedRevision`
+   * must equal the tag's current revision or the server rejects the write with a
+   * structured HTTP 409 conflict (`{ error, expectedRevision, actualRevision }`), which the
+   * response interceptor surfaces via `ApiError.data`.
+   */
+  async updateTag(tagId: string, dto: UpdateTagRequest): Promise<TagOption> {
+    const response = await this.client.put(`/tags/${tagId}`, dto);
+    return response.data as TagOption;
+  }
+
   async assignTagToObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile' | 'Printer'): Promise<void> {
     await this.client.post(`/tags/${objectId}/${tagId}/assign`, null, {
       params: { objectType }
@@ -3857,6 +3885,74 @@ export class ApiClient {
    */
   async clearToolheadSpool(printerId: string, toolheadIndex: number): Promise<void> {
     await this.client.delete(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`);
+  }
+
+  // ============ Model Collections API methods (#843/#846) ============
+  // Personal/shared collections that group 3D models. Owner-or-administrator may mutate;
+  // shared collections are readable by any authenticated user. See ModelCollectionsController.
+
+  /** Lists collections visible to the current user (owned + shared; admins see all). */
+  async getModelCollections(): Promise<ModelCollection[]> {
+    const response = await this.client.get("/model-collections");
+    return response.data || [];
+  }
+
+  /** Gets a single collection by id. */
+  async getModelCollection(id: string): Promise<ModelCollection> {
+    const response = await this.client.get(`/model-collections/${id}`);
+    return response.data;
+  }
+
+  /** Creates a new collection owned by the current user. */
+  async createModelCollection(dto: CreateModelCollectionRequest): Promise<ModelCollection> {
+    const response = await this.client.post("/model-collections", dto);
+    return response.data;
+  }
+
+  /** Updates a collection's name/description. */
+  async updateModelCollection(id: string, dto: UpdateModelCollectionRequest): Promise<ModelCollection> {
+    const response = await this.client.put(`/model-collections/${id}`, dto);
+    return response.data;
+  }
+
+  /** Deletes a collection and its memberships. */
+  async deleteModelCollection(id: string): Promise<void> {
+    await this.client.delete(`/model-collections/${id}`);
+  }
+
+  /** Shares a collection so any authenticated user can read it. */
+  async shareModelCollection(id: string): Promise<ModelCollection> {
+    const response = await this.client.post(`/model-collections/${id}/share`);
+    return response.data;
+  }
+
+  /** Unshares a collection so only the owner and administrators can read it. */
+  async unshareModelCollection(id: string): Promise<ModelCollection> {
+    const response = await this.client.post(`/model-collections/${id}/unshare`);
+    return response.data;
+  }
+
+  /** Lists the memberships (model references) of a collection. */
+  async listModelCollectionMembers(id: string): Promise<ModelCollectionMembership[]> {
+    const response = await this.client.get(`/model-collections/${id}/members`);
+    return response.data || [];
+  }
+
+  /** Adds a single model to a collection. Idempotent when already present. */
+  async addModelCollectionMember(id: string, modelId: string): Promise<ModelCollectionMembership> {
+    const response = await this.client.post(`/model-collections/${id}/members`, { modelId });
+    return response.data;
+  }
+
+  /** Removes a single model from a collection. Idempotent when already absent. */
+  async removeModelCollectionMember(id: string, modelId: string): Promise<void> {
+    await this.client.delete(`/model-collections/${id}/members/${modelId}`);
+  }
+
+  /** Replaces a collection's entire membership set. */
+  async replaceModelCollectionMembers(id: string, modelIds: string[]): Promise<ModelCollection> {
+    const response = await this.client.put(`/model-collections/${id}/members`, { modelIds });
+    return response.data;
   }
 }
 

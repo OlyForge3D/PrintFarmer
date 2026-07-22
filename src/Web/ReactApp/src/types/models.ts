@@ -56,3 +56,45 @@ export interface Model3DSearchResponse {
   pageSize: number;
   totalPages: number;
 }
+
+/**
+ * A user-owned collection (album) that groups 3D models together. Mirrors
+ * `ModelCollectionDto` on the backend (camelCase JSON, #843/#844/#845).
+ */
+export interface ModelCollection {
+  id: string;
+  name: string;
+  description?: string | null;
+  ownerUserId: string;
+  isShared: boolean;
+  createdAt: string;
+  updatedAt: string;
+  memberCount: number;
+  modelIds: string[];
+  /** Monotonic per-collection revision, bumped on every metadata mutation. */
+  revision: number;
+  /** Optimistic-concurrency token regenerated on every metadata mutation. */
+  concurrencyToken: string;
+}
+
+/** A single collection membership row. Mirrors `ModelCollectionMembershipDto`. */
+export interface ModelCollectionMembership {
+  id: string;
+  collectionId: string;
+  modelId: string;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+}
+
+/** Request payload to create a new collection. */
+export interface CreateModelCollectionRequest {
+  name: string;
+  description?: string;
+}
+
+/** Request payload to update an existing collection's metadata. */
+export interface UpdateModelCollectionRequest {
+  name: string;
+  description?: string;
+}

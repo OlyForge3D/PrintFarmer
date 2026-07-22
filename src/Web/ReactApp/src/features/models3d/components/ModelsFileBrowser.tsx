@@ -9,7 +9,7 @@ import {
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { Button } from '@/common/components/ui';
-import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon, FolderPlusIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Model, Model3DSearchResponse } from '@/types/models';
 import { apiClient } from '@/services/api';
@@ -108,7 +108,19 @@ interface ModelsFileBrowserProps {
   onSelectionChange?: (ids: string[]) => void;
   onOpenModel?: (model: Model) => void;
   onSliceModel?: (model: Model) => void;
+  /**
+   * When provided (non-null), restricts the browser to only these model ids, filtered
+   * client-side (the /3d-models/query endpoint has no collection/id filter, #846). Pass
+   * `null`/`undefined` to show all models.
+   */
+  collectionModelIds?: string[] | null;
+  /** Shown alongside the tag bulk-action button when there is a selection. */
+  onShowCollectionModal?: () => void;
 }
+
+/** Page size used to fetch models when a collection filter is active, so the client-side
+ * id filter operates over the whole collection rather than one server page at a time. */
+const COLLECTION_FILTER_PAGE_SIZE = 500;
 
 export const ModelsFileBrowser = ({
   viewMode,
@@ -121,6 +133,8 @@ export const ModelsFileBrowser = ({
   onSelectionChange,
   onOpenModel,
   onSliceModel,
+  collectionModelIds,
+  onShowCollectionModal,
 }: ModelsFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -205,12 +219,12 @@ export const ModelsFileBrowser = ({
     (query: FileQueryState) => ({
       query: query.search || undefined,
       tagIds: selectedTags.length ? selectedTags : undefined,
-      page: query.page,
-      pageSize: query.pageSize,
+      page: collectionModelIds ? 1 : query.page,
+      pageSize: collectionModelIds ? COLLECTION_FILTER_PAGE_SIZE : query.pageSize,
       sortBy: query.sortBy === 'name' ? 'name' : query.sortBy === 'size' ? 'size' : 'uploadedAt',
       descending: query.sortOrder === 'desc',
     }),
-    [selectedTags]
+    [selectedTags, collectionModelIds]
   );
 
   const fetcher = useCallback(
@@ -219,17 +233,28 @@ export const ModelsFileBrowser = ({
       const response = await apiClient.get3DModelsQuery(payload);
 
       const searchResponse = response as unknown as Model3DSearchResponse;
-      const totalSize = searchResponse.models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
+      let models = searchResponse.models;
+      let totalCount = searchResponse.totalCount;
+      let totalPages = searchResponse.totalPages;
+
+      if (collectionModelIds) {
+        const idSet = new Set(collectionModelIds);
+        models = models.filter((model: Model) => idSet.has(model.id));
+        totalCount = models.length;
+        totalPages = 1;
+      }
+
+      const totalSize = models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
 
       return {
-        items: searchResponse.models,
-        totalItems: searchResponse.totalCount,
-        totalPages: searchResponse.totalPages,
+        items: models,
+        totalItems: totalCount,
+        totalPages,
         totalSize,
         page: searchResponse.page,
       };
     },
-    []
+    [collectionModelIds]
   );
 
   const config: UseFileBrowserConfig<Model> = useMemo(
@@ -337,6 +362,18 @@ export const ModelsFileBrowser = ({
           iconLeft={<TagIcon className="h-4 w-4" />}
         >
           ({selection.length})
+        </Button>
+      )}
+      {selection.length > 0 && onShowCollectionModal && (
+        <Button
+          type="button"
+          onClick={onShowCollectionModal}
+          variant="secondary"
+          size="sm"
+          title="Add selected models to a collection"
+          iconLeft={<FolderPlusIcon className="h-4 w-4" />}
+        >
+          Add to collection ({selection.length})
         </Button>
       )}
     </>

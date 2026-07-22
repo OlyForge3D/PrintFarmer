@@ -107,6 +107,10 @@ import {
   mdiClipboardListOutline,
   mdiShield,
   mdiCloudDownload,
+  mdiShareVariant,
+  mdiEarth,
+  mdiAccountMultiple,
+  mdiFolderPlusOutline,
 } from '@mdi/js';
 
 interface IconProps {
@@ -3052,6 +3056,90 @@ export function CloudDownloadIcon({ className = 'w-4 h-4', ariaLabel = 'Cloud do
       role="img"
     >
       <path fill="currentColor" d={mdiCloudDownload} />
+    </svg>
+  );
+}
+
+/**
+ * Share icon for sharing collections with all users
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <ShareIcon className="w-4 h-4" ariaLabel="Share collection" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ShareIcon({ className = 'w-4 h-4', ariaLabel = 'Share' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiShareVariant} />
+    </svg>
+  );
+}
+
+/**
+ * Earth/globe icon indicating a collection is shared with all users
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <EarthIcon className="w-4 h-4" ariaLabel="Shared collection" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function EarthIcon({ className = 'w-4 h-4', ariaLabel = 'Shared' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiEarth} />
+    </svg>
+  );
+}
+
+/**
+ * Multiple-accounts icon indicating shared/team collections
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <AccountMultipleIcon className="w-4 h-4" ariaLabel="Shared collections" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function AccountMultipleIcon({ className = 'w-4 h-4', ariaLabel = 'Shared with everyone' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiAccountMultiple} />
+    </svg>
+  );
+}
+
+/**
+ * Folder-plus icon for creating a new collection
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <FolderPlusIcon className="w-4 h-4" ariaLabel="New collection" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FolderPlusIcon({ className = 'w-4 h-4', ariaLabel = 'New collection' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFolderPlusOutline} />
     </svg>
   );
 }
