@@ -113,7 +113,7 @@ public interface IPartHarvestService
 
 /// <summary>
 /// Seam for the F8 (#713) shift compiler that lists SKUs currently
-/// below their reorder points.
+/// at or below their reorder points.
 /// </summary>
 public interface IReorderEvaluationService
 {

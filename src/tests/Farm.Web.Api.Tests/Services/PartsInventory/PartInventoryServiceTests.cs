@@ -818,4 +818,62 @@ public class PartInventoryServiceTests : IDisposable
         Assert.Equal("PF-TEST-01", candidate.Sku);
         Assert.Equal(0, candidate.Deficit);
     }
+
+    [Fact]
+    public async Task GetReorderCandidatesAsync_BoundariesInactiveRemovedAndBin_ReturnsAuthoritativeCandidates()
+    {
+        Bin defaultBin = await SeedBinAsync("BIN-REORDER");
+        DateTime now = DateTime.UtcNow;
+        var below = NewPart("PF-01-BELOW", onHand: 4, reorderPoint: 5, isActive: true, now);
+        below.DefaultBinId = defaultBin.Id;
+        var equal = NewPart("PF-02-EQUAL", onHand: 5, reorderPoint: 5, isActive: true, now);
+        var above = NewPart("PF-03-ABOVE", onHand: 6, reorderPoint: 5, isActive: true, now);
+        var inactive = NewPart("PF-04-INACTIVE", onHand: 0, reorderPoint: 5, isActive: false, now);
+        var zeroThreshold = NewPart("PF-05-ZERO", onHand: 0, reorderPoint: 0, isActive: true, now);
+        var removed = NewPart("PF-07-REMOVED", onHand: 0, reorderPoint: 5, isActive: true, now);
+
+        await using (var db = new AppDbContext(_options))
+        {
+            db.PartInventories.AddRange(below, equal, above, inactive, zeroThreshold, removed);
+            _ = await db.SaveChangesAsync();
+            _ = db.PartInventories.Remove(removed);
+            _ = await db.SaveChangesAsync();
+        }
+
+        var sut = new ReorderEvaluationService(_factory);
+        IReadOnlyList<Farm.Infrastructure.Dtos.PartsInventory.ReorderCandidateResponse> candidates =
+            await sut.GetReorderCandidatesAsync();
+
+        Assert.Equal(
+            [below.Id, equal.Id, zeroThreshold.Id],
+            candidates.Select(candidate => candidate.PartInventoryId));
+        Assert.DoesNotContain(candidates, candidate => candidate.PartInventoryId == above.Id);
+        Assert.DoesNotContain(candidates, candidate => candidate.PartInventoryId == inactive.Id);
+        Assert.DoesNotContain(candidates, candidate => candidate.PartInventoryId == removed.Id);
+
+        Farm.Infrastructure.Dtos.PartsInventory.ReorderCandidateResponse belowCandidate =
+            Assert.Single(candidates, candidate => candidate.PartInventoryId == below.Id);
+        Assert.Equal(1, belowCandidate.Deficit);
+        Assert.Equal(defaultBin.Id, belowCandidate.DefaultBinId);
+        Assert.Equal(defaultBin.Code, belowCandidate.DefaultBinCode);
+        Assert.Equal(defaultBin.Name, belowCandidate.DefaultBinName);
+        Assert.Equal(0, Assert.Single(candidates, candidate => candidate.PartInventoryId == zeroThreshold.Id).Deficit);
+    }
+
+    private static PartInventory NewPart(
+        string sku,
+        int onHand,
+        int reorderPoint,
+        bool isActive,
+        DateTime now) => new()
+        {
+            Id = Guid.NewGuid(),
+            Sku = sku,
+            Name = sku,
+            OnHand = onHand,
+            ReorderPoint = reorderPoint,
+            IsActive = isActive,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
 }

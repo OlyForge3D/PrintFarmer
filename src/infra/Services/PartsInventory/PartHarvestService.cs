@@ -962,8 +962,10 @@ public class ReorderEvaluationService(IDbContextFactory<AppDbContext> dbFactory)
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
         List<PartInventory> below = await db.PartInventories
             .AsNoTracking()
+            .Include(part => part.DefaultBin)
             .Where(part => part.IsActive && part.OnHand <= part.ReorderPoint)
             .OrderBy(part => part.Sku)
+            .ThenBy(part => part.Id)
             .ToListAsync(ct);
 
         return below
@@ -973,7 +975,10 @@ public class ReorderEvaluationService(IDbContextFactory<AppDbContext> dbFactory)
                 part.Name,
                 part.OnHand,
                 part.ReorderPoint,
-                Math.Max(0, part.ReorderPoint - part.OnHand)))
+                Math.Max(0, part.ReorderPoint - part.OnHand),
+                part.DefaultBinId,
+                part.DefaultBin?.Code,
+                part.DefaultBin?.Name))
             .ToList();
     }
 }
