@@ -1281,6 +1281,357 @@ final class AttentionFeedViewModelTests: XCTestCase {
         XCTAssertEqual(vm.snapshot?.items.first?.id, "runout:fresh")
     }
 
+    // MARK: - Cycle 4: strict request/event ordering
+
+    func testEventQueuedBeforeRefreshDrainingDuringSuspensionYieldsExactlyOneGET() async {
+        // Disputed timeline (Hicks blocker 1): an invalidation is
+        // enqueued BEFORE a canonical refresh starts, but its
+        // callback drains WHILE the refresh's fetch is suspended.
+        // The refresh must cover it — total canonical GET count = 1.
+        let feed = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:1")],
+            healthyPrinterCount: 2
+        )
+        let gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [.gated(gate)])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Event enqueues BEFORE any refresh. eventSeq=1.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:1",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+
+        // Refresh starts. Its start-cover watermark = 1 because the
+        // event's sequence was already issued.
+        let refreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        // Drain the queued callback while the refresh is suspended.
+        // eventSeq(1) > lastCovered(0) so it latches pending, but
+        // activeRefreshCount>0 so it MUST NOT dispatch.
+        await callbackQueue.runNext()
+        let midCount = await service.loadCallCount
+        XCTAssertEqual(
+            midCount, 1,
+            "In-flight drain must not launch a concurrent duplicate GET"
+        )
+
+        // Resolve the refresh. cover(1) → lastCovered=1. pending(1)
+        // is covered → clear. No follow-up.
+        await gate.succeed(feed)
+        _ = await refreshTask.value
+
+        let finalCount = await service.loadCallCount
+        XCTAssertEqual(
+            finalCount, 1,
+            "Event that preceded the refresh start is covered by it — total 1 GET"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 2)
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "No follow-up should be scheduled when pending is covered"
+        )
+    }
+
+    func testEventArrivingAfterRefreshStartDrainingDuringYieldsFollowupGET() async {
+        // Disputed timeline (Hicks blocker 2): an invalidation arrives
+        // AFTER a refresh has started, and its callback drains BEFORE
+        // the refresh completes. Because the refresh's cover watermark
+        // was captured before the event, the event is NOT covered by
+        // that refresh — completion must launch exactly one follow-up.
+        let firstFeed = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:1")],
+            healthyPrinterCount: 1
+        )
+        let followUpFeed = makeAttentionFeed(
+            items: [makeAttentionItem(id: "runout:2")],
+            healthyPrinterCount: 5
+        )
+        let gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [
+            .gated(gate),
+            .value(followUpFeed),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Refresh starts FIRST — cover watermark = 0.
+        let refreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        // Event arrives DURING the in-flight refresh. eventSeq=1.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+
+        // Drain before refresh completes. Latches pending=1.
+        // activeRefreshCount>0 → no dispatch.
+        await callbackQueue.runNext()
+        let midCount = await service.loadCallCount
+        XCTAssertEqual(
+            midCount, 1,
+            "In-flight drain must not launch concurrent GET"
+        )
+
+        // Complete refresh. cover(0) → lastCovered=0. pending(1) > 0
+        // → launch exactly one follow-up through the enqueuer.
+        await gate.succeed(firstFeed)
+        _ = await refreshTask.value
+
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        let finalCount = await service.loadCallCount
+        XCTAssertEqual(
+            finalCount, 2,
+            "Event uncovered by first refresh must yield exactly one follow-up GET"
+        )
+        XCTAssertEqual(
+            vm.snapshot?.healthyPrinterCount, 5,
+            "Follow-up must apply the fresh payload"
+        )
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
+    func testEventArrivingAfterRefreshStartDrainingAfterCompletionYieldsSecondGET() async {
+        // Complementary ordering to the previous test: event arrives
+        // during the in-flight refresh but its callback drains AFTER
+        // the refresh has completed. The completed refresh didn't
+        // cover it, so the drain must dispatch a fresh GET.
+        let firstFeed = makeAttentionFeed(healthyPrinterCount: 1)
+        let secondFeed = makeAttentionFeed(healthyPrinterCount: 5)
+        let gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [
+            .gated(gate),
+            .value(secondFeed),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let refreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        // Event during flight, callback NOT drained yet.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+
+        // Complete refresh FIRST. cover(0), no pending yet → no
+        // follow-up launched from completion.
+        await gate.succeed(firstFeed)
+        _ = await refreshTask.value
+        let midCount = await service.loadCallCount
+        XCTAssertEqual(midCount, 1)
+
+        // Drain callback AFTER completion. eventSeq(1) > lastCovered(0)
+        // → uncovered. Active, activeCount=0 → dispatch refresh
+        // directly (not queued as a follow-up).
+        await callbackQueue.runNext()
+
+        let finalCount = await service.loadCallCount
+        XCTAssertEqual(
+            finalCount, 2,
+            "Late-drained event uncovered by prior refresh must fire a fresh GET"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 5)
+    }
+
+    func testMultipleEventsDuringInFlightRefreshCoalesceIntoOneFollowupGET() async {
+        // Blocker requirement: "Multiple invalidations arriving during
+        // one in-flight refresh coalesce into exactly one follow-up
+        // GET, not N concurrent/sequential GETs."
+        let firstFeed = makeAttentionFeed(healthyPrinterCount: 1)
+        let followUpFeed = makeAttentionFeed(healthyPrinterCount: 7)
+        let gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [
+            .gated(gate),
+            .value(followUpFeed),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Refresh starts (cover=0).
+        let refreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        // THREE events during flight. Sequences 1, 2, 3.
+        for _ in 0..<3 {
+            signalR.simulateAttentionChanged(
+                AttentionChangedEvent(
+                    itemId: "failure:x",
+                    changeKind: .updated,
+                    occurredAt: Date()
+                )
+            )
+        }
+        await callbackQueue.waitForCount(3)
+
+        // Drain all three. Each latches pending (max wins → 3). None
+        // dispatch (activeCount>0).
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        let midCount = await service.loadCallCount
+        XCTAssertEqual(
+            midCount, 1,
+            "Three events during flight must not dispatch three GETs"
+        )
+
+        // Complete refresh. cover(0), pending(3) > 0 → launch EXACTLY
+        // ONE follow-up (not three).
+        await gate.succeed(firstFeed)
+        _ = await refreshTask.value
+
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "Coalescing must produce exactly one follow-up, not one per event"
+        )
+        await callbackQueue.runNext()
+
+        let finalCount = await service.loadCallCount
+        XCTAssertEqual(
+            finalCount, 2,
+            "Total: initial GET + one coalesced follow-up = 2"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 7)
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
+    func testFailedRefreshWithUncoveredEventDoesNotAutoLoop() async {
+        // Blocker requirement: "A failed follow-up must not loop
+        // without a newer event or explicit operator refresh." Applies
+        // to failed refreshes generally, not just follow-ups.
+        let gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [.gated(gate)])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let refreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        // Event during flight → latches pending, no dispatch.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // Refresh FAILS. Must not launch a follow-up despite the
+        // pending uncovered event. (User pull-to-refresh is the
+        // recovery path.)
+        await gate.fail(.forced("boom"))
+        _ = await refreshTask.value
+
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "Failed refresh must NOT schedule a follow-up — that would create a retry loop"
+        )
+        let calls = await service.loadCallCount
+        XCTAssertEqual(calls, 1, "Only the initial GET; no retry")
+        XCTAssertEqual(vm.phase, .error)
+        XCTAssertEqual(vm.loadFailure?.message, "boom")
+    }
+
+    func testUserRefreshAfterFailedRefreshCoversStrandedEvent() async {
+        // Recovery half of the previous test: pending coverage from a
+        // failed refresh remains latched, and the operator's next
+        // canonical refresh (pull-to-refresh) covers it via its own
+        // start-cover watermark.
+        let recoveryFeed = makeAttentionFeed(healthyPrinterCount: 6)
+        let gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [
+            .gated(gate),
+            .value(recoveryFeed),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let refreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        await gate.fail(.forced("boom"))
+        _ = await refreshTask.value
+        XCTAssertEqual(callbackQueue.count, 0, "No auto-follow-up after failure")
+
+        // User pull-to-refresh: cover watermark = eventSequenceBox
+        // current = 1. Success covers the stranded event.
+        let userRefreshOK = await vm.refresh()
+        XCTAssertTrue(userRefreshOK)
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 6)
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "User refresh success covers pending — no further follow-up"
+        )
+        let calls = await service.loadCallCount
+        XCTAssertEqual(calls, 2)
+    }
+
     // MARK: - Helpers
 
     private func configuredViewModel(

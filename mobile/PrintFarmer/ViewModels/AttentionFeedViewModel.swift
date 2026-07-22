@@ -97,29 +97,37 @@ struct AttentionLifecycleToken: Equatable, Sendable {
     fileprivate let value: UInt64
 }
 
-/// Lock-protected monotonic counter incremented after every applied
-/// refresh completion. The SignalR handler reads this counter from the
-/// signalR delivery queue at enqueue time and again at drain time on
-/// MainActor. If the counter has advanced between enqueue and drain,
-/// a refresh has already covered the invalidation and the queued
-/// closure is a no-op — preventing the double-fetch pattern where a
-/// callback queued off-screen drains AFTER `bootstrap` has already
-/// completed its own refresh.
+/// Lock-protected monotonic event sequence issuer. The SignalR handler
+/// issues a strictly-increasing sequence number for each event at
+/// **delivery time** (on the signalR delivery queue). The MainActor
+/// then uses that number, alongside a per-refresh "start-cover
+/// snapshot" of the sequence, to decide whether a canonical refresh
+/// has already covered the event or a follow-up is required.
+///
+/// This box replaces the previous completion-only fence, which could
+/// not distinguish an event that preceded a refresh request from one
+/// that arrived during it, and therefore either issued a redundant
+/// second GET or dropped a necessary follow-up.
 ///
 /// The class is `Sendable` so it can be captured by closures that
-/// straddle the signalR queue and MainActor. The lock is sufficient —
-/// reads and writes are all short scalar copies.
-final class RefreshCompletionSequenceBox: @unchecked Sendable {
+/// straddle the signalR delivery queue and MainActor. The lock is
+/// sufficient — reads and writes are all short scalar copies.
+final class EventSequenceBox: @unchecked Sendable {
     private let lock = NSLock()
     private var _value: UInt64 = 0
 
-    var value: UInt64 {
+    /// Latest issued sequence, or 0 if none have been issued. Read
+    /// on MainActor at refresh start to snapshot the "cover watermark".
+    var currentValue: UInt64 {
         lock.lock()
         defer { lock.unlock() }
         return _value
     }
 
-    fileprivate func advance() -> UInt64 {
+    /// Atomically increment and return the new sequence. Called on the
+    /// signalR delivery queue when an `attentionchanged` event
+    /// arrives, giving every event a unique strictly-increasing id.
+    func issueNext() -> UInt64 {
         lock.lock()
         defer { lock.unlock() }
         _value &+= 1
@@ -225,15 +233,32 @@ final class AttentionFeedViewModel {
     /// older completion that fires after a newer request has taken over.
     @ObservationIgnored private var loadMoreOwnerStamp: UInt64 = 0
     @ObservationIgnored private var attentionSubscription: SignalRSubscription?
-    /// Sendable, lock-protected refresh-completion sequence. Written on
-    /// MainActor after each applied refresh; read from the signalR
-    /// delivery queue at enqueue time (to snapshot the pre-invalidation
-    /// value) and from MainActor at drain time. If the counter has
-    /// advanced between enqueue and drain, a refresh has already
-    /// covered the invalidation — the queued closure is a no-op.
-    /// See #779 blocker 2: queued invalidation must not double-fetch on
-    /// re-entry.
-    @ObservationIgnored private let refreshCompletionBox = RefreshCompletionSequenceBox()
+    /// Sendable, lock-protected monotonic event sequence issuer. Each
+    /// SignalR `attentionchanged` event is stamped with a strictly
+    /// increasing sequence at delivery time. Every refresh captures
+    /// the current sequence at request-start as its "cover watermark"
+    /// — the refresh covers exactly the events whose sequence is ≤
+    /// that watermark.
+    @ObservationIgnored private let eventSequenceBox = EventSequenceBox()
+    /// The highest event sequence that has been covered by an APPLIED
+    /// successful canonical refresh. Advanced only on `applySnapshot`
+    /// success; failures and disabled outcomes do NOT advance it, so
+    /// pending coverage requirements survive a failed refresh without
+    /// creating a retry loop.
+    @ObservationIgnored private var lastCoveredEventSequence: UInt64 = 0
+    /// The highest event sequence that has been received (via SignalR
+    /// drain) but has not yet been guaranteed covered by a completed
+    /// successful refresh. Cleared when a subsequent refresh's cover
+    /// watermark reaches it. Drives the follow-up decision at refresh
+    /// completion and the drain decision at reactivation.
+    @ObservationIgnored private var pendingCoverageEventSequence: UInt64?
+    /// Number of canonical refreshes currently in flight (started but
+    /// not yet completed). Event-drain coalescing uses this to avoid
+    /// launching a concurrent duplicate refresh merely because a
+    /// callback drained during an in-flight fetch. Also gates the
+    /// follow-up dispatch on the completion path so only the LAST
+    /// completing refresh may launch a follow-up.
+    @ObservationIgnored private var activeRefreshCount: Int = 0
 
     /// Deduplicated ID set for `loadMore` appends. Rebuilt atomically on
     /// canonical refresh so refresh resets are all-or-nothing.
@@ -318,13 +343,13 @@ final class AttentionFeedViewModel {
 
         let capturedEpoch = authorityEpoch
         let enqueue = callbackEnqueuer
-        let sequenceBox = refreshCompletionBox
+        let sequenceBox = eventSequenceBox
         attentionSubscription = signalRService.onAttentionChanged { [weak self] _ in
-            // Snapshot the refresh-completion sequence at enqueue time.
-            // The SignalR handler may run on the signalR delivery
-            // queue; the sequence box is lock-protected so this is
-            // safe from off-MainActor threads.
-            let seqAtEnqueue = sequenceBox.value
+            // Issue the event's monotonic sequence at signalR delivery
+            // time. This gives a strict ordering between events and
+            // subsequent refresh-start "cover watermarks", regardless
+            // of when the callback drains on MainActor.
+            let eventSeq = sequenceBox.issueNext()
             enqueue { [weak self] in
                 guard let self,
                       self.matchesAuthorityIgnoringActive(
@@ -334,25 +359,65 @@ final class AttentionFeedViewModel {
                       ) else {
                     return
                 }
-                // #779 blocker 2: if a refresh has completed since this
-                // callback was enqueued, that refresh has already
-                // covered the invalidation this callback would have
-                // signalled. Skip to avoid a double-fetch on re-entry.
-                if sequenceBox.value > seqAtEnqueue {
-                    return
-                }
-                // `attentionchanged` is a diagnostic invalidation
-                // signal. It never carries item truth — we refetch the
-                // canonical page. When the view is inactive we queue
-                // exactly one refresh to drain on re-entry so events
-                // received off-screen don't leave stale content.
-                if self.isActive {
-                    await self.refresh()
-                } else {
-                    self.pendingReloadOnActivate = true
-                }
+                await self.handleInvalidationDrain(eventSequence: eventSeq)
             }
         }
+    }
+
+    /// Central invalidation-drain handler with strict request/event
+    /// ordering. Called on MainActor via `callbackEnqueuer`.
+    ///
+    /// The property we enforce:
+    ///
+    ///   > An event E is COVERED by canonical refresh R iff R started
+    ///   > strictly after E was received; equivalently, R's start-cover
+    ///   > watermark ≥ E's sequence.
+    ///
+    /// This lets us distinguish an event that preceded a request from
+    /// one that arrived during it, and route them correctly:
+    ///
+    /// * Already-covered event → skip (no fetch).
+    /// * Off-screen event → latch pending + queue reload on activate.
+    /// * Uncovered event during an in-flight refresh → latch pending
+    ///   without dispatching (the completion path launches a
+    ///   follow-up if the in-flight didn't cover us).
+    /// * Uncovered event with no refresh in flight → dispatch refresh.
+    private func handleInvalidationDrain(eventSequence eventSeq: UInt64) async {
+        // Already covered by a completed successful refresh — no work.
+        if eventSeq <= lastCoveredEventSequence { return }
+
+        // Latch coverage requirement. This is authoritative: any refresh
+        // completion path checks pendingCoverageEventSequence against
+        // its own cover watermark. Setting it here is safe even if
+        // we ultimately end up dispatching immediately (redundant with
+        // the dispatched refresh's cover snapshot).
+        pendingCoverageEventSequence = max(
+            pendingCoverageEventSequence ?? 0,
+            eventSeq
+        )
+
+        if !isActive {
+            // Off-screen: drain on activate.
+            pendingReloadOnActivate = true
+            return
+        }
+
+        if activeRefreshCount > 0 {
+            // A refresh is already in flight. It may or may not cover
+            // this event (depends on its start-cover watermark vs
+            // eventSeq). The completion path will check
+            // pendingCoverageEventSequence and launch a follow-up if
+            // uncovered. Do NOT dispatch a concurrent refresh here —
+            // that would violate the "no duplicate GET merely because
+            // a callback drained" invariant.
+            return
+        }
+
+        // Active and idle: dispatch a canonical refresh. Its cover
+        // watermark will include this event (since it starts after
+        // the event was received) and its success completion will
+        // clear the pending coverage requirement.
+        await refresh()
     }
 
     /// Called when the view leaves the screen. The next `configure` for
@@ -504,6 +569,21 @@ final class AttentionFeedViewModel {
         let stampedLoad = advanceLoadStamp()
         let stampedActivation = activationEpoch
 
+        // Snapshot the event-sequence "cover watermark" NOW, before
+        // awaiting the fetch. This request covers exactly the events
+        // whose sequence is ≤ this watermark. Events issued after this
+        // point are NOT covered — the completion path will schedule a
+        // follow-up refresh for any such pending coverage.
+        let startCoverSnapshot = eventSequenceBox.currentValue
+
+        // Track the concurrent-refresh count so:
+        //   (1) event-drain coalescing knows to latch pending instead
+        //       of dispatching a duplicate, and
+        //   (2) only the LAST completing refresh may launch a follow-up
+        //       (avoiding duplicate follow-ups when multiple refreshes
+        //       overlap).
+        activeRefreshCount += 1
+
         if snapshot == nil {
             phase = .loading
         } else {
@@ -511,6 +591,9 @@ final class AttentionFeedViewModel {
         }
 
         let outcome = await Self.fetchFirstPage(service: service)
+
+        // Always release our slot, even on stale drop.
+        activeRefreshCount = max(0, activeRefreshCount - 1)
 
         guard matchesActive(loadStamp: stampedLoad, activation: stampedActivation) else {
             // Stale generation OR view went inactive OR reactivated
@@ -536,12 +619,47 @@ final class AttentionFeedViewModel {
         switch outcome {
         case .success(let feed):
             applySnapshot(feed, mode: .refresh)
+            // Advance coverage. Any event with sequence ≤ startCover is
+            // now proven covered by an applied successful refresh.
+            lastCoveredEventSequence = max(lastCoveredEventSequence, startCoverSnapshot)
+            if let pending = pendingCoverageEventSequence,
+               pending <= lastCoveredEventSequence {
+                pendingCoverageEventSequence = nil
+            }
+            // Follow-up gate:
+            //   * only the LAST completing refresh dispatches
+            //     (activeRefreshCount == 0), so multiple overlapping
+            //     refreshes don't each launch a follow-up;
+            //   * only when uncovered pending coverage remains, so
+            //     redundant follow-ups aren't scheduled.
+            //
+            // Multi-event coalescing: N events arriving during a
+            // single in-flight refresh all latch onto the same
+            // pendingCoverageEventSequence (max wins), and this
+            // completion launches at most ONE follow-up covering all
+            // of them.
+            if activeRefreshCount == 0,
+               let pending = pendingCoverageEventSequence,
+               pending > lastCoveredEventSequence {
+                let enqueue = callbackEnqueuer
+                enqueue { [weak self] in
+                    await self?.refresh()
+                }
+            }
             return true
         case .featureDisabled:
             applyDisabled()
+            // Do NOT advance lastCoveredEventSequence or launch a
+            // follow-up: disabled is a terminal state that requires
+            // explicit recovery (retryDisabledRecovery).
             return false
         case .failure(let error):
             applyFailure(error)
+            // No-auto-loop invariant: a failed refresh does NOT
+            // advance coverage and does NOT launch a follow-up.
+            // Pending coverage persists until either a subsequent
+            // successful refresh clears it (user pull-to-refresh) or
+            // a genuinely later event triggers a new drain cycle.
             return false
         }
     }
@@ -758,7 +876,6 @@ final class AttentionFeedViewModel {
         paginationFailure = nil
         isRefreshing = false
         phase = .loaded
-        _ = refreshCompletionBox.advance()
     }
 
     private func applyAppendedPage(_ feed: AttentionFeed) {
@@ -794,7 +911,6 @@ final class AttentionFeedViewModel {
         // stays `.loaded` and the shell renders the failure inline via
         // `loadFailure`. #779 requires refresh error to remain
         // pull-to-refresh accessible without wedging the list.
-        _ = refreshCompletionBox.advance()
     }
 
     private func applyDisabled() {
@@ -807,7 +923,6 @@ final class AttentionFeedViewModel {
         isRefreshing = false
         isLoadingMore = false
         phase = .disabled
-        _ = refreshCompletionBox.advance()
     }
 
     private static func groupBySeverity(_ items: [AttentionItem]) -> [AttentionSeverityGroup] {
@@ -863,6 +978,12 @@ final class AttentionFeedViewModel {
         isRefreshing = false
         isLoadingMore = false
         pendingReloadOnActivate = false
+        // Coverage state is per-authority: any latched pending
+        // coverage from the old authority is meaningless once the
+        // service/signalR pair has been replaced.
+        pendingCoverageEventSequence = nil
+        lastCoveredEventSequence = 0
+        activeRefreshCount = 0
 
         guard resetState else { return }
         attentionService = nil
