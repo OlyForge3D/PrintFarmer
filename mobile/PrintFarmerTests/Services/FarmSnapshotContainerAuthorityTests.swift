@@ -44,7 +44,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: b.id)
 
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
@@ -72,7 +72,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: a.id)
 
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
@@ -105,7 +105,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         try reg.setActive(id: a.id)
         let owners = ownerStore() // no owner persisted → token-only/legacy
 
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
@@ -132,7 +132,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
 
         // Phase 1 (online): seed a cached snapshot for (A, userA).
-        let seedAuthority = FarmSnapshotAuthority()
+        let seedAuthority = FarmSnapshotFixtures.makeAuthority()
         let seedStore = FarmSnapshotStore(authority: seedAuthority, rootURL: root)
         let seedSession = seedAuthority.mint(namespace: namespace, generation: 0)!
         await seedStore.activate(session: seedSession)
@@ -144,7 +144,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
         // Phase 2 (offline relaunch): fresh authority + store on the same disk,
         // same persisted owner, NO network.
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
@@ -172,7 +172,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
 
         // Seed both namespaces.
-        let seedAuthority = FarmSnapshotAuthority()
+        let seedAuthority = FarmSnapshotFixtures.makeAuthority()
         let seedStore = FarmSnapshotStore(authority: seedAuthority, rootURL: root)
         let envA = FarmSnapshotFixtures.envelope(namespace: nsA, millis: 1000)
         let envB = FarmSnapshotFixtures.envelope(namespace: nsB, millis: 2000)
@@ -183,7 +183,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         await seedStore.activate(session: sB)
         XAssertEqual(await seedStore.commit(envB, capturedSession: sB), .committed)
 
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
@@ -257,7 +257,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let namespace = FarmSnapshotNamespace(serverID: a.id, userID: userA)
         let root = newRoot()
 
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         // Seed a cached snapshot before demo exit.
         let env = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 4200)
@@ -278,5 +278,67 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         await container.activateFarmSnapshotForActiveServer()
         XAssertEqual(await store.currentSession()?.userID, userA)
         XAssertEqual(await store.hydrateActive(), .snapshot(env))
+    }
+
+    // MARK: H1 — switch epoch: services and snapshot bind the SAME captured server
+
+    func testSwitchBindsSnapshotToSettledServerConsistentWithServices() async throws {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        let userA = UUID(), userB = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        owners.setOwner(userID: userB, serverID: b.id)
+        try reg.setActive(id: a.id)
+
+        let authority = FarmSnapshotAuthority()
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: true,
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners
+        )
+        await container.activateFarmSnapshotForActiveServer()
+
+        // Switch to B via the real registry-observation path, then settle.
+        try reg.setActive(id: b.id)
+        await container.activateFarmSnapshotForActiveServer()
+
+        // The snapshot session binds B's own owner — the same server the services
+        // were rebuilt for. Never a mixed (services=A, snapshot=B) binding.
+        let session = await store.currentSession()
+        XCTAssertEqual(session?.serverID, b.id)
+        XCTAssertEqual(session?.userID, userB)
+    }
+
+    func testRapidABASwitchSettlesToFinalServerOwner() async throws {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        let userA = UUID(), userB = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        owners.setOwner(userID: userB, serverID: b.id)
+        try reg.setActive(id: a.id)
+
+        let authority = FarmSnapshotAuthority()
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: true,
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners
+        )
+
+        // Rapid A→B→A: the reconciliation loop must settle to the final server, and
+        // the snapshot must bind that server's own owner (never a stale cross-bind).
+        try reg.setActive(id: b.id)
+        try reg.setActive(id: a.id)
+        await container.activateFarmSnapshotForActiveServer()
+
+        let session = await store.currentSession()
+        XCTAssertEqual(session?.serverID, a.id)
+        XCTAssertEqual(session?.userID, userA)
+        XCTAssertEqual(reg.activeServerID, a.id)
     }
 }

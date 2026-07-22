@@ -10,6 +10,36 @@ final class AuthServiceUserDefaultsBox: @unchecked Sendable {
     }
 }
 
+/// Monotonic epoch for auth operations (login / restore / logout). Advanced by
+/// the orchestrator (`AuthViewModel`) at the start of each operation; consulted
+/// by `AuthService` before durable owner/credential mutations and by the view
+/// model before view-state/snapshot activation, so a superseded late-completing
+/// login/restore cannot resurrect auth/owner/session (issue #816, H2).
+final class AuthOperationEpoch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    @discardableResult
+    func advance() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
+    }
+
+    var current: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func isCurrent(_ epoch: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value == epoch
+    }
+}
+
 actor AuthService: AuthServiceProtocol {
     private let apiClient: APIClient
     private let credentialsStore: ServerCredentialsStore
@@ -17,6 +47,7 @@ actor AuthService: AuthServiceProtocol {
     private let migrateLegacyServerURL: Bool
     private let serverRegistry: ServerRegistry?
     private let snapshotOwnerStore: FarmSnapshotOwnerStore
+    private let authEpoch: AuthOperationEpoch
 
     init(
         apiClient: APIClient,
@@ -24,7 +55,8 @@ actor AuthService: AuthServiceProtocol {
         userDefaultsBox: AuthServiceUserDefaultsBox = AuthServiceUserDefaultsBox(.standard),
         migrateLegacyServerURL: Bool = true,
         serverRegistry: ServerRegistry? = nil,
-        snapshotOwnerStore: FarmSnapshotOwnerStore = FarmSnapshotOwnerStore()
+        snapshotOwnerStore: FarmSnapshotOwnerStore = FarmSnapshotOwnerStore(),
+        authEpoch: AuthOperationEpoch = AuthOperationEpoch()
     ) {
         self.apiClient = apiClient
         self.credentialsStore = credentialsStore
@@ -32,11 +64,16 @@ actor AuthService: AuthServiceProtocol {
         self.migrateLegacyServerURL = migrateLegacyServerURL
         self.serverRegistry = serverRegistry
         self.snapshotOwnerStore = snapshotOwnerStore
+        self.authEpoch = authEpoch
     }
 
     /// Authenticate against a Printfarmer server.
     /// Stores the JWT and applies it to the shared API client for the active server on success.
     func login(serverURL: String, username: String, password: String) async throws -> AuthResponse {
+        // H2: capture the auth-operation epoch at entry. If a logout / newer op
+        // supersedes this login while it is in flight, durable owner/credential
+        // mutations are skipped so a late login cannot resurrect auth/owner state.
+        let epoch = authEpoch.current
         guard let normalizedURL = APIClient.normalizedServerURLString(serverURL),
               let url = URL(string: normalizedURL) else {
             throw NetworkError.invalidURL(serverURL)
@@ -56,23 +93,37 @@ actor AuthService: AuthServiceProtocol {
             throw NetworkError.authFailed(response.error ?? "Login failed")
         }
 
+        guard authEpoch.isCurrent(epoch) else { return response }
         credentialsStore.save(
             ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
             serverId: server.id
         )
-        // Persist the verified non-secret owner for this server so cold-offline
-        // restore and switching can recover the exact prior owner (issue #816).
-        if let user = response.user {
-            snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
-        }
         await apiClient.updateBaseURL(server.baseURL)
         await apiClient.setAccessToken(token)
         await registerTokenExpiryChecker(for: server)
+
+        // H2: the snapshot owner must be a VERIFIED current identity. A token-only
+        // response (`user == nil`) must never reuse a persisted prior owner — verify
+        // via an authoritative `currentUser()` fetch, and fail closed (clear any
+        // stale owner) if no stable id can be established.
+        var verifiedUser = response.user
+        if verifiedUser == nil {
+            verifiedUser = try? await currentUser()
+        }
+        guard authEpoch.isCurrent(epoch) else { return response }
+        if let user = verifiedUser {
+            snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
+        } else {
+            snapshotOwnerStore.clearOwner(serverID: server.id)
+        }
         await activate(server)
         return response
     }
 
     func logout() async {
+        // Supersede any in-flight login/restore so its late completion cannot
+        // resurrect credentials/owner/session (H2).
+        authEpoch.advance()
         let currentServer = await activeServer()
         try? await apiClient.postVoid("/api/auth/logout")
         if let server = currentServer {
@@ -86,6 +137,7 @@ actor AuthService: AuthServiceProtocol {
     /// Attempt to restore a previous session from Keychain.
     /// Returns the current user on success, nil if no valid session.
     func restoreSession() async -> UserDTO? {
+        let epoch = authEpoch.current
         guard let server = await activeServer() else { return nil }
         migrateLegacyCredentialsIfAllowed(to: server)
         guard let credentials = credentialsStore.load(serverId: server.id) else { return nil }
@@ -96,6 +148,9 @@ actor AuthService: AuthServiceProtocol {
 
         do {
             let user: UserDTO = try await apiClient.get("/api/auth/me")
+            // H2: if a logout / newer op superseded this restore mid-flight, do not
+            // persist the owner or report success (no resurrection).
+            guard authEpoch.isCurrent(epoch) else { return nil }
             // Online-verified restore: persist the owner (transient offline never
             // reaches here, so the last verified owner is preserved).
             snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)

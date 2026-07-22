@@ -26,7 +26,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
     }
 
     private func makeStore(root: URL, io: FarmSnapshotFileIO) -> (FarmSnapshotStore, FarmSnapshotAuthority) {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         return (FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root), authority)
     }
 

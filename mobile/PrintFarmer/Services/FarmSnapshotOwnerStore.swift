@@ -61,3 +61,50 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
         userDefaults.removeObject(forKey: ownerKey(serverID: serverID))
     }
 }
+
+// MARK: - Durable tombstone store (F10-C1a, #816, H4)
+//
+// Persists the set of purged/pending-deletion server UUIDs so a tombstone
+// survives the restart/crash window between `purge` and registry removal. A
+// durably-tombstoned server can never re-activate or have its cache recreated,
+// which is what makes post-purge resurrection impossible even across a crash.
+
+/// Persistent record of purged server UUIDs.
+final class FarmSnapshotTombstoneStore: @unchecked Sendable {
+    static let key = "pf_snapshot_tombstones"
+
+    private let userDefaults: UserDefaults
+    private let lock = NSLock()
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
+
+    /// The persisted tombstone set (server UUIDs).
+    func load() -> Set<UUID> {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let raw = userDefaults.array(forKey: Self.key) as? [String] else { return [] }
+        return Set(raw.compactMap(UUID.init(uuidString:)))
+    }
+
+    /// Durably mark a server as tombstoned. Idempotent.
+    func insert(_ serverID: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        var set = Set((userDefaults.array(forKey: Self.key) as? [String]) ?? [])
+        set.insert(serverID.uuidString)
+        userDefaults.set(Array(set), forKey: Self.key)
+    }
+
+    /// Remove a server's tombstone. Only valid once the server's identity/ID
+    /// lifecycle is complete (registry removal done); server UUIDs are never
+    /// reused, so this is purely housekeeping.
+    func remove(_ serverID: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        var set = Set((userDefaults.array(forKey: Self.key) as? [String]) ?? [])
+        set.remove(serverID.uuidString)
+        userDefaults.set(Array(set), forKey: Self.key)
+    }
+}

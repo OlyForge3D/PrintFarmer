@@ -51,8 +51,14 @@ final class AuthViewModel {
             return
         }
 
+        let epoch = services.authOperationEpoch.advance()
         isLoading = true
         if let user = await services.authService.restoreSession() {
+            guard services.authOperationEpoch.isCurrent(epoch) else {
+                isLoading = false
+                hasCheckedAuth = true
+                return
+            }
             currentUser = user
             isAuthenticated = true
             await services.activateFarmSnapshotForActiveServer()
@@ -79,6 +85,9 @@ final class AuthViewModel {
     // MARK: - Login / Logout
 
     func login(serverURL: String, username: String, password: String) async {
+        // Advance the auth-operation epoch so this login supersedes any in-flight
+        // restore and the AuthService can fence a later logout (H2).
+        services.authOperationEpoch.advance()
         isLoading = true
         errorMessage = nil
 
@@ -101,8 +110,10 @@ final class AuthViewModel {
     }
 
     func logout() async {
-        // Revoke snapshot authority (synchronous) and await store deactivation
-        // before the auth service tears down the session.
+        // Supersede any in-flight login/restore (H2), then revoke snapshot
+        // authority (synchronous) and await store deactivation before the auth
+        // service tears down the session.
+        services.authOperationEpoch.advance()
         await services.revokeFarmSnapshot()
         await services.authService.logout()
         isAuthenticated = false

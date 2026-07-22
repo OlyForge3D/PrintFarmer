@@ -81,6 +81,11 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
     let isOnline: Bool
     let isEnabled: Bool
     let inMaintenance: Bool
+    /// Auto-dispatch "pending ready" state the phone/iPad cards surface. This is
+    /// NOT derivable from `Printer.state` (it comes from the separate auto-dispatch
+    /// status), so it is carried explicitly and must be supplied from that
+    /// authoritative source by the caller (issue #816, H6).
+    let isPendingReady: Bool
     let state: String?
     let progress: Double?
     let jobName: String?
@@ -92,7 +97,15 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
     let spool: FarmSnapshotSpool?
     let obicoEnabled: Bool
 
-    init(_ printer: Printer) {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, location, modelName, manufacturerName
+        case isOnline, isEnabled, inMaintenance, isPendingReady
+        case state, progress, jobName, fileName
+        case hotendTemp, hotendTarget, bedTemp, bedTarget
+        case spool, obicoEnabled
+    }
+
+    init(_ printer: Printer, isPendingReady: Bool) {
         self.id = printer.id
         self.name = printer.name
         self.location = printer.location.map(FarmSnapshotLocation.init)
@@ -101,6 +114,7 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
         self.isOnline = printer.isOnline
         self.isEnabled = printer.isEnabled
         self.inMaintenance = printer.inMaintenance
+        self.isPendingReady = isPendingReady
         self.state = printer.state
         self.progress = printer.progress
         self.jobName = printer.jobName
@@ -111,6 +125,35 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
         self.bedTarget = printer.bedTarget
         self.spool = printer.spoolInfo.map(FarmSnapshotSpool.init)
         self.obicoEnabled = printer.obicoEnabled
+    }
+
+    /// Convenience for callers without auto-dispatch context (defaults
+    /// `isPendingReady` to `false`).
+    init(_ printer: Printer) {
+        self.init(printer, isPendingReady: false)
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        location = try c.decodeIfPresent(FarmSnapshotLocation.self, forKey: .location)
+        modelName = try c.decodeIfPresent(String.self, forKey: .modelName)
+        manufacturerName = try c.decodeIfPresent(String.self, forKey: .manufacturerName)
+        isOnline = try c.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        inMaintenance = try c.decodeIfPresent(Bool.self, forKey: .inMaintenance) ?? false
+        isPendingReady = try c.decodeIfPresent(Bool.self, forKey: .isPendingReady) ?? false
+        state = try c.decodeIfPresent(String.self, forKey: .state)
+        progress = try c.decodeIfPresent(Double.self, forKey: .progress)
+        jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
+        fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
+        hotendTemp = try c.decodeIfPresent(Double.self, forKey: .hotendTemp)
+        hotendTarget = try c.decodeIfPresent(Double.self, forKey: .hotendTarget)
+        bedTemp = try c.decodeIfPresent(Double.self, forKey: .bedTemp)
+        bedTarget = try c.decodeIfPresent(Double.self, forKey: .bedTarget)
+        spool = try c.decodeIfPresent(FarmSnapshotSpool.self, forKey: .spool)
+        obicoEnabled = try c.decodeIfPresent(Bool.self, forKey: .obicoEnabled) ?? false
     }
 }
 
@@ -141,7 +184,25 @@ struct FarmSnapshotEnvelope: Codable, Sendable, Equatable {
         self.lastUpdatedAtMillis = lastUpdatedAtMillis
     }
 
-    /// Convenience projection from live `Printer` values.
+    /// Convenience projection from live `Printer` values plus the authoritative
+    /// set of printer IDs currently in auto-dispatch "pending ready" state (issue
+    /// #816, H6). Callers (#817) supply `pendingReadyPrinterIDs` from the
+    /// auto-dispatch status source — it is not reconstructed from `Printer.state`.
+    init(
+        namespace: FarmSnapshotNamespace,
+        printers: [Printer],
+        pendingReadyPrinterIDs: Set<UUID>,
+        lastUpdatedAtMillis: Int64
+    ) {
+        self.init(
+            namespace: namespace,
+            payload: printers.map { FarmSnapshotPrinter($0, isPendingReady: pendingReadyPrinterIDs.contains($0.id)) },
+            lastUpdatedAtMillis: lastUpdatedAtMillis
+        )
+    }
+
+    /// Convenience projection from live `Printer` values with no pending-ready
+    /// context (all `isPendingReady == false`).
     init(
         namespace: FarmSnapshotNamespace,
         printers: [Printer],
@@ -149,7 +210,8 @@ struct FarmSnapshotEnvelope: Codable, Sendable, Equatable {
     ) {
         self.init(
             namespace: namespace,
-            payload: printers.map(FarmSnapshotPrinter.init),
+            printers: printers,
+            pendingReadyPrinterIDs: [],
             lastUpdatedAtMillis: lastUpdatedAtMillis
         )
     }

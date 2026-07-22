@@ -31,7 +31,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
         root: URL,
         fileIO: FarmSnapshotFileIO = DiskFarmSnapshotFileIO()
     ) -> (FarmSnapshotStore, FarmSnapshotAuthority) {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let store = FarmSnapshotStore(authority: authority, fileIO: fileIO, rootURL: root)
         return (store, authority)
     }

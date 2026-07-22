@@ -93,4 +93,55 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
             XCTAssertEqual(outcome.applicability, .preserve)
         }
     }
+
+    // MARK: H6 — pending-ready payload parity
+
+    func testProjectionCarriesPendingReadyFromAuthoritativeSource() {
+        let printer = FarmSnapshotFixtures.printerWithSecrets()
+        // The Printer decodes with state "printing" (NOT PendingReady). The
+        // pending-ready flag must come from the authoritative source, not the state.
+        XCTAssertEqual(printer.state, "printing")
+        let pendingProjection = FarmSnapshotPrinter(printer, isPendingReady: true)
+        XCTAssertTrue(pendingProjection.isPendingReady)
+        let notPendingProjection = FarmSnapshotPrinter(printer, isPendingReady: false)
+        XCTAssertFalse(notPendingProjection.isPendingReady)
+        // The Printer-only convenience defaults to false (no auto-dispatch context).
+        XCTAssertFalse(FarmSnapshotPrinter(printer).isPendingReady)
+    }
+
+    func testEnvelopeWiresPendingReadyFromPrinterIDSet() throws {
+        let printerA = FarmSnapshotFixtures.printerWithSecrets()
+        let printerB = FarmSnapshotFixtures.printerWithSecrets()
+        let namespace = FarmSnapshotFixtures.namespace()
+        let envelope = FarmSnapshotEnvelope(
+            namespace: namespace,
+            printers: [printerA, printerB],
+            pendingReadyPrinterIDs: [printerA.id],
+            lastUpdatedAtMillis: 1
+        )
+        let a = try XCTUnwrap(envelope.payload.first { $0.id == printerA.id })
+        let b = try XCTUnwrap(envelope.payload.first { $0.id == printerB.id })
+        XCTAssertTrue(a.isPendingReady)
+        XCTAssertFalse(b.isPendingReady)
+    }
+
+    func testPendingReadyRoundTripsAndStaysSecretFree() throws {
+        let printer = FarmSnapshotFixtures.printerWithSecrets()
+        let namespace = FarmSnapshotFixtures.namespace()
+        let envelope = FarmSnapshotEnvelope(
+            namespace: namespace,
+            printers: [printer],
+            pendingReadyPrinterIDs: [printer.id],
+            lastUpdatedAtMillis: 1
+        )
+        let data = try FarmSnapshotEnvelope.makeEncoder().encode(envelope)
+        let decoded = try FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: data)
+        XCTAssertEqual(decoded, envelope)
+        XCTAssertTrue(decoded.payload[0].isPendingReady)
+        // isPendingReady is non-secret; no secret bytes/keys leak.
+        let text = String(decoding: data, as: UTF8.self)
+        for sentinel in FarmSnapshotFixtures.secretSentinels {
+            XCTAssertFalse(text.contains(sentinel))
+        }
+    }
 }

@@ -7,7 +7,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     // MARK: Authority
 
     func testMintAdvancesMonotonicTokenAndSupersedes() {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let namespace = FarmSnapshotFixtures.namespace()
 
         let first = authority.mint(namespace: namespace, generation: 0)
@@ -22,7 +22,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testTombstonedServerCannotMint() {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let namespace = FarmSnapshotFixtures.namespace()
         authority.tombstone(namespace.serverID)
 
@@ -31,7 +31,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testTombstoneRevokesMatchingCurrentSession() {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let namespace = FarmSnapshotFixtures.namespace()
         let session = authority.mint(namespace: namespace, generation: 0)!
 
@@ -41,7 +41,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testRevokeClearsCurrent() {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         authority.revoke()
         XCTAssertNil(authority.currentSession())
@@ -49,7 +49,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testWithPromotionSkipsWhenNotCurrent() {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         authority.revoke()
 
@@ -63,7 +63,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testWithPromotionSkipsWhenCancelled() {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         var ran = false
         let result: Bool? = authority.withPromotion(session, cancelled: { true }) {
@@ -75,7 +75,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testIsCurrentRequiresExactSession() {
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let namespace = FarmSnapshotFixtures.namespace()
         let session = authority.mint(namespace: namespace, generation: 0)!
         // A same-namespace/same-generation session with a different token is not current.

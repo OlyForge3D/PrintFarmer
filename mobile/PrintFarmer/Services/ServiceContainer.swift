@@ -50,6 +50,10 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private var activeServerID: UUID?
     @ObservationIgnored private var activeServerSwitchTask: Task<Void, Never>?
     @ObservationIgnored private var activeServerSwitchRequested = false
+    /// Monotonic switch-operation epoch (H1). Each service rebuild / snapshot
+    /// (re)bind captures this; an older switch that has been superseded must not
+    /// rebuild, bind, or clear newer state.
+    @ObservationIgnored private var switchEpoch = 0
 
     // MARK: Farm snapshot lifecycle authority (issue #816)
     /// Shared synchronous authority for origin-pinned snapshot sessions. A
@@ -60,6 +64,8 @@ final class ServiceContainer: @unchecked Sendable {
     /// Non-secret per-server owner identity. Activation resolves the settled
     /// server's OWN owner from here — never a carried cross-server user id.
     @ObservationIgnored let farmSnapshotOwnerStore: FarmSnapshotOwnerStore
+    /// Shared monotonic auth-operation epoch fencing late login/restore vs logout (H2).
+    @ObservationIgnored let authOperationEpoch = AuthOperationEpoch()
 
     init(
         baseURL: URL? = nil,
@@ -94,7 +100,7 @@ final class ServiceContainer: @unchecked Sendable {
         let ownerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore(userDefaults: userDefaultsBox.userDefaults)
         self.farmSnapshotAuthority = authority
         self.farmSnapshotOwnerStore = ownerStore
-        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority)
+        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority, ownerStore: ownerStore)
 
         let activeServer = serverRegistry.activeServer
         let resolvedURL = activeServer?.baseURL
@@ -111,7 +117,8 @@ final class ServiceContainer: @unchecked Sendable {
             userDefaultsBox: userDefaultsBox,
             migrateLegacyServerURL: false,
             serverRegistry: serverRegistry,
-            snapshotOwnerStore: ownerStore
+            snapshotOwnerStore: ownerStore,
+            authEpoch: authOperationEpoch
         )
         self.printerService = PrinterService(apiClient: client)
         self.jobService = JobService(apiClient: client)
@@ -360,23 +367,32 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     private func switchToActiveServer(_ server: RegisteredServer) async {
+        switchEpoch += 1
+        let epoch = switchEpoch
         let oldSignalRService = signalRService
         await oldSignalRService.disconnect()
-        // Revoke-before-authority-change: synchronous revoke + awaited store
-        // deactivation must complete before the generation advances.
-        await revokeFarmSnapshot()
+        guard epoch == switchEpoch else { return } // superseded by a newer switch
+
+        // H3: conditionally deactivate ONLY the outgoing session (compare-and-set),
+        // so a stale switch cannot clear a newer login's session.
+        if let outgoing = farmSnapshotAuthority.currentSession() {
+            farmSnapshotAuthority.deactivate(outgoing)
+        }
         activeServerGeneration = activeGeneration.advance()
+        let capturedGeneration = activeServerGeneration
 
         let accessToken = Self.validAccessToken(for: server, credentialsStore: credentialsStore)
         let client = rebuildRealServices(baseURL: server.baseURL, server: server, accessToken: accessToken)
         userDefaultsBox.userDefaults.set(server.normalizedURLString, forKey: APIClient.serverURLKey)
         await configureTokenExpiryChecker(client: client, serverID: server.id)
+        guard epoch == switchEpoch else { return } // superseded during the awaits
 
-        // Re-bind the snapshot session to THIS server's own verified owner. Never
-        // carries an identity across from the previously-active server.
-        await bindSnapshotToActiveServer()
+        // H1: bind the snapshot to the SAME captured server + generation the
+        // services were rebuilt for — never a re-read that could diverge from the
+        // rebuilt API client.
+        await bindSnapshotToServer(server, generation: capturedGeneration, epoch: epoch)
 
-        guard accessToken != nil else { return }
+        guard epoch == switchEpoch, accessToken != nil else { return }
         do {
             try await signalRService.connect()
         } catch {
@@ -384,11 +400,31 @@ final class ServiceContainer: @unchecked Sendable {
         }
     }
 
+    /// Bind the snapshot to a specific captured server + generation for a switch
+    /// operation, guarded by the switch epoch (H1). Resolves that server's OWN
+    /// verified owner; token-only/unverified or tombstoned → no bind (fail closed).
+    private func bindSnapshotToServer(_ server: RegisteredServer, generation: Int, epoch: Int) async {
+        guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: server.id) else { return }
+        let namespace = FarmSnapshotNamespace(serverID: server.id, userID: ownerID)
+        guard let session = farmSnapshotAuthority.mint(namespace: namespace, generation: generation) else { return }
+        await farmSnapshotStore.activate(session: session)
+        // Revalidate: an older switch that lost the race must not leave its binding.
+        guard epoch == switchEpoch, farmSnapshotAuthority.isCurrent(session) else {
+            farmSnapshotAuthority.deactivate(session)
+            return
+        }
+    }
+
     private func switchToNoActiveServer() async {
         guard activeServerID != nil else { return }
+        switchEpoch += 1
+        let epoch = switchEpoch
         let oldSignalRService = signalRService
         await oldSignalRService.disconnect()
-        await revokeFarmSnapshot()
+        guard epoch == switchEpoch else { return }
+        if let outgoing = farmSnapshotAuthority.currentSession() {
+            farmSnapshotAuthority.deactivate(outgoing)
+        }
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
     }
@@ -407,7 +443,8 @@ final class ServiceContainer: @unchecked Sendable {
             userDefaultsBox: userDefaultsBox,
             migrateLegacyServerURL: false,
             serverRegistry: serverRegistry,
-            snapshotOwnerStore: farmSnapshotOwnerStore
+            snapshotOwnerStore: farmSnapshotOwnerStore,
+            authEpoch: authOperationEpoch
         )
         self.printerService = PrinterService(apiClient: client)
         self.jobService = JobService(apiClient: client)
@@ -503,8 +540,9 @@ final class ServiceContainer: @unchecked Sendable {
         self.observesRegistry = false
         let authority = farmSnapshotAuthority ?? FarmSnapshotAuthority()
         self.farmSnapshotAuthority = authority
-        self.farmSnapshotOwnerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore()
-        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority)
+        let demoOwnerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore()
+        self.farmSnapshotOwnerStore = demoOwnerStore
+        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority, ownerStore: demoOwnerStore)
         self.activeServerID = nil
         self.apiClient = nil
         self.authService = authService

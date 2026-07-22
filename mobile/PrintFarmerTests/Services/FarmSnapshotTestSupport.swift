@@ -207,6 +207,23 @@ enum FarmSnapshotFixtures {
             .appendingPathComponent("FarmSnapshotTests-\(UUID().uuidString)", isDirectory: true)
     }
 
+    /// Authority backed by an isolated in-memory-ish UserDefaults suite so durable
+    /// tombstones never leak into `.standard` or across tests (H4).
+    static func makeAuthority() -> FarmSnapshotAuthority {
+        FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotTombstoneStore(userDefaults: UserDefaults(suiteName: "tomb-\(UUID().uuidString)")!)
+        )
+    }
+
+    /// Isolated tombstone store for tests that need to prove restart durability.
+    static func makeTombstoneStore(suite: String = "tomb-\(UUID().uuidString)") -> FarmSnapshotTombstoneStore {
+        FarmSnapshotTombstoneStore(userDefaults: UserDefaults(suiteName: suite)!)
+    }
+
+    static func makeOwnerStore() -> FarmSnapshotOwnerStore {
+        FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: "owner-\(UUID().uuidString)")!)
+    }
+
     static func namespace(server: UUID = UUID(), user: UUID = UUID()) -> FarmSnapshotNamespace {
         FarmSnapshotNamespace(serverID: server, userID: user)
     }
