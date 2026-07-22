@@ -10,3 +10,8 @@
 # Shell scripts must always use LF line endings
 *.sh text eol=lf
 install.sh text eol=lf
+
+# Embedded text fixtures must be byte-stable across checkout platforms.
+src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/lib/Assets/bed-models/Prusa/MK4.stl text eol=lf
+src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/lib/Assets/bed-models/casemaker/casebot.stl text eol=lf
+src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/lib/Assets/cover-images/Prusa/MK4_cover.png text eol=lf
