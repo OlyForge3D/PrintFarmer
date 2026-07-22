@@ -33,8 +33,20 @@ export function AddModelsToCollectionModal({ isOpen, modelIds, onClose, onCreate
   };
 
   const handleSubmit = async () => {
-    await Promise.all(checkedIds.map((collectionId) => addModels.mutateAsync({ collectionId, modelIds })));
-    onClose();
+    // Use allSettled (not Promise.all) so a rejected mutateAsync for one collection doesn't
+    // abort the others mid-flight, and only close/reset the modal when every collection's
+    // add fully succeeded - on any failure (or partial per-collection failure surfaced by
+    // useAddModelsToCollection) the modal stays open with the current selection intact so
+    // the user can see the toast(s) and retry instead of silently losing the failure.
+    const results = await Promise.allSettled(
+      checkedIds.map((collectionId) => addModels.mutateAsync({ collectionId, modelIds }))
+    );
+    const hasFailure = results.some(
+      (result) => result.status === 'rejected' || result.value.failures.length > 0
+    );
+    if (!hasFailure) {
+      onClose();
+    }
   };
 
   const isSaving = addModels.isPending;

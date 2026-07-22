@@ -236,7 +236,13 @@ export const ModelsPage: React.FC = () => {
           isOpen={showAddToCollectionModal}
           modelIds={selectedModelIds}
           onClose={() => setShowAddToCollectionModal(false)}
-          onCreateNew={() => setShowNewCollectionModal(true)}
+          onCreateNew={() => {
+            // Close this modal before opening CollectionFormModal - the shared Modal
+            // implementation isn't designed to have two instances open at once (duplicate
+            // "modal-title" ids, conflicting scroll-lock/Escape handling).
+            setShowAddToCollectionModal(false);
+            setShowNewCollectionModal(true);
+          }}
         />
 
         {/* Quick "new collection" form reachable from the add-to-collection flow */}
@@ -244,7 +250,16 @@ export const ModelsPage: React.FC = () => {
           key={showNewCollectionModal ? 'open' : 'closed'}
           isOpen={showNewCollectionModal}
           isSaving={createCollection.isPending}
-          onSubmit={(values) => createCollection.mutate(values, { onSuccess: () => setShowNewCollectionModal(false) })}
+          onSubmit={(values) =>
+            createCollection.mutate(values, {
+              onSuccess: () => {
+                setShowNewCollectionModal(false);
+                // Reopen the add-to-collection modal so the user can pick the collection
+                // they just created without restarting the flow from the toolbar.
+                setShowAddToCollectionModal(true);
+              },
+            })
+          }
           onClose={() => setShowNewCollectionModal(false)}
         />
 

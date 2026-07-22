@@ -59,21 +59,28 @@ export function CollectionsNav({ selectedCollectionId, onSelectCollection }: Col
 
   const isAdmin = hasRole('farm_admin');
 
-  const { personal, shared } = useMemo(() => {
+  const { personal, shared, otherPrivate } = useMemo(() => {
     const personalCollections: ModelCollection[] = [];
     const sharedCollections: ModelCollection[] = [];
+    // Admins can list (and manage) every collection, including other users' private ones
+    // (see ModelCollectionService.ListCollectionsAsync). Without a third bucket those
+    // collections are owned by someone else and not shared, so they'd match neither the
+    // Personal nor Shared section and become unreachable in the nav.
+    const otherPrivateCollections: ModelCollection[] = [];
     for (const collection of collections) {
       const isOwner = user?.id === collection.ownerUserId;
       if (isOwner) {
         personalCollections.push(collection);
       } else if (collection.isShared) {
         sharedCollections.push(collection);
+      } else if (isAdmin) {
+        otherPrivateCollections.push(collection);
       }
     }
     // Owner's own shared collections still show under "Personal" (they own it), but also
     // surface them to everyone else under "Shared" via the loop above.
-    return { personal: personalCollections, shared: sharedCollections };
-  }, [collections, user?.id]);
+    return { personal: personalCollections, shared: sharedCollections, otherPrivate: otherPrivateCollections };
+  }, [collections, user?.id, isAdmin]);
 
   const canManage = (collection: ModelCollection) => isAdmin || user?.id === collection.ownerUserId;
 
@@ -243,6 +250,16 @@ export function CollectionsNav({ selectedCollectionId, onSelectCollection }: Col
               <ul className="space-y-0.5">{shared.map(renderCollectionRow)}</ul>
             )}
           </div>
+
+          {isAdmin && otherPrivate.length > 0 && (
+            <div className="mt-3">
+              <h3 className="px-3 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary mb-1 flex items-center gap-1">
+                <LockIcon className="w-3.5 h-3.5" />
+                Other users&apos; private collections
+              </h3>
+              <ul className="space-y-0.5">{otherPrivate.map(renderCollectionRow)}</ul>
+            </div>
+          )}
         </>
       )}
 

@@ -53,6 +53,21 @@ const sharedCollection: ModelCollection = {
   concurrencyToken: 'tok-2',
 };
 
+/** Private collection owned by a different user - only admins can see/list these at all. */
+const otherUsersPrivateCollection: ModelCollection = {
+  id: 'col-3',
+  name: 'Someone Else Private',
+  description: null,
+  ownerUserId: 'user-3',
+  isShared: false,
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+  memberCount: 1,
+  modelIds: ['m9'],
+  revision: 1,
+  concurrencyToken: 'tok-3',
+};
+
 function renderNav(props: Partial<ComponentProps<typeof CollectionsNav>> = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onSelectCollection = vi.fn();
@@ -244,5 +259,24 @@ describe('CollectionsNav', () => {
     const menu = await screen.findByRole('menu');
     expect(within(menu).getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: /unshare/i })).toBeInTheDocument();
+  });
+
+  it('surfaces other users\u2019 private collections to admins in a dedicated section instead of hiding them', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 'admin-user' }, hasRole: (role: string) => role === 'farm_admin' });
+    vi.mocked(apiClient.getModelCollections).mockResolvedValue([otherUsersPrivateCollection]);
+    renderNav();
+
+    expect(await screen.findByText('Someone Else Private')).toBeInTheDocument();
+    expect(screen.getByText(/other users.? private collections/i)).toBeInTheDocument();
+  });
+
+  it('does not show other users\u2019 private collections, or the section itself, to non-admins', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 'regular-user' }, hasRole: () => false });
+    vi.mocked(apiClient.getModelCollections).mockResolvedValue([otherUsersPrivateCollection]);
+    renderNav();
+
+    await screen.findByText(/no personal collections yet/i);
+    expect(screen.queryByText('Someone Else Private')).not.toBeInTheDocument();
+    expect(screen.queryByText(/other users.? private collections/i)).not.toBeInTheDocument();
   });
 });
