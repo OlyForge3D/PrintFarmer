@@ -61,6 +61,10 @@ final class DemoSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         ]
     }
 
+    func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament {
+        throw ServiceError.notImplemented("createFilament — read-only in demo mode")
+    }
+
     func listVendors() async throws -> [SpoolmanVendor] {
         [
             SpoolmanVendor(id: 1, name: "Prusa Research", externalId: nil),

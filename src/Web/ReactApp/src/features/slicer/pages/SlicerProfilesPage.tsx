@@ -25,10 +25,12 @@ import {
 } from '@/services/slicerProfilesService';
 import { orcaProfilesService } from '@/features/slicer/orca';
 import { slicerRegistry } from '@/services/slicerRegistry';
+import { catalogService } from '@/services/catalogService';
 import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
+import { Tabs } from '@/common/components/ui/Tabs';
 import { FormField } from '@/common/components/ui/FormField';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
@@ -56,6 +58,12 @@ export const SlicerProfilesPage: React.FC = () => {
   const [uploadRawJson, setUploadRawJson] = useState('');
   const [uploadName, setUploadName] = useState('');
   const [uploadProfileType, setUploadProfileType] = useState<'machine' | 'filament' | 'process'>('process');
+  // Catalog PrinterModel association for the uploaded profile (machine/process only).
+  // Empty string means "auto-detect" (let the backend resolve from raw JSON via aliases).
+  const [uploadPrinterModelId, setUploadPrinterModelId] = useState<string>('');
+  // Compatible printer names for the uploaded profile (filament only). Empty array
+  // means "auto-detect from raw JSON's compatible_printers".
+  const [uploadCompatiblePrinters, setUploadCompatiblePrinters] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Edit custom profile modal state
@@ -63,6 +71,11 @@ export const SlicerProfilesPage: React.FC = () => {
   const [editingProfile, setEditingProfile] = useState<CustomProfile | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  // Catalog PrinterModel association for the edited profile (machine/process only).
+  // Empty string means "clear association"; any GUID means "set to this model".
+  const [editPrinterModelId, setEditPrinterModelId] = useState<string>('');
+  // Compatible printer names for the edited profile (filament only).
+  const [editCompatiblePrinters, setEditCompatiblePrinters] = useState<string[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
 
   // Tab state - 'machines', 'filaments', 'processes', 'custom'
@@ -101,6 +114,20 @@ export const SlicerProfilesPage: React.FC = () => {
     staleTime: 10_000,
     refetchInterval: 15_000,
   });
+
+  // Catalog printer models — used by the upload and edit dialogs to associate a
+  // custom machine/process profile with a known printer model. Filament profiles
+  // do not carry a PrinterModelId and the picker is hidden for that type.
+  const { data: catalogPrinterModels = [] } = useQuery({
+    queryKey: ['catalog-printer-models'],
+    queryFn: () => catalogService.getModels(),
+    staleTime: 60_000,
+  });
+
+  const sortedCatalogPrinterModels = useMemo(
+    () => [...catalogPrinterModels].sort((a, b) => a.name.localeCompare(b.name)),
+    [catalogPrinterModels]
+  );
 
   // Extract slicer names for the dropdown
   const slicerNames = useMemo(() => {
@@ -247,6 +274,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setAllowSystemOverride(false);
       setSetDefault(false);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => {
       setImportError(err.message);
@@ -258,6 +286,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: () => {
       setMessage('Default profile updated.');
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => setMessage(`Failed to set default: ${err.message}`)
   });
@@ -268,6 +297,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
       setSelectedProfileIds(new Set());
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to delete profiles: ${err.message}`)
@@ -279,6 +309,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: (result) => {
       setMessage(`Created custom profile: ${result.name}`);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to clone profile: ${err.message}`)
@@ -291,9 +322,12 @@ export const SlicerProfilesPage: React.FC = () => {
       setMessage(`Created custom profile: ${result.name}`);
       setUploadRawJson('');
       setUploadName('');
+      setUploadPrinterModelId('');
+      setUploadCompatiblePrinters([]);
       setUploadError(null);
       setIsUploadModalOpen(false);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setUploadError(err.message)
@@ -308,6 +342,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setEditingProfile(null);
       setEditError(null);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setEditError(err.message)
@@ -319,6 +354,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: () => {
       setMessage('Profile deleted');
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to delete profile: ${err.message}`)
@@ -329,6 +365,13 @@ export const SlicerProfilesPage: React.FC = () => {
     setEditingProfile(profile);
     setEditName(profile.name);
     setEditDescription(profile.description || '');
+    // Seed the printer-model picker from the current association so the user can
+    // see (and repair) it. Filament profiles always have null here and the picker
+    // is hidden in the modal, so seeding is harmless.
+    setEditPrinterModelId(profile.printerModelId || '');
+    // Seed the compatible-printers picker (filament only). Defaults to [] for
+    // non-filament profiles where the picker is hidden.
+    setEditCompatiblePrinters(profile.compatiblePrinters ?? []);
     setEditError(null);
     setIsEditModalOpen(true);
   };
@@ -340,11 +383,37 @@ export const SlicerProfilesPage: React.FC = () => {
       setEditError('Name is required');
       return;
     }
+    // Only send printer-model fields for machine/process profiles. Filament does
+    // not carry a PrinterModelId column and the backend ignores those fields, but
+    // we omit them explicitly to keep the payload tidy.
+    const isFilament = editingProfile.profileType === 'filament';
+    const previousPrinterModelId = editingProfile.printerModelId || '';
+    const printerModelChanged = !isFilament && editPrinterModelId !== previousPrinterModelId;
+
+    // Compatible-printers diff (filament only). Order-insensitive comparison so
+    // accidental reorders do not trigger an unnecessary write.
+    const previousCompatible = editingProfile.compatiblePrinters ?? [];
+    const compatibleChanged =
+      isFilament &&
+      (previousCompatible.length !== editCompatiblePrinters.length ||
+        [...previousCompatible].sort().join('|') !== [...editCompatiblePrinters].sort().join('|'));
+    const compatiblePayload = compatibleChanged
+      ? editCompatiblePrinters.length > 0
+        ? { compatiblePrinters: editCompatiblePrinters }
+        : { clearCompatiblePrinters: true }
+      : {};
+
     updateProfileMutation.mutate({
       id: editingProfile.id,
       request: {
         name: editName,
-        description: editDescription || undefined
+        description: editDescription || undefined,
+        ...(printerModelChanged
+          ? editPrinterModelId
+            ? { printerModelId: editPrinterModelId }
+            : { clearPrinterModelId: true }
+          : {}),
+        ...compatiblePayload
       }
     });
   };
@@ -355,10 +424,21 @@ export const SlicerProfilesPage: React.FC = () => {
       setUploadError('Raw JSON is required');
       return;
     }
+    const isFilament = uploadProfileType === 'filament';
     uploadProfileMutation.mutate({
       rawJson: uploadRawJson,
       profileType: uploadProfileType,
-      name: uploadName || undefined
+      name: uploadName || undefined,
+      // Only attach a PrinterModelId for machine/process profiles. Empty string
+      // means "auto-detect" — let the backend resolve from raw JSON via aliases.
+      ...(!isFilament && uploadPrinterModelId
+        ? { printerModelId: uploadPrinterModelId }
+        : {}),
+      // Only attach compatiblePrinters for filament profiles. Empty array means
+      // "auto-detect" from the raw JSON's compatible_printers.
+      ...(isFilament && uploadCompatiblePrinters.length > 0
+        ? { compatiblePrinters: uploadCompatiblePrinters }
+        : {})
     });
   };
 
@@ -826,6 +906,7 @@ export const SlicerProfilesPage: React.FC = () => {
           setReseedMessage(`✅ ${data.imported} profiles imported, ${data.skipped} skipped, ${data.deleted} deleted`);
           // Refresh the profiles list
           qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+          qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
         }
       });
 
@@ -1052,44 +1133,22 @@ export const SlicerProfilesPage: React.FC = () => {
             </div>
 
             {/* Profile Type Tabs */}
-            <div className="flex gap-2 mt-4 border-b border-pf-border">
-              <Button
-                type="button"
-                onClick={() => setActiveTab('machines')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'machines' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                Machines ({filteredMachineProfiles.length})
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setActiveTab('processes')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'processes' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setActiveTab('filaments')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'filaments' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setActiveTab('custom')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'custom' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                My Profiles ({filteredCustomProfiles.length})
-              </Button>
-            </div>
+            <Tabs activeTab={activeTab} onTabChange={(tabId) => setActiveTab(tabId as 'machines' | 'filaments' | 'processes' | 'custom')}>
+              <Tabs.List className="border-b border-pf-border bg-transparent !p-0">
+                <Tabs.Tab id="machines">
+                  Machines ({filteredMachineProfiles.length})
+                </Tabs.Tab>
+                <Tabs.Tab id="processes">
+                  Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
+                </Tabs.Tab>
+                <Tabs.Tab id="filaments">
+                  Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
+                </Tabs.Tab>
+                <Tabs.Tab id="custom">
+                  My Profiles ({filteredCustomProfiles.length})
+                </Tabs.Tab>
+              </Tabs.List>
+            </Tabs>
           </div>
 
           {/* Profiles Table */}
@@ -1371,6 +1430,43 @@ export const SlicerProfilesPage: React.FC = () => {
             </Select>
           </FormField>
 
+          {uploadProfileType !== 'filament' && (
+            <FormField
+              label="Printer Model"
+              helper="Optional. If left on Auto-detect, the server will try to match the model from the raw JSON via slicer aliases."
+            >
+              <Select
+                aria-label="Printer model association"
+                value={uploadPrinterModelId}
+                onChange={e => setUploadPrinterModelId(e.target.value)}
+              >
+                <option value="">Auto-detect from JSON</option>
+                {sortedCatalogPrinterModels.map(model => (
+                  <option key={model.id} value={model.id}>{model.name}</option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+
+          {uploadProfileType === 'filament' && (
+            <FormField
+              label="Compatible Printers"
+              helper="Optional. Hold Ctrl/Cmd to select multiple. Leave empty to auto-detect from the raw JSON's compatible_printers array."
+            >
+              <Select
+                multiple
+                aria-label="Compatible printer names"
+                size={6}
+                value={uploadCompatiblePrinters}
+                onChange={e => setUploadCompatiblePrinters(Array.from(e.target.selectedOptions, o => o.value))}
+              >
+                {sortedCatalogPrinterModels.map(model => (
+                  <option key={model.id} value={model.name}>{model.name}</option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+
           <FormField label="Raw Profile JSON" required helper="Paste OrcaSlicer profile JSON.">
             <Textarea
               placeholder={'{\n  "layer_height": 0.2,\n  "infill_density": "15%",\n  ...\n}'}
@@ -1493,6 +1589,43 @@ export const SlicerProfilesPage: React.FC = () => {
                   rows={3}
                 />
               </FormField>
+
+              {editingProfile.profileType !== 'filament' && (
+                <FormField
+                  label="Printer Model"
+                  helper="Repair the catalog Printer Model association for this custom profile. Choose 'No association' to detach."
+                >
+                  <Select
+                    aria-label="Printer model association"
+                    value={editPrinterModelId}
+                    onChange={e => setEditPrinterModelId(e.target.value)}
+                  >
+                    <option value="">No association</option>
+                    {sortedCatalogPrinterModels.map(model => (
+                      <option key={model.id} value={model.id}>{model.name}</option>
+                    ))}
+                  </Select>
+                </FormField>
+              )}
+
+              {editingProfile.profileType === 'filament' && (
+                <FormField
+                  label="Compatible Printers"
+                  helper="Edit which printers this filament profile applies to. Hold Ctrl/Cmd to select multiple. Clear all selections to detach."
+                >
+                  <Select
+                    multiple
+                    aria-label="Compatible printer names"
+                    size={6}
+                    value={editCompatiblePrinters}
+                    onChange={e => setEditCompatiblePrinters(Array.from(e.target.selectedOptions, o => o.value))}
+                  >
+                    {sortedCatalogPrinterModels.map(model => (
+                      <option key={model.id} value={model.name}>{model.name}</option>
+                    ))}
+                  </Select>
+                </FormField>
+              )}
 
               {editError && <Alert type="error">{editError}</Alert>}
             </>

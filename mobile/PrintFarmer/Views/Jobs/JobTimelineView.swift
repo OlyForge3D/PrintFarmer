@@ -27,6 +27,7 @@ struct JobTimelineView: View {
             await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
             await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
         }

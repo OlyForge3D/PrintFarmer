@@ -6,11 +6,14 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.AutoTagging;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Web.Api.Tests.Builders;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Dispatch;
@@ -176,6 +179,110 @@ public class DispatchScorerTests : IDisposable
     }
 
     #endregion
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ScorePrintersForJobAsync_ToolheadLoadedMaterialAndColor_MatchesU1PhysicalLane()
+    {
+        Printer printer = CreateTestPrinter(currentMaterial: null);
+        printer.MultiMaterial = true;
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Dispatch U1 Mfg" };
+        var model = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturer.Id, Name = "Dispatch U1" };
+        printer.ManufacturerId = manufacturer.Id;
+        printer.ModelId = model.Id;
+
+        Toolhead t0 = CreateToolhead(printer.Id, isPrimary: true);
+        t0.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t0.Name = "T0";
+        t0.CurrentMaterial = "PLA";
+        t0.CurrentFilamentColor = "#FF0000";
+        printer.Toolheads.Add(t0);
+
+        Toolhead t1 = CreateToolhead(printer.Id, isPrimary: false);
+        t1.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t1.Index = 1;
+        t1.Name = "T1";
+        printer.Toolheads.Add(t1);
+
+        Toolhead t2 = CreateToolhead(printer.Id, isPrimary: false);
+        t2.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t2.Index = 2;
+        t2.Name = "T2";
+        t2.CurrentMaterial = "ASA";
+        t2.CurrentFilamentColor = "#0000FF";
+        printer.Toolheads.Add(t2);
+
+        Toolhead t3 = CreateToolhead(printer.Id, isPrimary: false);
+        t3.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t3.Index = 3;
+        t3.Name = "T3";
+        t3.CurrentMaterial = "TPU";
+        t3.CurrentFilamentColor = "#FFFF00";
+        printer.Toolheads.Add(t3);
+
+        PrintJob job = CreateTestJob(requiredMaterial: "ASA");
+        job.FilamentColor = "#0000FF";
+
+        _context.Manufacturers.Add(manufacturer);
+        _context.PrinterModels.Add(model);
+        _context.Printers.Add(printer);
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
+
+        DispatchScore score = scores.Should().ContainSingle().Subject;
+        score.Eliminated.Should().BeFalse();
+        score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(100);
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(100);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ScorePrintersForJobAsync_ToolheadLoadedMaterialAndColor_MatchesNonU1MultiToolheadPrinter()
+    {
+        Printer printer = CreateTestPrinter(name: "Generic IDEX", currentMaterial: null);
+        printer.MultiMaterial = true;
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Dispatch IDEX Mfg" };
+        var model = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturer.Id, Name = "Generic IDEX" };
+        printer.ManufacturerId = manufacturer.Id;
+        printer.ModelId = model.Id;
+
+        Toolhead t0 = CreateToolhead(printer.Id, isPrimary: true);
+        t0.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t0.Name = "Left Toolhead";
+        t0.CurrentMaterial = "PLA";
+        t0.CurrentFilamentColor = "#FF0000";
+        printer.Toolheads.Add(t0);
+
+        Toolhead t1 = CreateToolhead(printer.Id, isPrimary: false);
+        t1.NozzleModel!.ManufacturerId = manufacturer.Id;
+        t1.Index = 1;
+        t1.Name = "Right Toolhead";
+        t1.CurrentMaterial = "ASA";
+        t1.CurrentFilamentColor = "#0000FF";
+        printer.Toolheads.Add(t1);
+
+        PrintJob job = CreateTestJob(requiredMaterial: "ASA");
+        job.FilamentColor = "#0000FF";
+
+        _context.Manufacturers.Add(manufacturer);
+        _context.PrinterModels.Add(model);
+        _context.Printers.Add(printer);
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
+
+        DispatchScore score = scores.Should().ContainSingle().Subject;
+        score.Eliminated.Should().BeFalse();
+        score.ScoreBreakdown["MaterialMatch"].Score.Should().Be(100);
+        score.ScoreBreakdown["ColorMatch"].Score.Should().Be(100);
+    }
 
     // =========================================================================
     // MATERIAL MATCH FACTOR TESTS
@@ -493,6 +600,96 @@ public class DispatchScorerTests : IDisposable
     }
 
     // =========================================================================
+    // COLOR MATCH FACTOR TESTS
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_ExactHexMatch_Returns100()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#FF0000";
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000";
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(100, "exact hex match should score 100");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_SameColorFamily_Returns80()
+    {
+        // Both are red family but different hex values
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#CC0000"; // Dark red
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000"; // Bright red
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(80, "same color family should score 80");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_DifferentFamily_Returns20()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#0000FF"; // Blue
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000"; // Red
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(20, "different color family should score 20");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_NoJobColor_ReturnsNeutral()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = "#FF0000";
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = null;
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(50, "no job color should return neutral 50");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public void ScoreColorMatch_NoPrinterColor_ReturnsNeutral()
+    {
+        Printer printer = CreateTestPrinter();
+        Toolhead toolhead = CreateToolhead(printer.Id);
+        toolhead.CurrentFilamentColor = null;
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob();
+        job.FilamentColor = "#FF0000";
+
+        int score = ScoreColorMatch(printer, job);
+
+        score.Should().Be(50, "no printer color should return neutral 50");
+    }
+
+    // =========================================================================
     // SCORING HELPER METHODS
     // These implement the scoring logic from the specification.
     // When Lambert's IDispatchScorer lands, these tests should be adapted
@@ -667,6 +864,54 @@ public class DispatchScorerTests : IDisposable
         }
 
         return printer.Toolheads.Count > 0 ? 100 : -1;
+    }
+
+    /// <summary>
+    /// Scores color match between printer's loaded filament and job's required color.
+    /// Returns 100 (exact hex), 80 (same family), 50 (neutral/no data), or 20 (different family).
+    /// </summary>
+    private static int ScoreColorMatch(Printer printer, PrintJob job)
+    {
+        if (string.IsNullOrWhiteSpace(job.FilamentColor))
+        {
+            return 50; // No job color — neutral
+        }
+
+        string? printerColor = printer.Toolheads
+            .Where(t => t.IsPrimary)
+            .Select(t => t.CurrentFilamentColor)
+            .FirstOrDefault()
+            ?? printer.Toolheads
+                .Select(t => t.CurrentFilamentColor)
+                .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+
+        if (string.IsNullOrWhiteSpace(printerColor))
+        {
+            return 50; // No printer color — neutral
+        }
+
+        string jobHex = job.FilamentColor.Trim().TrimStart('#').ToUpperInvariant();
+        string printerHex = printerColor.Trim().TrimStart('#').ToUpperInvariant();
+
+        if (string.Equals(jobHex, printerHex, StringComparison.Ordinal))
+        {
+            return 100; // Exact hex match
+        }
+
+        (string Name, string Hex)? jobFamily = AutoTagService.HexToColorFamily(job.FilamentColor);
+        (string Name, string Hex)? printerFamily = AutoTagService.HexToColorFamily(printerColor);
+
+        if (jobFamily is null || printerFamily is null)
+        {
+            return 50; // Unparseable color — neutral
+        }
+
+        if (string.Equals(jobFamily.Value.Name, printerFamily.Value.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return 80; // Same color family
+        }
+
+        return 20; // Different family — slight penalty
     }
 
     /// <summary>

@@ -147,6 +147,12 @@ public class Printer
     public PrinterCredential? Credential { get; set; }
 
     /// <summary>
+    /// IP address of a Prusa Buddy-board camera (separate device from the printer).
+    /// When set, a Camera entity is auto-created/updated with RTSP stream URL rtsp://{ip}:554/live/.
+    /// </summary>
+    public string? BuddyCameraIp { get; set; }
+
+    /// <summary>
     /// Cameras attached to this printer.
     /// Cameras are discovered from Moonraker, PrusaLink, OctoPrint, etc. or manually configured.
     /// </summary>
@@ -172,6 +178,10 @@ public class Printer
 
     public PrinterGroup? PrinterGroup { get; set; }
 
+    public Guid? BedTypeId { get; set; } // Optional bed surface type for matching and filtering
+
+    public BedType? BedType { get; set; }
+
     public DateTime? DateAcquired { get; set; }
 
     // Hardware Specifications (previously in PrinterCapabilities)
@@ -184,6 +194,18 @@ public class Printer
     public bool HasHeatedBed { get; set; } = true;
 
     public bool HasEnclosure { get; set; }
+
+    /// <summary>
+    /// Nozzle diameter in millimeters (e.g. 0.4). Populated from PrusaLink printer info.
+    /// Nullable because non-Prusa backends don't report this.
+    /// </summary>
+    public double? NozzleDiameter { get; set; }
+
+    /// <summary>
+    /// Whether a Multi-Material Unit is connected. Populated from PrusaLink printer info.
+    /// Nullable because non-Prusa backends don't report this.
+    /// </summary>
+    public bool? HasMmu { get; set; }
 
     public bool MultiMaterial { get; set; }
 
@@ -247,6 +269,17 @@ public class Printer
     /// </summary>
     public ICollection<Tag> Tags { get; set; } = new List<Tag>();
 
+    /// <summary>
+    /// Calibrated Z-offset in millimeters. Negative values move the nozzle closer to the bed.
+    /// Null indicates the printer has not been calibrated via the wizard.
+    /// </summary>
+    public decimal? ZOffsetMm { get; set; }
+
+    /// <summary>
+    /// UTC timestamp of the last Z-offset calibration via the wizard.
+    /// </summary>
+    public DateTime? LastZOffsetCalibrationAt { get; set; }
+
     public bool InMaintenance { get; set; } = false;
 
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
@@ -258,6 +291,12 @@ public class Printer
     /// waiting for operator confirmation before dispatching the next queued job.
     /// </summary>
     public bool AutoDispatchEnabled { get; set; }
+
+    /// <summary>
+    /// When true, dispatch settings are inherited from the printer model defaults.
+    /// When false, this printer uses its own custom dispatch configuration.
+    /// </summary>
+    public bool UseModelDispatchDefaults { get; set; } = true;
 
     /// <summary>
     /// Dispatch-related state (AutoDispatchState, BedPreConfirmed) stored in a separate

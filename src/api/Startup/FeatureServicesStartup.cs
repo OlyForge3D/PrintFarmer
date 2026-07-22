@@ -45,12 +45,23 @@ public static class FeatureServicesStartup
         // Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();
 
+        // Auto-tag service for completed print jobs
+        services.AddScoped<Farm.Infrastructure.Services.AutoTagging.IAutoTagService, Farm.Infrastructure.Services.AutoTagging.AutoTagService>();
+
         // Print Cost Calculator (calculates job costs from Spoolman spool price and filament usage)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintCostCalculator, Farm.Infrastructure.Services.Printers.PrintCostCalculator>();
 
         // Notification Module (job event notifications broadcast to all users)
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.INotificationRepository, Farm.Infrastructure.Repositories.Notifications.EfNotificationRepository>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.IWebPushNotificationSender, Farm.Infrastructure.Services.Notifications.WebPushNotificationSender>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.ITelegramNotificationSender, Farm.Infrastructure.Services.Notifications.TelegramNotificationSender>();
+        services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationChannel, Farm.Infrastructure.Services.Notifications.TelegramNotificationChannel>();
         services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationService, Farm.Infrastructure.Services.Notifications.NotificationService>();
+        services.AddHttpClient("TelegramDelivery", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-Telegram/1.0");
+        });
 
         // Webhooks (event delivery via HTTP POST to external consumers)
         services.AddSingleton<Farm.Infrastructure.Services.Webhooks.WebhookService>();
@@ -145,6 +156,7 @@ public static class FeatureServicesStartup
         // Monitoring services (Grafana/Jaeger auth proxy, Prometheus metrics)
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
         services.AddHttpClient("MonitoringHealth", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);

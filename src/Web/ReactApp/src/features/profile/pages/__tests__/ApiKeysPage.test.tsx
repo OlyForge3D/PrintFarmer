@@ -85,6 +85,78 @@ describe('ApiKeysPage', () => {
     expect(screen.getByText('Expired')).toBeInTheDocument();
   });
 
+  it('should not allow expired keys to be rotated', async () => {
+    vi.mocked(apiKeysService.listApiKeys).mockResolvedValue([
+      {
+        id: 'expired-key',
+        name: 'Expired Desktop Key',
+        isActive: true,
+        createdAt: '2024-01-01T00:00:00Z',
+        expiresAt: '2024-02-01T00:00:00Z',
+        purpose: 'Desktop',
+        scopes: 'ModelRead',
+        isExpired: true,
+      },
+    ]);
+
+    renderPage();
+
+    const rotateButton = await screen.findByRole('button', { name: 'Rotate API key Expired Desktop Key' });
+    expect(rotateButton).toBeDisabled();
+    expect(rotateButton).toHaveAttribute('title', 'Expired API keys cannot be rotated');
+
+    fireEvent.click(rotateButton);
+
+    expect(apiKeysService.rotateApiKey).not.toHaveBeenCalled();
+  });
+
+  it('should allow valid expiring and non-expiring keys to be rotated', async () => {
+    vi.mocked(apiKeysService.listApiKeys).mockResolvedValue([
+      {
+        id: 'valid-expiring-key',
+        name: 'Valid Desktop Key',
+        isActive: true,
+        createdAt: '2026-01-01T00:00:00Z',
+        expiresAt: '2099-01-01T00:00:00Z',
+        purpose: 'Desktop',
+        scopes: 'ModelRead',
+        isExpired: false,
+      },
+      {
+        id: 'non-expiring-key',
+        name: 'Non-expiring Slicer Key',
+        isActive: true,
+        createdAt: '2026-01-01T00:00:00Z',
+        purpose: 'OctoPrint',
+        scopes: 'None',
+        isExpired: false,
+      },
+    ]);
+    vi.mocked(apiKeysService.rotateApiKey).mockResolvedValue({ key: 'rotated-key', id: 'rotated-id' });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    renderPage();
+
+    const validExpiringRotateButton = await screen.findByRole('button', { name: 'Rotate API key Valid Desktop Key' });
+    const nonExpiringRotateButton = screen.getByRole('button', { name: 'Rotate API key Non-expiring Slicer Key' });
+
+    expect(validExpiringRotateButton).toBeEnabled();
+    expect(nonExpiringRotateButton).toBeEnabled();
+
+    fireEvent.click(validExpiringRotateButton);
+    await waitFor(() => {
+      expect(apiKeysService.rotateApiKey).toHaveBeenCalledWith('user-1', 'valid-expiring-key');
+      expect(nonExpiringRotateButton).toBeEnabled();
+    });
+
+    fireEvent.click(nonExpiringRotateButton);
+    await waitFor(() => {
+      expect(apiKeysService.rotateApiKey).toHaveBeenCalledWith('user-1', 'non-expiring-key');
+    });
+
+    confirmSpy.mockRestore();
+  });
+
   it('should show optional expiry for every purpose and scopes only for Desktop', async () => {
     renderPage();
 

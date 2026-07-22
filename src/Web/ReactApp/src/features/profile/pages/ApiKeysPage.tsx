@@ -26,7 +26,11 @@ const SCOPE_OPTIONS: { value: ApiKeyScope; label: string; description: string }[
 
 const MAX_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 
-export function ApiKeysPage() {
+interface ApiKeysPageProps {
+  embedded?: boolean;
+}
+
+export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [newKeyName, setNewKeyName] = useState('');
@@ -202,13 +206,8 @@ export function ApiKeysPage() {
     return new Date(dateString).toLocaleString();
   };
 
-  return (
-    <PageTemplate
-      title="API Keys"
-      subtitle="Manage purpose-limited credentials for slicers and PrintFarmer Desktop"
-      icon={KeyIcon}
-    >
-      <div className="space-y-6">
+  const content = (
+    <div className="space-y-6">
         {/* Information Banner */}
         <div className="bg-pf-info/10 border border-pf-info rounded-lg p-4">
           <h3 className="font-semibold text-pf-text-primary mb-2">What are API Keys?</h3>
@@ -429,9 +428,9 @@ export function ApiKeysPage() {
                       <Button
                         variant="secondary"
                         onClick={() => handleRotate(apiKey.id, apiKey.name)}
-                        disabled={rotateMutation.isPending}
+                        disabled={rotateMutation.isPending || apiKey.isExpired}
                         iconLeft={<RefreshIcon className="w-4 h-4" />}
-                        title="Rotate (generate new key)"
+                        title={apiKey.isExpired ? 'Expired API keys cannot be rotated' : 'Rotate (generate new key)'}
                         aria-label={`Rotate API key ${apiKey.name}`}
                       />
                       <Button
@@ -478,6 +477,15 @@ export function ApiKeysPage() {
           </p>
         </div>
       </div>
+  );
+
+  return embedded ? content : (
+    <PageTemplate
+      title="API Keys"
+      subtitle="Manage purpose-limited credentials for slicers and PrintFarmer Desktop"
+      icon={KeyIcon}
+    >
+      {content}
     </PageTemplate>
   );
 }

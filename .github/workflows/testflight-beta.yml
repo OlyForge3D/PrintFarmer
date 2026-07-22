@@ -35,6 +35,7 @@ name: TestFlight Beta Build
 on:
   push:
     tags:
+      - 'v*-alpha*'
       - 'v*-beta*'
       - 'v*-rc*'
   workflow_dispatch:
@@ -47,6 +48,18 @@ on:
         options:
           - internal
           - external
+      marketing_version:
+        description: 'Optional marketing version override (for example, 1.0). Blank uses the latest v*-beta.N tag series.'
+        required: false
+        type: string
+      beta_number:
+        description: 'Optional beta number override. Blank increments the latest v<version>-beta.N tag.'
+        required: false
+        type: string
+
+concurrency:
+  group: testflight-beta-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -63,12 +76,134 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract version from tag
+      - name: Resolve version and build metadata
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_MARKETING_VERSION: ${{ github.event.inputs.marketing_version }}
+          INPUT_BETA_NUMBER: ${{ github.event.inputs.beta_number }}
         run: |
-          TAG_NAME="${{ github.ref_name }}"
-          VERSION=$(echo "$TAG_NAME" | sed -E 's/^v(.+)-.*/\1/')
-          BUILD_NUMBER=$(git rev-list --count HEAD)
+          set -euo pipefail
+
+          latest_beta_tag_for_version() {
+            local version="$1"
+            git tag -l "v${version}-beta.[0-9]*" --sort=v:refname | tail -n 1
+          }
+
+          latest_beta_series_version() {
+            local latest_tag
+            latest_tag="$(git tag -l 'v*-beta.[0-9]*' --sort=v:refname | tail -n 1)"
+            if [[ -z "$latest_tag" ]]; then
+              echo "No existing v*-beta.N tags found; provide marketing_version." >&2
+              exit 1
+            fi
+
+            if [[ "$latest_tag" =~ ^v([0-9]+\.[0-9]+(\.[0-9]+)?)-beta\.([0-9]+)$ ]]; then
+              echo "${BASH_REMATCH[1]}"
+            else
+              echo "Unsupported beta tag format found: $latest_tag" >&2
+              exit 1
+            fi
+          }
+
+          next_beta_number_for_version() {
+            local version="$1"
+            local latest_tag
+            latest_tag="$(latest_beta_tag_for_version "$version")"
+            if [[ -z "$latest_tag" ]]; then
+              echo "1"
+              return
+            fi
+
+            if [[ "$latest_tag" =~ -beta\.([0-9]+)$ ]]; then
+              echo "$((BASH_REMATCH[1] + 1))"
+            else
+              echo "Unsupported beta tag format found: $latest_tag" >&2
+              exit 1
+            fi
+          }
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            git fetch --tags --force
+
+            VERSION="$(echo "${INPUT_MARKETING_VERSION:-}" | tr -d '[:space:]')"
+            if [[ -z "$VERSION" ]]; then
+              VERSION="$(latest_beta_series_version)"
+            fi
+            VERSION="${VERSION#v}"
+
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+              echo "Invalid marketing version resolved: $VERSION" >&2
+              exit 1
+            fi
+
+            if [[ -n "${INPUT_BETA_NUMBER:-}" ]]; then
+              if [[ ! "$INPUT_BETA_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+                echo "Invalid beta_number: $INPUT_BETA_NUMBER" >&2
+                exit 1
+              fi
+              TAG_NAME="v${VERSION}-beta.${INPUT_BETA_NUMBER}"
+              if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+                echo "Tag already exists: $TAG_NAME" >&2
+                exit 1
+              fi
+            else
+              TAG_NAME="v${VERSION}-beta.$(next_beta_number_for_version "$VERSION")"
+            fi
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            TAG_PUSHED=false
+            for attempt in 1 2 3; do
+              if [[ "$attempt" -gt 1 && -z "${INPUT_BETA_NUMBER:-}" ]]; then
+                git fetch --tags --force
+                TAG_NAME="v${VERSION}-beta.$(next_beta_number_for_version "$VERSION")"
+              fi
+
+              if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+                if [[ -n "${INPUT_BETA_NUMBER:-}" || "$attempt" -eq 3 ]]; then
+                  echo "Tag already exists: $TAG_NAME" >&2
+                  exit 1
+                fi
+                continue
+              fi
+
+              git tag -a "$TAG_NAME" -m "PrintFarmer iOS beta $TAG_NAME"
+              if git push origin "refs/tags/$TAG_NAME"; then
+                TAG_PUSHED=true
+                break
+              fi
+
+              git tag -d "$TAG_NAME" || true
+              if [[ -n "${INPUT_BETA_NUMBER:-}" || "$attempt" -eq 3 ]]; then
+                echo "Failed to push beta tag after $attempt attempt(s): $TAG_NAME" >&2
+                exit 1
+              fi
+            done
+
+            if [[ "$TAG_PUSHED" != "true" ]]; then
+              echo "Failed to create beta tag: $TAG_NAME" >&2
+              exit 1
+            fi
+          else
+            TAG_NAME="$REF_NAME"
+            if [[ "$TAG_NAME" =~ ^v([0-9]+\.[0-9]+(\.[0-9]+)?)(-(beta|rc)\.[0-9]+)?$ ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+            else
+              echo "Unsupported tag format: $TAG_NAME" >&2
+              echo "Expected vX.Y.Z-beta.N, vX.Y.Z-rc.N, or vX.Y.Z" >&2
+              exit 1
+            fi
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Invalid marketing version resolved: $VERSION" >&2
+            exit 1
+          fi
+
+          BUILD_NUMBER=$((${{ github.run_number }} + 400))
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
@@ -116,15 +251,31 @@ jobs:
         env:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          MATCH_GIT_TOKEN: ${{ secrets.MATCH_GIT_TOKEN }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          
+          # Configure git to use token-based authentication
+          # MATCH_GIT_TOKEN is the plain PAT token (not base64 encoded)
+          git config --global url."https://git:${MATCH_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
+          
           fastlane match appstore \
             --readonly \
             --git_url "$MATCH_GIT_URL" \
             --app_identifier "com.olyforge3d.printfarmer.ios" \
             --keychain_name "$KEYCHAIN_PATH" \
             --keychain_password "$MATCH_PASSWORD"
+
+      - name: Extract provisioning profile name
+        id: profile
+        run: |
+          PROFILE_PATH=$(ls -t "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision 2>/dev/null | head -1)
+          echo "Profile path: $PROFILE_PATH"
+          TMP_PLIST=$(mktemp).plist
+          security cms -D -i "$PROFILE_PATH" > "$TMP_PLIST"
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$TMP_PLIST")
+          echo "Profile name: $PROFILE_NAME"
+          echo "name=$PROFILE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Allow codesign keychain access
         run: |
@@ -157,7 +308,7 @@ jobs:
             -archivePath "build/PrintFarmer.xcarchive" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="match AppStore com.olyforge3d.printfarmer.ios" \
+            PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile.outputs.name }}" \
             DEVELOPMENT_TEAM=ZPKA84F3TY \
             SWIFT_STRICT_CONCURRENCY=minimal \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
@@ -166,6 +317,8 @@ jobs:
       - name: Export IPA
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          # Patch ExportOptions.plist with actual profile name from match
+          /usr/libexec/PlistBuddy -c "Set :provisioningProfiles:com.olyforge3d.printfarmer.ios '${{ steps.profile.outputs.name }}'" ExportOptions.plist
           xcodebuild \
             -exportArchive \
             -archivePath "build/PrintFarmer.xcarchive" \
@@ -218,7 +371,7 @@ jobs:
 
       - name: Notify Slack
         if: success()
-        uses: slackapi/slack-github-action@v3
+        uses: slackapi/slack-github-action@v4
         with:
           payload: |
             {

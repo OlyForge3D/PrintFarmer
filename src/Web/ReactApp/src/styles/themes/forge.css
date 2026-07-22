@@ -1,0 +1,205 @@
+/* =============================================================================
+   Forge Theme — Industrial Warmth
+   Copper, amber, molten metal aesthetic — evoking metalworking & manufacturing
+   ============================================================================= */
+
+[data-theme="forge"] {
+  /* Color system metadata */
+  --pf-theme-name: 'forge';
+  
+  /* Primary background colors — Dark iron/steel with warm undertones */
+  --pf-bg-0: #0f0d0b;           /* Deep charred black */
+  --pf-bg-1: #1a1714;           /* Warm dark brown */
+  --pf-bg-2: #231f1a;           /* Lifted warm gray */
+  --pf-panel: #151210;          /* Panel background — smoky */
+  --pf-card-bg: #1a1714;        /* Card background */
+  --pf-sidebar-bg: #12100e;     /* Sidebar — coal dark */
+  
+  /* Button glow effect — Amber/copper glow like molten metal */
+  --pf-btn-glow: 0 0 12px rgba(255, 166, 77, 0.25), 0 0 4px rgba(212, 126, 52, 0.2);
+  
+  /* Border and divider colors — Warm bronze/copper tints */
+  --pf-border: #3d3229;         /* Bronze-tinted border */
+  --pf-border-light: #5c4a3a;   /* Copper highlight */
+  --pf-border-medium: #4a3d32;  /* Medium bronze */
+  --pf-border-dark: #2a231d;    /* Dark iron */
+  --pf-border-gray: #6b5848;    /* Warm gray */
+  
+  /* Text colors — Warm cream and amber spectrum */
+  --pf-text-primary: #f5e6d3;   /* Cream — like parchment */
+  --pf-text-secondary: #c9b8a5; /* Muted tan */
+  --pf-text-tertiary: #8a7a6a;  /* Dusty bronze */
+  --pf-text-light: #fff5e6;     /* Bright cream */
+  --pf-text-muted: #7a6b5c;     /* Faded copper */
+  
+  /* Accent and brand colors — Molten copper/amber */
+  --pf-accent: #d47e34;         /* Molten copper */
+  --pf-accent-bg: #8b4513;      /* Saddle brown — rich copper BG */
+  --pf-accent-hover: #a0522d;   /* Sienna hover */
+  --pf-accent-2: #ff9f43;       /* Bright amber */
+  --pf-success: #7cb342;        /* Oxidized copper green */
+  --pf-success-bg: #4a5d23;     /* Dark olive */
+  --pf-success-hover: #5c7a2e;  /* Olive hover */
+  --pf-error-hover: #8b0000;    /* Dark red hover */
+  --pf-link: #ffa726;           /* Amber links */
+  
+  /* Semantic status colors — Forge palette */
+  --pf-status-online-bg: #1a2612;
+  --pf-status-online-text: #aed581;
+  --pf-status-online-border: #4a5d23;
+  --pf-status-offline-bg: #2a1515;
+  --pf-status-offline-text: #ff8a80;
+  --pf-status-offline-border: #5c2626;
+  
+  /* Error and warning colors — Fire spectrum */
+  --pf-error: #e53935;          /* Forge fire red */
+  --pf-error-bg: #2a1515;
+  --pf-error-text: #ff8a80;
+  --pf-error-border: #5c2626;
+  --pf-warning: #ffb300;        /* Molten gold */
+  --pf-warning-text: #ffd54f;
+  
+  /* Loading and disabled states */
+  --pf-loading: #ff9f43;
+  --pf-loading-border: #8b4513;
+  --pf-disabled: #5c4a3a;
+  
+  /* Gradient colors — Forge fire depth */
+  --pf-gradient-primary-start: #1a1714;
+  --pf-gradient-primary-end: #0f0d0b;
+  --pf-gradient-secondary-start: #231f1a;
+  --pf-gradient-secondary-end: #1a1714;
+  --pf-gradient-success-start: #4a5d23;
+  --pf-gradient-success-end: #5c7a2e;
+  --pf-gradient-green-start: #5c7a2e;
+  --pf-gradient-green-end: #4a5d23;
+  --pf-gradient-green-active-start: #6b8f36;
+  --pf-gradient-green-active-end: #5c7a2e;
+  --pf-gradient-gray-start: #5c4a3a;
+  --pf-gradient-gray-end: #4a3d32;
+  --pf-gradient-gray-dark-start: #4a3d32;
+  --pf-gradient-gray-dark-end: #3d3229;
+  
+  /* Focus and interaction states — Warm amber glow */
+  --pf-focus-ring: rgba(212, 126, 52, 0.5);
+  --pf-focus-ring-offset: #0f0d0b;
+  --pf-hover-overlay: rgba(255, 166, 77, 0.08);
+  --pf-active-overlay: rgba(255, 166, 77, 0.15);
+
+  /* Skeleton / shimmer surfaces */
+  --pf-skeleton-bg: #231f1a;
+  --pf-skeleton-bg-alt: #3d3229;
+  --pf-skeleton-accent: #5c4a3a;
+  --pf-focus-outline: var(--pf-accent);
+  
+  /* ========== CONTROL STYLING VARIABLES ========== */
+  /* Input/Select/Textarea Controls */
+  --pf-control-bg: #12100e;            /* Coal dark input background */
+  --pf-control-border: #3d3229;        /* Bronze border */
+  --pf-control-border-hover: #5c4a3a;  /* Copper hover */
+  --pf-control-border-focus: #d47e34;  /* Molten copper focus */
+  --pf-control-text: #f5e6d3;          /* Cream text */
+  --pf-control-placeholder: #6b5848;   /* Muted copper */
+  --pf-control-disabled-bg: #1a1714;   /* Disabled background */
+  --pf-control-disabled-text: #5c4a3a; /* Disabled text */
+  
+  /* Focus Ring */
+  --pf-control-focus-ring: rgba(212, 126, 52, 0.5);  /* Amber focus ring */
+  --pf-control-focus-ring-offset: #0f0d0b;
+  --pf-control-focus-ring-width: 2px;
+  
+  /* Button States (Primary variant) — Forge copper */
+  --pf-button-primary-bg: #8b4513;
+  --pf-button-primary-hover: #a0522d;
+  --pf-button-primary-active: #6b3410;
+  --pf-button-primary-text: #fff5e6;
+  --pf-button-primary-border: #d47e34;
+  
+  /* Button States (Secondary variant) */
+  --pf-button-secondary-bg: #1a1714;
+  --pf-button-secondary-hover: #231f1a;
+  --pf-button-secondary-active: #12100e;
+  --pf-button-secondary-text: #c9b8a5;
+  --pf-button-secondary-border: #3d3229;
+
+  /* Home buttons (axis homed state) */
+  --pf-home-homed-bg: #d47e34;
+  --pf-home-not-homed-bg: #ffb300;
+  
+  /* Button States (Danger variant) — Fire red */
+  --pf-button-danger-bg: #8b2323;
+  --pf-button-danger-hover: #a52a2a;
+  --pf-button-danger-active: #6b1c1c;
+  --pf-button-danger-text: #fff5e6;
+  --pf-button-danger-border: #e53935;
+  
+  /* Validation States */
+  --pf-validation-error-bg: rgba(229, 57, 53, 0.1);
+  --pf-validation-error-border: #e53935;
+  --pf-validation-error-text: #ff8a80;
+  --pf-validation-success-border: #7cb342;
+  --pf-validation-success-text: #aed581;
+  
+  color-scheme: dark;
+}
+
+/* ============================================================================
+   Forge Theme — Special Visual Effects
+   ============================================================================ */
+
+/* Subtle texture overlay for industrial feel (opt-in via class) */
+[data-theme="forge"] .forge-texture {
+  position: relative;
+}
+
+[data-theme="forge"] .forge-texture::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.02;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Warm glow on headings — like metal cooling */
+[data-theme="forge"] h1,
+[data-theme="forge"] h2,
+[data-theme="forge"] h3 {
+  text-shadow: 0 0 10px rgba(212, 126, 52, 0.3), 0 0 20px rgba(212, 126, 52, 0.15);
+}
+
+/* Ember glow on focused inputs */
+[data-theme="forge"] input:focus,
+[data-theme="forge"] select:focus,
+[data-theme="forge"] textarea:focus {
+  box-shadow: 
+    0 0 0 2px rgba(212, 126, 52, 0.5),
+    0 0 15px rgba(255, 166, 77, 0.15);
+}
+
+/* Warm border glow on cards */
+[data-theme="forge"] .card-pf:hover {
+  border-color: rgba(212, 126, 52, 0.4);
+  box-shadow: 0 0 20px rgba(255, 166, 77, 0.08);
+}
+
+/* Progress bar ember effect */
+[data-theme="forge"] [role="progressbar"] {
+  box-shadow: 0 0 8px rgba(255, 159, 67, 0.3);
+}
+
+/* Status badge warm glow */
+[data-theme="forge"] .status-pf-online {
+  box-shadow: 0 0 8px rgba(124, 179, 66, 0.25);
+}
+
+/* Molten button glow effect */
+[data-theme="forge"] .pf-btn-primary:hover {
+  box-shadow: 
+    var(--pf-btn-glow),
+    0 4px 15px rgba(139, 69, 19, 0.4);
+}

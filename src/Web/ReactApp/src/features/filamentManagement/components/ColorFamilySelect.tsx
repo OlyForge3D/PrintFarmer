@@ -10,10 +10,11 @@ interface Props {
   placeholder?: string;
   label?: string;
   id?: string;
+  disabled?: boolean;
 }
 
 // Accessible custom select (button + listbox) with per-option color swatch.
-export function ColorFamilySelect({ value, onChange, options, placeholder = 'All Colors', label = 'Filter by color family', id }: Props) {
+export function ColorFamilySelect({ value, onChange, options, placeholder = 'All Colors', label = 'Filter by color family', id, disabled = false }: Props) {
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
   const btnRef = useRef<HTMLButtonElement | null>(null);
@@ -78,8 +79,9 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
         type="button"
         aria-haspopup="listbox"
         data-open={open ? 'true' : 'false'}
-        onClick={() => { setOpen(o => !o); if (!open) setActiveIdx( value ? (families.indexOf(value) + 1) : 0 ); }}
-        onKeyDown={onKeyDown}
+        disabled={disabled}
+        onClick={() => { if (disabled) return; setOpen(o => !o); if (!open) setActiveIdx( value ? (families.indexOf(value) + 1) : 0 ); }}
+        onKeyDown={disabled ? undefined : onKeyDown}
         className="w-40 border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none flex items-center justify-between gap-2"
         variant="unstyled"
         iconRight={open ? <ChevronUpIcon className="w-4 h-4 opacity-60" ariaLabel="" /> : <ChevronDownIcon className="w-4 h-4 opacity-60" ariaLabel="" />}

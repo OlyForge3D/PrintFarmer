@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain.Notifications;
@@ -182,7 +183,6 @@ public class NotificationsController(INotificationService notificationService) :
     /// <returns>User notification preferences</returns>
     [HttpGet("preferences")]
     [ProducesResponseType(typeof(NotificationPreferencesDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<NotificationPreferencesDto>> GetPreferencesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -191,21 +191,8 @@ public class NotificationsController(INotificationService notificationService) :
             Guid userId = GetUserIdFromClaims();
 
             NotificationPreferences? preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
-            return preferences == null
-                ? NotFound(new { error = $"Preferences not found for user {userId}" })
-                : Ok(new NotificationPreferencesDto
-                {
-                    UserId = preferences.UserId,
-                    EnableEmailNotifications = preferences.EnableEmailNotifications,
-                    EnablePushNotifications = preferences.EnablePushNotifications,
-                    EnableInAppNotifications = preferences.EnableInAppNotifications,
-                    NotifyOnCompletion = preferences.NotifyOnCompletion,
-                    NotifyOnFailure = preferences.NotifyOnFailure,
-                    NotifyOnStart = preferences.NotifyOnStart,
-                    NotifyOnPause = preferences.NotifyOnPause,
-                    Frequency = preferences.Frequency,
-                    RetentionDays = preferences.RetentionDays
-                });
+            NotificationPreferences effective = preferences ?? CreateDefaultPreferences(userId);
+            return Ok(ToDto(effective));
         }
         catch (InvalidOperationException)
         {
@@ -245,6 +232,7 @@ public class NotificationsController(INotificationService notificationService) :
                 EnableEmailNotifications = request.EnableEmailNotifications,
                 EnablePushNotifications = request.EnablePushNotifications,
                 EnableInAppNotifications = request.EnableInAppNotifications,
+                EnableTelegramNotifications = request.EnableTelegramNotifications,
                 NotifyOnCompletion = request.NotifyOnCompletion,
                 NotifyOnFailure = request.NotifyOnFailure,
                 NotifyOnStart = request.NotifyOnStart,
@@ -253,21 +241,9 @@ public class NotificationsController(INotificationService notificationService) :
                 RetentionDays = request.RetentionDays ?? 30
             };
 
+            ApplyEventChannelPreferences(preferences, request);
             await notificationService.UpdatePreferencesAsync(userId, preferences, cancellationToken);
-
-            return Ok(new NotificationPreferencesDto
-            {
-                UserId = preferences.UserId,
-                EnableEmailNotifications = preferences.EnableEmailNotifications,
-                EnablePushNotifications = preferences.EnablePushNotifications,
-                EnableInAppNotifications = preferences.EnableInAppNotifications,
-                NotifyOnCompletion = preferences.NotifyOnCompletion,
-                NotifyOnFailure = preferences.NotifyOnFailure,
-                NotifyOnStart = preferences.NotifyOnStart,
-                NotifyOnPause = preferences.NotifyOnPause,
-                Frequency = preferences.Frequency,
-                RetentionDays = preferences.RetentionDays
-            });
+            return Ok(ToDto(preferences));
         }
         catch (InvalidOperationException)
         {
@@ -277,6 +253,268 @@ public class NotificationsController(INotificationService notificationService) :
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Get the VAPID public key for push subscription enrollment.
+    /// </summary>
+    [HttpGet("push-subscription/vapid-key")]
+    [ProducesResponseType(typeof(VapidKeyResponse), StatusCodes.Status200OK)]
+    public ActionResult<VapidKeyResponse> GetVapidKey()
+    {
+        // TODO: Move to configuration once VAPID keys are generated for deployment
+        string? publicKey = Environment.GetEnvironmentVariable("VAPID_PUBLIC_KEY");
+        if (string.IsNullOrEmpty(publicKey))
+        {
+            return Ok(new VapidKeyResponse { PublicKey = string.Empty });
+        }
+
+        return Ok(new VapidKeyResponse { PublicKey = publicKey });
+    }
+
+    /// <summary>
+    /// Subscribe to web push notifications. Stores the browser push subscription.
+    /// </summary>
+    /// <param name="request">The push subscription data from the browser.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpPost("push-subscription")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SubscribePushAsync(
+        [FromBody] PushSubscriptionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Guid userId = GetUserIdFromClaims();
+
+            if (string.IsNullOrWhiteSpace(request?.Endpoint))
+            {
+                return BadRequest(new { error = "Endpoint is required" });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Keys?.P256dh) || string.IsNullOrWhiteSpace(request.Keys?.Auth))
+            {
+                return BadRequest(new { error = "Subscription keys p256dh and auth are required" });
+            }
+
+            await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys.P256dh, request.Keys.Auth, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException)
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Unsubscribe from web push notifications for the current device.
+    /// </summary>
+    /// <param name="request">The push subscription endpoint to remove.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpDelete("push-subscription")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UnsubscribePushAsync(
+        [FromBody] UnsubscribePushRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Guid userId = GetUserIdFromClaims();
+
+            if (string.IsNullOrWhiteSpace(request?.Endpoint))
+            {
+                return BadRequest(new { error = "Endpoint is required" });
+            }
+
+            await notificationService.DeletePushSubscriptionAsync(userId, request.Endpoint, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException)
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    private static NotificationPreferencesDto ToDto(NotificationPreferences preferences)
+    {
+        return new NotificationPreferencesDto
+        {
+            UserId = preferences.UserId,
+            EnableEmailNotifications = preferences.EnableEmailNotifications,
+            EnablePushNotifications = preferences.EnablePushNotifications,
+            EnableInAppNotifications = preferences.EnableInAppNotifications,
+            EnableTelegramNotifications = preferences.EnableTelegramNotifications,
+            NotifyOnCompletion = preferences.NotifyOnCompletion,
+            NotifyOnFailure = preferences.NotifyOnFailure,
+            NotifyOnStart = preferences.NotifyOnStart,
+            NotifyOnPause = preferences.NotifyOnPause,
+            EventChannelPreferences = BuildEventChannelPreferences(preferences),
+            Frequency = preferences.Frequency,
+            RetentionDays = preferences.RetentionDays
+        };
+    }
+
+    private static NotificationPreferences CreateDefaultPreferences(Guid userId)
+    {
+        var defaults = new NotificationPreferences
+        {
+            UserId = userId
+        };
+        ApplyEventChannelPreferences(defaults, new UpdateNotificationPreferencesRequest());
+        return defaults;
+    }
+
+    private static List<NotificationEventChannelPreferenceDto> BuildEventChannelPreferences(NotificationPreferences preferences)
+    {
+        return new List<NotificationEventChannelPreferenceDto>
+        {
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobStarted,
+                InApp = preferences.InAppOnJobStarted,
+                Email = preferences.EmailOnJobStarted,
+                Push = preferences.PushOnJobStarted,
+                Telegram = preferences.TelegramOnJobStarted
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobCompleted,
+                InApp = preferences.InAppOnJobCompleted,
+                Email = preferences.EmailOnJobCompleted,
+                Push = preferences.PushOnJobCompleted,
+                Telegram = preferences.TelegramOnJobCompleted
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobFailed,
+                InApp = true,
+                Email = preferences.EmailOnJobFailed,
+                Push = preferences.PushOnJobFailed,
+                Telegram = preferences.TelegramOnJobFailed
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.JobPaused,
+                InApp = preferences.InAppOnJobPaused,
+                Email = preferences.EmailOnJobPaused,
+                Push = preferences.PushOnJobPaused,
+                Telegram = preferences.TelegramOnJobPaused
+            }
+        };
+    }
+
+    private static void ApplyEventChannelPreferences(NotificationPreferences preferences, UpdateNotificationPreferencesRequest request)
+    {
+        List<NotificationEventChannelPreferenceDto>? matrix = request.EventChannelPreferences;
+        if (matrix is null || matrix.Count == 0)
+        {
+            preferences.InAppOnJobStarted = request.EnableInAppNotifications && request.NotifyOnStart;
+            preferences.InAppOnJobCompleted = request.EnableInAppNotifications && request.NotifyOnCompletion;
+            preferences.InAppOnJobFailed = true;
+            preferences.InAppOnJobPaused = request.EnableInAppNotifications && request.NotifyOnPause;
+            preferences.EmailOnJobStarted = request.EnableEmailNotifications && request.NotifyOnStart;
+            preferences.EmailOnJobCompleted = request.EnableEmailNotifications && request.NotifyOnCompletion;
+            preferences.EmailOnJobFailed = request.EnableEmailNotifications && request.NotifyOnFailure;
+            preferences.EmailOnJobPaused = request.EnableEmailNotifications && request.NotifyOnPause;
+            preferences.PushOnJobStarted = request.EnablePushNotifications && request.NotifyOnStart;
+            preferences.PushOnJobCompleted = request.EnablePushNotifications && request.NotifyOnCompletion;
+            preferences.PushOnJobFailed = request.EnablePushNotifications && request.NotifyOnFailure;
+            preferences.PushOnJobPaused = request.EnablePushNotifications && request.NotifyOnPause;
+            preferences.TelegramOnJobStarted = request.EnableTelegramNotifications && request.NotifyOnStart;
+            preferences.TelegramOnJobCompleted = request.EnableTelegramNotifications && request.NotifyOnCompletion;
+            preferences.TelegramOnJobFailed = request.EnableTelegramNotifications && request.NotifyOnFailure;
+            preferences.TelegramOnJobPaused = request.EnableTelegramNotifications && request.NotifyOnPause;
+            return;
+        }
+
+        preferences.InAppOnJobStarted = false;
+        preferences.InAppOnJobCompleted = true;
+        preferences.InAppOnJobFailed = true;
+        preferences.InAppOnJobPaused = true;
+        preferences.EmailOnJobStarted = false;
+        preferences.EmailOnJobCompleted = true;
+        preferences.EmailOnJobFailed = true;
+        preferences.EmailOnJobPaused = true;
+        preferences.PushOnJobStarted = false;
+        preferences.PushOnJobCompleted = true;
+        preferences.PushOnJobFailed = true;
+        preferences.PushOnJobPaused = true;
+        preferences.TelegramOnJobStarted = false;
+        preferences.TelegramOnJobCompleted = false;
+        preferences.TelegramOnJobFailed = false;
+        preferences.TelegramOnJobPaused = false;
+
+        foreach (NotificationEventChannelPreferenceDto item in matrix)
+        {
+            if (item is null)
+            {
+                continue;
+            }
+
+            switch (item.EventType)
+            {
+                case NotificationPreferenceEventType.JobStarted:
+                    preferences.InAppOnJobStarted = item.InApp;
+                    preferences.EmailOnJobStarted = item.Email;
+                    preferences.PushOnJobStarted = item.Push;
+                    preferences.TelegramOnJobStarted = item.Telegram;
+                    break;
+                case NotificationPreferenceEventType.JobCompleted:
+                    preferences.InAppOnJobCompleted = item.InApp;
+                    preferences.EmailOnJobCompleted = item.Email;
+                    preferences.PushOnJobCompleted = item.Push;
+                    preferences.TelegramOnJobCompleted = item.Telegram;
+                    break;
+                case NotificationPreferenceEventType.JobFailed:
+                    preferences.InAppOnJobFailed = true;
+                    preferences.EmailOnJobFailed = item.Email;
+                    preferences.PushOnJobFailed = item.Push;
+                    preferences.TelegramOnJobFailed = item.Telegram;
+                    break;
+                case NotificationPreferenceEventType.JobPaused:
+                    preferences.InAppOnJobPaused = item.InApp;
+                    preferences.EmailOnJobPaused = item.Email;
+                    preferences.PushOnJobPaused = item.Push;
+                    preferences.TelegramOnJobPaused = item.Telegram;
+                    break;
+            }
+        }
+
+        preferences.EnableInAppNotifications =
+            preferences.InAppOnJobStarted
+            || preferences.InAppOnJobCompleted
+            || preferences.InAppOnJobFailed
+            || preferences.InAppOnJobPaused;
+        preferences.EnableEmailNotifications =
+            preferences.EmailOnJobStarted
+            || preferences.EmailOnJobCompleted
+            || preferences.EmailOnJobFailed
+            || preferences.EmailOnJobPaused;
+        preferences.EnablePushNotifications =
+            preferences.PushOnJobStarted
+            || preferences.PushOnJobCompleted
+            || preferences.PushOnJobFailed
+            || preferences.PushOnJobPaused;
+        preferences.EnableTelegramNotifications =
+            preferences.TelegramOnJobStarted
+            || preferences.TelegramOnJobCompleted
+            || preferences.TelegramOnJobFailed
+            || preferences.TelegramOnJobPaused;
+
+        preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted || preferences.TelegramOnJobStarted;
+        preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted || preferences.TelegramOnJobCompleted;
+        preferences.NotifyOnFailure = true;
+        preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused || preferences.TelegramOnJobPaused;
     }
 
     /// <summary>
@@ -317,6 +555,9 @@ public class UpdateNotificationPreferencesRequest
     /// <summary>Enable in-app notifications</summary>
     public bool EnableInAppNotifications { get; set; } = true;
 
+    /// <summary>Enable Telegram notifications</summary>
+    public bool EnableTelegramNotifications { get; set; } = false;
+
     /// <summary>Notify on job completion</summary>
     public bool NotifyOnCompletion { get; set; } = true;
 
@@ -327,13 +568,16 @@ public class UpdateNotificationPreferencesRequest
     public bool NotifyOnStart { get; set; } = false;
 
     /// <summary>Notify on job pause</summary>
-    public bool NotifyOnPause { get; set; } = false;
+    public bool NotifyOnPause { get; set; } = true;
 
     /// <summary>Notification frequency (RealTime, Hourly, Daily, Weekly, Never)</summary>
     public NotificationFrequency Frequency { get; set; } = NotificationFrequency.RealTime;
 
     /// <summary>Retention days for notification history</summary>
     public int? RetentionDays { get; set; } = 30;
+
+    /// <summary>Per-event by channel notification matrix.</summary>
+    public List<NotificationEventChannelPreferenceDto>? EventChannelPreferences { get; set; }
 }
 
 /// <summary>
@@ -398,6 +642,9 @@ public class NotificationPreferencesDto
     /// <summary>Enable in-app notifications</summary>
     public bool EnableInAppNotifications { get; set; }
 
+    /// <summary>Enable Telegram notifications</summary>
+    public bool EnableTelegramNotifications { get; set; }
+
     /// <summary>Notify on job completion</summary>
     public bool NotifyOnCompletion { get; set; }
 
@@ -410,9 +657,75 @@ public class NotificationPreferencesDto
     /// <summary>Notify on job pause</summary>
     public bool NotifyOnPause { get; set; }
 
+    /// <summary>Per-event by channel notification matrix.</summary>
+    public List<NotificationEventChannelPreferenceDto> EventChannelPreferences { get; set; } = new();
+
     /// <summary>Notification frequency</summary>
     public NotificationFrequency Frequency { get; set; }
 
     /// <summary>Retention days for notification history</summary>
     public int RetentionDays { get; set; }
+}
+
+public enum NotificationPreferenceEventType
+{
+    JobStarted,
+    JobCompleted,
+    JobFailed,
+    JobPaused
+}
+
+public class NotificationEventChannelPreferenceDto
+{
+    public NotificationPreferenceEventType EventType { get; set; }
+
+    public bool InApp { get; set; }
+
+    public bool Email { get; set; }
+
+    public bool Push { get; set; }
+
+    public bool Telegram { get; set; }
+}
+
+/// <summary>
+/// VAPID public key response for push subscription enrollment
+/// </summary>
+public class VapidKeyResponse
+{
+    /// <summary>The VAPID public key (Base64url encoded)</summary>
+    public string PublicKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request model for creating a push subscription
+/// </summary>
+public class PushSubscriptionRequest
+{
+    /// <summary>The push subscription endpoint URL</summary>
+    public string Endpoint { get; set; } = string.Empty;
+
+    /// <summary>Subscription keys</summary>
+    public PushSubscriptionKeys? Keys { get; set; }
+}
+
+/// <summary>
+/// Push subscription cryptographic keys
+/// </summary>
+public class PushSubscriptionKeys
+{
+    /// <summary>The p256dh key (Base64url encoded)</summary>
+    public string P256dh { get; set; } = string.Empty;
+
+    /// <summary>The auth secret (Base64url encoded)</summary>
+    public string Auth { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request model for unsubscribing a specific push subscription (device endpoint)
+/// </summary>
+public class UnsubscribePushRequest
+{
+    /// <summary>The push subscription endpoint URL to remove</summary>
+    public string Endpoint { get; set; } = string.Empty;
 }

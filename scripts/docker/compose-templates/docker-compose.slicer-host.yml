@@ -22,6 +22,7 @@ services:
         NODE_TAG: ${NODE_TAG}
         NGINX_TAG: ${NGINX_TAG}
         UBUNTU_TAG: ${UBUNTU_TAG}
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: printfarmer-slicer-host
     container_name: printfarmer-slicer-host
     restart: unless-stopped
@@ -52,11 +53,13 @@ services:
       - Jwt__Key=${Jwt__Key:-}
       - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+      - MODEL_UPLOAD_PATH=/app/models
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
     volumes:
       - ${EXTERNAL_SLICER_DATA_PATH:-.volumes/printfarmer-slicer-data}:/data
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles:ro
+      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
     networks:
       - printfarmer-network
     healthcheck: *slicer-host-healthcheck

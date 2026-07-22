@@ -2,6 +2,8 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.AutoTagging;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
@@ -10,6 +12,7 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -30,6 +33,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IAutoDispatchTrigger? _autoDispatchTrigger;
     private readonly IDiagnosticChannelService? _diagnostics;
     private readonly IJobCostCalculationService? _jobCostCalculationService;
+    private readonly IAutoTagService? _autoTagService;
+    private readonly ICameraSnapshotService? _cameraSnapshotService;
+    private readonly IServiceScopeFactory? _serviceScopeFactory;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -90,7 +96,10 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         ISpoolmanService? spoolmanService = null,
         IAutoDispatchTrigger? autoDispatchTrigger = null,
         IDiagnosticChannelService? diagnostics = null,
-        IJobCostCalculationService? jobCostCalculationService = null)
+        IJobCostCalculationService? jobCostCalculationService = null,
+        IAutoTagService? autoTagService = null,
+        ICameraSnapshotService? cameraSnapshotService = null,
+        IServiceScopeFactory? serviceScopeFactory = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -103,6 +112,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _autoDispatchTrigger = autoDispatchTrigger;
         _diagnostics = diagnostics;
         _jobCostCalculationService = jobCostCalculationService;
+        _autoTagService = autoTagService;
+        _cameraSnapshotService = cameraSnapshotService;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     /// <summary>
@@ -207,10 +219,23 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Fetch actual filament usage from backend and record consumption in Spoolman
         await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
 
+        // Auto-tag the completed job with material, color, and nozzle info
+        if (_autoTagService is not null && primaryJob.Status == PrintJobStatus.Completed)
+        {
+            try
+            {
+                await _autoTagService.GenerateTagsAsync(primaryJob, printerId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Auto-tagging failed for job {JobId}", primaryJob.Id);
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
 
-        // Calculate detailed cost breakdown (runs after SaveChanges to ensure ActualFilamentUsage is persisted)
-        await CalculateDetailedCostBreakdownAsync(primaryJob.Id, ct);
+        // Calculate detailed cost breakdown after persistence without blocking the status update.
+        ScheduleDetailedCostBreakdown(primaryJob.Id);
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Job {JobId} ({JobName}) marked as completed. Duration: {Duration}",
@@ -220,6 +245,26 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
+
+        // Capture camera snapshots (true fire-and-forget — never blocks completion)
+        if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
+        {
+            Guid captureForPrinter = printerId;
+            Guid captureForJob = primaryJob.Id;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    ICameraSnapshotService svc = scope.ServiceProvider.GetRequiredService<ICameraSnapshotService>();
+                    await svc.CaptureSnapshotAsync(captureForPrinter, "PrintCompleted", captureForJob, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background snapshot capture failed for printer {PrinterId}", captureForPrinter);
+                }
+            });
+        }
 
         // Send notification if configured
         if (_notificationService != null)
@@ -319,6 +364,26 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
+
+        // Capture camera snapshots on failure (true fire-and-forget)
+        if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
+        {
+            Guid captureForPrinter = printerId;
+            Guid captureForJob = primaryJob.Id;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    ICameraSnapshotService svc = scope.ServiceProvider.GetRequiredService<ICameraSnapshotService>();
+                    await svc.CaptureSnapshotAsync(captureForPrinter, "PrintFailed", captureForJob, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background snapshot capture failed for printer {PrinterId}", captureForPrinter);
+                }
+            });
+        }
 
         return true;
     }
@@ -558,6 +623,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         int syncedCount = 0;
         HashSet<Guid> printersToNotify = [];
+        List<Guid> completedJobIds = [];
 
         foreach (PrintJob job in orphanedJobs)
         {
@@ -637,6 +703,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
                 syncedCount++;
                 printersToNotify.Add(printerId);
+                completedJobIds.Add(job.Id);
             }
             else if (IsFailureState(currentPrinterState))
             {
@@ -671,6 +738,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 "[PrintJobCompletionService] Synced {Count} orphaned jobs",
                 syncedCount);
 
+            foreach (Guid completedJobId in completedJobIds)
+            {
+                ScheduleDetailedCostBreakdown(completedJobId);
+            }
+
             // Broadcast updates for affected printers
             foreach (Guid printerId in printersToNotify)
             {
@@ -682,23 +754,45 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     }
 
     /// <summary>
-    /// Calculates detailed cost breakdown using the JobCostCalculationService if available.
+    /// Schedules detailed cost breakdown using the JobCostCalculationService if available.
     /// </summary>
-    private async Task CalculateDetailedCostBreakdownAsync(Guid jobId, CancellationToken ct)
+    private void ScheduleDetailedCostBreakdown(Guid jobId)
     {
-        if (_jobCostCalculationService == null)
+        if (_serviceScopeFactory is not null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    IJobCostCalculationService costService = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+                    await costService.CalculateAndStoreCostsAsync(jobId, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background cost calculation failed for job {JobId}", jobId);
+                }
+            });
+
+            return;
+        }
+
+        if (_jobCostCalculationService is null)
         {
             return;
         }
 
-        try
+        _ = Task.Run(async () =>
         {
-            await _jobCostCalculationService.CalculateAndStoreCostsAsync(jobId, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to calculate detailed cost breakdown for job {JobId}", jobId);
-        }
+            try
+            {
+                await _jobCostCalculationService.CalculateAndStoreCostsAsync(jobId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Background cost calculation failed for job {JobId}", jobId);
+            }
+        });
     }
 
     /// <inheritdoc />

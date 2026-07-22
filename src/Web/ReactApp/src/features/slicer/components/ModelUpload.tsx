@@ -1,14 +1,6 @@
 import { apiClient } from '@/services/api';
-import React, { useCallback, useState, useRef, useEffect } from 'react';
-import { FileUpload } from '@/common/components/ui/FileUpload';
-
-const ProgressBar: React.FC<{ percent: number }> = ({ percent }) => {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.style.width = `${Math.min(percent, 100)}%`;
-  }, [percent]);
-  return <div ref={ref} className="bg-pf-accent-bg h-2 rounded-sm transition-all duration-300" />;
-};
+import React, { useCallback, useState } from 'react';
+import { FileUpload, ProgressBar } from '@/common/components/ui';
 
 export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) => void }) {
   const [dragOver, setDragOver] = useState(false);
@@ -55,11 +47,11 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         className={`border-2 rounded-md p-6 text-center ${dragOver ? 'border-pf-accent bg-pf-accent-bg/15' : 'border-dashed'}`}>
-        <p className="mb-2">Drag & drop model file here (.stl, .3mf, .obj, .ply, .step)</p>
+        <p className="mb-2">Drag & drop model file here (.stl, .3mf, .obj, .ply, .step, .stp)</p>
         <p className="text-sm text-pf-text-secondary">Or click to select a file</p>
         <FileUpload
           id="model-upload-input"
-          accept=".stl,.3mf,.obj,.ply,.step"
+          accept=".stl,.3mf,.obj,.ply,.step,.stp"
           onChange={(files) => {
             if (files) {
               const event = { target: { files } } as unknown as React.ChangeEvent<HTMLInputElement>;
@@ -71,9 +63,7 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         {progress !== null && (
           <div className="mt-4">
             <div className="text-sm">Uploading: {progress}%</div>
-            <div className="w-full bg-pf-bg-2 h-2 rounded-sm mt-1">
-              <ProgressBar percent={progress} />
-            </div>
+            <ProgressBar value={progress} ariaLabel="Upload progress" showPercent={false} className="mt-1" />
           </div>
         )}
         {error && <div className="mt-3 text-pf-error">Error: {error}</div>}

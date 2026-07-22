@@ -139,13 +139,12 @@ final class SpoolInventoryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.filteredSpools.first?.id, 1)
     }
 
-    func testFilterAvailableWithNilInUse() {
+    func testFilterAvailableWithFalseInUse() {
         viewModel.spools = [
-            makeSpool(id: 1, material: "PLA", inUse: nil, archived: false),
+            makeSpool(id: 1, material: "PLA", inUse: false, archived: false),
         ]
         viewModel.selectedStatus = .available
 
-        // nil inUse defaults to false, so spool is available
         XCTAssertEqual(viewModel.filteredSpools.count, 1)
     }
 
@@ -153,7 +152,7 @@ final class SpoolInventoryViewModelTests: XCTestCase {
         viewModel.spools = [
             makeSpool(id: 1, material: "PLA", inUse: true),
             makeSpool(id: 2, material: "PLA", inUse: false),
-            makeSpool(id: 3, material: "PLA", inUse: nil),
+            makeSpool(id: 3, material: "PLA", inUse: false),
         ]
         viewModel.selectedStatus = .inUse
 
@@ -498,7 +497,7 @@ final class SpoolInventoryViewModelTests: XCTestCase {
         id: Int,
         material: String,
         name: String = "Test Spool",
-        inUse: Bool? = nil,
+        inUse: Bool = false,
         archived: Bool? = false,
         vendor: String? = nil,
         filamentName: String? = nil,

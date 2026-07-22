@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { FileIcon, UploadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
-import { Button, FileUpload } from '@/common/components/ui';
+import { Button, FileUpload, ProgressBar } from '@/common/components/ui';
 import { toast } from 'sonner';
 import { Modal } from './Modal';
 
@@ -190,12 +190,12 @@ export const GcodeUploadModal: React.FC<GcodeUploadModalProps> = ({
                 </div>
 
                 {item.status === 'uploading' && (
-                  <div className="w-full bg-pf-bg rounded-full h-1.5">
-                    <div
-                      className="bg-pf-accent h-full rounded-full transition-all duration-300"
-                      style={{ width: `${item.progress}%` }}
-                    />
-                  </div>
+                  <ProgressBar
+                    value={item.progress}
+                    ariaLabel={`${item.file.name} upload progress`}
+                    showPercent={false}
+                    size="xs"
+                  />
                 )}
 
                 {item.error && (

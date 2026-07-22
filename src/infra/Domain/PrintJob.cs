@@ -76,7 +76,14 @@ public class PrintJob
     public decimal? MaterialCostUsd { get; set; }
 
     /// <summary>
-    /// Energy cost in USD (print duration × printer wattage × electricity rate). Calculated on job completion.
+    /// Kilowatt-hours consumed during this print job, as measured by a power monitor.
+    /// When set, energy cost is computed directly as KwhUsed × ElectricityRatePerKwh.
+    /// When null, energy cost falls back to an estimate: (ActualPrintTime × Wattage / 1000) × rate.
+    /// </summary>
+    public decimal? KwhUsed { get; set; }
+
+    /// <summary>
+    /// Energy cost in USD (KwhUsed × electricity rate, or estimated from wattage × duration). Calculated on job completion.
     /// </summary>
     public decimal? EnergyCostUsd { get; set; }
 
@@ -113,6 +120,11 @@ public class PrintJob
     public DateTime UpdatedAt { get; set; }
 
     public DateTime QueuedAt { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this queued job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 
     // History Seeding: Track external job source for deduplication
 
@@ -217,6 +229,17 @@ public class PrintJob
     [MaxLength(32)]
     public string? FilamentColor { get; set; }
 
+    /// <summary>
+    /// Optional plate index from a multi-plate 3MF model.
+    /// </summary>
+    public int? PlateIndex { get; set; }
+
+    /// <summary>
+    /// Optional plate name from a multi-plate 3MF model.
+    /// </summary>
+    [MaxLength(255)]
+    public string? PlateName { get; set; }
+
     // Phase 3C: Timeline tracking
     public ICollection<JobStateHistory> StateHistory { get; } = new List<JobStateHistory>();
 
@@ -262,4 +285,10 @@ public class PrintJob
     /// Retry history where THIS job is a retry attempt (reference to original in JobRetry.OriginalJobId)
     /// </summary>
     public ICollection<JobRetry> RetriesAsAttempt { get; } = new List<JobRetry>();
+
+    /// <summary>
+    /// Tags associated with this print job. Includes both auto-generated tags
+    /// (material, color, nozzle) and user-applied manual tags.
+    /// </summary>
+    public ICollection<Tag> Tags { get; set; } = new List<Tag>();
 }

@@ -87,6 +87,24 @@ public class PrinterModel
     /// </summary>
     public decimal? DefaultHourlyRate { get; set; }
 
+    // ── Auto-dispatch defaults ────────────────────────────────────────────
+
+    /// <summary>
+    /// Default auto-dispatch ready-gate state for new printers of this model.
+    /// When set, new printers inherit this value unless explicitly overridden.
+    /// </summary>
+    public AutoDispatchState DefaultAutoDispatchState { get; set; } = AutoDispatchState.None;
+
+    /// <summary>
+    /// Default start behavior for dispatched print jobs on this model.
+    /// Null means no model-level default is configured.
+    /// </summary>
+    public StartBehavior? DefaultStartBehavior { get; set; }
+
+    public Guid? DefaultBedTypeId { get; set; } // Default bed surface type for new printers of this model
+
+    public BedType? DefaultBedType { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     /// <summary>

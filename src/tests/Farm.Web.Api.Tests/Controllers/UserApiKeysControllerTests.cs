@@ -139,6 +139,7 @@ public class UserApiKeysControllerTests
     public async Task RotateApiKeyAsync_DesktopPurposeWithHashingDisabled_ReturnsSecretButPersistsOnlyHash()
     {
         SetHashStoredApiKeys(false);
+        DateTime expiresAt = DateTime.UtcNow.AddDays(30);
         ApiKey desktopKey = new()
         {
             UserId = _userId,
@@ -146,7 +147,7 @@ public class UserApiKeysControllerTests
             KeyHash = "old-hash",
             Purpose = ApiKeyPurpose.Desktop,
             Scopes = ApiKeyScope.LibrarySync,
-            ExpiresAt = DateTime.UtcNow.AddDays(30),
+            ExpiresAt = expiresAt,
         };
         _store.Add(desktopKey);
 
@@ -157,6 +158,42 @@ public class UserApiKeysControllerTests
         object response = ok.Value;
         string rawKey = Assert.IsType<string>(response.GetType().GetProperty("key")?.GetValue(response));
         desktopKey.KeyHash.Should().NotBe(rawKey).And.HaveLength(64);
+        desktopKey.Purpose.Should().Be(ApiKeyPurpose.Desktop);
+        desktopKey.Scopes.Should().Be(ApiKeyScope.LibrarySync);
+        desktopKey.ExpiresAt.Should().Be(expiresAt);
+    }
+
+    [Theory]
+    [InlineData(ApiKeyPurpose.OctoPrint)]
+    [InlineData(ApiKeyPurpose.Desktop)]
+    public async Task RotateApiKeyAsync_ExpiredKey_IsRejectedWithoutReplacingSecret(ApiKeyPurpose purpose)
+    {
+        const string oldHash = "old-hash";
+        DateTime expiresAt = DateTime.UtcNow.AddMinutes(-1);
+        ApiKeyScope scopes = purpose == ApiKeyPurpose.Desktop ? ApiKeyScope.ModelRead : ApiKeyScope.None;
+        ApiKey expiredKey = new()
+        {
+            UserId = _userId,
+            Name = "expired",
+            KeyHash = oldHash,
+            Purpose = purpose,
+            Scopes = scopes,
+            ExpiresAt = expiresAt,
+        };
+        _store.Add(expiredKey);
+
+        IActionResult result = await _controller.RotateApiKeyAsync(_userId, expiredKey.Id);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.NotNull(badRequest.Value);
+        object response = badRequest.Value;
+        string error = Assert.IsType<string>(response.GetType().GetProperty("error")?.GetValue(response));
+        error.Should().Be("Expired API keys cannot be rotated. Create a new API key instead.");
+        expiredKey.KeyHash.Should().Be(oldHash);
+        expiredKey.Purpose.Should().Be(purpose);
+        expiredKey.Scopes.Should().Be(scopes);
+        expiredKey.ExpiresAt.Should().Be(expiresAt);
+        _repoMock.Verify(r => r.UpdateAsync(It.IsAny<ApiKey>()), Times.Never);
     }
 
     [Fact]

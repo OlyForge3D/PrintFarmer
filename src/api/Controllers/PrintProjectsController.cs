@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Projects;
 using Microsoft.AspNetCore.Authorization;
@@ -284,7 +285,21 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
         try
         {
             var effectiveRequest = request ?? new QueueProjectRequest();
-            var result = await projectService.QueueProjectAsync(id, effectiveRequest);
+
+            string? userIdStr = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? User?.FindFirst("sub")?.Value;
+
+            if (!Guid.TryParse(userIdStr, out Guid parsed))
+            {
+                logger.LogWarning("Queue project denied: unable to resolve user identity from claims (raw value: {UserIdStr})", userIdStr);
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new { error = "Unable to verify group access — user identity could not be resolved." });
+            }
+
+            Guid? userId = parsed;
+
+            var result = await projectService.QueueProjectAsync(id, effectiveRequest, userId);
 
             if (result is null)
             {
@@ -297,6 +312,12 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
             }
 
             return Ok(result);
+        }
+        catch (QueueGroupAccessDeniedException)
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "You do not have permission to submit jobs to this printer group." });
         }
         catch (Exception ex)
         {

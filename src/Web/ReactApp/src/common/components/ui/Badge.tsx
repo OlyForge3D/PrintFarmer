@@ -19,11 +19,11 @@ export interface BadgeProps {
 
 const variantClasses: Record<BadgeVariant, string> = {
   default: 'bg-pf-bg-2 text-pf-text-secondary border-pf-border',
-  primary: 'bg-pf-accent-bg text-pf-accent border-pf-accent/30',
+  primary: 'bg-pf-accent/15 text-pf-accent border-pf-accent/30',
   success: 'bg-pf-success-bg text-pf-success-text border-pf-success/30',
   warning: 'bg-pf-warning-bg text-pf-warning-text border-pf-warning/30',
   error: 'bg-pf-error-bg text-pf-error-text border-pf-error/30',
-  info: 'bg-pf-accent-bg text-pf-accent border-pf-accent/30',
+  info: 'bg-pf-accent/15 text-pf-accent border-pf-accent/30',
 };
 
 const sizeClasses: Record<BadgeSize, string> = {

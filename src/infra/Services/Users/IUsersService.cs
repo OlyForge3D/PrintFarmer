@@ -31,4 +31,8 @@ public interface IUsersService
 
     /// <summary>Checks if a username and/or email are available for registration.</summary>
     Task<UserAvailabilityDto> CheckAvailabilityAsync(string? username, string? email, CancellationToken ct);
+
+    /// <summary>Changes password for a target user (admin operation).</summary>
+    /// <returns>True when target user exists and password was changed.</returns>
+    Task<bool> ChangeUserPasswordAsync(Guid userId, string newPassword, CancellationToken ct);
 }

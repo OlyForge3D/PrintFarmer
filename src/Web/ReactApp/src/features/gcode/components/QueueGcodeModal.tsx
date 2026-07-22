@@ -6,6 +6,8 @@ import { printJobQueueService, EnqueuePrintJobRequest } from '@/services/printJo
 import { SpoolValidationModal } from '@/features/queue/components/SpoolValidationModal';
 import { validateSpoolForDispatch } from '@/features/queue/utils/spoolValidation';
 import type { SpoolValidationContext } from '@/features/queue/utils/spoolValidation';
+import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { usePrinterDetails } from '@/common/hooks/useApi';
 import { GcodeFile, SpoolmanFilament } from '@/types/api';
 import { CheckCircleIcon, PrinterIcon, ClockIcon } from '@/common/components/icons/MdiIcons';
 
@@ -105,6 +107,14 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
 
   // Use overridden printer list when model filter is bypassed
   const effectivePrinters = overrideModelFilter && allPrinters ? allPrinters : printers;
+  const hasPerExtruderColorTargets = file.filamentPerExtruderColorHex !== undefined;
+  const {
+    data: selectedPrinterDetails,
+    isLoading: selectedPrinterDetailsLoading,
+    refetch: refetchSelectedPrinterDetails,
+  } = usePrinterDetails(selectedPrinter ?? '', {
+    enabled: !!selectedPrinter && !autoAssign && hasPerExtruderColorTargets,
+  });
 
   // Filament picker state
   const [filaments, setFilaments] = useState<SpoolmanFilament[]>([]);
@@ -494,6 +504,44 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
           </div>
         )}
 
+        {hasPerExtruderColorTargets && autoAssign && (
+          <div className="text-sm text-pf-text-secondary bg-pf-bg-2 p-3 rounded-lg">
+            Select a printer manually to review automatic color-to-spool suggestions before starting this multi-tool file.
+          </div>
+        )}
+
+        {hasPerExtruderColorTargets && !autoAssign && selectedPrinter && (
+          <div className="rounded-lg border border-pf-border bg-pf-bg-1 p-3">
+            <div className="mb-3">
+              <div className="text-sm font-medium text-pf-text-primary">Loaded spool auto-match</div>
+              <div className="text-xs text-pf-text-tertiary">
+                Suggestions compare the file&apos;s per-extruder colors with the selected printer&apos;s loaded spools.
+              </div>
+            </div>
+
+            {selectedPrinterDetailsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-pf-text-secondary">
+                <Spinner size="sm" />
+                Loading toolhead spools…
+              </div>
+            ) : selectedPrinterDetails?.toolheads && selectedPrinterDetails.toolheads.length > 1 ? (
+              <ToolheadSpoolPicker
+                printerId={selectedPrinter}
+                toolheads={selectedPrinterDetails.toolheads}
+                targetFilamentColorHex={file.filamentPerExtruderColorHex}
+                targetFilamentType={file.filamentPerExtruderType}
+                onSpoolChange={() => {
+                  void refetchSelectedPrinterDetails();
+                }}
+              />
+            ) : (
+              <div className="text-sm text-pf-text-tertiary">
+                This printer does not expose multiple loaded toolhead spools to match.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Filament picker (optional, loads from Spoolman) — filtered by required material */}
         {filaments.length > 0 && (
           <div>
@@ -572,9 +620,9 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
  */
 export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
   // Extract all filter criteria from the file
-  const requiredModel = file.extractedPrinterModel || file.extractedPrinterModelName;
-  const requiredNozzle = file.extractedNozzleDiameter;
-  const requiredMaterial = file.extractedMaterial;
+  const requiredModel = file?.extractedPrinterModel || file?.extractedPrinterModelName;
+  const requiredNozzle = file?.extractedNozzleDiameter;
+  const requiredMaterial = file?.extractedMaterial;
   
   // Memoize the printer promise - re-fetch when any filter criteria changes
   // Pass all criteria to server for filtering (consistent with auto-assign logic)
@@ -583,7 +631,7 @@ export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
     [requiredModel, requiredNozzle, requiredMaterial]
   );
 
-  if (!isOpen) return null;
+  if (!isOpen || !file) return null;
 
   return (
     <Suspense fallback={

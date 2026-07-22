@@ -3,6 +3,7 @@ name: Bootstrap Ubuntu Agent
 on:
   workflow_dispatch:
   push:
+    branches: [main, development]
     paths:
       - 'scripts/bootstrap-ubuntu.sh'
       - '.github/workflows/bootstrap-ubuntu-ci.yml'

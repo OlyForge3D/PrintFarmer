@@ -3,6 +3,7 @@ export const MmuProtocol = {
   HappyHare: 'HappyHare',
   Qidibox: 'Qidibox',
   Afc: 'AFC',
+  SnapmakerU1: 'SnapmakerU1',
   Unknown: 'Unknown',
 } as const;
 

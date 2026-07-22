@@ -69,6 +69,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         {
             // Authentication and authorization
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "Unauthorized access", null),
+            Farm.Infrastructure.QueueGroupAccessDeniedException => (HttpStatusCode.Forbidden, "Access denied to printer group", null),
 
             // Validation errors (more specific first)
             ArgumentNullException => (HttpStatusCode.BadRequest, "Missing required parameter", ex.Message),
