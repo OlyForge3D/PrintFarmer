@@ -6,20 +6,21 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Migrations;
 
 /// <summary>
-/// Verifies the issue #839 provider migrations (<c>AddApiKeyPurposeAndScopes</c>) for both
-/// PostgreSQL and SQL Server add the <see cref="ApiKey.Purpose"/> and <see cref="ApiKey.Scopes"/>
-/// columns with safe, non-nullable, zero-valued defaults so existing OctoPrint/legacy rows are
-/// upgraded to <see cref="ApiKeyPurpose.OctoPrint"/> / <see cref="ApiKeyScope.None"/> and never
-/// silently gain Desktop access. These tests inspect the generated migration operations directly
-/// (via the public <c>Migration.UpOperations</c>/<c>DownOperations</c> APIs) so they run
-/// deterministically without a live Postgres or SQL Server connection.
+/// Verifies the issue #839 provider migrations (<c>AddApiKeyPurposeScopesAndExpiry</c> — the
+/// canonical migration produced by the #837/#838 ancestry repair) for both PostgreSQL and SQL
+/// Server add the <see cref="ApiKey.Purpose"/> and <see cref="ApiKey.Scopes"/> columns with safe,
+/// non-nullable, zero-valued defaults so existing OctoPrint/legacy rows are upgraded to
+/// <see cref="ApiKeyPurpose.OctoPrint"/> / <see cref="ApiKeyScope.None"/> and never silently gain
+/// Desktop access. These tests inspect the generated migration operations directly (via the
+/// public <c>Migration.UpOperations</c>/<c>DownOperations</c> APIs) so they run deterministically
+/// without a live Postgres or SQL Server connection.
 /// </summary>
 public class ApiKeyPurposeAndScopesMigrationTests
 {
     [Fact]
     public void PostgreSqlMigration_Up_AddsPurposeAndScopesColumnsWithSafeDefaults()
     {
-        var migration = new Farm.Migrations.PostgreSQL.Migrations.AddApiKeyPurposeAndScopes();
+        var migration = new Farm.Migrations.PostgreSQL.Migrations.AddApiKeyPurposeScopesAndExpiry();
 
         AssertAddsPurposeAndScopesWithSafeDefaults(migration.UpOperations);
     }
@@ -27,7 +28,7 @@ public class ApiKeyPurposeAndScopesMigrationTests
     [Fact]
     public void PostgreSqlMigration_Down_DropsPurposeAndScopesColumns()
     {
-        var migration = new Farm.Migrations.PostgreSQL.Migrations.AddApiKeyPurposeAndScopes();
+        var migration = new Farm.Migrations.PostgreSQL.Migrations.AddApiKeyPurposeScopesAndExpiry();
 
         AssertDropsPurposeAndScopesColumns(migration.DownOperations);
     }
@@ -35,7 +36,7 @@ public class ApiKeyPurposeAndScopesMigrationTests
     [Fact]
     public void SqlServerMigration_Up_AddsPurposeAndScopesColumnsWithSafeDefaults()
     {
-        var migration = new Farm.Migrations.SqlServer.Migrations.AddApiKeyPurposeAndScopes();
+        var migration = new Farm.Migrations.SqlServer.Migrations.AddApiKeyPurposeScopesAndExpiry();
 
         AssertAddsPurposeAndScopesWithSafeDefaults(migration.UpOperations);
     }
@@ -43,7 +44,7 @@ public class ApiKeyPurposeAndScopesMigrationTests
     [Fact]
     public void SqlServerMigration_Down_DropsPurposeAndScopesColumns()
     {
-        var migration = new Farm.Migrations.SqlServer.Migrations.AddApiKeyPurposeAndScopes();
+        var migration = new Farm.Migrations.SqlServer.Migrations.AddApiKeyPurposeScopesAndExpiry();
 
         AssertDropsPurposeAndScopesColumns(migration.DownOperations);
     }
@@ -56,8 +57,8 @@ public class ApiKeyPurposeAndScopesMigrationTests
     [Fact]
     public void BothProviderMigrations_ProduceEquivalentColumnDefinitions()
     {
-        var pg = new Farm.Migrations.PostgreSQL.Migrations.AddApiKeyPurposeAndScopes();
-        var sqlServer = new Farm.Migrations.SqlServer.Migrations.AddApiKeyPurposeAndScopes();
+        var pg = new Farm.Migrations.PostgreSQL.Migrations.AddApiKeyPurposeScopesAndExpiry();
+        var sqlServer = new Farm.Migrations.SqlServer.Migrations.AddApiKeyPurposeScopesAndExpiry();
 
         AddColumnOperation pgPurpose = GetAddColumn(pg.UpOperations, "Purpose");
         AddColumnOperation sqlPurpose = GetAddColumn(sqlServer.UpOperations, "Purpose");
