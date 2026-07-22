@@ -83,6 +83,65 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    // MARK: - Attention actions mode (#780)
+
+    func test_attentionActionsLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.attentionActionsLaunchArgument,
+            "--uitesting-attention-actions"
+        )
+    }
+
+    func test_mode_isAttentionActions_whenArgumentPresent() {
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-attention-actions",
+            ]),
+            .authenticatedAttentionActions
+        )
+    }
+
+    func test_makeBundle_attentionActions_seedsActionMediaAndStableIDs() async throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedAttentionActions,
+            defaults: defaults
+        )
+        let attentionService = try XCTUnwrap(
+            bundle.services.attentionService as? DemoAttentionService
+        )
+        let printerService = try XCTUnwrap(
+            bundle.services.printerService as? DemoPrinterService
+        )
+
+        let feed = try await attentionService.getFeed(
+            cursor: nil,
+            limit: nil
+        )
+        XCTAssertEqual(feed.items.count, 3)
+        XCTAssertEqual(
+            feed.items.first?.printerId,
+            UITestBootstrap.duplicateNamePrinterID
+        )
+        XCTAssertEqual(
+            AttentionFeedViewModel.supportedActions(
+                in: try XCTUnwrap(feed.items.first)
+            ).map(\.kind),
+            [.resume, .cancel, .snooze]
+        )
+
+        let duplicatePrinter = try await printerService.get(
+            id: UITestBootstrap.duplicateNamePrinterID
+        )
+        let snapshot = try await printerService.getSnapshot(
+            id: UITestBootstrap.duplicateNamePrinterID
+        )
+        XCTAssertEqual(duplicatePrinter.name, "Prusa MK4 #1")
+        XCTAssertFalse(snapshot.isEmpty)
+        XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+    }
+
     func test_shiftTaskMutationErrorLaunchArgument_matchesUITestsHarness() {
         XCTAssertEqual(
             UITestBootstrap.shiftTaskMutationErrorLaunchArgument,

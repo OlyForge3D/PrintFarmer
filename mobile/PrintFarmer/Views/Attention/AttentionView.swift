@@ -2,21 +2,245 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
-/// Attention tab — F2-U1 (issue #779) unified feed shell.
+struct AttentionPendingAction: Identifiable, Equatable {
+    let itemID: String
+    let action: AttentionAction
+    let serverGeneration: Int
+
+    var id: String { "\(itemID):\(action.kind.rawValue)" }
+}
+
+struct AttentionNavigationTargets: Equatable {
+    let printer: AppDestination
+    let job: AppDestination?
+
+    init(item: AttentionItem) {
+        printer = .printerDetail(id: item.printerId)
+        job = item.jobId.map(AppDestination.jobDetail)
+    }
+}
+
+struct AttentionAccessibilityDescriptor: Equatable {
+    let identifier: String
+    let label: String
+    let hint: String
+}
+
+enum AttentionAccessibility {
+    static func card(_ item: AttentionItem) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id)",
+            label: "\(severityName(item.severity)) attention item",
+            hint: "Contains details, destinations, media, and server-provided actions."
+        )
+    }
+
+    static func summary(_ item: AttentionItem) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).summary",
+            label: [
+                item.title,
+                item.detail,
+                item.printerName,
+                item.occurredAt.relativeFormatted,
+            ].joined(separator: ". "),
+            hint: "Review the item details before choosing an action."
+        )
+    }
+
+    static func severity(_ item: AttentionItem) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).severity",
+            label: "Severity, \(severityName(item.severity))",
+            hint: "Indicates the urgency of this attention item."
+        )
+    }
+
+    static func deadline(_ item: AttentionItem, deadline: Date) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).deadline",
+            label: "Deadline, \(deadline.relativeFormatted)",
+            hint: "Complete the required work before this deadline."
+        )
+    }
+
+    static func healthySummary(count: Int, expanded: Bool) -> AttentionAccessibilityDescriptor {
+        let printerText = count == 1 ? "printer" : "printers"
+        return AttentionAccessibilityDescriptor(
+            identifier: "attention.healthy.summary",
+            label: "\(count) \(printerText) running normally",
+            hint: expanded
+                ? "Collapses the healthy printer explanation."
+                : "Expands the healthy printer explanation."
+        )
+    }
+
+    static func media(
+        item: AttentionItem,
+        state: AttentionMediaState
+    ) -> AttentionAccessibilityDescriptor {
+        let suffix: String
+        let label: String
+        let hint: String
+        switch state {
+        case .idle:
+            suffix = "idle"
+            label = "Load camera snapshot"
+            hint = "Loads the latest available failure snapshot for \(item.printerName)."
+        case .loading:
+            suffix = "loading"
+            label = "Loading failure camera snapshot for \(item.printerName)"
+            hint = "Other attention items remain available while this image loads."
+        case .available:
+            suffix = "image"
+            label = "Failure camera snapshot for \(item.printerName)"
+            hint = "Use this image to inspect the reported print failure."
+        case .unavailable:
+            suffix = "unavailable"
+            label = "Failure camera snapshot unavailable for \(item.printerName)"
+            hint = "The item and its actions remain available. Retry the image manually."
+        }
+        return AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).media.\(suffix)",
+            label: label,
+            hint: hint
+        )
+    }
+
+    static func navigation(
+        item: AttentionItem,
+        destination: AppDestination
+    ) -> AttentionAccessibilityDescriptor {
+        switch destination {
+        case .printerDetail:
+            return AttentionAccessibilityDescriptor(
+                identifier: "attention.item.\(item.id).navigation.printer",
+                label: "Open printer, \(item.printerName)",
+                hint: "Opens the printer matching this item's stable printer identifier."
+            )
+        case .jobDetail:
+            return AttentionAccessibilityDescriptor(
+                identifier: "attention.item.\(item.id).navigation.job",
+                label: "Open related job",
+                hint: "Opens the job matching this item's stable job identifier."
+            )
+        default:
+            preconditionFailure("Attention cards only navigate to printer or job details")
+        }
+    }
+
+    static func action(
+        item: AttentionItem,
+        action: AttentionAction
+    ) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).action.\(action.kind.rawValue)",
+            label: action.label,
+            hint: actionHint(action.kind)
+        )
+    }
+
+    static func actionProgress(
+        item: AttentionItem,
+        actionKind: AttentionActionKind
+    ) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).action.progress",
+            label: "\(actionName(actionKind)) in progress",
+            hint: "Wait for the server action and canonical feed refresh to finish."
+        )
+    }
+
+    static func actionError(
+        item: AttentionItem,
+        failure: AttentionActionFailure
+    ) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).action.error",
+            label: "\(failure.action.label) failed. \(failure.message)",
+            hint: "Retry this item or choose another available action."
+        )
+    }
+
+    static func orderedIdentifiers(
+        item: AttentionItem,
+        mediaState: AttentionMediaState?,
+        actions: [AttentionAction],
+        actionState: AttentionItemActionState
+    ) -> [String] {
+        var identifiers = [
+            severity(item).identifier,
+            summary(item).identifier,
+        ]
+        if let deadline = item.deadlineAt {
+            identifiers.append(Self.deadline(item, deadline: deadline).identifier)
+        }
+        if let mediaState {
+            identifiers.append(media(item: item, state: mediaState).identifier)
+        }
+        identifiers.append(navigation(item: item, destination: .printerDetail(id: item.printerId)).identifier)
+        if let jobID = item.jobId {
+            identifiers.append(navigation(item: item, destination: .jobDetail(id: jobID)).identifier)
+        }
+        identifiers.append(contentsOf: actions.map { action(item: item, action: $0).identifier })
+        switch actionState {
+        case .idle:
+            break
+        case .inProgress(let kind):
+            identifiers.append(actionProgress(item: item, actionKind: kind).identifier)
+        case .failed(let failure):
+            identifiers.append(actionError(item: item, failure: failure).identifier)
+            identifiers.append("attention.item.\(item.id).action.retry")
+        }
+        return identifiers
+    }
+
+    private static func severityName(_ severity: AttentionSeverity) -> String {
+        switch severity {
+        case .critical: "Critical"
+        case .warning: "Warning"
+        case .info: "Informational"
+        case .unknown: "Other"
+        }
+    }
+
+    private static func actionName(_ kind: AttentionActionKind) -> String {
+        switch kind {
+        case .pause: "Pause"
+        case .resume: "Resume"
+        case .cancel: "Cancel"
+        case .acknowledge: "Acknowledge"
+        case .resolve: "Resolve"
+        case .dismiss: "Dismiss"
+        case .snooze: "Snooze"
+        case .harvest: "Harvest"
+        case .unknown: "Action"
+        }
+    }
+
+    private static func actionHint(_ kind: AttentionActionKind) -> String {
+        switch kind {
+        case .pause: "Asks the server to pause the current print."
+        case .resume: "Asks the server to resume the current print."
+        case .cancel: "Asks the server to cancel the current print."
+        case .acknowledge: "Acknowledges this maintenance alert on the server."
+        case .resolve: "Resolves this maintenance alert on the server."
+        case .dismiss: "Dismisses this maintenance alert on the server."
+        case .snooze: "Snoozes this item for one hour using the server snooze route."
+        case .harvest: "Records the completed plate harvest through the server action route."
+        case .unknown: "This action is not supported by this app version."
+        }
+    }
+}
+
+/// Attention tab — canonical shell plus F2-U2 item interaction.
 ///
-/// Replaces the F1 placeholder that reused `NotificationsViewModel`
-/// while F2 was in flight. The tab now renders the canonical
-/// severity-ordered Attention feed backed by `AttentionFeedViewModel`
-/// against the shipped `AttentionServiceProtocol` (#744) and the
-/// lowercase `attentionchanged` invalidation subscription (#731/#707).
-///
-/// Explicit boundaries (per #779):
-/// * No inline action execution, snooze UI, or media capture — owned
-///   by F2-U2 (#780).
-/// * No reconnect-gap refresh — owned by F2-R (#781).
-/// * Kinds/severities/actions/timestamps come from the server; the
-///   shell only groups by canonical severity.
+/// Kinds, severities, actions, timestamps, and action routes remain
+/// server-owned. Reconnect-gap refresh remains owned by F2-R (#781).
 struct AttentionView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
@@ -26,6 +250,7 @@ struct AttentionView: View {
     @State private var showingDashboard = false
     @State private var showingMaintenance = false
     @State private var showingNotifications = false
+    @State private var pendingAction: AttentionPendingAction?
     /// Locally observed feature-disabled flag. Populated from the shared
     /// operator feature gate (#725) via `SystemCapabilitiesService` and
     /// also flipped locally when `/api/attention` returns ProblemDetails
@@ -93,7 +318,8 @@ struct AttentionView: View {
                 attentionService: services.attentionService,
                 signalRService: services.signalRService,
                 attentionEnabled: attentionEnabled,
-                lifecycleToken: token
+                lifecycleToken: token,
+                printerService: services.printerService
             )
         }
         .onChange(of: feedItemCount) { _, newValue in
@@ -116,6 +342,28 @@ struct AttentionView: View {
         }
         .sheet(isPresented: $showingNotifications) {
             NotificationsView()
+        }
+        .confirmationDialog(
+            pendingAction.map { "Confirm \($0.action.label)" } ?? "Confirm action",
+            isPresented: Binding(
+                get: { pendingAction != nil },
+                set: { if !$0 { pendingAction = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingAction
+        ) { pending in
+            Button(
+                "Confirm \(pending.action.label)",
+                role: confirmationRole(for: pending.action.kind)
+            ) {
+                pendingAction = nil
+                triggerAction(pending)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAction = nil
+            }
+        } message: { pending in
+            Text("This sends \(pending.action.label) for this item to the PrintFarmer server.")
         }
         .onChange(of: showingDashboard) { _, isPresented in
             if !isPresented { router.resetLegacySheet(.dashboard) }
@@ -193,6 +441,60 @@ struct AttentionView: View {
                 capturedServerGeneration: capturedGeneration,
                 capturedLifecycleToken: capturedToken
             )
+        }
+    }
+
+    private func handleActionTap(item: AttentionItem, action: AttentionAction) {
+        let pending = AttentionPendingAction(
+            itemID: item.id,
+            action: action,
+            serverGeneration: services.activeServerGeneration
+        )
+        if action.requiresConfirmation {
+            pendingAction = pending
+        } else {
+            triggerAction(pending)
+        }
+    }
+
+    private func triggerAction(_ pending: AttentionPendingAction) {
+        Task {
+            guard pending.serverGeneration == services.activeServerGeneration else {
+                return
+            }
+            await feedViewModel.performAction(
+                pending.action,
+                for: pending.itemID
+            )
+        }
+    }
+
+    private func retryAction(_ failure: AttentionActionFailure) {
+        let capturedGeneration = services.activeServerGeneration
+        Task {
+            guard capturedGeneration == services.activeServerGeneration else {
+                return
+            }
+            await feedViewModel.retryAction(failureID: failure.id)
+        }
+    }
+
+    private func retryMedia(itemID: String) {
+        let capturedGeneration = services.activeServerGeneration
+        Task {
+            guard capturedGeneration == services.activeServerGeneration else {
+                return
+            }
+            await feedViewModel.retrySnapshot(for: itemID)
+        }
+    }
+
+    private func confirmationRole(for kind: AttentionActionKind) -> ButtonRole? {
+        switch kind {
+        case .cancel, .dismiss:
+            .destructive
+        default:
+            nil
         }
     }
 
@@ -307,12 +609,39 @@ struct AttentionView: View {
             ForEach(feedViewModel.groups) { group in
                 Section {
                     ForEach(group.items) { item in
-                        AttentionItemRow(item: item)
-                            .accessibilityIdentifier("attention.item.\(item.id)")
+                        AttentionItemRow(
+                            item: item,
+                            actionState: feedViewModel.actionState(for: item.id),
+                            mediaState: item.kind == .failure
+                                ? feedViewModel.mediaState(for: item.id)
+                                : nil,
+                            mediaRequestID: feedViewModel.mediaRequestID(for: item.id),
+                            onAction: { action in
+                                handleActionTap(item: item, action: action)
+                            },
+                            onRetryAction: retryAction,
+                            onLoadMedia: {
+                                await feedViewModel.loadSnapshot(for: item.id)
+                            },
+                            onRetryMedia: {
+                                retryMedia(itemID: item.id)
+                            }
+                        )
+                        .listRowInsets(
+                            EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+                        )
+                        .listRowBackground(Color.clear)
                     }
                 } header: {
                     Text(group.severity.accessibilityLabel)
                         .font(.footnote.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityLabel(
+                            "\(group.severity.accessibilityLabel) attention items"
+                        )
+                        .accessibilityHint(
+                            "Items in this section share the same severity."
+                        )
                         .accessibilityIdentifier("attention.severity.\(group.severity.rawValue)")
                 }
             }
@@ -391,7 +720,11 @@ struct AttentionView: View {
     }
 
     private func healthySummarySection(healthyCount: Int) -> some View {
-        Section {
+        let accessibility = AttentionAccessibility.healthySummary(
+            count: healthyCount,
+            expanded: feedViewModel.isHealthySummaryExpanded
+        )
+        return Section {
             DisclosureGroup(isExpanded: Binding(
                 get: { feedViewModel.isHealthySummaryExpanded },
                 set: { feedViewModel.isHealthySummaryExpanded = $0 }
@@ -409,7 +742,13 @@ struct AttentionView: View {
                         .foregroundStyle(.green)
                 }
             }
-            .accessibilityIdentifier("attention.healthy.summary")
+            .accessibilityLabel(accessibility.label)
+            .accessibilityValue(
+                feedViewModel.isHealthySummaryExpanded ? "Expanded" : "Collapsed"
+            )
+            .accessibilityHint(accessibility.hint)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier(accessibility.identifier)
         }
     }
 
@@ -623,74 +962,384 @@ struct AttentionView: View {
     }
 }
 
-// MARK: - Row
+// MARK: - Item card
 
-/// Read-only attention item card. #779 explicitly excludes inline action
-/// execution, snooze UI, camera snapshots/media, and printer/job
-/// destination navigation. The row therefore renders server-supplied
-/// title/detail/timestamp/deadline only. F2-U2 (#780) will augment this
-/// with actions and destinations.
-private struct AttentionItemRow: View {
+struct AttentionItemRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(AppRouter.self) private var router
+
     let item: AttentionItem
+    let actionState: AttentionItemActionState
+    let mediaState: AttentionMediaState?
+    let mediaRequestID: AttentionMediaRequestID
+    let onAction: (AttentionAction) -> Void
+    let onRetryAction: (AttentionActionFailure) -> Void
+    let onLoadMedia: () async -> Bool
+    let onRetryMedia: () -> Void
+
+    private var supportedActions: [AttentionAction] {
+        AttentionFeedViewModel.supportedActions(in: item)
+    }
+
+    private var navigationTargets: AttentionNavigationTargets {
+        AttentionNavigationTargets(item: item)
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: iconName)
-                .font(.title3)
-                .foregroundStyle(iconColor)
-                .frame(width: 32)
-                .accessibilityHidden(true)
+        let cardAccessibility = AttentionAccessibility.card(item)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-
-                Text(item.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-
-                HStack(spacing: 8) {
-                    Text(item.printerName)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.tertiary)
-                    if let deadline = item.deadlineAt {
-                        Text("• Due \(deadline.relativeFormatted)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            severityHeader
+            summary
+            if let deadline = item.deadlineAt {
+                deadlineView(deadline)
             }
-            .fixedSize(horizontal: false, vertical: true)
+            if let mediaState {
+                mediaView(state: mediaState)
+            }
+            navigationLinks
+            if !supportedActions.isEmpty {
+                Divider()
+                actionControls
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(cardAccessibility.label)
+        .accessibilityHint(cardAccessibility.hint)
+        .accessibilityIdentifier(cardAccessibility.identifier)
+    }
+
+    private var severityHeader: some View {
+        let accessibility = AttentionAccessibility.severity(item)
+
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Label(severityText, systemImage: iconName)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(iconColor)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(iconColor.opacity(0.12), in: Capsule())
+                .accessibilityLabel(accessibility.label)
+                .accessibilityHint(accessibility.hint)
+                .accessibilityIdentifier(accessibility.identifier)
 
             Spacer(minLength: 8)
 
             Text(item.occurredAt.relativeFormatted)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
         }
-        .padding(.vertical, 6)
-        .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
     }
 
-    private var accessibilityLabel: String {
-        let severity: String
+    private var summary: some View {
+        let accessibility = AttentionAccessibility.summary(item)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(item.title)
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(item.detail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(item.printerName)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    private func deadlineView(_ deadline: Date) -> some View {
+        let accessibility = AttentionAccessibility.deadline(item, deadline: deadline)
+
+        return Label("Due \(deadline.relativeFormatted)", systemImage: "clock.badge.exclamationmark")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(item.severity == .critical ? Color.pfError : Color.pfWarning)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(accessibility.label)
+            .accessibilityHint(accessibility.hint)
+            .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    @ViewBuilder
+    private func mediaView(state: AttentionMediaState) -> some View {
+        Group {
+            switch state {
+            case .idle:
+                mediaLoadButton(state: state)
+            case .loading:
+                mediaLoading(state: state)
+            case .available(let data):
+                mediaImage(data: data)
+            case .unavailable(let message):
+                mediaUnavailable(message: message)
+            }
+        }
+        .task(id: mediaRequestID) {
+            guard state == .idle else { return }
+            _ = await onLoadMedia()
+        }
+    }
+
+    private func mediaLoadButton(state: AttentionMediaState) -> some View {
+        let accessibility = AttentionAccessibility.media(item: item, state: state)
+
+        return Button(action: onRetryMedia) {
+            Label("Load camera snapshot", systemImage: "camera")
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    private func mediaLoading(state: AttentionMediaState) -> some View {
+        let accessibility = AttentionAccessibility.media(item: item, state: state)
+
+        return HStack(spacing: 10) {
+            ProgressView()
+            Text("Loading camera snapshot…")
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    @ViewBuilder
+    private func mediaImage(data: Data) -> some View {
+        let accessibility = AttentionAccessibility.media(
+            item: item,
+            state: .available(data)
+        )
+
+        #if canImport(UIKit)
+        if let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .accessibilityLabel(accessibility.label)
+                .accessibilityHint(accessibility.hint)
+                .accessibilityIdentifier(accessibility.identifier)
+        } else {
+            mediaUnavailable(message: "The camera returned data that is not a displayable image.")
+        }
+        #elseif canImport(AppKit)
+        if let image = NSImage(data: data) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .accessibilityLabel(accessibility.label)
+                .accessibilityHint(accessibility.hint)
+                .accessibilityIdentifier(accessibility.identifier)
+        } else {
+            mediaUnavailable(message: "The camera returned data that is not a displayable image.")
+        }
+        #else
+        mediaUnavailable(message: "Camera images are unavailable on this platform.")
+        #endif
+    }
+
+    private func mediaUnavailable(message: String) -> some View {
+        let accessibility = AttentionAccessibility.media(
+            item: item,
+            state: .unavailable(message)
+        )
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Label("Camera snapshot unavailable", systemImage: "photo.badge.exclamationmark")
+                .font(.footnote.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Retry camera snapshot", action: onRetryMedia)
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Retry camera snapshot")
+                .accessibilityHint(
+                    "Makes one new failure snapshot request for \(item.printerName)."
+                )
+                .accessibilityIdentifier(
+                    "attention.item.\(item.id).media.retry"
+                )
+        }
+        .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    private var navigationLinks: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+
+        return layout {
+            navigationButton(
+                title: "Printer",
+                systemImage: "printer",
+                destination: navigationTargets.printer
+            )
+            if let job = navigationTargets.job {
+                navigationButton(
+                    title: "Job",
+                    systemImage: "doc.text",
+                    destination: job
+                )
+            }
+        }
+    }
+
+    private func navigationButton(
+        title: String,
+        systemImage: String,
+        destination: AppDestination
+    ) -> some View {
+        let accessibility = AttentionAccessibility.navigation(
+            item: item,
+            destination: destination
+        )
+
+        return Button {
+            router.notificationsPath.append(destination)
+        } label: {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    @ViewBuilder
+    private var actionControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(supportedActions.enumerated()), id: \.offset) { _, action in
+                actionButton(action)
+            }
+
+            switch actionState {
+            case .idle:
+                EmptyView()
+            case .inProgress(let kind):
+                actionProgress(kind)
+            case .failed(let failure):
+                actionFailure(failure)
+            }
+        }
+    }
+
+    private func actionButton(_ action: AttentionAction) -> some View {
+        let accessibility = AttentionAccessibility.action(item: item, action: action)
+
+        return Button(role: buttonRole(for: action.kind)) {
+            onAction(action)
+        } label: {
+            HStack {
+                Label(action.label, systemImage: actionIcon(action.kind))
+                Spacer(minLength: 8)
+                if action.requiresConfirmation {
+                    Image(systemName: "checkmark.shield")
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(actionTint(action.kind))
+        .disabled(isActionInProgress)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    private func actionProgress(_ kind: AttentionActionKind) -> some View {
+        let accessibility = AttentionAccessibility.actionProgress(
+            item: item,
+            actionKind: kind
+        )
+
+        return HStack(spacing: 10) {
+            ProgressView()
+            Text(accessibility.label)
+                .font(.footnote.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    private func actionFailure(_ failure: AttentionActionFailure) -> some View {
+        let accessibility = AttentionAccessibility.actionError(
+            item: item,
+            failure: failure
+        )
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Label("Action failed", systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.pfError)
+            Text(failure.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Retry \(failure.action.label)") {
+                onRetryAction(failure)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Retry \(failure.action.label)")
+            .accessibilityHint("Repeats the failed server request once.")
+            .accessibilityIdentifier("attention.item.\(item.id).action.retry")
+        }
+        .padding(12)
+        .background(Color.pfError.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    private var isActionInProgress: Bool {
+        if case .inProgress = actionState {
+            return true
+        }
+        return false
+    }
+
+    private var severityText: String {
         switch item.severity {
-        case .critical: severity = "Critical"
-        case .warning: severity = "Warning"
-        case .info: severity = "Informational"
-        case .unknown: severity = "Attention"
+        case .critical: "Critical"
+        case .warning: "Warning"
+        case .info: "Info"
+        case .unknown: "Other"
         }
-        var parts = [severity, item.title, item.detail, item.printerName]
-        parts.append(item.occurredAt.relativeFormatted)
-        if let deadline = item.deadlineAt {
-            parts.append("Due \(deadline.relativeFormatted)")
-        }
-        return parts.joined(separator: ". ")
     }
 
     private var iconName: String {
@@ -708,8 +1357,35 @@ private struct AttentionItemRow: View {
         switch item.severity {
         case .critical: .pfError
         case .warning: .pfWarning
-        case .info: .pfSecondaryAccent
-        case .unknown: .pfSecondaryAccent
+        case .info, .unknown: .pfSecondaryAccent
+        }
+    }
+
+    private func actionIcon(_ kind: AttentionActionKind) -> String {
+        switch kind {
+        case .pause: "pause.fill"
+        case .resume: "play.fill"
+        case .cancel: "xmark.octagon"
+        case .acknowledge: "checkmark"
+        case .resolve: "checkmark.circle"
+        case .dismiss: "eye.slash"
+        case .snooze: "clock"
+        case .harvest: "tray.and.arrow.up"
+        case .unknown: "questionmark"
+        }
+    }
+
+    private func actionTint(_ kind: AttentionActionKind) -> Color {
+        switch kind {
+        case .cancel, .dismiss: .pfError
+        default: .accentColor
+        }
+    }
+
+    private func buttonRole(for kind: AttentionActionKind) -> ButtonRole? {
+        switch kind {
+        case .cancel, .dismiss: .destructive
+        default: nil
         }
     }
 }

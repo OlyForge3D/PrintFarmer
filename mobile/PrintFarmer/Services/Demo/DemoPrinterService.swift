@@ -4,11 +4,13 @@ import Foundation
 
 final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     private let printers: [Printer]
+    private let snapshots: [UUID: Data]
 
     /// Default demo constructor (all callers except UI-test bootstrap):
     /// exposes exactly the demo fleet from `DemoData.printers`.
     init() {
         self.printers = DemoData.printers
+        self.snapshots = [:]
     }
 
     /// UI-test bootstrap constructor (F4-M / #778 cycle-3): appends
@@ -16,8 +18,12 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     /// `DemoData`. Used by `--uitesting-filament-coverage-scenario`
     /// to seed a duplicate display-name pair so XCUI can prove stable-
     /// id scoping. Non-Farm demo behavior is unaffected.
-    init(additionalPrinters: [Printer]) {
+    init(
+        additionalPrinters: [Printer],
+        snapshots: [UUID: Data] = [:]
+    ) {
         self.printers = DemoData.printers + additionalPrinters
+        self.snapshots = snapshots
     }
 
     func list(includeDisabled: Bool) async throws -> [Printer] {
@@ -76,7 +82,7 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func getSnapshot(id: UUID) async throws -> Data {
-        Data()
+        snapshots[id] ?? Data()
     }
 
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? {

@@ -190,6 +190,10 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Details")
                 .font(.headline)
+                .accessibilityLabel("\(job.name), job detail. Details")
+                .accessibilityIdentifier(
+                    "job.detail.destination.\(job.id.uuidString.lowercased())"
+                )
 
             VStack(spacing: 0) {
                 infoRow(label: "File", value: job.gcodeFileName, icon: "doc")

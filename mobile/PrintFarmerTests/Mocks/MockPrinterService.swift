@@ -10,6 +10,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var currentJobToReturn: PrintJobStatusInfo?
     var commandResultToReturn = CommandResult(success: true, message: nil)
     var snapshotDataToReturn = Data()
+    var snapshotHandler: (@Sendable (UUID) async throws -> Data)?
     var queueOverviewToReturn: [QueueOverview] = []
     var spoolsToReturn: [SpoolmanSpool] = []
     var errorToThrow: Error?
@@ -79,6 +80,9 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     func getSnapshot(id: UUID) async throws -> Data {
         getSnapshotCalledWith = id
         getSnapshotCallCount += 1
+        if let snapshotHandler {
+            return try await snapshotHandler(id)
+        }
         if let error = errorToThrow { throw error }
         return snapshotDataToReturn
     }
@@ -216,6 +220,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getCameraUrlCalledWith = nil
         getSnapshotCalledWith = nil
         getSnapshotCallCount = 0
+        snapshotHandler = nil
         getCurrentJobCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil

@@ -53,6 +53,7 @@ enum UITestBootstrap {
     /// Dashboard / Maintenance sheets. Required by issue #727 UI tests
     /// which need deterministic access to the fallback Notifications sheet.
     static let attentionDisabledLaunchArgument = "--uitesting-attention-disabled"
+    static let attentionActionsLaunchArgument = "--uitesting-attention-actions"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
         "--uitesting-shift-task-mutation-error"
@@ -87,6 +88,9 @@ enum UITestBootstrap {
         /// feature gate forced to disabled — `AttentionView` renders the
         /// fallback so the legacy Notifications sheet is reachable.
         case authenticatedAttentionDisabled
+        /// F2-U2 feed with failure media, stable-ID destinations, and
+        /// server-backed failure + maintenance actions.
+        case authenticatedAttentionActions
         #if DEBUG
         case authenticatedShiftTaskMutationError
         case authenticatedShiftTaskInitialLoadFailure
@@ -130,6 +134,9 @@ enum UITestBootstrap {
     /// Pure overload: resolves the launch mode from an explicit argument
     /// list so unit tests can exercise it without `CommandLine`.
     static func mode(in arguments: [String]) -> Mode {
+        if arguments.contains(attentionActionsLaunchArgument) {
+            return .authenticatedAttentionActions
+        }
         if arguments.contains(filamentCoverageScenarioLaunchArgument) {
             return .authenticatedFilamentCoverageScenario
         }
@@ -202,6 +209,19 @@ enum UITestBootstrap {
             disabled.attentionEnabled = false
             services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
         }
+        if mode == .authenticatedAttentionActions {
+            services.attentionService = DemoAttentionService(
+                feed: attentionActionsScenarioFeed(),
+                gatedFailureAction: .resume,
+                gateReleaseAction: .acknowledge
+            )
+            services.printerService = DemoPrinterService(
+                additionalPrinters: [duplicateNamePrinter()],
+                snapshots: [
+                    duplicateNamePrinterID: attentionActionsSnapshotData(),
+                ]
+            )
+        }
         if mode == .authenticatedFilamentCoverageScenario {
             services.filamentCoverageService = StubFilamentCoverageService(
                 fleet: Self.filamentCoverageScenarioFleet()
@@ -232,7 +252,7 @@ enum UITestBootstrap {
 
         let auth = AuthViewModel(services: services)
         switch mode {
-        case .authenticated, .authenticatedAttentionDisabled:
+        case .authenticated, .authenticatedAttentionDisabled, .authenticatedAttentionActions:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         case .unauthenticated:
             break
@@ -259,6 +279,76 @@ enum UITestBootstrap {
         let defaults = UserDefaults(suiteName: userDefaultsSuiteName) ?? .standard
         defaults.removePersistentDomain(forName: userDefaultsSuiteName)
         return defaults
+    }
+
+    // MARK: - F2-U2 #780 UI-test scenario
+
+    static func attentionActionsScenarioFeed() -> AttentionFeed {
+        let occurredAt = ISO8601DateFormatter()
+            .date(from: "2026-07-22T15:00:00Z")!
+        let deadlineAt = ISO8601DateFormatter()
+            .date(from: "2026-07-23T15:00:00Z")!
+
+        let failure = AttentionItem(
+            id: "failure:78000000-0000-0000-0000-000000000001",
+            kind: .failure,
+            severity: .critical,
+            printerId: duplicateNamePrinterID,
+            printerName: "Prusa MK4 #1",
+            title: "Print failure — auto-paused",
+            detail: "Camera review is required before resuming or cancelling this print.",
+            occurredAt: occurredAt,
+            actions: [
+                AttentionAction(kind: .resume, label: "Resume", requiresConfirmation: true),
+                AttentionAction(kind: .cancel, label: "Cancel", requiresConfirmation: true),
+                AttentionAction(kind: .snooze, label: "Snooze", requiresConfirmation: false),
+            ],
+            deadlineAt: deadlineAt,
+            jobId: DemoData.job1ID
+        )
+
+        let maintenance = AttentionItem(
+            id: "maintenance:78000000-0000-0000-0000-000000000002",
+            kind: .maintenance,
+            severity: .warning,
+            printerId: DemoData.prusaMK4_2_ID,
+            printerName: "Prusa MK4 #2",
+            title: "Lubrication inspection due",
+            detail: "Inspect the linear rails and acknowledge the maintenance alert.",
+            occurredAt: occurredAt.addingTimeInterval(-300),
+            actions: [
+                AttentionAction(
+                    kind: .acknowledge,
+                    label: "Acknowledge",
+                    requiresConfirmation: false
+                ),
+            ]
+        )
+
+        let unavailableMedia = AttentionItem(
+            id: "failure:78000000-0000-0000-0000-000000000003",
+            kind: .failure,
+            severity: .info,
+            printerId: DemoData.bambuX1C_ID,
+            printerName: "Bambu X1C",
+            title: "Camera snapshot unavailable",
+            detail: "The card remains usable when camera data cannot be decoded.",
+            occurredAt: occurredAt.addingTimeInterval(-600),
+            actions: []
+        )
+
+        return AttentionFeed(
+            items: [failure, maintenance, unavailableMedia],
+            nextCursor: nil,
+            healthyPrinterCount: 4
+        )
+    }
+
+    static func attentionActionsSnapshotData() -> Data {
+        Data(
+            base64Encoded:
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )!
     }
 
     // MARK: - F4-M #778 UI-test scenario
