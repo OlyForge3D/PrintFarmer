@@ -53,3 +53,35 @@ Older entries (pre-2026-05-26) archived to history-archive.md for size managemen
 - 2026-06-03T11:36:03-07:00: Settings navigation metadata now lives in `src/Web/ReactApp/src/features/settings/settings-navigation.ts`, so the sidebar and Command-K palette share one source for category icons, descriptions, and route targets while fuzzy jumps stay scoped to `SettingsShell.tsx`.
 - 2026-06-03T12:26:51-07:00: The settings workspace works best as a fixed-height split shell keyed off `data-settings-shell`; shell-scoped card-heading typography and number-input styling let embedded admin pages inherit the industrial settings treatment while only the content pane scrolls.
 
+
+---
+
+## 2026-07-20T10:49:02Z — #782 Operator Redesign Formal Rejection & Lock
+
+**Event:** Three-round pre-PR review cycle completed; formal rejection issued; Ripley locked out.
+
+**Verdict:** FORMALLY REJECTED
+- Bishop: REQUEST_CHANGES
+- Hicks: REQUEST_CHANGES
+- Vasquez: Conditional APPROVE (contingent on blocker resolution) → two blockers override condition per team policy
+
+**Candidate SHA:** 680515c94d3f806b7e14351657b230c063f2c7ad  
+**Feature Base:** 967474c1bc2d4b44aa9bbbf1c3730d0df8fb5019 (clean, verified no contamination)
+
+**Boundary Incident:** Worktree externally checked out/detached to parent 2efaa6833 without Ripley command; no data loss; candidate archived locally, not pushed to origin.
+
+**Actions Taken:**
+- Public issue comment posted to #782 (live)
+- Owner label changed: squad:⚩ ripley → squad:🔨 anvil
+- Ripley locked for revision cycle (no further work until Anvil submits)
+- Trio reviewers (Bishop, Hicks, Vasquez) locked for re-review cycle
+- Related agents locked: Gorman, Hudson, Kane
+
+**Handoff Details:**
+- Anvil session: 193b2bc9-939a-4aad-8eee-748e4d2f7e21
+- Mandate: Independent rebuild from clean feature base
+- Contract: P1-P10 reconstruction requirements (epoch-safe mutation/refetch, queued callback fencing, SignalR FIFO parser, causal Retry/Dismiss, single a11y action, shared i18n, no Release hooks, exact-SHA evidence)
+
+**Orchestration Log:** `.squad/orchestration-log/2026-07-20T10-49-02Z-scribe-782-ripley-rejection-anvil-handoff.md`
+
+**Status:** Locked pending Anvil trio APPROVE

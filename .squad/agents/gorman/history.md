@@ -166,3 +166,26 @@
 - **Handoff Status:** Hudson locked out; Anvil authorized for independent third revision
 - **Available:** Unrelated tasks
 - **Orchestration:** `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md`
+
+
+---
+
+## 2026-07-20T10:49:02Z — #782 Agent Lock (Formal Rejection)
+
+**Event:** #782 Operator Redesign formally rejected in three-round review cycle.
+
+**Lock Status:** LOCKED (no further work on #782 until Anvil submits)
+
+**Locked Agents (Consensus):** Bishop, Hicks, Gorman, Hudson, Kane (plus Ripley/original author)
+
+**Details:**
+- Ripley candidate 680515c94d3f806b7e14351657b230c063f2c7ad rejected
+- Two explicit REQUEST_CHANGES (Bishop, Hicks) override one conditional APPROVE (Vasquez)
+- Trio reviewers locked for re-review cycle
+- Related agents locked for coordination/test/support roles
+- Anvil authorized for independent reconstruction from clean feature base (967474c1)
+- P1-P10 reconstruction contract defined and captured
+
+**Expected Unblock:** When Anvil submits fresh diff and trio delivers unified APPROVE
+
+**Orchestration Log:** 

@@ -17,6 +17,13 @@
 | 🔧 Lambert | Backend Dev | .squad/agents/lambert/charter.md | Active |
 | 📱 Hudson | iOS Developer | .squad/agents/hudson/charter.md | Active |
 | 🌐 Gorman | iOS Networking | .squad/agents/gorman/charter.md | Active |
+| 📱 Frost | iOS Concurrency & Lifecycle Engineer | .squad/agents/frost/charter.md | Active |
+| 📱 Dietrich | iOS Persistence & Data Integrity Engineer | .squad/agents/dietrich/charter.md | Active |
+| 📱 Apone | iOS Auth-Epoch & Secure-Persistence Engineer | .squad/agents/apone/charter.md | Active |
+| 📱 Crowe | iOS Snapshot Concurrency & Atomic-Filesystem Engineer | .squad/agents/crowe/charter.md | Active |
+| 📱 Morse | iOS Snapshot Transaction Recovery Engineer | .squad/agents/morse/charter.md | Active |
+| 📱 Clemens | iOS Offline Identity & Snapshot Integrity Engineer | .squad/agents/clemens/charter.md | Active |
+| 📱 Drake | iOS SwiftUI & Accessibility Engineer | .squad/agents/drake/charter.md | Active |
 | 🧪 Kane | Tester | .squad/agents/kane/charter.md | Active |
 | 📝 Ash | Documentation Specialist | .squad/agents/ash/charter.md | Active |
 | 🔍 Brett | Researcher | .squad/agents/brett/charter.md | Active |

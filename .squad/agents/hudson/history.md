@@ -135,3 +135,26 @@ Status: Backlog item cleared. No blockers for review.
   - Available for unrelated tasks
 - **Handoff:** Anvil authorized for independent third revision (session 691f8ba6-6037-4624-9b56-4885f0ce2ce2, worktree `/Users/jpapiez/s/copilot-worktrees/PFarm1/jpapiez-laughing-fiesta`, branch `jpapiez-laughing-fiesta`, clean HEAD exact 536bce065)
 - **Orchestration:** `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md`
+
+
+---
+
+## 2026-07-20T10:49:02Z — #782 Agent Lock (Formal Rejection)
+
+**Event:** #782 Operator Redesign formally rejected in three-round review cycle.
+
+**Lock Status:** LOCKED (no further work on #782 until Anvil submits)
+
+**Locked Agents (Consensus):** Bishop, Hicks, Gorman, Hudson, Kane (plus Ripley/original author)
+
+**Details:**
+- Ripley candidate 680515c94d3f806b7e14351657b230c063f2c7ad rejected
+- Two explicit REQUEST_CHANGES (Bishop, Hicks) override one conditional APPROVE (Vasquez)
+- Trio reviewers locked for re-review cycle
+- Related agents locked for coordination/test/support roles
+- Anvil authorized for independent reconstruction from clean feature base (967474c1)
+- P1-P10 reconstruction contract defined and captured
+
+**Expected Unblock:** When Anvil submits fresh diff and trio delivers unified APPROVE
+
+**Orchestration Log:** 

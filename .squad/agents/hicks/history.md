@@ -130,3 +130,46 @@ Participated in multi-round trio review cycle. Key learnings:
   3. Offline cached authority issues
 - **Status:** Re-review cycle ongoing; Vasquez contamination incident invalidated final consensus; Hudson locked out; Anvil authorized for independent third revision
 - **Orchestration:** `.squad/orchestration-log/2026-07-19T22-29-26Z-scribe-hudson-785-review-cycle.md`
+
+
+---
+
+## 2026-07-20T10:49:02Z — #782 Agent Lock (Formal Rejection)
+
+**Event:** #782 Operator Redesign formally rejected in three-round review cycle.
+
+**Lock Status:** LOCKED (no further work on #782 until Anvil submits)
+
+**Locked Agents (Consensus):** Bishop, Hicks, Gorman, Hudson, Kane (plus Ripley/original author)
+
+**Details:**
+- Ripley candidate 680515c94d3f806b7e14351657b230c063f2c7ad rejected
+- Two explicit REQUEST_CHANGES (Bishop, Hicks) override one conditional APPROVE (Vasquez)
+- Trio reviewers locked for re-review cycle
+- Related agents locked for coordination/test/support roles
+- Anvil authorized for independent reconstruction from clean feature base (967474c1)
+- P1-P10 reconstruction contract defined and captured
+
+**Expected Unblock:** When Anvil submits fresh diff and trio delivers unified APPROVE
+
+**Orchestration Log:** 
+
+---
+
+## 2026-07-20T10:51:27Z — #782 Lockout Scope Correction (Append-Only)
+
+**Correction Notice:** Prior entry at 2026-07-20T10:49:02Z incorrectly enumerated Hicks as a *locked agent* for #782.
+
+**Authoritative Clarification:**
+- Hicks **is NOT locked** on #782
+- Hicks remains a **mandatory independent reviewer**
+- Hicks is **required** for Anvil's exact-SHA unified re-review cycle
+- Prior lock notation is void and superseded by this correction
+
+**Rationale:**
+Team policy restricts reviewer-rejection lockout to artifact/revision authors only. Reviewers (Bishop, Hicks, Vasquez) who issue verdicts remain independent and unbiased for all subsequent review cycles. Reviewer lockout is a policy violation.
+
+**Orchestration Reference:**  
+`.squad/orchestration-log/2026-07-20T10-51-27Z-scribe-782-lockout-correction.md`
+
+**Status:** ✅ Correction recorded (append-only; prior erroneous log preserved)

@@ -291,3 +291,26 @@ Participated in multi-round trio review cycle. Key learnings:
 - 2026-06-02T09:26:33-07:00 — Header architecture: `src/Web/ReactApp/src/common/components/Layout.tsx` uses a `flex flex-col h-screen` shell with a 48px `h-12` global top header. The right side currently holds the connection indicator, `SystemPulsePill`, `NotificationBell`, and the user menu; mobile drawer logic in `Layout.tsx` and the printer-details overlay in `PrintersPage.tsx` both hard-code the current `top-12` header offset.
 - 2026-06-02T09:26:33-07:00 — Overlay patterns: the repo already has reusable floating-surface patterns. `SystemPulsePill` provides an accessible popover with `Escape` close and focus return, `NotificationBell` opens a fixed drawer, and components like `SlicerLeftTools` use `pointer-events-none` on the shell plus `pointer-events-auto` on interactive islands so overlays do not block the whole page.
 - 2026-06-02T09:26:33-07:00 — 2-pane refactor context: UI reorganization issues #435-#440 are the prerequisite wave, while issues #441 and #454 track the follow-on two-pane shell as a separate initiative. The tracked desktop direction is to remove the 48px header, move to a persistent left rail, and let the content pane fill the viewport; mobile keeps a slim top bar + drawer pattern.
+
+
+---
+
+## 2026-07-20T10:49:02Z — #782 Agent Lock (Formal Rejection)
+
+**Event:** #782 Operator Redesign formally rejected in three-round review cycle.
+
+**Lock Status:** LOCKED (no further work on #782 until Anvil submits)
+
+**Locked Agents (Consensus):** Bishop, Hicks, Gorman, Hudson, Kane (plus Ripley/original author)
+
+**Details:**
+- Ripley candidate 680515c94d3f806b7e14351657b230c063f2c7ad rejected
+- Two explicit REQUEST_CHANGES (Bishop, Hicks) override one conditional APPROVE (Vasquez)
+- Trio reviewers locked for re-review cycle
+- Related agents locked for coordination/test/support roles
+- Anvil authorized for independent reconstruction from clean feature base (967474c1)
+- P1-P10 reconstruction contract defined and captured
+
+**Expected Unblock:** When Anvil submits fresh diff and trio delivers unified APPROVE
+
+**Orchestration Log:** 

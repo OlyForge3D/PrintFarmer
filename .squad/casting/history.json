@@ -1,4 +1,176 @@
 {
-  "universe_usage_history": [],
-  "assignment_cast_snapshots": {}
+  "universe_usage_history": [
+    {
+      "universe": "Alien",
+      "assignment_id": "PFarm1",
+      "used_at": "2026-07-20T05:49:21.508-07:00"
+    },
+    {
+      "universe": "Alien",
+      "assignment_id": "PFarm1-785-split",
+      "used_at": "2026-07-20T18:38:34.809-07:00"
+    },
+    {
+      "universe": "Alien",
+      "assignment_id": "PFarm1-816-revision",
+      "used_at": "2026-07-20T22:11:56.064-07:00"
+    },
+    {
+      "universe": "Alien",
+      "assignment_id": "PFarm1-816-revision-2",
+      "used_at": "2026-07-20T23:19:49.053-07:00"
+    },
+    {
+      "universe": "Alien",
+      "assignment_id": "PFarm1-816-revision-3",
+      "used_at": "2026-07-21T00:43:41.837-07:00"
+    },
+    {
+      "universe": "Alien",
+      "assignment_id": "PFarm1-816-revision-4",
+      "used_at": "2026-07-21T03:14:58.128-07:00"
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "PFarm1": {
+      "universe": "Alien",
+      "agents": {
+        "lead": "Dallas",
+        "frontend": "Ripley",
+        "backend": "Lambert",
+        "ios": "Hudson",
+        "ios-networking": "Gorman",
+        "ios-concurrency": "Frost",
+        "tester": "Kane",
+        "documentation": "Ash",
+        "research": "Brett",
+        "devops": "Parker",
+        "design": "Newt",
+        "reviewer-opus": "Bishop",
+        "reviewer-sol": "Hicks",
+        "reviewer-gemini": "Vasquez"
+      },
+      "created_at": "2026-07-20T05:49:21.508-07:00"
+    },
+    "PFarm1-785-split": {
+      "universe": "Alien",
+      "agents": {
+        "lead": "Dallas",
+        "frontend": "Ripley",
+        "backend": "Lambert",
+        "ios": "Hudson",
+        "ios-networking": "Gorman",
+        "ios-concurrency": "Frost",
+        "ios-persistence": "Dietrich",
+        "ios-accessibility": "Drake",
+        "tester": "Kane",
+        "documentation": "Ash",
+        "research": "Brett",
+        "devops": "Parker",
+        "design": "Newt",
+        "reviewer-opus": "Bishop",
+        "reviewer-sol": "Hicks",
+        "reviewer-gemini": "Vasquez"
+      },
+      "created_at": "2026-07-20T18:38:34.809-07:00"
+    },
+    "PFarm1-816-revision": {
+      "universe": "Alien",
+      "agents": {
+        "lead": "Dallas",
+        "frontend": "Ripley",
+        "backend": "Lambert",
+        "ios": "Hudson",
+        "ios-networking": "Gorman",
+        "ios-concurrency": "Frost",
+        "ios-persistence": "Dietrich",
+        "ios-secure-persistence": "Apone",
+        "ios-accessibility": "Drake",
+        "tester": "Kane",
+        "documentation": "Ash",
+        "research": "Brett",
+        "devops": "Parker",
+        "design": "Newt",
+        "reviewer-opus": "Bishop",
+        "reviewer-sol": "Hicks",
+        "reviewer-gemini": "Vasquez"
+      },
+      "created_at": "2026-07-20T22:11:56.064-07:00"
+    },
+    "PFarm1-816-revision-2": {
+      "universe": "Alien",
+      "agents": {
+        "lead": "Dallas",
+        "frontend": "Ripley",
+        "backend": "Lambert",
+        "ios": "Hudson",
+        "ios-networking": "Gorman",
+        "ios-concurrency": "Frost",
+        "ios-persistence": "Dietrich",
+        "ios-secure-persistence": "Apone",
+        "ios-snapshot-transactions": "Crowe",
+        "ios-accessibility": "Drake",
+        "tester": "Kane",
+        "documentation": "Ash",
+        "research": "Brett",
+        "devops": "Parker",
+        "design": "Newt",
+        "reviewer-opus": "Bishop",
+        "reviewer-sol": "Hicks",
+        "reviewer-gemini": "Vasquez"
+      },
+      "created_at": "2026-07-20T23:19:49.053-07:00"
+    },
+    "PFarm1-816-revision-3": {
+      "universe": "Alien",
+      "agents": {
+        "lead": "Dallas",
+        "frontend": "Ripley",
+        "backend": "Lambert",
+        "ios": "Hudson",
+        "ios-networking": "Gorman",
+        "ios-concurrency": "Frost",
+        "ios-persistence": "Dietrich",
+        "ios-secure-persistence": "Apone",
+        "ios-snapshot-transactions": "Crowe",
+        "ios-snapshot-recovery": "Morse",
+        "ios-accessibility": "Drake",
+        "tester": "Kane",
+        "documentation": "Ash",
+        "research": "Brett",
+        "devops": "Parker",
+        "design": "Newt",
+        "reviewer-opus": "Bishop",
+        "reviewer-sol": "Hicks",
+        "reviewer-gemini": "Vasquez"
+      },
+      "created_at": "2026-07-21T00:43:41.837-07:00"
+    },
+    "PFarm1-816-revision-4": {
+      "universe": "Alien",
+      "agents": {
+        "lead": "Dallas",
+        "frontend": "Ripley",
+        "backend": "Lambert",
+        "ios": "Hudson",
+        "ios-networking": "Gorman",
+        "ios-concurrency": "Frost",
+        "ios-persistence": "Dietrich",
+        "ios-secure-persistence": "Apone",
+        "ios-snapshot-transactions": "Crowe",
+        "ios-snapshot-recovery": "Morse",
+        "ios-offline-identity-integrity": "Clemens",
+        "ios-accessibility": "Drake",
+        "tester": "Kane",
+        "documentation": "Ash",
+        "research": "Brett",
+        "devops": "Parker",
+        "design": "Newt",
+        "reviewer-opus": "Bishop",
+        "reviewer-sol": "Hicks",
+        "reviewer-gemini": "Vasquez"
+      },
+      "created_at": "2026-07-21T03:14:58.128-07:00"
+    }
+  }
 }

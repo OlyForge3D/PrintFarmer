@@ -290,3 +290,45 @@ PendingReady fix fully documented. No pending squad state. Branch clean after pu
   - Inbox: 2 files (Dallas #786, Scribe 807 pending merger)
 - **Session Status:** ✅ Complete; no product edits; orchestration metadata only
 - **Timestamp-Safe Naming:** Used `2026-07-19T22-29-26Z` format for artifacts
+
+### 2026-07-20T10:49:02Z — #782 Ripley Rejection & Anvil Takeover Recording
+
+- **Requested by:** Jeff Papiez  
+- **Scope:** Record formal three-round rejection of Ripley #782 candidate; document worktree boundary incident; formalize agent locks; authorize Anvil P1-P10 reconstruction session
+- **Artifacts Created:**
+  - Orchestration log: `.squad/orchestration-log/2026-07-20T10-49-02Z-scribe-782-ripley-rejection-anvil-handoff.md` (5,768 bytes)
+- **Key Details:**
+  - **Rejection Verdict:** Two REQUEST_CHANGES (Bishop, Hicks) + one conditional APPROVE (Vasquez contingent on blocker resolution) = formal rejection per team policy
+  - **Candidate SHA:** 680515c94d3f806b7e14351657b230c063f2c7ad
+  - **Feature Base:** 967474c1bc2d4b44aa9bbbf1c3730d0df8fb5019 (clean, no contamination)
+  - **Boundary Incident:** Worktree externally checked out/detached to parent 2efaa6833 without Ripley command; no data loss
+  - **Locked Agents:** Ripley, Bishop, Hicks, Gorman, Hudson, Kane (no further work until Anvil submits)
+- **Public Actions Taken:**
+  - Issue comment posted to #782 (live on GitHub)
+  - Owner label changed: squad:⚩ ripley → squad:🔨 anvil
+- **Anvil Takeover:**
+  - Session ID: 193b2bc9-939a-4aad-8eee-748e4d2f7e21
+  - P1-P10 reconstruction contract defined and captured
+  - Mandate: rebuild from clean origin/feature/705-operator-redesign, address trio blockers, prepare for unified re-review
+- **State Health:**
+  - decisions.md: unchanged, no new decisions recorded (record-only task)
+  - No git staging or commits
+- **Session Status:** ✅ Complete; orchestration metadata only; locked agents documented
+
+---
+
+## 2026-07-20T10:51:27Z — #782 Orchestration Correction (Append-Only)
+
+**Scope:** Corrected erroneous reviewer-lockout enumeration in prior #782 rejection log.
+
+**Correction Detail:**
+- Created: `.squad/orchestration-log/2026-07-20T10-51-27Z-scribe-782-lockout-correction.md`
+- Appended corrections to: Bishop, Hicks, Anvil histories
+- **Authoritative Locked Authors:** Ripley, Gorman, Hudson, Kane
+- **Not Locked (Mandatory Reviewers):** Bishop, Hicks, Vasquez
+- **Authorized Revision Author:** Anvil (not subject to lockout; current independent author)
+
+**Policy Clarification:**
+Reviewer-rejection lockout violates team independence policy. Only artifact/revision authors are subject to lockout. Reviewers must remain unbiased and eligible for all subsequent review cycles.
+
+**Status:** ✅ Correction logged (append-only; prior erroneous log preserved)

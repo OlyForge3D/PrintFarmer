@@ -1557,3 +1557,27 @@ All three can merge in parallel (no conflicts between them), respecting #376's s
 4. Only the right pane scrolls — left nav stays fixed/pinned
 5. Remove redundant title+description on each sub-page (the nav already tells you where you are)
 **Why:** Current layout wastes space and creates distracting scroll behavior where the whole page moves instead of just the content area.
+
+---
+
+### 2026-07-12T17:28:22Z: Hicks model and reasoning override
+**By:** Jeff Papiez (via Copilot)
+**What:** Use `gpt-5.6-sol` with `max` reasoning effort for all future Hicks review work
+**Why:** User directive for optimized Hicks code review depth
+
+---
+
+### 2026-07-13T16:00:00Z: #715 r8 — Harvest reserved-prefix guard + migration script/collation deploy-safety
+**By:** Burke (r8 remediation author)
+**What:** Resolved #715 (F10 offline tolerance / write-queue persistent Idempotency-Key) cycle r8 with three components:
+1. **B1/H3 — Harvest endpoint reserved OperationKey guard:** Added `[ReservedOperationKeyPrefix]` to `HarvestJobRequest.OperationKey` (DTO) + defense-in-depth service guard in `PartHarvestService.HarvestJobAsync` (400 InvalidRequest). Prevents cross-job harvest-key poisoning exploit.
+2. **H1a — SQL Server migration script batch-safety:** `OnlineAwareCreateUniqueIndex` now emits unique per-index variable names (`@online_{ix}`, `@sql_{ix}`) instead of repeated declarations, fixing Msg 134 under SQLCMD/sqlpackage deployments where all `migrationBuilder.Sql()` calls collapse into one GO batch.
+3. **H1b — Down migrations catalog-collation-agnostic:** Dynamic SQL using `DATABASEPROPERTYEX(DB_NAME(),'Collation')` instead of hardcoded `SQL_Latin1_General_CP1_CI_AS`. Applies to 4 columns in `20260713235657` Down() + 3 columns in `20260713163813` Down().
+
+**Validation:** format clean; build 0W/0E; focused tests 219 pass deterministic; has-pending-model-changes clean on both providers; UP/DOWN scripts zero duplicate DECLAREs; full suite: only 4 pre-approved failures, no regressions.
+
+**Preserved:** Frost r6 BIN2, Newt r7 WITH NOCHECK, Apone r5 NFKC, Ripley r4 attribute, Hudson r3 reclaim TOCTOU, Kane r1 IdempotencyRecords BIN2.
+**Why:** Remediation of cycle r7 2× REQUEST_CHANGES; #715 closes F10 offline tolerance and write-queue idempotency.
+
+---
+
