@@ -4,6 +4,7 @@ using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
 using FluentAssertions;
@@ -41,6 +42,47 @@ public class FilamentCoverageSpoolResolverTests
                 It.IsAny<SpoolmanSpoolQueryParams>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveSpoolAsync_CanonicalCentralIdentity_CapturesOriginBeforeObservation()
+    {
+        var sequence = new MockSequence();
+        Mock<IMutationWatermarkReader> watermarkReader = new(MockBehavior.Strict);
+        watermarkReader.InSequence(sequence)
+            .Setup(reader => reader.GetCurrentAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(37);
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        central.InSequence(sequence)
+            .Setup(service => service.GetConfig())
+            .Returns(new SpoolmanConfigDto("http://central.local"));
+        central.InSequence(sequence)
+            .Setup(service => service.GetConfig())
+            .Returns(new SpoolmanConfigDto("http://central.local"));
+        central.InSequence(sequence)
+            .Setup(service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(
+                [new SpoolmanSpoolDto(42, "spool", "PLA", 321, "#FFFFFF", true)],
+                1));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            watermarkReader: watermarkReader.Object);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            42);
+
+        FilamentCoverageSpoolSnapshot result =
+            await resolver.ResolveSpoolAsync(identity, CancellationToken.None);
+
+        result.Spool!.RemainingWeightG.Should().Be(321);
+        result.OriginWatermark.Should().Be(37);
+        watermarkReader.VerifyAll();
+        central.VerifyAll();
     }
 
     [Fact]
