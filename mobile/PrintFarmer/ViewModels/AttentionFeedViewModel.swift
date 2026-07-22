@@ -277,7 +277,22 @@ final class AttentionFeedViewModel {
     /// Drains to exactly one canonical refetch when `activate` is
     /// called with a matching service, matching #779's "exactly one
     /// queued refresh drains on re-entry" contract.
+    ///
+    /// Cycle 8: this flag is now CLAIMED (dedupe token below) rather
+    /// than consumed at schedule time. A fenced closure only clears
+    /// it when it actually fires. If a same-authority activation
+    /// drift invalidates the closure, the flag persists and the
+    /// next `activate` / `configure` re-entry queues a fresh closure
+    /// under the current activation — preserving the reload intent
+    /// instead of stranding it.
     @ObservationIgnored private var pendingReloadOnActivate = false
+    /// The `activationEpoch` value for which we have already scheduled
+    /// an owner-checked reload closure. Prevents queuing duplicate
+    /// closures when `activate` runs multiple times within the same
+    /// activation. Reset when the closure fires (successful claim),
+    /// on service replacement (`invalidateAuthority`), or when the
+    /// activation moves (checked at schedule time).
+    @ObservationIgnored private var pendingReloadClaimedForActivation: UInt64?
 
     init() {
         self.callbackEnqueuer = { operation in
@@ -325,14 +340,14 @@ final class AttentionFeedViewModel {
                 // load from before the last deactivate must drop, not
                 // apply into fresh reactivation state.
                 activationEpoch &+= 1
-                if pendingReloadOnActivate {
-                    pendingReloadOnActivate = false
-                    // Cycle 7: authority/activation-fenced reload.
-                    // The closure captures authority+activation at
-                    // schedule time and no-ops at drain time if
-                    // either has moved. Prevents an A-scheduled
-                    // activation reload from stealing B's bootstrap
-                    // slot after service replacement.
+                // Cycle 8: claim-based reload scheduling. Only queue
+                // a closure when pending intent exists AND no
+                // outstanding claim for the CURRENT activation. If
+                // we drift again, the claim goes stale but pending
+                // is preserved — the next activation re-queues.
+                if pendingReloadOnActivate,
+                   pendingReloadClaimedForActivation != activationEpoch {
+                    pendingReloadClaimedForActivation = activationEpoch
                     enqueueOwnerCheckedReload(
                         capturedAuthority: authorityEpoch,
                         capturedActivation: activationEpoch
@@ -472,6 +487,12 @@ final class AttentionFeedViewModel {
     /// Called when the view re-appears. If a `pendingReloadOnActivate`
     /// flag was set (typically by a signalR event that arrived while the
     /// tab was in the background), exactly one canonical refresh drains.
+    ///
+    /// Cycle 8: uses claim-based scheduling. The pending flag is NOT
+    /// consumed here — it is only cleared when a matching-owner
+    /// closure actually fires. Activation-drift closures that
+    /// invalidate themselves leave the intent latched so a subsequent
+    /// activation can re-queue.
     func activate() {
         guard attentionService != nil else { return }
         let wasActive = isActive
@@ -484,18 +505,14 @@ final class AttentionFeedViewModel {
             activationEpoch &+= 1
         }
         guard pendingReloadOnActivate else { return }
-        pendingReloadOnActivate = false
-        // Cycle 7 fix: authority/activation-fenced reload closure.
-        // Without this, the queued `refresh()` had no owner token and
-        // could fire against a replacement authority (blocker B'):
-        //   1. authority A deactivates,
-        //   2. inactive event drain sets pendingReloadOnActivate,
-        //   3. activate() queues refresh() (unfenced pre-fix),
-        //   4. configure(B) runs bootstrap before drain,
-        //   5. queued closure drains and calls refresh() against B,
-        //      duplicating B's bootstrap GET.
-        // The helper captures current authorityEpoch + activationEpoch
-        // and re-checks them at drain time.
+        // Cycle 8: claim-based scheduling. Skip if we already have an
+        // outstanding closure for the CURRENT activation (dedupe).
+        // Any closure claimed for a stale activation will no-op at
+        // drain and leave pending intact for us to re-queue.
+        guard pendingReloadClaimedForActivation != activationEpoch else { return }
+        pendingReloadClaimedForActivation = activationEpoch
+        // The pending flag is deliberately NOT cleared here — the
+        // closure clears it (and the claim) on successful fire.
         enqueueOwnerCheckedReload(
             capturedAuthority: authorityEpoch,
             capturedActivation: activationEpoch
@@ -509,10 +526,11 @@ final class AttentionFeedViewModel {
     /// re-entry) so both are structurally protected against
     /// old-owner drift between schedule and drain.
     ///
-    /// Preserves same-owner reload semantics: when the owner hasn't
-    /// changed, this behaves exactly like the pre-cycle-7 raw
-    /// `enqueue { await self?.refresh() }` — exactly one canonical
-    /// GET drains.
+    /// Cycle 8: on successful drain, clears both
+    /// `pendingReloadOnActivate` and `pendingReloadClaimedForActivation`
+    /// atomically before awaiting `refresh()`. If the closure no-ops
+    /// on drift, it leaves both flags untouched so the next
+    /// activation re-queues the intent.
     private func enqueueOwnerCheckedReload(
         capturedAuthority: UInt64,
         capturedActivation: UInt64
@@ -528,8 +546,18 @@ final class AttentionFeedViewModel {
             // VM must still be a valid owner right now.
             guard self.isActive, self.attentionEnabled,
                   self.attentionService != nil else { return }
-            // Both identities intact — fire the canonical GET. Same
-            // exactly-one semantics as the pre-fence behavior.
+            // Cycle 8: the reload intent may have been consumed
+            // elsewhere since this closure was scheduled — for
+            // example by `bootstrap()`, which owns its own follow-up
+            // refresh. If the flag is no longer set, firing would
+            // duplicate work. Skip.
+            guard self.pendingReloadOnActivate else { return }
+            // Claim the reload: clear both flags atomically before
+            // awaiting refresh. This prevents a concurrent `activate`
+            // from observing the flag still set and queuing another
+            // closure for the same activation.
+            self.pendingReloadOnActivate = false
+            self.pendingReloadClaimedForActivation = nil
             await self.refresh()
         }
     }
@@ -569,7 +597,18 @@ final class AttentionFeedViewModel {
         // Consume any queued drain before configure so its re-entry
         // path does not enqueue a duplicate refresh through the
         // callback enqueuer. Bootstrap owns the fetch below.
+        //
+        // Cycle 8: also clear the claim, so any already-queued
+        // owner-checked reload closure that was scheduled for the
+        // current activation will find `pendingReloadOnActivate ==
+        // false` mid-flight... actually the closure clears both
+        // itself. The important invariant: bootstrap's own refresh
+        // subsumes any pending event coverage, so subsequent
+        // closures firing would be duplicates. Clearing the claim
+        // ensures the enqueued closure will not re-schedule on the
+        // dedupe check.
         pendingReloadOnActivate = false
+        pendingReloadClaimedForActivation = nil
         configure(
             attentionService: attentionService,
             signalRService: signalRService,
@@ -1111,6 +1150,7 @@ final class AttentionFeedViewModel {
         isRefreshing = false
         isLoadingMore = false
         pendingReloadOnActivate = false
+        pendingReloadClaimedForActivation = nil
         // Coverage state is per-authority: any latched pending
         // coverage from the old authority is meaningless once the
         // service/signalR pair has been replaced.

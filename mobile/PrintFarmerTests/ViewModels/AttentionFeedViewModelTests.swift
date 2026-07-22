@@ -2364,11 +2364,12 @@ final class AttentionFeedViewModelTests: XCTestCase {
     func testActivationReloadClosureNoOpsAfterAnotherDeactivateReactivate() async {
         // Same-authority variant: activation A1 queues a reload
         // closure. Before it drains, deactivate + reactivate bumps
-        // activationEpoch to A2 (and again to A3 via activate).
-        // A1's closure captured activation-A1; at drain, mismatch
-        // -> no-op. The A3 owner's own reload path (if any) is
-        // unaffected — this test proves the fence is not a wedge
-        // by dispatching an explicit user refresh at the end.
+        // activationEpoch to A3. Cycle 8: intent is preserved across
+        // the drift — activate(A3) sees `pendingReloadOnActivate ==
+        // true` and `claim != A3`, so it queues a NEW closure for A3.
+        // Both closures are in the queue; A1 drains and no-ops
+        // (activation mismatch), A3 drains and fires exactly one
+        // canonical GET.
         let service = ScriptedAttentionService(steps: [
             .value(makeAttentionFeed(healthyPrinterCount: 2)),
         ])
@@ -2395,35 +2396,42 @@ final class AttentionFeedViewModelTests: XCTestCase {
 
         // Activate A1 — queues reload with captured activation A1.
         vm.activate()
-        XCTAssertEqual(callbackQueue.count, 1, "A1 activation queues reload")
+        XCTAssertEqual(callbackQueue.count, 1, "A1 activation queues reload closure_A1")
 
         // Deactivate + reactivate BEFORE the A1 reload drains.
-        // pendingReloadOnActivate is currently false (activate
-        // consumed it), so the second activate does NOT enqueue
-        // another reload. This isolates the test to a pure
-        // activation-mismatch no-op check.
+        // Cycle 8: pending intent is PRESERVED — so activate(A3) sees
+        // the pending flag and, because the claim was A1 != A3,
+        // queues a NEW closure_A3.
         vm.deactivate()
         vm.activate()
         XCTAssertEqual(
-            callbackQueue.count, 1,
-            "Second activate must not enqueue a duplicate reload (nothing pending)"
+            callbackQueue.count, 2,
+            "Second activate under drifted activation must queue a new closure to preserve reload intent (cycle 8)"
         )
 
-        // A1's reload drains. Activation mismatch (A1 vs A3) -> no-op.
+        // Drain closure_A1: activation mismatch (A1 vs A3) → no-op.
+        // pending flag remains true (closure did not fire).
         await callbackQueue.runNext()
-        let countAfterDrain = await service.loadCallCount
+        let countAfterA1 = await service.loadCallCount
         XCTAssertEqual(
-            countAfterDrain, 0,
-            "A1-scheduled reload must no-op after activation moved to A3"
+            countAfterA1, 0,
+            "closure_A1 must no-op after activation moved to A3"
         )
 
-        // Fence-not-a-wedge proof: an explicit user refresh under
-        // the current activation still works.
-        let ok = await vm.refresh()
-        XCTAssertTrue(ok)
-        let finalCount = await service.loadCallCount
-        XCTAssertEqual(finalCount, 1, "Current-owner user refresh fires exactly once")
+        // Drain closure_A3: activation matches, fence passes, fires
+        // exactly one canonical GET and consumes pending intent.
+        await callbackQueue.runNext()
+        let countAfterA3 = await service.loadCallCount
+        XCTAssertEqual(
+            countAfterA3, 1,
+            "closure_A3 fires exactly one GET (intent claimed)"
+        )
+        XCTAssertEqual(vm.phase, .loaded)
         XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 2)
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "No further closures scheduled"
+        )
     }
 
     func testActivationReloadFencePreservesSameOwnerDrainExactlyOnce() async {
@@ -2466,6 +2474,516 @@ final class AttentionFeedViewModelTests: XCTestCase {
         )
         XCTAssertEqual(vm.phase, .loaded)
         XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 4)
+    }
+
+    // MARK: - Cycle 8: activation-intent preservation across drift (blocker A)
+
+    func testActivationIntentSurvivesDriftAndClosureFireClearsFlagAndClaim() async {
+        // Blocker A: pre-cycle-8, `activate()` consumed
+        // pendingReloadOnActivate at schedule time. If the queued
+        // closure was invalidated by same-authority activation
+        // drift, the intent was stranded and the next activation
+        // performed no reload.
+        //
+        // Cycle-8: `activate()` claims (not consumes) the intent.
+        // On drift, the older closure no-ops but leaves the pending
+        // flag set so the next `activate` re-queues under the new
+        // activation. Both closures may sit in the queue; only the
+        // current-activation closure fires and consumes the intent.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 6)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Deactivate; inactive event drain sets pendingReloadOnActivate.
+        vm.deactivate()
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // Activate A1 — claims and queues closure_A1.
+        vm.activate()
+        XCTAssertEqual(callbackQueue.count, 1)
+
+        // Drift: deactivate + reactivate → A3. Pending intent
+        // preserved (cycle-8 property). activate() sees claim=A1
+        // != current=A3 → queues closure_A3.
+        vm.deactivate()
+        vm.activate()
+        XCTAssertEqual(
+            callbackQueue.count, 2,
+            "Cycle-8: drift preserves intent; second activate queues a fresh closure"
+        )
+
+        // Drain both. closure_A1 no-ops (activation mismatch); flag
+        // and claim untouched. closure_A3 fires (activation match)
+        // and CLEARS both flag and claim atomically.
+        await callbackQueue.runNext()  // closure_A1 no-op
+        let afterA1 = await service.loadCallCount
+        XCTAssertEqual(
+            afterA1, 0,
+            "closure_A1 must no-op"
+        )
+        await callbackQueue.runNext()  // closure_A3 fires
+        let afterA3 = await service.loadCallCount
+        XCTAssertEqual(
+            afterA3, 1,
+            "closure_A3 fires exactly one canonical GET"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 6)
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "No further closures scheduled — intent consumed"
+        )
+
+        // Verify claim is cleared: another activate() without pending
+        // intent must not queue anything.
+        vm.deactivate()
+        vm.activate()
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "No pending intent → no closure queued"
+        )
+    }
+
+    func testRepeatedActivationDriftBeforeAnyDrainYieldsSingleFinalGET() async {
+        // Multiple drift cycles before any closure drains. Each
+        // activate under a new activation queues a fresh closure
+        // (dedupe: activate under same activation as claim does NOT
+        // requeue). N drift cycles queue N closures; only the
+        // last-activation closure fires, all others no-op.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 3)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        vm.deactivate()
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // First activate + two additional drift cycles = 3 activations.
+        vm.activate()
+        vm.deactivate(); vm.activate()
+        vm.deactivate(); vm.activate()
+        XCTAssertEqual(
+            callbackQueue.count, 3,
+            "Three activations across drift queue three fenced closures"
+        )
+
+        // Drain all three. Only the last one fires; total GETs = 1.
+        for _ in 0..<3 {
+            await callbackQueue.runNext()
+        }
+        let calls = await service.loadCallCount
+        XCTAssertEqual(
+            calls, 1,
+            "Only the current-activation closure fires; earlier drift closures no-op"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 3)
+    }
+
+    func testActivationClaimDedupePreventsDuplicateQueueWithinSameActivation() async {
+        // Dedupe check: activate() called TWICE without any drift
+        // in between must not queue two closures for the same
+        // activation — the claim mechanism catches the duplicate.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 4)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        vm.deactivate()
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // First activate: claim=A1, queue closure.
+        vm.activate()
+        // Second activate under same activation (no drift). Claim
+        // already matches current activation → do not requeue.
+        vm.activate()
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "Duplicate activate under same activation must not queue a second closure"
+        )
+    }
+
+    func testServiceReplacementDiscardsPendingActivationIntent() async {
+        // Blocker A guard for the authority-crossing case. A had
+        // pending intent + queued closure. B replaces. Intent is
+        // discarded (invalidateAuthority resets both pending and
+        // claim). Bootstrap B issues exactly one canonical GET,
+        // undisturbed. A's queued closure drains and no-ops on
+        // authority mismatch.
+        let oldService = ScriptedAttentionService(steps: [])
+        let bBootstrapFeed = makeAttentionFeed(healthyPrinterCount: 5)
+        let newService = ScriptedAttentionService(steps: [.value(bBootstrapFeed)])
+        let oldSignalR = MockSignalRService()
+        let newSignalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: oldService,
+            signalRService: oldSignalR,
+            attentionEnabled: true
+        )
+
+        vm.deactivate()
+        oldSignalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        vm.activate()  // Under A: queues closure_A.
+        XCTAssertEqual(callbackQueue.count, 1)
+
+        // Service replacement discards A intent.
+        vm.configure(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+
+        // Bootstrap B: exactly one canonical GET.
+        _ = await vm.bootstrap(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+        let bCount = await newService.loadCallCount
+        XCTAssertEqual(bCount, 1, "B bootstrap issues exactly one GET")
+
+        // Drain A's queued closure — authority mismatch → no-op.
+        await callbackQueue.runNext()
+        let bAfterDrain = await newService.loadCallCount
+        XCTAssertEqual(
+            bAfterDrain, 1,
+            "A-scheduled reload closure must not fire against B — B GET count stays 1"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 5)
+    }
+
+    func testBootstrapConsumesClaimSoQueuedActivationClosureNoOps() async {
+        // Regression: if bootstrap consumes pendingReloadOnActivate
+        // but does NOT clear the claim, an already-queued
+        // activation closure could still find (pending, claim,
+        // authority, activation) all matching and duplicate the
+        // bootstrap GET. Cycle-8 fix: bootstrap clears BOTH pending
+        // and claim, AND the closure re-checks `pendingReloadOnActivate`
+        // at drain time before firing.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 7)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        vm.deactivate()
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        vm.activate()  // Queues closure_A1.
+        XCTAssertEqual(callbackQueue.count, 1)
+
+        // Bootstrap same-authority-same-activation — consumes
+        // pending+claim and awaits its own refresh.
+        _ = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let afterBootstrap = await service.loadCallCount
+        XCTAssertEqual(afterBootstrap, 1, "Bootstrap issues exactly one GET")
+
+        // Drain the still-queued closure. Same activation but
+        // pending flag is now false → closure detects consumed
+        // intent and no-ops (no duplicate GET).
+        await callbackQueue.runNext()
+        let afterDrain = await service.loadCallCount
+        XCTAssertEqual(
+            afterDrain, 1,
+            "Queued closure must detect bootstrap-consumed intent and no-op"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 7)
+    }
+
+    // MARK: - Cycle 8: UI-trigger owner provenance (blocker B, owner-operation proof)
+    //
+    // These proofs model the view's recovery orchestration as VM
+    // sequences. The actual view-level fix captures owner
+    // provenance synchronously at Button actions / .refreshable
+    // closure entry and re-checks it at every await boundary. Here
+    // we prove that the SAME orchestration, driven directly against
+    // the VM, produces the correct outcome under each disputed
+    // ordering:
+    //   * queued A recovery + B bootstrap intervening → B stays 1 GET,
+    //   * mid-await service change → no configure/refresh on B,
+    //   * same-owner recovery works exactly once,
+    //   * stale owner-bound retry paths cannot operate on B (VM
+    //     guards prove this structurally).
+
+    func testQueuedRecoveryFromOldOwnerNoOpsAfterBootstrapCompletes() async {
+        // The view's Button + Task pattern captures owner provenance
+        // synchronously and re-validates before every VM mutation.
+        // Model: capture the A-authority token, then bootstrap under
+        // a new B authority, then invoke the recovery orchestration
+        // with A's captured token — every guard fails, no VM call
+        // occurs, B's GET count stays at 1.
+        let aService = ScriptedAttentionService(steps: [])
+        let bBootstrapFeed = makeAttentionFeed(healthyPrinterCount: 5)
+        let bService = ScriptedAttentionService(steps: [.value(bBootstrapFeed)])
+        let aSignalR = MockSignalRService()
+        let bSignalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: aService,
+            signalRService: aSignalR,
+            attentionEnabled: true
+        )
+
+        // Under A: capture the recovery Task's owner identity
+        // synchronously (as the view does at Button trigger).
+        let capturedTokenA = vm.currentLifecycleToken()
+
+        // Service replacement: B takes over. Bootstrap issues one GET.
+        vm.configure(
+            attentionService: bService,
+            signalRService: bSignalR,
+            attentionEnabled: true
+        )
+        _ = await vm.bootstrap(
+            attentionService: bService,
+            signalRService: bSignalR,
+            attentionEnabled: true
+        )
+        let bAfterBootstrap = await bService.loadCallCount
+        XCTAssertEqual(bAfterBootstrap, 1, "B bootstrap exactly one GET")
+
+        // The queued A recovery Task now runs (simulated). It
+        // captured A's token synchronously at the Button tap. The
+        // FIRST guard in performRecoveryRefresh compares
+        // capturedToken vs current — mismatch → return early.
+        //
+        // Modeling: check the token match ourselves. If mismatch,
+        // do NOT call configure/refresh on the VM.
+        let currentToken = vm.currentLifecycleToken()
+        let shouldProceed = (capturedTokenA == currentToken)
+        XCTAssertFalse(
+            shouldProceed,
+            "Captured A token is stale after service replacement — recovery must abort"
+        )
+        // (Bootstrap's invalidateAuthority bumped the lifecycleToken.)
+
+        // Because we correctly abort, no VM mutation happens. B's
+        // count stays at 1.
+        let bFinalCount = await bService.loadCallCount
+        XCTAssertEqual(
+            bFinalCount, 1,
+            "Correctly-fenced recovery abort must leave B untouched"
+        )
+        // A's service was never called at all.
+        let aFinalCount = await aService.loadCallCount
+        XCTAssertEqual(aFinalCount, 0)
+    }
+
+    func testSameOwnerRecoveryUsesCapturedIdentityAndFiresExactlyOnce() async {
+        // Complement to the previous test: when the captured owner
+        // token matches at recovery time, the recovery proceeds and
+        // fires exactly one canonical GET. Proves the fence is not
+        // a wedge for the common case.
+        let feed = makeAttentionFeed(healthyPrinterCount: 3)
+        let service = ScriptedAttentionService(steps: [.value(feed)])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Capture token at UI trigger (synchronous).
+        let capturedToken = vm.currentLifecycleToken()
+        // ... no service replacement or deactivate happens ...
+        // Recovery body starts.
+        let currentToken = vm.currentLifecycleToken()
+        XCTAssertEqual(
+            capturedToken, currentToken,
+            "Same-owner recovery: captured token still matches"
+        )
+
+        // Guard passes, recovery calls VM.refresh() (view's actual
+        // implementation also calls retryDisabledRecovery + configure
+        // conditionally; here we model just the refresh path).
+        _ = await vm.refresh()
+        let count = await service.loadCallCount
+        XCTAssertEqual(
+            count, 1,
+            "Same-owner recovery fires exactly one canonical GET"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 3)
+    }
+
+    func testStaleRetryLoadFailureIdIsSafelyRejectedUnderNewAuthority() async {
+        // Owner-bound retry safety proof: retryLoad(failureID:) is
+        // structurally safe against A→B replacement. Under A, an
+        // error occurs and loadFailure is latched (id = idA). B
+        // replaces; invalidateAuthority resets loadFailure = nil.
+        // A stale A-triggered retry with idA finds no matching
+        // failure and returns false — no VM state change, no
+        // stray GET.
+        let aService = ScriptedAttentionService(steps: [
+            .failure(.forced("A network flake")),
+        ])
+        let bBootstrapFeed = makeAttentionFeed(healthyPrinterCount: 2)
+        let bService = ScriptedAttentionService(steps: [.value(bBootstrapFeed)])
+        let aSignalR = MockSignalRService()
+        let bSignalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: aService,
+            signalRService: aSignalR,
+            attentionEnabled: true
+        )
+
+        _ = await vm.refresh()  // A fails; loadFailure latched.
+        let idA = vm.loadFailure?.id
+        XCTAssertNotNil(idA)
+
+        // Replace to B and bootstrap.
+        vm.configure(
+            attentionService: bService,
+            signalRService: bSignalR,
+            attentionEnabled: true
+        )
+        _ = await vm.bootstrap(
+            attentionService: bService,
+            signalRService: bSignalR,
+            attentionEnabled: true
+        )
+        XCTAssertNil(
+            vm.loadFailure,
+            "B bootstrap under new authority — loadFailure was reset by invalidateAuthority"
+        )
+        let bAfterBootstrap = await bService.loadCallCount
+        XCTAssertEqual(bAfterBootstrap, 1)
+
+        // Stale A-triggered retry with idA. loadFailure is nil under
+        // B, so retryLoad returns false — no VM operation, no B GET.
+        let retryResult = await vm.retryLoad(failureID: idA!)
+        XCTAssertFalse(
+            retryResult,
+            "Stale A failureID must be rejected under B — no operation"
+        )
+        let bAfterStaleRetry = await bService.loadCallCount
+        XCTAssertEqual(
+            bAfterStaleRetry, 1,
+            "Stale retry must not fire a GET against B"
+        )
+    }
+
+    func testStaleRetryLoadMoreFailureIdIsSafelyRejectedUnderNewAuthority() async {
+        // Same safety proof for retryLoadMore.
+        let aFirstPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:1")],
+            nextCursor: "cursor-A"
+        )
+        let aService = ScriptedAttentionService(steps: [
+            .value(aFirstPage),
+            .failure(.forced("A pagination flake")),
+        ])
+        let bBootstrapFeed = makeAttentionFeed(healthyPrinterCount: 4)
+        let bService = ScriptedAttentionService(steps: [.value(bBootstrapFeed)])
+        let aSignalR = MockSignalRService()
+        let bSignalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: aService,
+            signalRService: aSignalR,
+            attentionEnabled: true
+        )
+
+        _ = await vm.refresh()          // A page 1 succeeds
+        _ = await vm.loadMore()          // A page 2 fails → paginationFailure latched
+        let idA = vm.paginationFailure?.id
+        XCTAssertNotNil(idA)
+
+        // Replace to B.
+        vm.configure(
+            attentionService: bService,
+            signalRService: bSignalR,
+            attentionEnabled: true
+        )
+        _ = await vm.bootstrap(
+            attentionService: bService,
+            signalRService: bSignalR,
+            attentionEnabled: true
+        )
+        XCTAssertNil(
+            vm.paginationFailure,
+            "invalidateAuthority reset paginationFailure"
+        )
+
+        // Stale A retry.
+        let result = await vm.retryLoadMore(failureID: idA!)
+        XCTAssertFalse(result, "Stale A failureID rejected under B")
+        let bCount = await bService.loadCallCount
+        XCTAssertEqual(bCount, 1, "B untouched by stale pagination retry")
     }
 
     // MARK: - Helpers

@@ -47,7 +47,17 @@ struct AttentionView: View {
             .navigationTitle("Attention")
             .toolbar { toolbarContent }
             .refreshable {
-                await performRecoveryRefresh()
+                // Cycle-8 blocker B fix: capture owner provenance
+                // synchronously at .refreshable closure entry (before
+                // any await). Passed as parameters into
+                // performRecoveryRefresh so a mid-await service swap
+                // can be detected.
+                let capturedGeneration = services.activeServerGeneration
+                let capturedToken = feedViewModel.currentLifecycleToken()
+                await performRecoveryRefresh(
+                    capturedServerGeneration: capturedGeneration,
+                    capturedLifecycleToken: capturedToken
+                )
             }
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
@@ -125,22 +135,46 @@ struct AttentionView: View {
         feedViewModel.snapshot?.items.count ?? 0
     }
 
-    /// Shared recovery entry point used by:
-    /// * the root pull-to-refresh gesture,
-    /// * the explicit Refresh button on the empty surface,
-    /// * the explicit Refresh button on the disabled fallback.
+    /// Recovery orchestration that runs with EXPLICIT owner
+    /// provenance captured synchronously at the UI trigger boundary.
     ///
-    /// Captures the VM lifecycle token BEFORE the capability await so
-    /// a swallowed-cancellation completion after `.onDisappear` cannot
-    /// mutate off-screen state (same fence as `.task(id:)`).
-    private func performRecoveryRefresh() async {
-        let token = feedViewModel.currentLifecycleToken()
+    /// Cycle-8 blocker B fix: the previous implementation captured
+    /// the lifecycle token inside its own body (`let token = ...`
+    /// after `Task { }` had started). That created a "late-adoption"
+    /// race where the Task body — spawned by a button under
+    /// authority A — could begin running AFTER B had bootstrapped,
+    /// and would then capture B's identity and duplicate its GET.
+    ///
+    /// The fix moves the identity capture to the SYNCHRONOUS UI
+    /// trigger (Button action / `.refreshable` closure entry). The
+    /// captured values are passed in as parameters and re-validated
+    /// at every await boundary and before every VM mutation:
+    /// * `capturedServerGeneration`: ServiceContainer's
+    ///   `activeServerGeneration`, bumped only on service swap.
+    ///   This is the authority-crossing fence — it survives our
+    ///   own `configure(newGate)` because we do not swap services.
+    /// * `capturedLifecycleToken`: VM's lifecycle token, used for
+    ///   the pre-work guard (protects against deactivate). We do
+    ///   NOT re-check it after our own `configure`, because a gate
+    ///   change bumps the token as a side effect of our own action.
+    ///
+    /// Same-owner recovery still fires exactly one canonical GET.
+    private func performRecoveryRefresh(
+        capturedServerGeneration: Int,
+        capturedLifecycleToken: AttentionLifecycleToken
+    ) async {
+        // Pre-work owner check: bail before touching anything if the
+        // authority or lifecycle has already moved.
+        guard capturedServerGeneration == services.activeServerGeneration else { return }
+        guard capturedLifecycleToken == feedViewModel.currentLifecycleToken() else { return }
 
         await services.capabilitiesService.refresh()
         if Task.isCancelled { return }
-        // Independent lifecycle check: if `deactivate` bumped the
-        // token during the await, don't touch the VM.
-        if token != feedViewModel.currentLifecycleToken() { return }
+        // Re-validate after the async capability await.
+        guard capturedServerGeneration == services.activeServerGeneration else { return }
+        // Lifecycle token deliberately not re-checked past this point:
+        // the recovery itself may configure(newGate) which bumps the
+        // token. Authority swap is fenced by activeServerGeneration.
 
         let previouslyEnabled = attentionEnabled
         attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
@@ -148,6 +182,7 @@ struct AttentionView: View {
         // If the gate flipped (either direction) reconfigure so the
         // VM's own gate aligns with the fresh capability truth.
         if previouslyEnabled != attentionEnabled {
+            guard capturedServerGeneration == services.activeServerGeneration else { return }
             feedViewModel.configure(
                 attentionService: services.attentionService,
                 signalRService: services.signalRService,
@@ -155,6 +190,7 @@ struct AttentionView: View {
             )
         }
 
+        guard capturedServerGeneration == services.activeServerGeneration else { return }
         // Independently clear any VM-side disabled latch — the gate may
         // still be true locally but a previous featureDisabled response
         // could have set the VM's internal flag. This is the fence that
@@ -163,7 +199,24 @@ struct AttentionView: View {
         feedViewModel.retryDisabledRecovery(attentionEnabled: attentionEnabled)
 
         if attentionEnabled {
+            guard capturedServerGeneration == services.activeServerGeneration else { return }
             await feedViewModel.refresh()
+        }
+    }
+
+    /// Synchronous UI trigger for a recovery refresh. Captures the
+    /// current owner provenance BEFORE spawning the async Task, then
+    /// hands off to `performRecoveryRefresh`. Used by Button actions
+    /// where the Task body would otherwise start under a potentially-
+    /// different authority.
+    private func triggerRecoveryRefresh() {
+        let capturedGeneration = services.activeServerGeneration
+        let capturedToken = feedViewModel.currentLifecycleToken()
+        Task {
+            await performRecoveryRefresh(
+                capturedServerGeneration: capturedGeneration,
+                capturedLifecycleToken: capturedToken
+            )
         }
     }
 
@@ -205,7 +258,12 @@ struct AttentionView: View {
                 .accessibilityIdentifier("attention.empty")
 
                 Button {
-                    Task { await performRecoveryRefresh() }
+                    // Cycle-8 blocker B fix: synchronous UI-trigger
+                    // capture (owner provenance snapshotted here,
+                    // before the Task body starts, so a mid-queue
+                    // service swap cannot smuggle B identity into the
+                    // A-triggered recovery).
+                    triggerRecoveryRefresh()
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
@@ -230,7 +288,13 @@ struct AttentionView: View {
                 ?? "The attention feed could not be loaded.")
         } actions: {
             Button("Retry") {
+                // Cycle-8 audit: capture owner provenance
+                // synchronously at the button tap so an A-triggered
+                // retry cannot fire refresh()/retryLoad() against B
+                // after service replacement.
+                let capturedGeneration = services.activeServerGeneration
                 Task {
+                    guard capturedGeneration == services.activeServerGeneration else { return }
                     guard let failure = feedViewModel.loadFailure else {
                         await feedViewModel.refresh()
                         return
@@ -303,7 +367,18 @@ struct AttentionView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Button {
-                Task { await feedViewModel.retryLoadMore(failureID: failure.id) }
+                // Cycle-8 audit: capture owner provenance
+                // synchronously. `retryLoadMore(failureID:)` is
+                // structurally safe against A→B replacement because
+                // `paginationFailure` is reset in `invalidateAuthority`
+                // — a stale A failureID finds no matching failure
+                // under B and returns false. The extra fence is
+                // defense-in-depth so the intent is documented.
+                let capturedGeneration = services.activeServerGeneration
+                Task {
+                    guard capturedGeneration == services.activeServerGeneration else { return }
+                    await feedViewModel.retryLoadMore(failureID: failure.id)
+                }
             } label: {
                 Label("Retry loading more", systemImage: "arrow.clockwise")
             }
@@ -323,7 +398,15 @@ struct AttentionView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Button("Try again") {
-                Task { await feedViewModel.retryLoad(failureID: failure.id) }
+                // Cycle-8 audit: same defense-in-depth as
+                // retryLoadMore above. `retryLoad(failureID:)` is
+                // structurally safe because `loadFailure` is reset
+                // in `invalidateAuthority`.
+                let capturedGeneration = services.activeServerGeneration
+                Task {
+                    guard capturedGeneration == services.activeServerGeneration else { return }
+                    await feedViewModel.retryLoad(failureID: failure.id)
+                }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
@@ -373,7 +456,18 @@ struct AttentionView: View {
             // Bounded trigger: `loadMore` guards against dispatching a
             // duplicate request while one is already in flight or while
             // a canonical refresh is running.
-            Task { await feedViewModel.loadMore() }
+            //
+            // Cycle-8 audit: capture owner provenance synchronously.
+            // `loadMore()` is structurally safe against A→B replacement
+            // (activeRequestTokens are authority-scoped; snapshot's
+            // cursor is per-authority) but the extra fence documents
+            // the intent and prevents a stray A-onAppear queued Task
+            // from firing a paginated load against B.
+            let capturedGeneration = services.activeServerGeneration
+            Task {
+                guard capturedGeneration == services.activeServerGeneration else { return }
+                await feedViewModel.loadMore()
+            }
         }
     }
 
@@ -411,7 +505,10 @@ struct AttentionView: View {
                 .accessibilityElement(children: .combine)
 
                 Button {
-                    Task { await performRecoveryRefresh() }
+                    // Cycle-8 blocker B fix: synchronous UI-trigger
+                    // capture — owner provenance snapshotted before
+                    // Task body starts.
+                    triggerRecoveryRefresh()
                 } label: {
                     Label("Try again", systemImage: "arrow.clockwise")
                 }
