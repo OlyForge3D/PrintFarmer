@@ -2404,11 +2404,13 @@ export class ApiClient {
 
   /**
    * Get a single tag by id with its revision/concurrencyToken, typed for the
-   * optimistic-concurrency edit flow (#844/#846).
+   * optimistic-concurrency edit flow (#844/#846). Delegates to `getTagById` so there's
+   * a single place wiring the `/tags/{id}` request; this method only adds the stronger
+   * `TagOption` return type needed by the revision-conflict flow.
    */
   async getTag(tagId: string): Promise<TagOption | null> {
-    const response = await this.client.get(`/tags/${tagId}`);
-    return (response.data as TagOption) || null;
+    const data = await this.getTagById(tagId);
+    return (data as TagOption | null) || null;
   }
 
   /**

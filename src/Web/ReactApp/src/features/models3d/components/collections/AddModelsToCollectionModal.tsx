@@ -126,7 +126,9 @@ export function AddModelsToCollectionModal({ isOpen, modelIds, onClose, onCreate
                         <span className="font-medium text-pf-text-primary truncate">{collection.name}</span>
                         {collection.isShared && (
                           <span className="inline-flex items-center gap-1 text-xs text-pf-text-tertiary" title="Shared with everyone">
-                            <EarthIcon className="w-3.5 h-3.5" />
+                            <span aria-hidden="true" className="flex items-center">
+                              <EarthIcon className="w-3.5 h-3.5" />
+                            </span>
                             Shared
                           </span>
                         )}

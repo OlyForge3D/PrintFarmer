@@ -241,7 +241,9 @@ export function CollectionsNav({ selectedCollectionId, onSelectCollection }: Col
 
           <div className="mt-3">
             <h3 className="px-3 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary mb-1 flex items-center gap-1">
-              <AccountMultipleIcon className="w-3.5 h-3.5" />
+              <span aria-hidden="true" className="flex items-center">
+                <AccountMultipleIcon className="w-3.5 h-3.5" />
+              </span>
               Shared
             </h3>
             {shared.length === 0 ? (
@@ -254,7 +256,9 @@ export function CollectionsNav({ selectedCollectionId, onSelectCollection }: Col
           {isAdmin && otherPrivate.length > 0 && (
             <div className="mt-3">
               <h3 className="px-3 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary mb-1 flex items-center gap-1">
-                <LockIcon className="w-3.5 h-3.5" />
+                <span aria-hidden="true" className="flex items-center">
+                  <LockIcon className="w-3.5 h-3.5" />
+                </span>
                 Other users&apos; private collections
               </h3>
               <ul className="space-y-0.5">{otherPrivate.map(renderCollectionRow)}</ul>
