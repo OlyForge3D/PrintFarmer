@@ -139,6 +139,8 @@ snapshots/
 .squad/decisions/inbox/pr-*-view.json
 .squad/decisions/inbox/review-*.txt
 .squad/.cache/
+# Machine-local Squad scope overrides (per-dev-machine, never shared)
+.squad/machine-local.md
 
 # Temp/debug artifacts
 .tmp-*

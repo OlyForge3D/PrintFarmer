@@ -2,6 +2,36 @@
 
 How to decide who handles what.
 
+## 🍏 Host Capability Gating — iOS build/test requires macOS
+
+This repo is shared across dev machines with different operating systems. iOS
+work has a hard platform dependency: **anything that builds, tests, signs, or
+runs the iOS app requires a macOS (Darwin) host with Xcode.** This rule is
+universal — it applies identically on every machine.
+
+**Before running any iOS build/test/sign step, preflight the host OS**
+(`uname -s` must be `Darwin`). Commands that are gated: `xcodebuild`, iOS
+Simulator, `xcrun`, `swift build/test`, `fastlane`, `PrintFarmerTests` /
+`PrintFarmerUITests`, TestFlight/APNs signing — anything under `mobile/`.
+
+**On a non-macOS host:**
+- Do **not** attempt iOS build/test/sign — they will fail and are not valid there.
+- Pure source edits to `mobile/` *may* proceed, but the change is **not
+  validated** until a macOS host builds/tests it. Mark such work
+  `needs-macos-validation` and hand verification to a macOS machine (or defer).
+  Never claim an iOS task complete without a macOS build/test pass.
+- `area:ios` acceptance gates (XCTest/XCUI green, simulator screenshots) must be
+  satisfied on macOS.
+
+**On a macOS host:** iOS build/test/sign run normally.
+
+### Per-machine scope overrides (machine-local, not committed)
+
+A machine may narrow its own focus (e.g. "this Mac works iOS-only") in
+**`.squad/machine-local.md`** — a **gitignored** file that never ships to other
+machines. If that file exists, honor it in addition to the capability rule above.
+If it is absent, follow the normal routing tables below.
+
 ## Routing Table
 
 | Work Type | Route To | Examples |
