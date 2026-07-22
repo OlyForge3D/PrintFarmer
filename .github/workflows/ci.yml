@@ -48,6 +48,10 @@ jobs:
         working-directory: src
         run: dotnet restore ./farm-web.sln
 
+      - name: Dotnet format (verify — fail-fast)
+        working-directory: src
+        run: dotnet format --verify-no-changes --no-restore ./farm-web.sln
+
       - name: Install dotnet-ef
         run: |
           dotnet tool install -g dotnet-ef
@@ -122,10 +126,6 @@ jobs:
       - name: Lint frontend
         working-directory: src/Web/ReactApp
         run: npm run lint
-
-      - name: Dotnet format (check)
-        working-directory: src
-        run: dotnet format --verify-no-changes ./farm-web.sln || echo "Dotnet format issues detected" && exit 0
 
       - name: Upload test results summary
         if: always()
