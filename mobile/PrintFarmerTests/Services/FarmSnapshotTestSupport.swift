@@ -221,27 +221,46 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
 
 // MARK: - Factories
 
+extension XCTestCase {
+    /// Returns a uniquely-named, TEST-OWNED suite name and registers a teardown block
+    /// that removes the persistent domain (on success or failure) and asserts it no
+    /// longer contains any keys. Prevents leaked persistent domains from accumulating
+    /// in `~/Library/Preferences` across runs (issue #816 test hygiene). Callers build
+    /// their own `UserDefaults(suiteName:)` from this name so fixtures never construct
+    /// an untracked random suite. Returning only the `Sendable` String also keeps the
+    /// non-Sendable `UserDefaults` within the caller's isolation domain.
+    func trackedSuiteName(_ prefix: String, file: StaticString = #filePath, line: UInt = #line) -> String {
+        let suite = "\(prefix)-\(UUID().uuidString)"
+        addTeardownBlock {
+            UserDefaults().removePersistentDomain(forName: suite)
+            let residual = UserDefaults().persistentDomain(forName: suite) ?? [:]
+            XCTAssertTrue(residual.isEmpty, "leaked persistent domain \(suite): \(residual)", file: file, line: line)
+        }
+        return suite
+    }
+}
+
 enum FarmSnapshotFixtures {
     static func tempRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("FarmSnapshotTests-\(UUID().uuidString)", isDirectory: true)
     }
 
-    /// Authority backed by an isolated in-memory-ish UserDefaults suite so durable
-    /// tombstones never leak into `.standard` or across tests (H4).
-    static func makeAuthority() -> FarmSnapshotAuthority {
-        FarmSnapshotAuthority(
-            tombstoneStore: FarmSnapshotTombstoneStore(userDefaults: UserDefaults(suiteName: "tomb-\(UUID().uuidString)")!)
-        )
+    /// Authority backed by a caller-provided, test-owned UserDefaults suite so
+    /// durable tombstones never leak into `.standard` or across tests (H4). The
+    /// suite MUST be tracked by the test (see `XCTestCase.trackedSuiteName`).
+    static func makeAuthority(tombstoneDefaults: UserDefaults) -> FarmSnapshotAuthority {
+        FarmSnapshotAuthority(tombstoneStore: FarmSnapshotTombstoneStore(userDefaults: tombstoneDefaults))
     }
 
-    /// Isolated tombstone store for tests that need to prove restart durability.
-    static func makeTombstoneStore(suite: String = "tomb-\(UUID().uuidString)") -> FarmSnapshotTombstoneStore {
-        FarmSnapshotTombstoneStore(userDefaults: UserDefaults(suiteName: suite)!)
+    /// Isolated tombstone store on a caller-provided, test-owned suite (used by
+    /// restart-durability fixtures that recreate the store on the SAME suite).
+    static func makeTombstoneStore(_ defaults: UserDefaults) -> FarmSnapshotTombstoneStore {
+        FarmSnapshotTombstoneStore(userDefaults: defaults)
     }
 
-    static func makeOwnerStore() -> FarmSnapshotOwnerStore {
-        FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: "owner-\(UUID().uuidString)")!)
+    static func makeOwnerStore(_ defaults: UserDefaults) -> FarmSnapshotOwnerStore {
+        FarmSnapshotOwnerStore(userDefaults: defaults)
     }
 
     static func namespace(server: UUID = UUID(), user: UUID = UUID()) -> FarmSnapshotNamespace {

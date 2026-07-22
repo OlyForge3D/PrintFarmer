@@ -21,15 +21,15 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
     }
 
     private func box() -> AuthServiceUserDefaultsBox {
-        AuthServiceUserDefaultsBox(UserDefaults(suiteName: "container-\(UUID().uuidString)")!)
+        AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("container"))!)
     }
 
     private func ownerStore() -> FarmSnapshotOwnerStore {
-        FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: "owner-\(UUID().uuidString)")!)
+        FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: trackedSuiteName("owner"))!)
     }
 
     private func registry() -> ServerRegistry {
-        ServerRegistry(userDefaults: UserDefaults(suiteName: "reg-\(UUID().uuidString)")!, migrateLegacyServerURL: false)
+        ServerRegistry(userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!, migrateLegacyServerURL: false)
     }
 
     // MARK: Structural: activation resolves the settled server's OWN owner
@@ -44,7 +44,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: b.id)
 
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
@@ -72,7 +72,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: a.id)
 
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
@@ -105,7 +105,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         try reg.setActive(id: a.id)
         let owners = ownerStore() // no owner persisted → token-only/legacy
 
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
@@ -132,7 +132,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
 
         // Phase 1 (online): seed a cached snapshot for (A, userA).
-        let seedAuthority = FarmSnapshotFixtures.makeAuthority()
+        let seedAuthority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let seedStore = FarmSnapshotStore(authority: seedAuthority, rootURL: root)
         let seedSession = seedAuthority.mint(namespace: namespace, generation: 0)!
         await seedStore.activate(session: seedSession)
@@ -144,7 +144,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
         // Phase 2 (offline relaunch): fresh authority + store on the same disk,
         // same persisted owner, NO network.
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
@@ -172,7 +172,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
 
         // Seed both namespaces.
-        let seedAuthority = FarmSnapshotFixtures.makeAuthority()
+        let seedAuthority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let seedStore = FarmSnapshotStore(authority: seedAuthority, rootURL: root)
         let envA = FarmSnapshotFixtures.envelope(namespace: nsA, millis: 1000)
         let envB = FarmSnapshotFixtures.envelope(namespace: nsB, millis: 2000)
@@ -183,7 +183,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         await seedStore.activate(session: sB)
         XAssertEqual(await seedStore.commit(envB, capturedSession: sB), .committed)
 
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
@@ -257,7 +257,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let namespace = FarmSnapshotNamespace(serverID: a.id, userID: userA)
         let root = newRoot()
 
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         // Seed a cached snapshot before demo exit.
         let env = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 4200)
@@ -292,7 +292,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: a.id)
 
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let container = ServiceContainer(
@@ -326,7 +326,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: a.id)
 
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
@@ -368,7 +368,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: a.id)
 
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let recorder = SignalRFactoryRecorder(barrierOnFirst: true)

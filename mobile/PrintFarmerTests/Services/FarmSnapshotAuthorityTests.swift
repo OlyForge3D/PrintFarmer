@@ -7,7 +7,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     // MARK: Authority
 
     func testMintAdvancesMonotonicTokenAndSupersedes() {
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
 
         let first = authority.mint(namespace: namespace, generation: 0)
@@ -22,7 +22,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testTombstonedServerCannotMint() {
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
         authority.tombstone(namespace.serverID)
 
@@ -31,7 +31,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testTombstoneRevokesMatchingCurrentSession() {
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
         let session = authority.mint(namespace: namespace, generation: 0)!
 
@@ -41,7 +41,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testRevokeClearsCurrent() {
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         authority.revoke()
         XCTAssertNil(authority.currentSession())
@@ -49,7 +49,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testWithPromotionSkipsWhenNotCurrent() {
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         authority.revoke()
 
@@ -63,7 +63,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testWithPromotionSkipsWhenCancelled() {
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         var ran = false
         let result: Bool? = authority.withPromotion(session, cancelled: { true }) {
@@ -75,7 +75,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testIsCurrentRequiresExactSession() {
-        let authority = FarmSnapshotFixtures.makeAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
         let session = authority.mint(namespace: namespace, generation: 0)!
         // A same-namespace/same-generation session with a different token is not current.
@@ -87,7 +87,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     // MARK: Owner store
 
     func testOwnerStoreSetGetClear() {
-        let defaults = UserDefaults(suiteName: "owner-\(UUID().uuidString)")!
+        let defaults = UserDefaults(suiteName: trackedSuiteName("owner"))!
         let store = FarmSnapshotOwnerStore(userDefaults: defaults)
         let server = UUID()
         let user = UUID()
@@ -100,7 +100,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testOwnerStoreIsScopedPerServer() {
-        let defaults = UserDefaults(suiteName: "owner-\(UUID().uuidString)")!
+        let defaults = UserDefaults(suiteName: trackedSuiteName("owner"))!
         let store = FarmSnapshotOwnerStore(userDefaults: defaults)
         let serverA = UUID(), userA = UUID()
         let serverB = UUID(), userB = UUID()
@@ -113,7 +113,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     }
 
     func testOwnerStorePersistsAcrossRecreation() {
-        let suite = "owner-\(UUID().uuidString)"
+        let suite = trackedSuiteName("owner")
         let server = UUID(), user = UUID()
         FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: suite)!)
             .setOwner(userID: user, serverID: server)

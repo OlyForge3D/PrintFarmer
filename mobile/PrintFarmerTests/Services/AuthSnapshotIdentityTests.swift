@@ -19,16 +19,16 @@ final class AuthSnapshotIdentityTests: XCTestCase {
         super.setUp()
         mockAPIClient = MockAPIClient()
         apiClient = mockAPIClient.apiClient
-        registry = ServerRegistry(userDefaults: UserDefaults(suiteName: "reg-\(UUID().uuidString)")!, migrateLegacyServerURL: false)
+        registry = ServerRegistry(userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!, migrateLegacyServerURL: false)
         let server = try! registry.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
         try! registry.setActive(id: server.id)
         serverID = server.id
-        owners = FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: "own-\(UUID().uuidString)")!)
+        owners = FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: trackedSuiteName("own"))!)
         epoch = AuthOperationEpoch()
         authService = AuthService(
             apiClient: apiClient,
             credentialsStore: ServerCredentialsStore(keychain: .init(keyPrefix: "AuthId_\(UUID().uuidString)_")),
-            userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: "auth-\(UUID().uuidString)")!),
+            userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("auth"))!),
             migrateLegacyServerURL: false,
             serverRegistry: registry,
             snapshotOwnerStore: owners,
