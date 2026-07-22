@@ -301,7 +301,9 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             // A source that failed before its first successful pass has no active keys to
             // seed, but must remain unbootstrapped. When it recovers, this exact-key query
             // restores a recent pre-restart Skip/Dismiss before the upsert can recreate it.
-            List<UserTaskSourceKind> unbootstrappedKinds = authoritativeKinds.Keys
+            List<UserTaskSourceKind> unbootstrappedKinds = specs.Keys
+                .Select(key => key.Item1)
+                .Distinct()
                 .Where(kind => !suppressionState.IsBootstrapped(kind))
                 .ToList();
             foreach (UserTaskSourceKind sourceKind in unbootstrappedKinds)
@@ -445,13 +447,15 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         {
             _ = suppressionState.SuppressedKeys.RemoveWhere(
                 key => !specs.ContainsKey(key)
+                    && !collidingKeys.Contains(key)
                     && authoritativeKinds.TryGetValue(key.SourceKind, out AuthoritativeKindObservation? observation)
                     && !observation.Authority.PreservedSourceIds.Contains(key.SourceId));
 
-            // A successful source with no current keys confirms any old episode cleared,
-            // while a successful source with active keys was seeded above. Failed sources
-            // deliberately remain unbootstrapped for their eventual recovery pass.
-            foreach (UserTaskSourceKind successfulKind in authoritativeKinds.Keys)
+            // Only a collision-free authoritative observation proves every active key was
+            // considered. Incomplete and colliding kinds remain unbootstrapped so future
+            // emitted keys still receive exact-key durable suppression recovery.
+            foreach (UserTaskSourceKind successfulKind in authoritativeKinds.Keys
+                .Where(kind => !collidingKeys.Any(key => key.Item1 == kind)))
             {
                 suppressionState.MarkBootstrapped(successfulKind);
             }

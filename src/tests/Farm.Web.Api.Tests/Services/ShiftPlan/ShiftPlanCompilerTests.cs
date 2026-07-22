@@ -509,6 +509,90 @@ public class ShiftPlanCompilerTests
     }
 
     [Fact]
+    public async Task CompileAsync_IncompleteSourceEmitsSuppressedSpec_BootstrapsKeyWithoutRecreatingTask()
+    {
+        const string sourceId = "failure:pre-restart";
+        ShiftPlanSuppressionState state = new();
+        ShiftPlanTaskSpec spec = Spec(sourceId);
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        _tasks.Setup(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Any(key => key.SourceKind == UserTaskSourceKind.FailureIncident
+                        && key.SourceId == sourceId)),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, sourceId)]);
+        ShiftPlanSourceResult incomplete = new([spec], OriginWatermark: 10)
+        {
+            Authority = new ShiftPlanSourceAuthority(
+            [
+                new ShiftPlanKindAuthority(
+                    UserTaskSourceKind.FailureIncident,
+                    IsAuthoritativeComplete: false,
+                    PreservedSourceIds: new HashSet<string>(StringComparer.Ordinal),
+                    IncompleteReasons: ["bounded"]),
+            ]),
+        };
+        ShiftPlanCompiler compiler = BuildCompiler(new ControlledSource(
+            "incomplete",
+            [UserTaskSourceKind.FailureIncident],
+            [spec],
+            incomplete));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync(state);
+
+        Assert.Equal(0, result.Created);
+        Assert.Empty(_tracked);
+        Assert.Contains((UserTaskSourceKind.FailureIncident, sourceId), state.SuppressedKeys);
+        Assert.False(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Any(key => key.SourceKind == UserTaskSourceKind.FailureIncident
+                        && key.SourceId == sourceId)),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CompileAsync_CollidingSuppressedKey_PreservesSuppressionUntilCollisionClears()
+    {
+        const string sourceId = "failure:collision";
+        ShiftPlanSuppressionState state = new();
+        _ = state.SuppressedKeys.Add((UserTaskSourceKind.FailureIncident, sourceId));
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+        ShiftPlanTaskSpec first = Spec(sourceId, title: "first");
+        ShiftPlanTaskSpec second = Spec(sourceId, title: "second");
+        ShiftPlanCompiler collidingCompiler = BuildCompiler(
+            AuthoritySource(
+                "colliding",
+                UserTaskSourceKind.FailureIncident,
+                originWatermark: 10,
+                specs: [first, second]));
+
+        ShiftPlanCompileResult collidingPass = await collidingCompiler.CompileAsync(state);
+
+        Assert.Equal(0, collidingPass.Created);
+        Assert.Contains((UserTaskSourceKind.FailureIncident, sourceId), state.SuppressedKeys);
+        Assert.False(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+
+        ShiftPlanCompiler recoveredCompiler = BuildCompiler(
+            AuthoritySource(
+                "recovered",
+                UserTaskSourceKind.FailureIncident,
+                originWatermark: 10,
+                specs: [first]));
+        ShiftPlanCompileResult recoveredPass = await recoveredCompiler.CompileAsync(state);
+
+        Assert.Equal(0, recoveredPass.Created);
+        Assert.Empty(_tracked);
+        Assert.Contains((UserTaskSourceKind.FailureIncident, sourceId), state.SuppressedKeys);
+        Assert.True(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+    }
+
+    [Fact]
     public async Task CompileAsync_SpecWithoutSourceKindOrSourceId_IsIgnored()
     {
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
