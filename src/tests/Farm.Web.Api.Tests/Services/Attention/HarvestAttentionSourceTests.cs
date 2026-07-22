@@ -7,6 +7,7 @@ using Farm.Infrastructure.Repositories.Attention;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Attention.Sources;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
@@ -112,6 +113,84 @@ public class HarvestAttentionSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetItemsWithOriginAsync_ExtraRowSentinel_MarksCappedObservationIncomplete()
+    {
+        Guid printerId = Guid.NewGuid();
+        await using (var db = new AppDbContext(_options))
+        {
+            Guid manufacturerId = Guid.NewGuid();
+            Guid modelId = Guid.NewGuid();
+            _ = db.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Test Manufacturer" });
+            _ = db.PrinterModels.Add(new PrinterModel
+            {
+                Id = modelId,
+                Name = "Test Model",
+                ManufacturerId = manufacturerId,
+            });
+            _ = db.Printers.Add(new Printer
+            {
+                Id = printerId,
+                Name = "Printer A",
+                ServerUrl = "http://printer-a",
+                BackendPort = 7125,
+                ManufacturerId = manufacturerId,
+                ModelId = modelId,
+            });
+            for (int index = 0; index < 101; index++)
+            {
+                _ = db.PrintJobs.Add(new PrintJob
+                {
+                    Id = Guid.NewGuid(),
+                    Name = $"part-{index}.gcode",
+                    Status = PrintJobStatus.Completed,
+                    AssignedPrinterId = printerId,
+                    ActualEndTime = DateTime.UtcNow.AddMinutes(-index),
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+
+            _ = await db.SaveChangesAsync();
+        }
+
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(value => value.IsEnabledStrictAsync(
+                OperatorFeature.PrintedPartsInventory,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        HarvestAttentionSource source = new(
+            _factory,
+            gate.Object,
+            new ConstantWatermarkReader(12));
+
+        AttentionSourceResult result =
+            await source.GetItemsWithOriginAsync(CancellationToken.None);
+
+        Assert.Equal(100, result.Items.Count);
+        Assert.False(result.IsAuthoritativeComplete);
+        Assert.Contains("harvest-item-cap", result.IncompleteReasons);
+    }
+
+    [Fact]
+    public async Task GetItemsWithOriginAsync_FeatureChangesDuringObservation_Throws()
+    {
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.SetupSequence(value => value.IsEnabledStrictAsync(
+                OperatorFeature.PrintedPartsInventory,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)
+            .ReturnsAsync(false);
+        HarvestAttentionSource source = new(
+            _factory,
+            gate.Object,
+            new ConstantWatermarkReader(12));
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => source.GetItemsWithOriginAsync(CancellationToken.None));
+
+        Assert.Contains("changed", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteActionAsync_HarvestItem_DispatchesProductionHarvestService()
     {
         Guid jobId = Guid.NewGuid();
@@ -165,5 +244,11 @@ public class HarvestAttentionSourceTests : IDisposable
 
         Assert.Equal(AttentionActionOutcome.Ok, result.Outcome);
         harvest.VerifyAll();
+    }
+
+    private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default)
+            => Task.FromResult(value);
     }
 }

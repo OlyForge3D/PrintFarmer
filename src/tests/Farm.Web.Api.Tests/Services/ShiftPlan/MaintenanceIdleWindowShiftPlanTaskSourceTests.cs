@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.ShiftPlan;
 using Farm.Infrastructure.Services.ShiftPlan.Sources;
@@ -30,6 +31,10 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
         // Default: multi-slot fallback enabled so per-tool alerts flow through.
         // Individual tests flip this to exercise the gate-off filter (Finding H5).
         _featureGate.Setup(g => g.IsEnabled(It.IsAny<OperatorFeature>())).Returns(true);
+        _featureGate.Setup(g => g.IsEnabledStrictAsync(
+                It.IsAny<OperatorFeature>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
     }
 
     private void SetupSettings(int minIdleMinutes = 10, int leadMinutes = 5)
@@ -41,13 +46,14 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
         });
     }
 
-    private MaintenanceIdleWindowShiftPlanTaskSource BuildSource()
+    private MaintenanceIdleWindowShiftPlanTaskSource BuildSource(IMutationWatermarkReader? watermarkReader = null)
         => new(
             _alertsRepo.Object,
             _idleWindows.Object,
             _settings.Object,
             _featureGate.Object,
-            NullLogger<MaintenanceIdleWindowShiftPlanTaskSource>.Instance);
+            NullLogger<MaintenanceIdleWindowShiftPlanTaskSource>.Instance,
+            watermarkReader);
 
     private static MaintenanceAlert BuildAlert(string title = "Check nozzle", string message = "Nozzle needs cleaning.", Guid? toolheadId = null)
         => new()
@@ -187,18 +193,15 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
     }
 
     /// <summary>
-    /// Fix R4-1 (issue #713 round 4): when dispatch eligibility is indeterminate for a
-    /// printer that has an active maintenance alert (every scorer threw, so
-    /// IdleWindowService excluded it and reported it via IndeterminatePrinterIds),
-    /// ProduceAsync must FAIL CLOSED by throwing. If it instead returned successfully
-    /// with the printer merely absent from the window set, the compiler would treat
-    /// Maintenance as a successful (spec-less) source and auto-complete the still-active
-    /// maintenance task — then recreate a duplicate once scoring recovered (flapping).
+    /// An indeterminate alerted printer is preserved by source id while the rest of an
+    /// authoritative maintenance observation remains usable.
     /// </summary>
     [Fact]
-    public async Task ProduceAsync_AlertedPrinterIndeterminate_ThrowsToPreserveTasks()
+    public async Task ProduceAsync_AlertedPrinterIndeterminate_PreservesSourceId()
     {
-        SetupSettings();
+        ShiftPlanSettings settings = new();
+        _settings.Setup(s => s.GetSnapshot<ShiftPlanSettings>())
+            .Returns(new SettingsSnapshot<ShiftPlanSettings>(settings, OriginWatermark: 8));
 
         _alertsRepo.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<MaintenanceAlert> { BuildAlert() });
@@ -208,13 +211,18 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
         _idleWindows.Setup(s => s.GetIdleWindowsWithIndeterminateAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new IdleWindowResult(
                 new List<IdleWindow>(),
-                new HashSet<Guid> { PrinterId }));
+                new HashSet<Guid> { PrinterId },
+                OriginWatermark: 7));
 
-        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource();
+        MaintenanceIdleWindowShiftPlanTaskSource source = BuildSource(new ConstantWatermarkReader(9));
 
-        InvalidOperationException thrown = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => source.ProduceAsync(CancellationToken.None));
-        Assert.Contains("indeterminate", thrown.Message, StringComparison.OrdinalIgnoreCase);
+        ShiftPlanSourceResult result = await source.ProduceAsync(CancellationToken.None);
+
+        Assert.Empty(result.Specs);
+        Assert.Equal(7, result.OriginWatermark);
+        ShiftPlanKindAuthority authority = Assert.Single(result.Authority!.Kinds);
+        Assert.True(authority.IsAuthoritativeComplete);
+        Assert.Contains($"maintenancealert:{AlertId}", authority.PreservedSourceIds);
     }
 
     /// <summary>
@@ -279,6 +287,10 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
         SetupSettings(minIdleMinutes: 5, leadMinutes: 0);
         _featureGate.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(false);
         _featureGate.Setup(g => g.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _featureGate.Setup(g => g.IsEnabledStrictAsync(
+                OperatorFeature.MultiSlotFallback,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         DateTime now = DateTime.UtcNow;
         IdleWindow goodWindow = new(
@@ -328,5 +340,11 @@ public class MaintenanceIdleWindowShiftPlanTaskSourceTests
 
         ShiftPlanTaskSpec spec = Assert.Single(specs);
         Assert.Equal(UserTaskSourceKind.Maintenance, spec.SourceKind);
+    }
+
+    private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default)
+            => Task.FromResult(value);
     }
 }

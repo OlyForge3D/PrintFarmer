@@ -49,7 +49,12 @@ public class ShiftPlanCompilerTests
             .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
         // Fix R3-5: default auto-complete to "won the race" so existing auto-complete
         // tests behave as before unless a test explicitly overrides this.
-        _tasks.Setup(r => r.TryAutoCompleteAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+        _tasks.Setup(r => r.TryAutoCompleteAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _tasks.Setup(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -146,6 +151,7 @@ public class ShiftPlanCompilerTests
             SourceId = "failure:gone",
             Status = UserTaskStatus.Pending,
             Title = "resolved elsewhere",
+            LastMutationSequence = 1,
         };
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { stale });
@@ -206,12 +212,8 @@ public class ShiftPlanCompilerTests
     }
 
     /// <summary>
-    /// Fix R4-1 (end-to-end): a scorer outage that makes the idle-window service report
-    /// an alerted printer as indeterminate must cause the REAL maintenance source to
-    /// fail closed (throw), so the compiler's per-source isolation preserves the open
-    /// maintenance task instead of auto-completing it. This exercises the full wiring
-    /// (indeterminate idle-window → source throw → compiler preservation), not just the
-    /// source in isolation.
+    /// An indeterminate maintenance key is preserved explicitly without turning unrelated
+    /// authoritative maintenance keys into source-wide failures.
     /// </summary>
     [Fact]
     public async Task CompileAsync_MaintenanceSourceIndeterminateEligibility_PreservesOpenMaintenanceTask()
@@ -265,10 +267,130 @@ public class ShiftPlanCompilerTests
         ShiftPlanCompiler compiler = BuildCompiler(maintenanceSource);
         ShiftPlanCompileResult result = await compiler.CompileAsync();
 
-        Assert.Equal(1, result.SourceFailures);
+        Assert.Equal(0, result.SourceFailures);
         Assert.Equal(0, result.AutoCompleted);
         Assert.Equal(UserTaskStatus.Pending, maintenanceTask.Status);
         Assert.Null(maintenanceTask.CompletedAt);
+    }
+
+    [Fact]
+    public async Task CompileAsync_BaselineResultWithoutAuthority_PreservesOpenTask()
+    {
+        UserTask stale = OpenTask(UserTaskSourceKind.FailureIncident, "failure:baseline", sequence: 1);
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([stale]);
+        ShiftPlanCompiler compiler = BuildCompiler(
+            new ControlledSource(
+                "baseline",
+                [UserTaskSourceKind.FailureIncident],
+                [],
+                new ShiftPlanSourceResult([], OriginWatermark: 10)));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(0, result.AutoCompleted);
+        _tasks.Verify(r => r.TryAutoCompleteAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task CompileAsync_CompleteKindWithPreservedSourceId_ResolvesOnlyAuthoritativeAbsence()
+    {
+        UserTask resolvable = OpenTask(UserTaskSourceKind.FailureIncident, "failure:resolved", sequence: 2);
+        UserTask indeterminate = OpenTask(UserTaskSourceKind.FailureIncident, "failure:unknown", sequence: 2);
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([resolvable, indeterminate]);
+        ShiftPlanCompiler compiler = BuildCompiler(
+            AuthoritySource(
+                "authority",
+                UserTaskSourceKind.FailureIncident,
+                originWatermark: 2,
+                preservedSourceIds: new HashSet<string>(
+                    ["failure:unknown"],
+                    StringComparer.Ordinal)));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(1, result.AutoCompleted);
+        Assert.Equal(UserTaskStatus.Completed, resolvable.Status);
+        Assert.Equal(UserTaskStatus.Pending, indeterminate.Status);
+        _tasks.Verify(r => r.TryAutoCompleteAsync(
+                resolvable.Id,
+                2,
+                2,
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _tasks.Verify(r => r.TryAutoCompleteAsync(
+                indeterminate.Id,
+                It.IsAny<long>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(0L, 10L)]
+    [InlineData(1L, null)]
+    [InlineData(11L, 10L)]
+    public async Task CompileAsync_UnprovenCausalFence_PreservesOpenTask(
+        long sequence,
+        long? originWatermark)
+    {
+        UserTask stale = OpenTask(UserTaskSourceKind.FailureIncident, "failure:fenced", sequence);
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([stale]);
+        ShiftPlanCompiler compiler = BuildCompiler(
+            AuthoritySource(
+                "authority",
+                UserTaskSourceKind.FailureIncident,
+                originWatermark));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(0, result.AutoCompleted);
+        Assert.Equal(UserTaskStatus.Pending, stale.Status);
+    }
+
+    [Fact]
+    public async Task CompileAsync_DuplicateKindOwners_PreservesAbsentTask()
+    {
+        UserTask stale = OpenTask(UserTaskSourceKind.FailureIncident, "failure:ambiguous", sequence: 1);
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([stale]);
+        ShiftPlanCompiler compiler = BuildCompiler(
+            AuthoritySource("first", UserTaskSourceKind.FailureIncident, originWatermark: 1),
+            AuthoritySource("second", UserTaskSourceKind.FailureIncident, originWatermark: 1));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal(0, result.AutoCompleted);
+        Assert.Equal(UserTaskStatus.Pending, stale.Status);
+    }
+
+    [Fact]
+    public async Task CompileAsync_CollidingSpecs_DoesNotChooseWinnerOrResolveExistingTask()
+    {
+        const string sourceId = "failure:collision";
+        UserTask existing = OpenTask(UserTaskSourceKind.FailureIncident, sourceId, sequence: 1);
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([existing]);
+        ShiftPlanTaskSpec first = Spec(sourceId, title: "first");
+        ShiftPlanTaskSpec second = Spec(sourceId, title: "second");
+        ShiftPlanCompiler compiler = BuildCompiler(
+            AuthoritySource("first", UserTaskSourceKind.FailureIncident, 1, specs: [first]),
+            AuthoritySource("second", UserTaskSourceKind.FailureIncident, 1, specs: [second]));
+
+        ShiftPlanCompileResult result = await compiler.CompileAsync();
+
+        Assert.Equal((0, 0, 0), (result.Created, result.Updated, result.AutoCompleted));
+        Assert.Equal("task", existing.Title);
     }
 
     /// <summary>
@@ -665,10 +787,16 @@ public class ShiftPlanCompilerTests
             SourceId = "failure:gone",
             Status = UserTaskStatus.Pending,
             Title = "resolved elsewhere",
+            LastMutationSequence = 1,
         };
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { stale });
-        _tasks.Setup(r => r.TryAutoCompleteAsync(stale.Id, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+        _tasks.Setup(r => r.TryAutoCompleteAsync(
+                stale.Id,
+                stale.LastMutationSequence,
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn", [UserTaskSourceKind.FailureIncident]));
@@ -841,6 +969,41 @@ public class ShiftPlanCompilerTests
         DueAt = spec.DueAt,
     };
 
+    private static UserTask OpenTask(
+        UserTaskSourceKind sourceKind,
+        string sourceId,
+        long sequence)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            SourceKind = sourceKind,
+            SourceId = sourceId,
+            Status = UserTaskStatus.Pending,
+            Title = "task",
+            LastMutationSequence = sequence,
+        };
+
+    private static IShiftPlanTaskSource AuthoritySource(
+        string name,
+        UserTaskSourceKind kind,
+        long? originWatermark,
+        IReadOnlySet<string>? preservedSourceIds = null,
+        IReadOnlyList<ShiftPlanTaskSpec>? specs = null)
+    {
+        ShiftPlanSourceResult result = new(specs ?? [], originWatermark)
+        {
+            Authority = new ShiftPlanSourceAuthority(
+            [
+                new ShiftPlanKindAuthority(
+                    kind,
+                    IsAuthoritativeComplete: true,
+                    preservedSourceIds ?? new HashSet<string>(StringComparer.Ordinal),
+                    IncompleteReasons: []),
+            ]),
+        };
+        return new ControlledSource(name, [kind], specs ?? [], result);
+    }
+
     private static ShiftPlanTaskSpec Spec(string sourceId = "failure:1", string title = "t") => new(
         TaskType: UserTaskType.FailureClear,
         SourceKind: UserTaskSourceKind.FailureIncident,
@@ -863,7 +1026,17 @@ public class ShiftPlanCompilerTests
         public string SourceName { get; } = name;
         public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = ownedKinds;
         public Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
-            => Task.FromResult(new ShiftPlanSourceResult(specs, OriginWatermark: null));
+            => Task.FromResult(new ShiftPlanSourceResult(specs, OriginWatermark: 100)
+            {
+                Authority = new ShiftPlanSourceAuthority(
+                [
+                    .. ownedKinds.Select(kind => new ShiftPlanKindAuthority(
+                        kind,
+                        IsAuthoritativeComplete: true,
+                        PreservedSourceIds: new HashSet<string>(StringComparer.Ordinal),
+                        IncompleteReasons: [])),
+                ]),
+            });
     }
 
     private sealed class ThrowingSource(IReadOnlyCollection<UserTaskSourceKind> ownedKinds) : IShiftPlanTaskSource
@@ -872,5 +1045,17 @@ public class ShiftPlanCompilerTests
         public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = ownedKinds;
         public Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
             => throw new InvalidOperationException("simulated");
+    }
+
+    private sealed class ControlledSource(
+        string name,
+        IReadOnlyCollection<UserTaskSourceKind> ownedKinds,
+        IReadOnlyList<ShiftPlanTaskSpec> specs,
+        ShiftPlanSourceResult result) : IShiftPlanTaskSource
+    {
+        public string SourceName { get; } = name;
+        public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = ownedKinds;
+        public Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
+            => Task.FromResult(result with { Specs = specs });
     }
 }

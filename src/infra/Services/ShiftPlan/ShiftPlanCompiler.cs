@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Tasks;
+using Farm.Infrastructure.Services.Mutations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -16,11 +17,10 @@ namespace Farm.Infrastructure.Services.ShiftPlan;
 ///         field materially changed</em>. Status is left alone so
 ///         operator-initiated <c>InProgress</c> tasks are not demoted to
 ///         <c>Pending</c>.</item>
-///   <item>Open task whose spec is absent from this pass AND whose
-///         <see cref="UserTask.SourceKind"/> belongs to a source that
-///         completed successfully → auto-complete (Status=Completed,
-///         CompletedAt=now). Tasks whose source failed this pass are preserved
-///         to avoid transient failures completing real tasks.</item>
+///   <item>Open task whose spec is absent from this pass is auto-completed only
+///         when its source kind has one unambiguous owner, that owner provided
+///         authoritative-complete evidence, the key is not preserved, and the
+///         task's mutation sequence is covered by the source watermark.</item>
 ///   <item>Legacy tasks (SourceKind=Unspecified) are never touched.</item>
 /// </list>
 /// All adds/updates are batched into a single <c>SaveChangesAsync</c> per pass.
@@ -105,34 +105,124 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         DateTime now = _clock.GetUtcNow().UtcDateTime;
         int sourceFailures = 0;
 
-        // Track which source kinds were successfully evaluated this pass.
-        // Auto-complete is restricted to tasks in this set.
-        HashSet<UserTaskSourceKind> successfulKinds = new();
+        List<IShiftPlanTaskSource> sources = _sources.ToList();
+        Dictionary<UserTaskSourceKind, List<IShiftPlanTaskSource>> owners = new();
+        HashSet<UserTaskSourceKind> invalidKinds = [];
+        foreach (IShiftPlanTaskSource source in sources)
+        {
+            List<UserTaskSourceKind> declaredKinds = source.OwnedKinds
+                .Where(kind => kind != UserTaskSourceKind.Unspecified)
+                .ToList();
+            if (declaredKinds.Count == 0 || declaredKinds.Count != declaredKinds.Distinct().Count())
+            {
+                _logger.LogWarning(
+                    "Shift-plan source {Source} has invalid or duplicate owned kinds; absence resolution is disabled for those kinds",
+                    source.SourceName);
+                invalidKinds.UnionWith(declaredKinds);
+            }
+
+            foreach (UserTaskSourceKind kind in declaredKinds.Distinct())
+            {
+                if (!owners.TryGetValue(kind, out List<IShiftPlanTaskSource>? kindOwners))
+                {
+                    kindOwners = [];
+                    owners.Add(kind, kindOwners);
+                }
+
+                kindOwners.Add(source);
+            }
+        }
+
+        HashSet<UserTaskSourceKind> ambiguousKinds =
+        [
+            .. owners
+                .Where(entry => entry.Value.Count != 1)
+                .Select(entry => entry.Key),
+        ];
+        foreach (UserTaskSourceKind kind in ambiguousKinds)
+        {
+            _logger.LogWarning(
+                "Shift-plan source kind {Kind} has {OwnerCount} owners; absence resolution is disabled",
+                kind,
+                owners[kind].Count);
+        }
 
         // 1) Collect all specs. Isolate per-source failures — the compiler
         //    must not stall if one source throws.
         Dictionary<(UserTaskSourceKind, string), ShiftPlanTaskSpec> specs = new();
-        foreach (IShiftPlanTaskSource src in _sources)
+        HashSet<(UserTaskSourceKind, string)> collidingKeys = [];
+        Dictionary<UserTaskSourceKind, AuthoritativeKindObservation> authoritativeKinds = new();
+        foreach (IShiftPlanTaskSource src in sources)
         {
             ct.ThrowIfCancellationRequested();
             ShiftPlanSourceResult produced;
             try
             {
                 produced = await src.ProduceAsync(ct).ConfigureAwait(false);
-
-                // Source succeeded — mark its owned kinds as successfully evaluated.
-                foreach (UserTaskSourceKind kind in src.OwnedKinds)
-                {
-                    successfulKinds.Add(kind);
-                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 sourceFailures++;
                 _logger.LogWarning(ex, "Shift-plan source {Source} failed; skipping", src.SourceName);
 
-                // Do NOT add its OwnedKinds to successfulKinds — auto-complete suppressed.
                 continue;
+            }
+
+            HashSet<UserTaskSourceKind> ownedKinds =
+            [
+                .. src.OwnedKinds.Where(kind => kind != UserTaskSourceKind.Unspecified),
+            ];
+            if (produced.Authority is not null)
+            {
+                foreach (IGrouping<UserTaskSourceKind, ShiftPlanKindAuthority> authorityGroup in
+                    produced.Authority.Kinds.GroupBy(authority => authority.SourceKind))
+                {
+                    if (authorityGroup.Count() != 1)
+                    {
+                        invalidKinds.Add(authorityGroup.Key);
+                        _logger.LogWarning(
+                            "Shift-plan source {Source} produced duplicate authority for {Kind}; absence resolution is disabled",
+                            src.SourceName,
+                            authorityGroup.Key);
+                        continue;
+                    }
+
+                    ShiftPlanKindAuthority authority = authorityGroup.Single();
+                    if (!ownedKinds.Contains(authority.SourceKind))
+                    {
+                        invalidKinds.Add(authority.SourceKind);
+                        _logger.LogWarning(
+                            "Shift-plan source {Source} produced authority for unowned kind {Kind}; absence resolution is disabled",
+                            src.SourceName,
+                            authority.SourceKind);
+                        continue;
+                    }
+
+                    if (!authority.IsAuthoritativeComplete)
+                    {
+                        _logger.LogDebug(
+                            "Shift-plan source {Source} is incomplete for {Kind}: {Reasons}",
+                            src.SourceName,
+                            authority.SourceKind,
+                            string.Join(", ", authority.IncompleteReasons));
+                        continue;
+                    }
+
+                    if (produced.OriginWatermark is not long originWatermark)
+                    {
+                        _logger.LogDebug(
+                            "Shift-plan source {Source} has no proven origin watermark for {Kind}; absence resolution is disabled",
+                            src.SourceName,
+                            authority.SourceKind);
+                        continue;
+                    }
+
+                    if (!ambiguousKinds.Contains(authority.SourceKind)
+                        && !invalidKinds.Contains(authority.SourceKind))
+                    {
+                        authoritativeKinds[authority.SourceKind] = new(authority, originWatermark);
+                    }
+                }
             }
 
             foreach (ShiftPlanTaskSpec spec in produced.Specs)
@@ -145,9 +235,38 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                     continue;
                 }
 
-                // Last-write-wins if two sources ever collide on the same key.
-                specs[(spec.SourceKind, spec.SourceId)] = spec;
+                if (!ownedKinds.Contains(spec.SourceKind))
+                {
+                    invalidKinds.Add(spec.SourceKind);
+                    _ = authoritativeKinds.Remove(spec.SourceKind);
+                    _logger.LogWarning(
+                        "Shift-plan source {Source} produced spec for unowned kind {Kind}; spec was skipped",
+                        src.SourceName,
+                        spec.SourceKind);
+                    continue;
+                }
+
+                (UserTaskSourceKind, string) key = (spec.SourceKind, spec.SourceId);
+                if (collidingKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                if (!specs.TryAdd(key, spec))
+                {
+                    _ = specs.Remove(key);
+                    collidingKeys.Add(key);
+                    _logger.LogWarning(
+                        "Shift-plan sources produced colliding spec {Kind}/{SourceId}; positive upsert and absence resolution are disabled for that key",
+                        spec.SourceKind,
+                        spec.SourceId);
+                }
             }
+        }
+
+        foreach (UserTaskSourceKind invalidKind in invalidKinds.Concat(ambiguousKinds))
+        {
+            _ = authoritativeKinds.Remove(invalidKind);
         }
 
         // 2) Load all currently-open compiler tasks (SourceKind != Unspecified).
@@ -182,9 +301,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             // A source that failed before its first successful pass has no active keys to
             // seed, but must remain unbootstrapped. When it recovers, this exact-key query
             // restores a recent pre-restart Skip/Dismiss before the upsert can recreate it.
-            List<UserTaskSourceKind> unbootstrappedKinds = specs.Keys
-                .Select(key => key.Item1)
-                .Distinct()
+            List<UserTaskSourceKind> unbootstrappedKinds = authoritativeKinds.Keys
                 .Where(kind => !suppressionState.IsBootstrapped(kind))
                 .ToList();
             foreach (UserTaskSourceKind sourceKind in unbootstrappedKinds)
@@ -264,23 +381,42 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 continue;
             }
 
-            // Fix 4: if the source that owns this kind failed, preserve the task.
-            if (!successfulKinds.Contains(kv.Key.Item1))
+            if (collidingKeys.Contains(kv.Key)
+                || !authoritativeKinds.TryGetValue(kv.Key.Item1, out AuthoritativeKindObservation? observation)
+                || observation.Authority.PreservedSourceIds.Contains(kv.Key.Item2))
             {
                 _logger.LogDebug(
-                    "Preserving task {TaskId} (source kind {Kind}) because its source failed this pass",
-                    kv.Value.Id, kv.Key.Item1);
+                    "Preserving task {TaskId} ({Kind}/{SourceId}) because absence is not authoritative",
+                    kv.Value.Id,
+                    kv.Key.Item1,
+                    kv.Key.Item2);
                 continue;
             }
 
             UserTask stale = kv.Value;
+            if (!MutationWatermarkCausality.CanAuthorizeAbsence(
+                    stale.LastMutationSequence,
+                    observation.OriginWatermark))
+            {
+                _logger.LogDebug(
+                    "Preserving task {TaskId}: sequence {Sequence} is outside origin watermark {OriginWatermark}",
+                    stale.Id,
+                    stale.LastMutationSequence,
+                    observation.OriginWatermark);
+                continue;
+            }
 
             // Fix R3-5: complete only if the row is still Pending/InProgress at the
             // moment of the write. An unconditional overwrite here would clobber a
             // terminal state (Skipped/Dismissed) a user set concurrently — the DB-level
             // conditional update lets the user's action win the race instead of the
             // compiler blindly stomping it on the next batched SaveChanges.
-            bool completedInDb = await _tasks.TryAutoCompleteAsync(stale.Id, now, ct).ConfigureAwait(false);
+            bool completedInDb = await _tasks.TryAutoCompleteAsync(
+                stale.Id,
+                stale.LastMutationSequence,
+                observation.OriginWatermark,
+                now,
+                ct).ConfigureAwait(false);
             if (!completedInDb)
             {
                 _logger.LogDebug(
@@ -308,12 +444,14 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         if (suppressionState is not null)
         {
             _ = suppressionState.SuppressedKeys.RemoveWhere(
-                key => !specs.ContainsKey(key) && successfulKinds.Contains(key.SourceKind));
+                key => !specs.ContainsKey(key)
+                    && authoritativeKinds.TryGetValue(key.SourceKind, out AuthoritativeKindObservation? observation)
+                    && !observation.Authority.PreservedSourceIds.Contains(key.SourceId));
 
             // A successful source with no current keys confirms any old episode cleared,
             // while a successful source with active keys was seeded above. Failed sources
             // deliberately remain unbootstrapped for their eventual recovery pass.
-            foreach (UserTaskSourceKind successfulKind in successfulKinds)
+            foreach (UserTaskSourceKind successfulKind in authoritativeKinds.Keys)
             {
                 suppressionState.MarkBootstrapped(successfulKind);
             }
@@ -352,6 +490,10 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
 
         return new ShiftPlanCompileResult(created, updated, autoCompleted, sourceFailures);
     }
+
+    private sealed record AuthoritativeKindObservation(
+        ShiftPlanKindAuthority Authority,
+        long OriginWatermark);
 
     /// <returns><c>true</c> if any material field was mutated; <c>false</c> if the task is unchanged.</returns>
     private static bool ApplySpec(UserTask task, ShiftPlanTaskSpec spec, DateTime now, bool isNew)

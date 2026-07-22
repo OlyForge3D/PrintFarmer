@@ -48,6 +48,8 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
     public async Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
     {
         List<ShiftPlanTaskSpec> results = new();
+        Dictionary<UserTaskSourceKind, ShiftPlanKindAuthority> authorityByKind = [];
+        Dictionary<UserTaskSourceKind, long?> authorityOrigins = [];
         SettingsSnapshot<SpoolCoverageSettings> settingsSnapshot;
         try
         {
@@ -66,32 +68,35 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
 
         SpoolCoverageSettings spool = settingsSnapshot.Value;
         int runoutLeadMinutes = Math.Max(0, spool.RunoutWarningLeadMinutes);
-        List<long?> requiredOrigins = [settingsSnapshot.OriginWatermark];
-
         foreach (IAttentionSource src in _attentionSources)
         {
             ct.ThrowIfCancellationRequested();
-            long? observationOrigin = await OriginWatermark
-                .CaptureAsync(_watermarkReader, _logger, $"attention source {src.SourceName}", ct)
-                .ConfigureAwait(false);
 
             // Fix 4: do NOT catch per-inner-source exceptions — let them propagate
             // so the compiler can suppress auto-complete for this source's OwnedKinds.
             IReadOnlyList<AttentionItemDto> items;
             if (src is IAttentionSourceWithOrigin sourceWithOrigin)
             {
+                long? observationOrigin = await OriginWatermark
+                    .CaptureAsync(_watermarkReader, _logger, $"attention source {src.SourceName}", ct)
+                    .ConfigureAwait(false);
                 AttentionSourceResult sourceResult = await sourceWithOrigin
                     .GetItemsWithOriginAsync(ct)
                     .ConfigureAwait(false);
                 items = sourceResult.Items;
-                requiredOrigins.Add(OriginWatermark.Combine(
+                long? sourceOrigin = OriginWatermark.Combine(
                     observationOrigin,
-                    sourceResult.OriginWatermark));
+                    sourceResult.OriginWatermark);
+                RegisterAuthority(
+                    sourceResult,
+                    sourceOrigin,
+                    settingsSnapshot.OriginWatermark,
+                    authorityByKind,
+                    authorityOrigins);
             }
             else
             {
                 items = await src.GetItemsAsync(ct).ConfigureAwait(false);
-                requiredOrigins.Add(observationOrigin);
             }
 
             foreach (AttentionItemDto item in items)
@@ -104,10 +109,70 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
             }
         }
 
-        return new ShiftPlanSourceResult(
-            results,
-            OriginWatermark.Combine([.. requiredOrigins]));
+        long? originWatermark = OriginWatermark.Combine(
+            [.. authorityOrigins
+                .Where(entry => authorityByKind[entry.Key].IsAuthoritativeComplete)
+                .Select(entry => entry.Value)]);
+        return new ShiftPlanSourceResult(results, originWatermark)
+        {
+            Authority = new ShiftPlanSourceAuthority(
+                [.. authorityByKind.Values.OrderBy(authority => authority.SourceKind)]),
+        };
     }
+
+    private static void RegisterAuthority(
+        AttentionSourceResult sourceResult,
+        long? sourceOrigin,
+        long? settingsOrigin,
+        Dictionary<UserTaskSourceKind, ShiftPlanKindAuthority> authorityByKind,
+        Dictionary<UserTaskSourceKind, long?> authorityOrigins)
+    {
+        if (sourceResult.AuthorityKind is not AttentionKind attentionKind
+            || MapAuthorityKind(attentionKind) is not UserTaskSourceKind sourceKind)
+        {
+            return;
+        }
+
+        if (sourceKind == UserTaskSourceKind.FilamentCoverage)
+        {
+            sourceOrigin = OriginWatermark.Combine(sourceOrigin, settingsOrigin);
+        }
+
+        bool isComplete = sourceResult.IsAuthoritativeComplete && sourceOrigin is not null;
+        List<string> reasons = [.. sourceResult.IncompleteReasons];
+        if (sourceOrigin is null)
+        {
+            reasons.Add("origin-watermark-unproven");
+        }
+
+        ShiftPlanKindAuthority authority = new(
+            sourceKind,
+            isComplete,
+            sourceResult.PreservedItemIds,
+            reasons);
+        if (authorityByKind.ContainsKey(sourceKind))
+        {
+            authorityByKind[sourceKind] = new(
+                sourceKind,
+                IsAuthoritativeComplete: false,
+                PreservedSourceIds: new HashSet<string>(StringComparer.Ordinal),
+                IncompleteReasons: ["duplicate-attention-kind-owner"]);
+            authorityOrigins[sourceKind] = null;
+            return;
+        }
+
+        authorityByKind.Add(sourceKind, authority);
+        authorityOrigins.Add(sourceKind, sourceOrigin);
+    }
+
+    private static UserTaskSourceKind? MapAuthorityKind(AttentionKind kind)
+        => kind switch
+        {
+            AttentionKind.Failure => UserTaskSourceKind.FailureIncident,
+            AttentionKind.Harvest => UserTaskSourceKind.Harvest,
+            AttentionKind.Runout => UserTaskSourceKind.FilamentCoverage,
+            _ => null,
+        };
 
     private static ShiftPlanTaskSpec? MapItem(AttentionItemDto item, int runoutLeadMinutes)
     {

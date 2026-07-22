@@ -169,6 +169,41 @@ public class AttentionShiftPlanTaskSourceTests
         ShiftPlanSourceResult result = await source.ProduceAsync(CancellationToken.None);
 
         Assert.Equal(expected, result.OriginWatermark);
+        ShiftPlanKindAuthority authority = Assert.Single(result.Authority!.Kinds);
+        Assert.Equal(UserTaskSourceKind.FilamentCoverage, authority.SourceKind);
+        Assert.Equal(expected is not null, authority.IsAuthoritativeComplete);
+    }
+
+    [Fact]
+    public async Task ProduceAsync_IncompletePositiveObservation_EmitsSpecWithoutAbsenceAuthority()
+    {
+        AttentionItemDto failure = new(
+            Id: "failure:partial",
+            Kind: AttentionKind.Failure,
+            Severity: AttentionSeverity.Warning,
+            PrinterId: PrinterId,
+            PrinterName: "P1",
+            Title: "Failure",
+            Detail: "Partial observation",
+            OccurredAt: DateTime.UtcNow,
+            Actions: []);
+        Mock<ISettingsService> settings = new();
+        settings.Setup(s => s.GetSnapshot<SpoolCoverageSettings>())
+            .Returns(new SettingsSnapshot<SpoolCoverageSettings>(
+                new SpoolCoverageSettings(),
+                OriginWatermark: 7));
+        AttentionShiftPlanTaskSource source = new(
+            [new IncompleteAttentionSource(failure)],
+            settings.Object,
+            NullLogger<AttentionShiftPlanTaskSource>.Instance,
+            new ConstantWatermarkReader(9));
+
+        ShiftPlanSourceResult result = await source.ProduceAsync(CancellationToken.None);
+
+        Assert.Single(result.Specs);
+        ShiftPlanKindAuthority authority = Assert.Single(result.Authority!.Kinds);
+        Assert.False(authority.IsAuthoritativeComplete);
+        Assert.Contains("bounded-result", authority.IncompleteReasons);
     }
 
     private static AttentionShiftPlanTaskSource BuildSource(SpoolCoverageSettings settings, params AttentionItemDto[] items)
@@ -195,12 +230,33 @@ public class AttentionShiftPlanTaskSourceTests
             => Task.FromResult<IReadOnlyList<AttentionItemDto>>([]);
 
         public Task<AttentionSourceResult> GetItemsWithOriginAsync(CancellationToken cancellationToken)
-            => Task.FromResult(new AttentionSourceResult([], originWatermark));
+            => Task.FromResult(new AttentionSourceResult([], originWatermark)
+            {
+                AuthorityKind = AttentionKind.Runout,
+                IsAuthoritativeComplete = true,
+            });
     }
 
     private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader
     {
         public Task<long> GetCurrentAsync(CancellationToken ct = default)
             => Task.FromResult(value);
+    }
+
+    private sealed class IncompleteAttentionSource(AttentionItemDto item)
+        : IAttentionSource, IAttentionSourceWithOrigin
+    {
+        public string SourceName => "incomplete-test";
+
+        public Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<AttentionItemDto>>([item]);
+
+        public Task<AttentionSourceResult> GetItemsWithOriginAsync(CancellationToken cancellationToken)
+            => Task.FromResult(new AttentionSourceResult([item], OriginWatermark: 8)
+            {
+                AuthorityKind = AttentionKind.Failure,
+                IsAuthoritativeComplete = false,
+                IncompleteReasons = ["bounded-result"],
+            });
     }
 }

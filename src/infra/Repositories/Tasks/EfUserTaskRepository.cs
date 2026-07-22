@@ -370,15 +370,21 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
-    public async Task<bool> TryAutoCompleteAsync(Guid taskId, DateTime completedAtUtc, CancellationToken ct = default)
+    public async Task<bool> TryAutoCompleteAsync(
+        Guid taskId,
+        long expectedLastMutationSequence,
+        long originWatermark,
+        DateTime completedAtUtc,
+        CancellationToken ct = default)
     {
-        // Fix R3-5: conditional, immediate write — succeeds only if the row is still
-        // Pending/InProgress at the moment of the update. A concurrent Skip/Dismiss
-        // that already committed wins the race instead of being silently overwritten
-        // by the compiler's batched SaveChangesAsync.
         return await ExecuteTaskMutationAsync(
             sequence => _db.UserTasks
-                .Where(t => t.Id == taskId && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
+                .Where(t =>
+                    t.Id == taskId
+                    && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress)
+                    && t.LastMutationSequence == expectedLastMutationSequence
+                    && t.LastMutationSequence > 0
+                    && t.LastMutationSequence <= originWatermark)
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(t => t.Status, UserTaskStatus.Completed)

@@ -6,8 +6,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Attention.Sources;
 using Farm.Infrastructure.Services.FailureDetection;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Moq;
@@ -145,10 +147,44 @@ public sealed class FailureAttentionSourceTests
         items.Should().BeEmpty("a completed/superseded job is no longer actionable and must not linger");
     }
 
+    [Fact]
+    public async Task GetItemsWithOriginAsync_ExtraRowSentinel_MarksCappedObservationIncomplete()
+    {
+        List<FailureDetectionDto> incidents = [];
+        for (int index = 0; index < 51; index++)
+        {
+            Guid incidentId = Guid.NewGuid();
+            Guid printerId = Guid.NewGuid();
+            Guid jobId = Guid.NewGuid();
+            incidents.Add(Incident(incidentId, printerId, jobId, Now.AddMinutes(-index)));
+            SetupJob(jobId, Job(jobId, printerId, PrintJobStatus.Printing));
+        }
+
+        SetupIncidents([.. incidents]);
+        FailureAttentionSource source = new(
+            _history.Object,
+            _queue.Object,
+            _clock,
+            new ConstantWatermarkReader(12));
+
+        AttentionSourceResult result =
+            await source.GetItemsWithOriginAsync(CancellationToken.None);
+
+        result.Items.Should().HaveCount(50);
+        result.IsAuthoritativeComplete.Should().BeFalse();
+        result.IncompleteReasons.Should().Contain("failure-incident-cap");
+    }
+
     private sealed class FixedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _now;
         public FixedTimeProvider(DateTime nowUtc) => _now = new DateTimeOffset(nowUtc, TimeSpan.Zero);
         public override DateTimeOffset GetUtcNow() => _now;
+    }
+
+    private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default)
+            => Task.FromResult(value);
     }
 }
