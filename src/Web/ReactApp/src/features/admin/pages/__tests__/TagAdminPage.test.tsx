@@ -118,6 +118,28 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     expect(screen.getByDisplayValue('My Local Edit')).toBeInTheDocument();
   });
 
+  it('shows a neutral not-found placeholder (not the user\'s own attempted name) when the server tag can no longer be found after a conflict', async () => {
+    vi.mocked(apiClient.updateTag).mockRejectedValue(
+      makeApiError({ statusCode: 409, data: { error: 'Revision mismatch', expectedRevision: 1, actualRevision: 2 } })
+    );
+    // Tag was deleted by someone else - getTag resolves to null.
+    vi.mocked(apiClient.getTag).mockResolvedValue(null);
+    const user = userEvent.setup();
+    renderPage();
+
+    await startEditingResin(user);
+    const nameInput = screen.getByDisplayValue('Resin');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'My Local Edit');
+    const row = nameInput.closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /conflict updating "my local edit"/i });
+    // The "current version" column must not mirror the user's own attempted value.
+    expect(within(dialog).getByRole('table')).toHaveTextContent(/tag not found/i);
+    expect(within(dialog).getByRole('table')).toHaveTextContent('My Local Edit');
+  });
+
   it('reloads the latest revision on "Reload latest version" without discarding the typed name, then allows retrying save', async () => {
     vi.mocked(apiClient.updateTag)
       .mockRejectedValueOnce(

@@ -232,6 +232,12 @@ export const ModelsFileBrowser = ({
       const payload = params as ReturnType<typeof mapQueryParams>;
 
       if (collectionModelIds) {
+        // An empty collection has no members to look up - skip the network round-trip
+        // entirely rather than issuing a query guaranteed to return zero matches.
+        if (collectionModelIds.length === 0) {
+          return { items: [], totalItems: 0, totalPages: 1, totalSize: 0, page: 1 };
+        }
+
         // The /3d-models/query endpoint has no collection/id-list filter (#846), so the
         // client-side id filter must page through the *entire* (search/tag-filtered) result
         // set - stopping after a single page would silently drop collection members that

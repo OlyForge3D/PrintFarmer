@@ -290,8 +290,11 @@ export const TagAdminPage: React.FC = () => {
                     const freshTag = await apiClient.getTag(editingTag.id);
                     setConflictServerTag(
                         freshTag ?? {
+                            // Tag not found (e.g. deleted by someone else) - use a neutral
+                            // placeholder rather than echoing the user's own attempted name,
+                            // which would misleadingly appear as if it were the server state.
                             id: editingTag.id,
-                            name: editingTag.name,
+                            name: '(tag not found - it may have been deleted)',
                             revision: revisionConflict.actualRevision
                         }
                     );
