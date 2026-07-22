@@ -78,6 +78,55 @@ struct AttentionLoadFailure: Equatable, Identifiable, Sendable {
     let message: String
 }
 
+/// A pagination-specific load failure bound to the cursor that failed.
+/// The sentinel gates its auto-load on this being nil for the current
+/// cursor — if the same cursor is showing and it already failed, the
+/// operator must explicitly retry.
+struct AttentionPaginationFailure: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let cursor: String
+    let message: String
+}
+
+/// Opaque token issued by the view model to a caller that intends to
+/// perform an async operation which must not fire if the view model was
+/// deactivated between capture and completion. The view uses this to
+/// guard `bootstrap` against a capability-refresh await that swallowed
+/// cancellation and returned after `.onDisappear` already ran.
+struct AttentionLifecycleToken: Equatable, Sendable {
+    fileprivate let value: UInt64
+}
+
+/// Lock-protected monotonic counter incremented after every applied
+/// refresh completion. The SignalR handler reads this counter from the
+/// signalR delivery queue at enqueue time and again at drain time on
+/// MainActor. If the counter has advanced between enqueue and drain,
+/// a refresh has already covered the invalidation and the queued
+/// closure is a no-op — preventing the double-fetch pattern where a
+/// callback queued off-screen drains AFTER `bootstrap` has already
+/// completed its own refresh.
+///
+/// The class is `Sendable` so it can be captured by closures that
+/// straddle the signalR queue and MainActor. The lock is sufficient —
+/// reads and writes are all short scalar copies.
+final class RefreshCompletionSequenceBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: UInt64 = 0
+
+    var value: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return _value
+    }
+
+    fileprivate func advance() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        _value &+= 1
+        return _value
+    }
+}
+
 // MARK: - View model
 
 /// Feed shell + state model for F2-U1 (issue #779). Owns the generation-
@@ -116,6 +165,14 @@ final class AttentionFeedViewModel {
     /// fetch of the current lifecycle succeeded.
     private(set) var loadFailure: AttentionLoadFailure?
 
+    /// The most recent pagination failure (from `loadMore`). Bound to
+    /// the specific cursor that failed so we can distinguish "this page
+    /// failed" from "the whole feed failed". Sentinel-driven auto-load
+    /// is disabled while this is set for the current cursor —
+    /// preventing the retry loop where `.onAppear` re-fires on every
+    /// SwiftUI list rebuild.
+    private(set) var paginationFailure: AttentionPaginationFailure?
+
     /// Local UI state for the "N printers running normally" summary row.
     /// Defaults to collapsed; the view supplies expansion state.
     var isHealthySummaryExpanded: Bool = false
@@ -150,6 +207,13 @@ final class AttentionFeedViewModel {
     /// where an activation-A load could apply into a fresh activation-B
     /// state after a deactivate/reactivate cycle.
     @ObservationIgnored private var activationEpoch: UInt64 = 0
+    /// Monotonic lifecycle token issued to callers that plan to await
+    /// external work (capability refresh, etc.) before calling
+    /// `bootstrap`. Bumped on every `deactivate`. `bootstrap` compares
+    /// the caller-supplied token and refuses to run if the token was
+    /// issued in a superseded lifecycle. Prevents a swallowed-cancel
+    /// capability await from reactivating an off-screen view.
+    @ObservationIgnored private var lifecycleToken: UInt64 = 0
     /// Bumped on every fetch (`refresh`, `loadMore`). Each in-flight
     /// operation captures the stamp at start and drops its outcome if
     /// the stamp has moved by application time. This is what makes
@@ -161,6 +225,15 @@ final class AttentionFeedViewModel {
     /// older completion that fires after a newer request has taken over.
     @ObservationIgnored private var loadMoreOwnerStamp: UInt64 = 0
     @ObservationIgnored private var attentionSubscription: SignalRSubscription?
+    /// Sendable, lock-protected refresh-completion sequence. Written on
+    /// MainActor after each applied refresh; read from the signalR
+    /// delivery queue at enqueue time (to snapshot the pre-invalidation
+    /// value) and from MainActor at drain time. If the counter has
+    /// advanced between enqueue and drain, a refresh has already
+    /// covered the invalidation — the queued closure is a no-op.
+    /// See #779 blocker 2: queued invalidation must not double-fetch on
+    /// re-entry.
+    @ObservationIgnored private let refreshCompletionBox = RefreshCompletionSequenceBox()
 
     /// Deduplicated ID set for `loadMore` appends. Rebuilt atomically on
     /// canonical refresh so refresh resets are all-or-nothing.
@@ -245,7 +318,13 @@ final class AttentionFeedViewModel {
 
         let capturedEpoch = authorityEpoch
         let enqueue = callbackEnqueuer
+        let sequenceBox = refreshCompletionBox
         attentionSubscription = signalRService.onAttentionChanged { [weak self] _ in
+            // Snapshot the refresh-completion sequence at enqueue time.
+            // The SignalR handler may run on the signalR delivery
+            // queue; the sequence box is lock-protected so this is
+            // safe from off-MainActor threads.
+            let seqAtEnqueue = sequenceBox.value
             enqueue { [weak self] in
                 guard let self,
                       self.matchesAuthorityIgnoringActive(
@@ -255,7 +334,14 @@ final class AttentionFeedViewModel {
                       ) else {
                     return
                 }
-                // #779: `attentionchanged` is a diagnostic invalidation
+                // #779 blocker 2: if a refresh has completed since this
+                // callback was enqueued, that refresh has already
+                // covered the invalidation this callback would have
+                // signalled. Skip to avoid a double-fetch on re-entry.
+                if sequenceBox.value > seqAtEnqueue {
+                    return
+                }
+                // `attentionchanged` is a diagnostic invalidation
                 // signal. It never carries item truth — we refetch the
                 // canonical page. When the view is inactive we queue
                 // exactly one refresh to drain on re-entry so events
@@ -271,7 +357,9 @@ final class AttentionFeedViewModel {
 
     /// Called when the view leaves the screen. The next `configure` for
     /// a matching authority will drain a queued reload rather than
-    /// starting from `.idle`.
+    /// starting from `.idle`. Also bumps `lifecycleToken` so any
+    /// caller that captured a token before an async await sees the
+    /// token become stale and refuses to `bootstrap`.
     func deactivate() {
         // Preserve `snapshot` so re-entering the view keeps the last
         // rendered content until the queued refresh completes; but drop
@@ -281,9 +369,23 @@ final class AttentionFeedViewModel {
         // or loadMore whose outcome would otherwise land into a fresh
         // reactivation. See `matchesActive`.
         activationEpoch &+= 1
+        // Bumping the lifecycle token invalidates any caller that
+        // captured a token before a pre-bootstrap async await (e.g.
+        // capability refresh). See `bootstrap(lifecycleToken:)`.
+        lifecycleToken &+= 1
         // Any load finishing while inactive will notice the mismatched
         // active state and clear loading without applying its result.
         // See applySnapshot / applyFailure / applyDisabled below.
+    }
+
+    /// Returns a lifecycle token the caller should re-supply to
+    /// `bootstrap` after any pre-bootstrap `await` (typically the
+    /// capability refresh in the view's `.task(id:)`). If the token
+    /// value has moved by bootstrap time (because `deactivate` bumped
+    /// it), the bootstrap becomes a no-op — no reactivation, no
+    /// subscription, no fetch.
+    func currentLifecycleToken() -> AttentionLifecycleToken {
+        AttentionLifecycleToken(value: lifecycleToken)
     }
 
     /// Called when the view re-appears. If a `pendingReloadOnActivate`
@@ -314,21 +416,32 @@ final class AttentionFeedViewModel {
     /// regardless of whether an invalidation arrived while off-screen.
     ///
     /// Contract:
+    /// * `lifecycleToken` must be a token obtained from
+    ///   `currentLifecycleToken()` BEFORE any pre-bootstrap `await`
+    ///   (typically the capability refresh in the view's `.task(id:)`).
+    ///   If `deactivate` has bumped the internal token between capture
+    ///   and this call, bootstrap returns `false` without reactivating,
+    ///   subscribing, or fetching — this closes the window where a
+    ///   swallowed-cancellation capability await could reactivate an
+    ///   off-screen view.
     /// * Bootstrap consumes any queued drain flag before configuring
     ///   so `configure`'s re-entry path does not enqueue a duplicate
     ///   fetch through the callback path.
     /// * Bootstrap then awaits a single `refresh()` — that is the one
     ///   canonical GET per bootstrap invocation.
-    ///
-    /// The service, signalR, and gate arguments must match the shell's
-    /// current authority; a mismatch triggers a full reconfigure inside
-    /// `configure()`.
     @discardableResult
     func bootstrap(
         attentionService: any AttentionServiceProtocol,
         signalRService: any SignalRServiceProtocol,
-        attentionEnabled: Bool
+        attentionEnabled: Bool,
+        lifecycleToken: AttentionLifecycleToken? = nil
     ) async -> Bool {
+        // #779 blocker 1: refuse to run when the lifecycle has been
+        // superseded by a `deactivate`. Any state mutation here would
+        // reactivate an off-screen view.
+        if let lifecycleToken, lifecycleToken.value != self.lifecycleToken {
+            return false
+        }
         // Consume any queued drain before configure so its re-entry
         // path does not enqueue a duplicate refresh through the
         // callback enqueuer. Bootstrap owns the fetch below.
@@ -449,6 +562,12 @@ final class AttentionFeedViewModel {
     /// * A `nextCursor` must be present.
     /// * No canonical refresh may be in flight (`isRefreshing == false`).
     /// * No prior `loadMore` may still be pending (`isLoadingMore == false`).
+    /// * No unresolved pagination failure for the current cursor
+    ///   (`paginationFailure?.cursor != snapshot.nextCursor`). This
+    ///   prevents the `.onAppear`-driven auto-retry loop: after a
+    ///   failed page, the sentinel is expected to render a Retry
+    ///   button and stay quiescent until the operator calls
+    ///   `retryLoadMore()`.
     ///
     /// The completion path uses an owner-token pattern: only the request
     /// that set `isLoadingMore` may clear it, and it does so on every
@@ -464,6 +583,15 @@ final class AttentionFeedViewModel {
             return false
         }
         guard !isRefreshing, !isLoadingMore else { return false }
+        // #779 blocker 3: refuse to auto-retry a cursor that already
+        // failed. The `.onAppear`-driven sentinel is idempotent-safe
+        // because SwiftUI may re-fire `.onAppear` on every list rebuild
+        // — silently re-attempting the same failed request in a tight
+        // loop would burn requests without operator intent. The retry
+        // path is `retryLoadMore()`.
+        if let paginationFailure, paginationFailure.cursor == cursor {
+            return false
+        }
 
         let stampedLoad = advanceLoadStamp()
         let stampedActivation = activationEpoch
@@ -499,21 +627,48 @@ final class AttentionFeedViewModel {
             // state requirement.
             applyDisabled()
             return false
-        case .failure:
-            // Deliberately non-fatal: keep the currently displayed page.
-            // The shell can offer another loadMore attempt on the same
-            // sentinel; a canonical refresh will surface the error path.
+        case .failure(let error):
+            // Latch the failure to this specific cursor so the sentinel
+            // does not auto-retry. Operator explicitly retries via
+            // `retryLoadMore()`.
+            let message = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            paginationFailure = AttentionPaginationFailure(
+                id: UUID(),
+                cursor: cursor,
+                message: message
+            )
             return false
         }
+    }
+
+    /// Explicit retry entry point for a failed `loadMore`. Clears the
+    /// pagination failure latch for the current cursor and re-runs
+    /// `loadMore`. Returns false if there is no matching latched
+    /// failure to retry.
+    @discardableResult
+    func retryLoadMore(failureID: UUID) async -> Bool {
+        guard let failure = paginationFailure, failure.id == failureID else {
+            return false
+        }
+        paginationFailure = nil
+        return await loadMore()
     }
 
     // MARK: - Reads consumed by the view
 
     /// Convenience the shell checks to decide whether to attempt a
     /// paginated load. Bounded — returning false is the "stop" signal.
+    ///
+    /// Returns false when a `paginationFailure` is latched to the
+    /// current cursor. In that state the view should show the failure
+    /// affordance with a Retry button that calls `retryLoadMore`.
     var canLoadMore: Bool {
         guard isActive, attentionEnabled else { return false }
         guard let cursor = snapshot?.nextCursor, !cursor.isEmpty else {
+            return false
+        }
+        if let paginationFailure, paginationFailure.cursor == cursor {
             return false
         }
         return !isRefreshing && !isLoadingMore
@@ -597,8 +752,13 @@ final class AttentionFeedViewModel {
         knownIDs = seen
         groups = Self.groupBySeverity(ordered)
         loadFailure = nil
+        // A canonical refresh success clears any latched pagination
+        // failure. The list has been rewritten atomically; the stale
+        // failed cursor is no longer meaningful.
+        paginationFailure = nil
         isRefreshing = false
         phase = .loaded
+        _ = refreshCompletionBox.advance()
     }
 
     private func applyAppendedPage(_ feed: AttentionFeed) {
@@ -634,6 +794,7 @@ final class AttentionFeedViewModel {
         // stays `.loaded` and the shell renders the failure inline via
         // `loadFailure`. #779 requires refresh error to remain
         // pull-to-refresh accessible without wedging the list.
+        _ = refreshCompletionBox.advance()
     }
 
     private func applyDisabled() {
@@ -642,9 +803,11 @@ final class AttentionFeedViewModel {
         groups = []
         knownIDs = []
         loadFailure = nil
+        paginationFailure = nil
         isRefreshing = false
         isLoadingMore = false
         phase = .disabled
+        _ = refreshCompletionBox.advance()
     }
 
     private static func groupBySeverity(_ items: [AttentionItem]) -> [AttentionSeverityGroup] {
@@ -692,6 +855,7 @@ final class AttentionFeedViewModel {
     private func invalidateAuthority(resetState: Bool) {
         authorityEpoch &+= 1
         activationEpoch &+= 1
+        lifecycleToken &+= 1
         loadStamp &+= 1
         loadMoreOwnerStamp = loadStamp
         attentionSubscription?.cancel()
@@ -710,6 +874,7 @@ final class AttentionFeedViewModel {
         knownIDs = []
         groups = []
         loadFailure = nil
+        paginationFailure = nil
         phase = .idle
     }
 }

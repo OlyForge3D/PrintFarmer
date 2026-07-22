@@ -54,19 +54,36 @@ struct AttentionView: View {
             }
         }
         .task(id: services.activeServerGeneration) {
+            // #779 blocker 1: capture the VM's lifecycle token BEFORE
+            // any pre-bootstrap `await`. If the view disappears
+            // between capture and bootstrap, `deactivate` will have
+            // bumped the token — bootstrap becomes a no-op and cannot
+            // reactivate an off-screen view even when the capability
+            // refresh swallowed its cancellation.
+            let token = feedViewModel.currentLifecycleToken()
+
             // #725: fetch shared operator feature gates before loading
             // any downstream feature-owned endpoints so we render the
             // safe fallback without a flash of the enabled UI.
             await services.capabilitiesService.refresh()
+
+            // SwiftUI cancels `.task` on disappear. Even if the
+            // capability service swallowed cancellation, honour it
+            // here and bail without touching the VM.
+            if Task.isCancelled { return }
+
             attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
 
             // Single canonical GET per re-entry: bootstrap consumes any
             // queued drain (from a signalR event while off-screen) and
-            // owns the refresh below — no duplicate dispatch.
+            // owns the refresh below — no duplicate dispatch. The
+            // lifecycle token check inside bootstrap makes this a
+            // no-op when the view is no longer present.
             await feedViewModel.bootstrap(
                 attentionService: services.attentionService,
                 signalRService: services.signalRService,
-                attentionEnabled: attentionEnabled
+                attentionEnabled: attentionEnabled,
+                lifecycleToken: token
             )
         }
         .onChange(of: feedItemCount) { _, newValue in
@@ -113,16 +130,18 @@ struct AttentionView: View {
     /// * the explicit Refresh button on the empty surface,
     /// * the explicit Refresh button on the disabled fallback.
     ///
-    /// Re-runs capability resolution, flips the shell's local gate,
-    /// and — critically for the disabled surface — clears the view
-    /// model's internal disabled gate so the next canonical GET
-    /// actually reaches the network. Without this, once the VM had
-    /// latched `phase = .disabled` (either from the gate or from a
-    /// featureDisabled server response), pull-to-refresh returned
-    /// immediately with the cached disabled state and the operator was
-    /// trapped until they navigated away and back.
+    /// Captures the VM lifecycle token BEFORE the capability await so
+    /// a swallowed-cancellation completion after `.onDisappear` cannot
+    /// mutate off-screen state (same fence as `.task(id:)`).
     private func performRecoveryRefresh() async {
+        let token = feedViewModel.currentLifecycleToken()
+
         await services.capabilitiesService.refresh()
+        if Task.isCancelled { return }
+        // Independent lifecycle check: if `deactivate` bumped the
+        // token during the await, don't touch the VM.
+        if token != feedViewModel.currentLifecycleToken() { return }
+
         let previouslyEnabled = attentionEnabled
         attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
 
@@ -260,10 +279,39 @@ struct AttentionView: View {
 
             if feedViewModel.canLoadMore {
                 paginationSentinel
+            } else if let paginationFailure = feedViewModel.paginationFailure,
+                      paginationFailure.cursor == feedViewModel.snapshot?.nextCursor {
+                paginationRetrySurface(paginationFailure)
             }
         }
         .listStyle(.insetGrouped)
         .accessibilityIdentifier("attention.list")
+    }
+
+    /// Rendered in place of the auto-loading sentinel when `loadMore`
+    /// has failed for the currently-visible cursor. Shows the explicit
+    /// error and requires an operator tap to retry — the sentinel's
+    /// `.onAppear` is deliberately gone from this surface so a failed
+    /// page cannot re-trigger every time SwiftUI recycles the row.
+    /// See #779 blocker 3.
+    private func paginationRetrySurface(_ failure: AttentionPaginationFailure) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Couldn't load more", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text(failure.message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button {
+                Task { await feedViewModel.retryLoadMore(failureID: failure.id) }
+            } label: {
+                Label("Retry loading more", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .accessibilityIdentifier("attention.loadMoreRetry")
+        }
+        .accessibilityIdentifier("attention.loadMoreFailure")
     }
 
     private func inlineRefreshError(_ failure: AttentionLoadFailure) -> some View {

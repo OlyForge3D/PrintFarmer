@@ -972,6 +972,315 @@ final class AttentionFeedViewModelTests: XCTestCase {
         XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 4)
     }
 
+    // MARK: - Cycle 3: lifecycle-token fence
+
+    func testBootstrapWithStaleLifecycleTokenIsANoOp() async {
+        // Reviewer's blocker 1: if the view captures the lifecycle
+        // token BEFORE a pre-bootstrap `await` (capability refresh)
+        // and the view deactivates during the await, bootstrap must
+        // not reactivate the VM, subscribe, or fetch.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 1)),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+
+        // Fresh VM: capture the initial lifecycle token before ever
+        // reaching bootstrap. This mirrors the view's pattern of
+        // capturing the token before `await capabilities.refresh()`.
+        let stale = vm.currentLifecycleToken()
+
+        // Simulate the view disappearing during the await (or the VM
+        // otherwise being deactivated). Deactivate bumps the token.
+        vm.deactivate()
+
+        let applied = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true,
+            lifecycleToken: stale
+        )
+        XCTAssertFalse(applied, "Stale token must cause bootstrap to abort")
+
+        // Full observable proof: nothing mutated.
+        let calls = await service.loadCallCount
+        XCTAssertEqual(calls, 0, "Stale bootstrap must not fetch")
+        XCTAssertEqual(vm.phase, .idle, "Stale bootstrap must not change phase")
+        XCTAssertEqual(
+            signalR.attentionSubscriberCount, 0,
+            "Stale bootstrap must not subscribe"
+        )
+    }
+
+    func testBootstrapWithFreshTokenAfterDeactivateWorks() async {
+        // Compare-and-contrast for the previous test: after a
+        // deactivate, capturing the token AFRESH and re-bootstrapping
+        // must succeed. Prevents the fence from being a permanent
+        // wedge.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 2)),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+
+        vm.deactivate() // bump token
+        let fresh = vm.currentLifecycleToken()
+
+        let applied = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true,
+            lifecycleToken: fresh
+        )
+        XCTAssertTrue(applied)
+
+        let calls = await service.loadCallCount
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(vm.phase, .loaded)
+    }
+
+    // MARK: - Cycle 3: queued-invalidation coalescing
+
+    func testInvalidationQueuedBeforeBootstrapAndDrainingAfterIsSkipped() async {
+        // Reviewer's blocker 2: the SignalR handler enqueues a
+        // callback. Bootstrap starts and runs a canonical refresh to
+        // completion. The queued callback then drains. Without the
+        // refresh-completion sequence fence, the drained callback
+        // would fire a duplicate refresh — this test proves the fence
+        // catches it.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 1)),
+            .value(makeAttentionFeed(healthyPrinterCount: 9)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+
+        // Prime the VM with a first successful bootstrap so a
+        // subscription is registered.
+        _ = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let baseline = await service.loadCallCount
+        XCTAssertEqual(baseline, 1)
+
+        // Enqueue an invalidation. This snapshots the current
+        // refresh-completion sequence at enqueue time.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:1",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+
+        // Bootstrap runs before the queued callback drains — its
+        // refresh advances the refresh-completion sequence.
+        _ = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let afterBootstrap = await service.loadCallCount
+        XCTAssertEqual(
+            afterBootstrap, baseline + 1,
+            "Bootstrap issues exactly one canonical GET"
+        )
+
+        // Drain the queued callback. Its captured sequence is stale;
+        // the fence must cause it to no-op instead of dispatching a
+        // duplicate refresh.
+        await callbackQueue.runNext()
+        let afterDrain = await service.loadCallCount
+        XCTAssertEqual(
+            afterDrain, baseline + 1,
+            "Queued invalidation whose refresh completed since enqueue must be a no-op"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 9)
+    }
+
+    func testGenuinelyLaterInvalidationStillFires() async {
+        // Complements the previous test: an invalidation that arrives
+        // AFTER the last refresh completed must still fire a fresh
+        // refresh. The fence must not swallow legitimate events.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 1)),
+            .value(makeAttentionFeed(healthyPrinterCount: 2)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+
+        _ = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let baseline = await service.loadCallCount
+        XCTAssertEqual(baseline, 1)
+
+        // Bootstrap has already completed. NOW an invalidation
+        // arrives — captured sequence == current sequence, no skip.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:new",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        let afterEvent = await service.loadCallCount
+        XCTAssertEqual(
+            afterEvent, baseline + 1,
+            "A genuinely later invalidation must still refetch"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 2)
+    }
+
+    // MARK: - Cycle 3: pagination-failure retry ownership
+
+    func testFailedPaginationDoesNotAutoRetryOnRepeatSentinelTrigger() async {
+        // Reviewer's blocker 3: after loadMore fails, the sentinel
+        // must NOT auto-retry — `.onAppear` may re-fire on every list
+        // rebuild. Repeated calls to `loadMore()` are the harness's
+        // model of that behaviour.
+        let firstPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:1")],
+            nextCursor: "cursor-1"
+        )
+        let service = ScriptedAttentionService(steps: [
+            .value(firstPage),
+            .failure(.forced("network flake")),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        _ = await vm.refresh()
+        XCTAssertTrue(vm.canLoadMore)
+
+        // First attempt: fails.
+        _ = await vm.loadMore()
+        XCTAssertNotNil(vm.paginationFailure)
+        XCTAssertEqual(vm.paginationFailure?.cursor, "cursor-1")
+        XCTAssertEqual(vm.paginationFailure?.message, "network flake")
+        XCTAssertFalse(
+            vm.canLoadMore,
+            "canLoadMore must be false while the current cursor is latched failed"
+        )
+
+        // Simulate many sentinel-onAppear-driven retries. None must
+        // hit the network — the latch keeps the request quiescent.
+        for _ in 0..<10 {
+            _ = await vm.loadMore()
+        }
+        let calls = await service.loadCallCount
+        XCTAssertEqual(
+            calls, 2,
+            "Auto-retry storm must be suppressed: expected 2 calls (refresh + one failed loadMore)"
+        )
+    }
+
+    func testExplicitRetryLoadMoreClearsLatchAndRetriesExactlyOnce() async throws {
+        // After the auto-retry latch has locked the sentinel, an
+        // explicit `retryLoadMore` must clear the latch and re-run
+        // loadMore exactly once. A subsequent implicit `loadMore` on
+        // the newly-loaded cursor must succeed normally.
+        let firstPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:1")],
+            nextCursor: "cursor-1"
+        )
+        let recoveredPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:2")],
+            nextCursor: nil
+        )
+        let service = ScriptedAttentionService(steps: [
+            .value(firstPage),
+            .failure(.forced("network flake")),
+            .value(recoveredPage),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        _ = await vm.refresh()
+        _ = await vm.loadMore()
+        let failureID = try XCTUnwrap(vm.paginationFailure?.id)
+
+        // Stale retry with a different failure ID must not fire.
+        let staleID = UUID()
+        let staleResult = await vm.retryLoadMore(failureID: staleID)
+        XCTAssertFalse(staleResult, "Stale retry ID must be rejected")
+
+        // Real retry: clears the latch, fires exactly one loadMore
+        // that succeeds.
+        let ok = await vm.retryLoadMore(failureID: failureID)
+        XCTAssertTrue(ok)
+        XCTAssertNil(vm.paginationFailure)
+        XCTAssertEqual(vm.snapshot?.items.map(\.id), ["failure:1", "failure:2"])
+        XCTAssertNil(vm.snapshot?.nextCursor)
+        XCTAssertFalse(vm.canLoadMore)
+
+        let calls = await service.loadCallCount
+        XCTAssertEqual(
+            calls, 3,
+            "Total calls: initial refresh + failed loadMore + successful retry = 3"
+        )
+    }
+
+    func testCanonicalRefreshClearsLatchedPaginationFailure() async {
+        // A subsequent canonical refresh (pull-to-refresh, signalR
+        // invalidation) must clear a latched pagination failure so
+        // pagination resumes automatically on the fresh cursor. If it
+        // did not, the operator would need to explicitly retry-loadMore
+        // even after a full refresh, which is unnecessary friction.
+        let firstPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:1")],
+            nextCursor: "cursor-1"
+        )
+        let refreshedPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "runout:fresh")],
+            nextCursor: "cursor-fresh"
+        )
+        let service = ScriptedAttentionService(steps: [
+            .value(firstPage),
+            .failure(.forced("network flake")),
+            .value(refreshedPage),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        _ = await vm.refresh()
+        _ = await vm.loadMore()
+        XCTAssertNotNil(vm.paginationFailure)
+
+        _ = await vm.refresh()
+        XCTAssertNil(
+            vm.paginationFailure,
+            "Canonical refresh must clear the latched pagination failure"
+        )
+        XCTAssertTrue(vm.canLoadMore, "Fresh cursor is not latched-failed")
+        XCTAssertEqual(vm.snapshot?.items.first?.id, "runout:fresh")
+    }
+
     // MARK: - Helpers
 
     private func configuredViewModel(
