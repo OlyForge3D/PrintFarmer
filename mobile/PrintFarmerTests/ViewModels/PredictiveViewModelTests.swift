@@ -901,6 +901,141 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
     }
 
+    /// Coordinator item #4a: multi-party proof with ACTUALLY-PARKED
+    /// observer continuations, not just token-order latching.
+    ///
+    /// Three observers register, each awaitObserver is launched in an
+    /// unstructured task and structurally acknowledged as parked via
+    /// waitForObserverParked BEFORE any waiter fires. Then three waiters
+    /// register — each waiter's registerWaiter runs signalEntryLocked,
+    /// which now MUST hit the parked-continuation branch and resume via
+    /// `.signaledWhileParked` (not `.signaledBeforePark`). A helper
+    /// regression that skipped parked resume would deadlock; drain-safe
+    /// close() at the end still lets asserts fail rather than hang.
+    func testAsyncGateMultiPartyResumesParkedObserverContinuations() async {
+        let gate = AsyncGate()
+        let o1 = await gate.registerObserver()
+        let o2 = await gate.registerObserver()
+        let o3 = await gate.registerObserver()
+
+        // Park every observer FIRST, structurally acknowledged.
+        let t1 = Task { await gate.awaitObserver(o1) }
+        await gate.waitForObserverParked(o1)
+        let t2 = Task { await gate.awaitObserver(o2) }
+        await gate.waitForObserverParked(o2)
+        let t3 = Task { await gate.awaitObserver(o3) }
+        await gate.waitForObserverParked(o3)
+
+        let parkedSnap = await gate.snapshot()
+        XCTAssertEqual(parkedSnap.parkedObserverCount, 3,
+                       "all three observers must be parked before any waiter fires")
+        XCTAssertEqual(parkedSnap.observerFates.count, 0,
+                       "no fate should be sealed while continuations are still parked")
+        XCTAssertEqual(parkedSnap.pendingEntrySignals, 0)
+
+        // Fire waiters one at a time; each MUST resume a parked observer
+        // via the parked-continuation branch of signalEntryLocked.
+        _ = await gate.registerWaiter()
+        let after1 = await gate.snapshot()
+        XCTAssertEqual(after1.parkedObserverCount, 2,
+                       "first waiter must resume exactly one parked observer")
+        XCTAssertEqual(after1.observerFateCounts[.signaledWhileParked] ?? 0, 1,
+                       "first waiter must seal fate via signaledWhileParked, not signaledBeforePark")
+        XCTAssertNil(after1.observerFateCounts[.signaledBeforePark],
+                     "no observer may take the latch path — all were parked")
+
+        _ = await gate.registerWaiter()
+        let after2 = await gate.snapshot()
+        XCTAssertEqual(after2.parkedObserverCount, 1)
+        XCTAssertEqual(after2.observerFateCounts[.signaledWhileParked] ?? 0, 2)
+
+        _ = await gate.registerWaiter()
+        let after3 = await gate.snapshot()
+        XCTAssertEqual(after3.parkedObserverCount, 0)
+        XCTAssertEqual(after3.observerFateCounts[.signaledWhileParked] ?? 0, 3)
+        XCTAssertEqual(after3.pendingEntrySignals, 0,
+                       "one signal per parked observer — no leftover pending")
+        XCTAssertNil(after3.observerFateCounts[.signaledBeforePark])
+
+        // Every parked task must have resumed exactly once.
+        await t1.value
+        await t2.value
+        await t3.value
+
+        // Safety close before assertions so any residual state surfaces
+        // as a completed-but-different assertion, not a hang.
+        await gate.close()
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        XCTAssertEqual(final.observerDuplicateAwaitCount, 0)
+        XCTAssertEqual(final.observerUnknownAwaitCount, 0)
+        XCTAssertEqual(final.observerCancelIgnoredCount, 0)
+    }
+
+    /// Coordinator item #4b: repeated-open proof with ACTUALLY-PARKED
+    /// waiter continuations, not just token-order draining.
+    ///
+    /// Three waiters register (each pushes a pending entry signal since
+    /// no observers exist), then awaitWaiter is launched per waiter and
+    /// structurally acknowledged as parked via waitForWaiterParked. The
+    /// first open() MUST drain the parked-waiter branch (fates:
+    /// `.openedWhileParked`); the second open() MUST be a no-op — no
+    /// new resumes, no fate mutations, no double-drain.
+    func testAsyncGateRepeatedOpenResumesParkedWaiterContinuations() async {
+        let gate = AsyncGate()
+        let w1 = await gate.registerWaiter()
+        let w2 = await gate.registerWaiter()
+        let w3 = await gate.registerWaiter()
+
+        // Park every waiter FIRST, structurally acknowledged.
+        let t1 = Task { await gate.awaitWaiter(w1) }
+        await gate.waitForWaiterParked(w1)
+        let t2 = Task { await gate.awaitWaiter(w2) }
+        await gate.waitForWaiterParked(w2)
+        let t3 = Task { await gate.awaitWaiter(w3) }
+        await gate.waitForWaiterParked(w3)
+
+        let parkedSnap = await gate.snapshot()
+        XCTAssertEqual(parkedSnap.parkedWaiterCount, 3,
+                       "all three waiters must be parked before open()")
+        XCTAssertEqual(parkedSnap.waiterFates.count, 0,
+                       "no fate should be sealed while continuations are still parked")
+
+        // First open() must drain via the parked branch.
+        await gate.open()
+        let afterOpen1 = await gate.snapshot()
+        XCTAssertTrue(afterOpen1.opened)
+        XCTAssertEqual(afterOpen1.parkedWaiterCount, 0,
+                       "first open() must resume every parked waiter")
+        XCTAssertEqual(afterOpen1.waiterOrder, [])
+        XCTAssertEqual(afterOpen1.waiterFateCounts[.openedWhileParked] ?? 0, 3,
+                       "all three fates must be openedWhileParked (not openedBeforePark)")
+        XCTAssertNil(afterOpen1.waiterFateCounts[.openedBeforePark],
+                     "no waiter may take the latch path — all were parked")
+
+        // Second open() must be a no-op — same counts, no state change.
+        await gate.open()
+        let afterOpen2 = await gate.snapshot()
+        XCTAssertEqual(afterOpen2, afterOpen1,
+                       "second open() must be a bit-identical no-op")
+
+        // Every parked task must have resumed exactly once.
+        await t1.value
+        await t2.value
+        await t3.value
+
+        // Safety close, then verify a fourth open post-close still no-op.
+        await gate.close()
+        await gate.open()
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedWaiterCount, 0)
+        XCTAssertEqual(final.waiterDuplicateAwaitCount, 0)
+        XCTAssertEqual(final.waiterUnknownAwaitCount, 0)
+        XCTAssertEqual(final.waiterCancelIgnoredCount, 0)
+        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 3,
+                       "fate counts must be frozen — no extra opened fates")
+    }
+
     /// Explicit teardown: close() drains BOTH pending waiters and pending
     /// entry observers exactly once, so a helper regression fails via a
     /// completed-but-different assertion rather than deadlocking on scope
