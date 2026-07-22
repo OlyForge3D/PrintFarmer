@@ -39,7 +39,9 @@ public interface IFilamentCoverageSpoolResolver
 /// <param name="Spool">Resolved spool, or null when unavailable/missing.</param>
 /// <param name="TracksLiveConsumption">Whether the source updates remaining weight during an active print.</param>
 /// <param name="ErrorReason">Machine-readable unknown reason when <paramref name="Spool"/> is null.</param>
+/// <param name="OriginWatermark">Watermark captured before the spool observation, or null when unproven.</param>
 public sealed record FilamentCoverageSpoolSnapshot(
     SpoolmanSpoolDto? Spool,
     bool TracksLiveConsumption,
-    string? ErrorReason);
+    string? ErrorReason,
+    long? OriginWatermark = null);

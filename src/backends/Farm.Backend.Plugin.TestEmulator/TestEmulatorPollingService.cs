@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -16,7 +17,8 @@ public sealed class TestEmulatorPollingService(
     IHubContext<PrinterHub> hub,
     ILogger<TestEmulatorPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
-    TestEmulatorStateManager stateManager) : IHostedService, IDisposable
+    TestEmulatorStateManager stateManager,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
 {
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan CompleteDwellTime = TimeSpan.FromSeconds(5);
@@ -100,6 +102,9 @@ public sealed class TestEmulatorPollingService(
 
     private async Task TickPrinterAsync(Guid printerId, CancellationToken ct)
     {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(watermarkReader, logger, "test-emulator status", ct)
+            .ConfigureAwait(false);
         EmulatedPrinterState? state = stateManager.GetState(printerId);
         if (state is null)
         {
@@ -150,7 +155,7 @@ public sealed class TestEmulatorPollingService(
             HotendTarget: hotendTarget,
             BedTarget: bedTarget,
             SpoolInfo: null);
-        statusCacheWriter.UpdateStatus(cacheUpdate);
+        statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
         var signalRUpdate = new PrinterStatusUpdate(
             Id: printerId,

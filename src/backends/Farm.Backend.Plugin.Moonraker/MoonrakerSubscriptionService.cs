@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Maintenance;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -25,7 +26,8 @@ public sealed class MoonrakerSubscriptionService(
     IHttpClientFactory httpClientFactory,
     IPrinterStatusCacheWriter statusCacheWriter,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IToolheadActivityAccumulator? activityAccumulator = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
+    IToolheadActivityAccumulator? activityAccumulator = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider, IPrinterStatusRefreshService
 {
     private readonly ILogger<MoonrakerSubscriptionService> _logger = logger;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
@@ -934,9 +936,13 @@ public sealed class MoonrakerSubscriptionService(
         {
             _ = sb.Clear();
             WebSocketReceiveResult result;
+            long? originWatermark;
 
             try
             {
+                originWatermark = await OriginWatermark
+                    .CaptureAsync(watermarkReader, _logger, "Moonraker WebSocket message", ct)
+                    .ConfigureAwait(false);
                 do
                 {
                     result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
@@ -964,7 +970,7 @@ public sealed class MoonrakerSubscriptionService(
 
             try
             {
-                await ProcessJsonRpcMessageAsync(sb.ToString(), printer, ct);
+                await ProcessJsonRpcMessageAsync(sb.ToString(), printer, originWatermark, ct);
             }
             catch (JsonException jsonEx)
             {
@@ -987,8 +993,13 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     /// <param name="message">The JSON-RPC message string.</param>
     /// <param name="printer">The printer being monitored.</param>
+    /// <param name="originWatermark">Watermark captured before receiving the message.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task ProcessJsonRpcMessageAsync(string message, Printer printer, CancellationToken ct)
+    private async Task ProcessJsonRpcMessageAsync(
+        string message,
+        Printer printer,
+        long? originWatermark,
+        CancellationToken ct)
     {
         try
         {
@@ -999,14 +1010,14 @@ public sealed class MoonrakerSubscriptionService(
             if (root.TryGetProperty("id", out _))
             {
                 // Response handling extracted to reduce nesting
-                await HandleJsonRpcResponseAsync(root, message, printer, ct);
+                await HandleJsonRpcResponseAsync(root, message, printer, originWatermark, ct);
             }
 
             // Check if this is a JSON-RPC notification (has "method" field but no "id")
             else if (root.TryGetProperty("method", out JsonElement methodProp))
             {
                 // Notification handling extracted to reduce nesting
-                await HandleJsonRpcNotificationAsync(methodProp, root, printer, ct);
+                await HandleJsonRpcNotificationAsync(methodProp, root, printer, originWatermark, ct);
             }
             else
             {
@@ -1031,8 +1042,14 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="root">The parsed JSON root element.</param>
     /// <param name="message">The original JSON-RPC message string.</param>
     /// <param name="printer">The printer being monitored.</param>
+    /// <param name="originWatermark">Watermark captured before receiving the response.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task HandleJsonRpcResponseAsync(JsonElement root, string message, Printer printer, CancellationToken ct)
+    private async Task HandleJsonRpcResponseAsync(
+        JsonElement root,
+        string message,
+        Printer printer,
+        long? originWatermark,
+        CancellationToken ct)
     {
         try
         {
@@ -1063,7 +1080,14 @@ public sealed class MoonrakerSubscriptionService(
                 res.TryGetProperty("status", out JsonElement statusObj))
             {
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
-                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.BackendUrl, null, null, ct);
+                await ProcessStatusUpdateAsync(
+                    statusObj,
+                    printer.Id,
+                    printer.BackendUrl,
+                    null,
+                    null,
+                    originWatermark,
+                    ct);
             }
 
             // Reset parse error count on successful (non-error) JSON-RPC response
@@ -1092,8 +1116,14 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="methodProp">The JSON element containing the method name.</param>
     /// <param name="root">The parsed JSON root element.</param>
     /// <param name="printer">The printer being monitored.</param>
+    /// <param name="originWatermark">Watermark captured before receiving the notification.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task HandleJsonRpcNotificationAsync(JsonElement methodProp, JsonElement root, Printer printer, CancellationToken ct)
+    private async Task HandleJsonRpcNotificationAsync(
+        JsonElement methodProp,
+        JsonElement root,
+        Printer printer,
+        long? originWatermark,
+        CancellationToken ct)
     {
         string? method = methodProp.GetString();
         _logger.LogDebug("Received notification {Method} from printer {PrinterName}", method, printer.Name);
@@ -1108,7 +1138,14 @@ public sealed class MoonrakerSubscriptionService(
                         printer.Name,
                         p[0].GetRawText());
 
-                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.BackendUrl, null, null, ct);
+                    await ProcessStatusUpdateAsync(
+                        p[0],
+                        printer.Id,
+                        printer.BackendUrl,
+                        null,
+                        null,
+                        originWatermark,
+                        ct);
                 }
 
                 break;
@@ -1152,11 +1189,20 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="serverUrl">The Moonraker server URL (for fetching additional data).</param>
     /// <param name="cameraStreamUrl">The camera stream URL from printer configuration.</param>
     /// <param name="thumbnailUrl">The thumbnail URL from printer configuration.</param>
+    /// <param name="originWatermark">Watermark captured before receiving the status.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task ProcessStatusUpdateAsync(JsonElement statusObj, Guid printerId, string serverUrl, string? cameraStreamUrl, string? thumbnailUrl, CancellationToken ct)
+    private async Task ProcessStatusUpdateAsync(
+        JsonElement statusObj,
+        Guid printerId,
+        string serverUrl,
+        string? cameraStreamUrl,
+        string? thumbnailUrl,
+        long? originWatermark,
+        CancellationToken ct)
     {
         // Get or create persistent state for this printer
         PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+        state.IncludeOrigin(originWatermark);
 
         // Store camera and thumbnail URLs if provided
         if (!string.IsNullOrEmpty(cameraStreamUrl))
@@ -2667,7 +2713,7 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: spoolInfo,
                 MmuStatus: mmuStatus,
                 PrintTimeLeftSeconds: printTimeLeftSeconds);
-            _statusCacheWriter.UpdateStatus(cacheUpdate);
+            _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
             await hub!.Clients.All.SendAsync("printerupdated", update, ct);
@@ -2726,7 +2772,7 @@ public sealed class MoonrakerSubscriptionService(
                 HotendTarget: null,
                 BedTarget: null,
                 SpoolInfo: null);
-            _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+            _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (offline) for {PrinterId} via SignalR", printerId);
             await hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
@@ -2785,7 +2831,7 @@ public sealed class MoonrakerSubscriptionService(
                 HotendTarget: null,
                 BedTarget: null,
                 SpoolInfo: null);
-            _statusCacheWriter.UpdateStatus(shutdownCacheUpdate);
+            _statusCacheWriter.UpdateStatus(shutdownCacheUpdate, originWatermark: null);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {PrinterId} via SignalR", printerId);
             await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
@@ -3109,6 +3155,9 @@ public sealed class MoonrakerSubscriptionService(
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
 
             // Get comprehensive status using existing HTTP endpoint
+            long? originWatermark = await OriginWatermark
+                .CaptureAsync(watermarkReader, _logger, "Moonraker HTTP status", ct)
+                .ConfigureAwait(false);
             PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.BackendUrl, ct);
 
             if (compositeStatus != null && compositeStatus.IsOnline)
@@ -3164,7 +3213,7 @@ public sealed class MoonrakerSubscriptionService(
                         BedTarget: compositeStatus.BedTarget,
                         SpoolInfo: spoolInfo,
                         PrintTimeLeftSeconds: compositeStatus.PrintTimeLeftSeconds);
-                    _statusCacheWriter.UpdateStatus(cacheUpdate);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
                     _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
 
                     await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);

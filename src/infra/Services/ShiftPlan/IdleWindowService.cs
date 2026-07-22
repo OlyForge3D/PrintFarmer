@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.EntityFrameworkCore;
@@ -46,17 +47,20 @@ public sealed class IdleWindowService : IIdleWindowService
     private readonly IDispatchScorer _dispatchScorer;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<IdleWindowService> _logger;
+    private readonly IMutationWatermarkReader? _watermarkReader;
 
     public IdleWindowService(
         IQueueDataService queue,
         IDispatchScorer dispatchScorer,
         IDbContextFactory<AppDbContext> dbFactory,
-        ILogger<IdleWindowService> logger)
+        ILogger<IdleWindowService> logger,
+        IMutationWatermarkReader? watermarkReader = null)
     {
         _queue = queue;
         _dispatchScorer = dispatchScorer;
         _dbFactory = dbFactory;
         _logger = logger;
+        _watermarkReader = watermarkReader;
     }
 
     public async Task<IReadOnlyList<IdleWindow>> GetIdleWindowsAsync(TimeSpan minWindow, CancellationToken ct = default)
@@ -67,12 +71,16 @@ public sealed class IdleWindowService : IIdleWindowService
 
     public async Task<IdleWindowResult> GetIdleWindowsWithIndeterminateAsync(TimeSpan minWindow, CancellationToken ct = default)
     {
+        long? rootOrigin = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "idle-window inputs", ct)
+            .ConfigureAwait(false);
+        List<long?> requiredOrigins = [rootOrigin];
         DateTime now = DateTime.UtcNow;
 
         List<Printer> printers = await _queue.GetAvailablePrintersAsync(ct);
         if (printers.Count == 0)
         {
-            return new IdleWindowResult(Array.Empty<IdleWindow>(), new HashSet<Guid>());
+            return new IdleWindowResult(Array.Empty<IdleWindow>(), new HashSet<Guid>(), rootOrigin);
         }
 
         // Load dispatch settings, global candidates, and per-printer dispatch states
@@ -161,7 +169,7 @@ public sealed class IdleWindowService : IIdleWindowService
             // work into a window that may in fact be dispatch-eligible).
             bool? dispatchEligibleNow = await IsDispatchEligibleAsync(
                     printer, printerDispatchState, globalDispatchEnabled,
-                    globalCandidates, assigned, minScore, scorerCache, ct)
+                    globalCandidates, assigned, minScore, scorerCache, requiredOrigins, ct)
                 .ConfigureAwait(false);
 
             if (dispatchEligibleNow is null)
@@ -176,7 +184,10 @@ public sealed class IdleWindowService : IIdleWindowService
             results.Add(new IdleWindow(printer.Id, printer.Name, windowStart, windowEnd, dispatchEligibleNow.Value));
         }
 
-        return new IdleWindowResult(results, indeterminate);
+        return new IdleWindowResult(
+            results,
+            indeterminate,
+            OriginWatermark.Combine([.. requiredOrigins]));
     }
 
     private static DateTime? ProjectNextBoundary(IEnumerable<PrintJob> assigned, DateTime now)
@@ -214,6 +225,7 @@ public sealed class IdleWindowService : IIdleWindowService
         List<PrintJob> assignedJobs,
         double minScore,
         Dictionary<Guid, IReadOnlyDictionary<Guid, DispatchScore>?> scorerCache,
+        List<long?> requiredOrigins,
         CancellationToken ct)
     {
         // Fix 2: mirror all dispatcher gates exactly.
@@ -269,7 +281,7 @@ public sealed class IdleWindowService : IIdleWindowService
             ct.ThrowIfCancellationRequested();
 
             IReadOnlyDictionary<Guid, DispatchScore>? scoresByPrinter =
-                await GetScoresByPrinterAsync(job.Id, scorerCache, ct).ConfigureAwait(false);
+                await GetScoresByPrinterAsync(job.Id, scorerCache, requiredOrigins, ct).ConfigureAwait(false);
             if (scoresByPrinter is null)
             {
                 anyScorerFailed = true;
@@ -296,6 +308,7 @@ public sealed class IdleWindowService : IIdleWindowService
     private async Task<IReadOnlyDictionary<Guid, DispatchScore>?> GetScoresByPrinterAsync(
         Guid jobId,
         Dictionary<Guid, IReadOnlyDictionary<Guid, DispatchScore>?> scorerCache,
+        List<long?> requiredOrigins,
         CancellationToken ct)
     {
         if (scorerCache.TryGetValue(jobId, out IReadOnlyDictionary<Guid, DispatchScore>? cached))
@@ -305,8 +318,23 @@ public sealed class IdleWindowService : IIdleWindowService
 
         try
         {
-            List<DispatchScore> scores = await _dispatchScorer.ScorePrintersForJobAsync(jobId, ct).ConfigureAwait(false);
-            IReadOnlyDictionary<Guid, DispatchScore> byPrinter = scores
+            DispatchScoreResult result;
+            if (_dispatchScorer is IDispatchScorerWithOrigin scorerWithOrigin)
+            {
+                result = await scorerWithOrigin
+                    .ScorePrintersForJobWithOriginAsync(jobId, ct)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                List<DispatchScore> scores = await _dispatchScorer
+                    .ScorePrintersForJobAsync(jobId, ct)
+                    .ConfigureAwait(false);
+                result = new DispatchScoreResult(scores, OriginWatermark: null);
+            }
+
+            requiredOrigins.Add(result.OriginWatermark);
+            IReadOnlyDictionary<Guid, DispatchScore> byPrinter = result.Scores
                 .GroupBy(s => s.PrinterId)
                 .ToDictionary(g => g.Key, g => g.First());
             scorerCache[jobId] = byPrinter;

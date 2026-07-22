@@ -94,6 +94,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<UserTask> UserTasks => Set<UserTask>();
 
+    public DbSet<MutationCounter> MutationCounters => Set<MutationCounter>();
+
     // Print approvals (pending Upload+Print approvals)
     public DbSet<PrintApproval> PrintApprovals => Set<PrintApproval>();
 

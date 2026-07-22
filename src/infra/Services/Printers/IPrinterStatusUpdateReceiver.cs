@@ -16,13 +16,15 @@ public interface IPrinterStatusUpdateReceiver
     /// Called when a printer status update is received from a backend service.
     /// </summary>
     /// <param name="status">The printer status data received from the backend.</param>
-    void ReceiveStatusUpdate(PrinterStatusDto status);
+    /// <param name="originWatermark">Watermark captured before the backend observation, or null when unproven.</param>
+    void ReceiveStatusUpdate(PrinterStatusDto status, long? originWatermark = null);
 
     /// <summary>
     /// Called when multiple printer statuses are updated at once.
     /// </summary>
     /// <param name="statuses">The collection of printer status updates.</param>
-    void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses);
+    /// <param name="originWatermark">Watermark captured before the backend observation, or null when unproven.</param>
+    void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses, long? originWatermark = null);
 }
 
 /// <summary>
@@ -34,18 +36,18 @@ public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, ILogge
     private readonly IPrinterStatusCacheWriter _cache = cache ?? throw new ArgumentNullException(nameof(cache));
     private readonly ILogger<PrinterStatusUpdateReceiver> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-    public void ReceiveStatusUpdate(PrinterStatusDto status)
+    public void ReceiveStatusUpdate(PrinterStatusDto status, long? originWatermark = null)
     {
         if (status == null)
         {
             return;
         }
 
-        _cache.UpdateStatus(status);
+        _cache.UpdateStatus(status, originWatermark);
         _logger.LogDebug("[StatusCache] Updated printer {StatusId}: IsOnline={StatusIsOnline}, State={StatusState}", status.Id, status.IsOnline, status.State);
     }
 
-    public void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses)
+    public void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses, long? originWatermark = null)
     {
         if (statuses == null)
         {
@@ -54,7 +56,7 @@ public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, ILogge
 
         foreach (PrinterStatusDto status in statuses)
         {
-            _cache.UpdateStatus(status);
+            _cache.UpdateStatus(status, originWatermark);
         }
 
         _logger.LogDebug($"[StatusCache] Updated multiple printer statuses");

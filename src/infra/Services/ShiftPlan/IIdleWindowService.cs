@@ -43,6 +43,7 @@ public readonly record struct IdleWindow(
 /// dispatch eligibility was indeterminate (a scorer outage), NOT because they are
 /// busy, have no projected window, or were conclusively found ineligible.
 /// </param>
+/// <param name="OriginWatermark">Oldest proven watermark captured before the required inputs.</param>
 /// <remarks>
 /// This wrapper is two references, so copying is cheap; making it a readonly struct
 /// avoids a per-pass heap allocation without changing value-equality semantics.
@@ -50,7 +51,8 @@ public readonly record struct IdleWindow(
 // R5-D: two references copy cheaply, so a struct wrapper beats pooling a tiny result object.
 public readonly record struct IdleWindowResult(
     IReadOnlyList<IdleWindow> Windows,
-    IReadOnlySet<Guid> IndeterminatePrinterIds);
+    IReadOnlySet<Guid> IndeterminatePrinterIds,
+    long? OriginWatermark = null);
 
 /// <summary>
 /// Computes projected idle windows across printers using the same eligibility

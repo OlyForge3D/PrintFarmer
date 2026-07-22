@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260721235052_AddMutationWatermark")]
+    partial class AddMutationWatermark
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -4010,11 +4013,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<double?>("FilamentUsageGrams")
                         .HasColumnType("double precision");
 
-                    b.Property<bool>("IsFilamentUsageAuthoritative")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
-
                     b.Property<decimal?>("MaterialCostUsd")
                         .HasColumnType("numeric");
 
@@ -4023,14 +4021,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<double?>("SlicerEstimateGrams")
                         .HasColumnType("double precision");
-
-                    b.Property<string>("SpoolSourceIdentity")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("SpoolSourceKind")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
 
                     b.Property<int?>("SpoolmanSpoolId")
                         .HasColumnType("integer");
@@ -4043,9 +4033,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrintJobId", "ToolheadIndex")
                         .IsUnique()
                         .HasDatabaseName("IX_PrintJobToolheadUsages_PrintJobId_ToolheadIndex");
-
-                    b.HasIndex("SpoolSourceKind", "SpoolSourceIdentity", "SpoolmanSpoolId", "IsFilamentUsageAuthoritative")
-                        .HasDatabaseName("IX_PrintJobToolheadUsages_SpoolProjection");
 
                     b.ToTable("PrintJobToolheadUsages");
                 });

@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoTagging;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
@@ -32,7 +33,8 @@ public class DispatchScorer(
     ILogger<DispatchScorer> logger,
     IOperatorFeatureGate? featureGate = null,
     IFilamentCoverageService? coverageService = null,
-    IFilamentFallbackGroupService? fallbackService = null) : IDispatchScorer
+    IFilamentFallbackGroupService? fallbackService = null,
+    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin
 {
     // Factor weight constants
     private const double WeightMaterialMatch = 100;
@@ -54,6 +56,19 @@ public class DispatchScorer(
 
     public async Task<List<DispatchScore>> ScorePrintersForJobAsync(Guid jobId, CancellationToken ct = default)
     {
+        DispatchScoreResult result = await ScorePrintersForJobWithOriginAsync(jobId, ct).ConfigureAwait(false);
+        return [.. result.Scores];
+    }
+
+    public async Task<DispatchScoreResult> ScorePrintersForJobWithOriginAsync(
+        Guid jobId,
+        CancellationToken ct = default)
+    {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(watermarkReader, logger, "dispatch scoring", ct)
+            .ConfigureAwait(false);
+        List<long?> requiredOrigins = [originWatermark];
+
         PrintJob? job = await db.PrintJobs
             .Include(j => j.GcodeFile)
                 .ThenInclude(g => g!.PrinterModel)
@@ -63,7 +78,7 @@ public class DispatchScorer(
         if (job is null)
         {
             logger.LogWarning("Dispatch scorer: job {JobId} not found", jobId);
-            return [];
+            return new DispatchScoreResult([], originWatermark);
         }
 
         // Pre-filter: get all enabled, non-maintenance printers with toolheads
@@ -121,7 +136,8 @@ public class DispatchScorer(
         if (gramsAware && coverageService is not null)
         {
             gramsContexts =
-                await BuildPerToolGramsContextAsync(printers, perToolReqs!, ct).ConfigureAwait(false);
+                await BuildPerToolGramsContextAsync(printers, perToolReqs!, requiredOrigins, ct)
+                    .ConfigureAwait(false);
         }
 
         foreach (Printer printer in printers)
@@ -153,7 +169,9 @@ public class DispatchScorer(
             "Dispatch scorer: job {JobId} scored {Count} printers, {Eliminated} eliminated",
             jobId, results.Count, results.Count(r => r.Eliminated));
 
-        return results;
+        return new DispatchScoreResult(
+            results,
+            OriginWatermark.Combine([.. requiredOrigins]));
     }
 
     private DispatchScore ScorePrinter(
@@ -358,6 +376,7 @@ public class DispatchScorer(
         BuildPerToolGramsContextAsync(
             List<Printer> printers,
             IReadOnlyList<PrintJobToolMaterialRequirement> perToolReqs,
+            List<long?> requiredOrigins,
             CancellationToken ct)
     {
         Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext> contexts = [];
@@ -365,7 +384,10 @@ public class DispatchScorer(
         FleetFilamentCoverageDto fleet;
         try
         {
-            fleet = await coverageService!.GetForFleetAsync(ct).ConfigureAwait(false);
+            FilamentCoverageResult<FleetFilamentCoverageDto> coverageResult =
+                await coverageService!.GetForFleetWithOriginAsync(ct).ConfigureAwait(false);
+            fleet = coverageResult.Value;
+            requiredOrigins.Add(coverageResult.OriginWatermark);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

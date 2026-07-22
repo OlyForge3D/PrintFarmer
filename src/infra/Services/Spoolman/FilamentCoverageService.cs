@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
@@ -26,7 +27,8 @@ public class FilamentCoverageService(
     IPrinterStatusCacheReader printerStatusCache,
     ISettingsService settingsService,
     IOperatorFeatureGate featureGate,
-    ILogger<FilamentCoverageService> logger)
+    ILogger<FilamentCoverageService> logger,
+    IMutationWatermarkReader? watermarkReader = null)
     : IFilamentCoverageService, IFilamentCoverageAttentionSource
 {
     // Machine-readable reason codes. Clients should NEVER localize these; they
@@ -49,23 +51,46 @@ public class FilamentCoverageService(
     private readonly ISettingsService _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
     private readonly IOperatorFeatureGate _featureGate = featureGate ?? throw new ArgumentNullException(nameof(featureGate));
     private readonly ILogger<FilamentCoverageService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IMutationWatermarkReader? _watermarkReader = watermarkReader;
 
-    private SpoolCoverageSettings GetSettings()
+    private SettingsSnapshot<SpoolCoverageSettings> GetSettingsSnapshot()
     {
         try
         {
-            return _settingsService.Get<SpoolCoverageSettings>() ?? new SpoolCoverageSettings();
+            return _settingsService.GetSnapshot<SpoolCoverageSettings>()
+                ?? new SettingsSnapshot<SpoolCoverageSettings>(
+                    _settingsService.Get<SpoolCoverageSettings>(),
+                    OriginWatermark: null);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "[FilamentCoverage] Falling back to default SpoolCoverageSettings");
-            return new SpoolCoverageSettings();
+            return new SettingsSnapshot<SpoolCoverageSettings>(
+                new SpoolCoverageSettings(),
+                OriginWatermark: null);
         }
     }
+
+    private SpoolCoverageSettings GetSettings() => GetSettingsSnapshot().Value;
 
     /// <inheritdoc />
     public async Task<PrinterFilamentCoverageDto?> GetForPrinterAsync(Guid printerId, CancellationToken ct)
     {
+        FilamentCoverageResult<PrinterFilamentCoverageDto?> result =
+            await GetForPrinterWithOriginAsync(printerId, ct).ConfigureAwait(false);
+        return result.Value;
+    }
+
+    /// <inheritdoc />
+    public async Task<FilamentCoverageResult<PrinterFilamentCoverageDto?>> GetForPrinterWithOriginAsync(
+        Guid printerId,
+        CancellationToken ct)
+    {
+        long? rootOrigin = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "printer filament coverage", ct)
+            .ConfigureAwait(false);
+        SettingsSnapshot<SpoolCoverageSettings> settingsSnapshot = GetSettingsSnapshot();
+
         Printer? printer = await _db.Printers
             .AsNoTracking()
             .Include(p => p.Toolheads)
@@ -74,7 +99,9 @@ public class FilamentCoverageService(
 
         if (printer is null)
         {
-            return null;
+            return new FilamentCoverageResult<PrinterFilamentCoverageDto?>(
+                null,
+                OriginWatermark.Combine(rootOrigin, settingsSnapshot.OriginWatermark));
         }
 
         List<PrintJob> jobs = await _db.PrintJobs
@@ -94,7 +121,7 @@ public class FilamentCoverageService(
             await _spoolResolver.ResolveAsync([printer], ct).ConfigureAwait(false);
         IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> spoolLookup = resolved[printer.Id];
 
-        SpoolCoverageSettings settings = GetSettings();
+        SpoolCoverageSettings settings = settingsSnapshot.Value;
 
         // Fetch one bounded live status for the single-printer path; the fleet
         // path uses the batched status-cache snapshot instead.
@@ -104,12 +131,34 @@ public class FilamentCoverageService(
             ? await TryReadLiveProgressAsync(printer.Id, settings.LiveProgressTimeoutMs, ct).ConfigureAwait(false)
             : null;
 
-        return ComputeForPrinter(printer, jobs, spoolLookup, liveProgress);
+        List<long?> requiredOrigins =
+        [
+            rootOrigin,
+            settingsSnapshot.OriginWatermark,
+            .. spoolLookup.Values.Select(snapshot => snapshot.OriginWatermark),
+        ];
+        return new FilamentCoverageResult<PrinterFilamentCoverageDto?>(
+            ComputeForPrinter(printer, jobs, spoolLookup, liveProgress, settings),
+            OriginWatermark.Combine([.. requiredOrigins]));
     }
 
     /// <inheritdoc />
     public async Task<FleetFilamentCoverageDto> GetForFleetAsync(CancellationToken ct)
     {
+        FilamentCoverageResult<FleetFilamentCoverageDto> result =
+            await GetForFleetWithOriginAsync(ct).ConfigureAwait(false);
+        return result.Value;
+    }
+
+    /// <inheritdoc />
+    public async Task<FilamentCoverageResult<FleetFilamentCoverageDto>> GetForFleetWithOriginAsync(
+        CancellationToken ct)
+    {
+        long? rootOrigin = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "fleet filament coverage", ct)
+            .ConfigureAwait(false);
+        SettingsSnapshot<SpoolCoverageSettings> settingsSnapshot = GetSettingsSnapshot();
+
         List<Printer> printers = await _db.Printers
             .AsNoTracking()
             .Include(p => p.Toolheads)
@@ -119,7 +168,9 @@ public class FilamentCoverageService(
 
         if (printers.Count == 0)
         {
-            return new FleetFilamentCoverageDto([], DateTime.UtcNow);
+            return new FilamentCoverageResult<FleetFilamentCoverageDto>(
+                new FleetFilamentCoverageDto([], DateTime.UtcNow),
+                OriginWatermark.Combine(rootOrigin, settingsSnapshot.OriginWatermark));
         }
 
         List<Guid> ids = printers.ConvertAll(p => p.Id);
@@ -150,7 +201,21 @@ public class FilamentCoverageService(
         // Fleet progress comes from one thread-safe cache snapshot. All
         // supported polling/subscription backends populate this cache, avoiding
         // N live backend calls and any shared scoped-service concurrency risk.
-        IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _printerStatusCache.GetAllStatuses();
+        IReadOnlyDictionary<Guid, PrinterStatusCacheSnapshot> cachedStatuses =
+            _printerStatusCache is IPrinterStatusCacheProvenanceReader provenanceReader
+                ? provenanceReader.GetAllSnapshots()
+                : _printerStatusCache.GetAllStatuses().ToDictionary(
+                    pair => pair.Key,
+                    pair => new PrinterStatusCacheSnapshot(
+                        pair.Value,
+                        DateTime.UtcNow,
+                        OriginWatermark: null));
+        List<long?> requiredOrigins =
+        [
+            rootOrigin,
+            settingsSnapshot.OriginWatermark,
+            .. fleetSpoolLookup.Values.SelectMany(spools => spools.Values).Select(snapshot => snapshot.OriginWatermark),
+        ];
 
         // Pure compute — no concurrent shared-context access, no exception
         // swallowing that would mask EF issues as "Unknown". Real errors
@@ -161,26 +226,57 @@ public class FilamentCoverageService(
         {
             List<PrintJob> jobs = jobsByPrinter.TryGetValue(printer.Id, out List<PrintJob>? list) ? list : [];
             IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> scoped = fleetSpoolLookup[printer.Id];
-            double? liveProgress = cachedStatuses.TryGetValue(printer.Id, out PrinterStatusDto? cachedStatus)
-                ? cachedStatus.Progress
+            bool hasActive = jobs.Any(job =>
+                job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused);
+            double? liveProgress = cachedStatuses.TryGetValue(printer.Id, out PrinterStatusCacheSnapshot? cachedStatus)
+                ? cachedStatus.Status.Progress
                 : null;
-            ordered.Add(ComputeForPrinter(printer, jobs, scoped, liveProgress));
+            if (hasActive)
+            {
+                requiredOrigins.Add(cachedStatus?.OriginWatermark);
+            }
+
+            ordered.Add(ComputeForPrinter(
+                printer,
+                jobs,
+                scoped,
+                liveProgress,
+                settingsSnapshot.Value));
         }
 
-        return new FleetFilamentCoverageDto(ordered, DateTime.UtcNow);
+        return new FilamentCoverageResult<FleetFilamentCoverageDto>(
+            new FleetFilamentCoverageDto(ordered, DateTime.UtcNow),
+            OriginWatermark.Combine([.. requiredOrigins]));
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<FilamentRunoutWarningDto>> GetRunoutWarningsAsync(CancellationToken ct)
     {
-        SpoolCoverageSettings settings = GetSettings();
+        FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>> result =
+            await GetRunoutWarningsWithOriginAsync(ct).ConfigureAwait(false);
+        return result.Value;
+    }
+
+    /// <inheritdoc />
+    public async Task<FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>>> GetRunoutWarningsWithOriginAsync(
+        CancellationToken ct)
+    {
+        long? rootOrigin = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "filament runout warnings", ct)
+            .ConfigureAwait(false);
+        SettingsSnapshot<SpoolCoverageSettings> settingsSnapshot = GetSettingsSnapshot();
+        SpoolCoverageSettings settings = settingsSnapshot.Value;
 
         if (!await _featureGate.IsEnabledAsync(OperatorFeature.FilamentCoverage, ct).ConfigureAwait(false))
         {
-            return [];
+            return new FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>>(
+                [],
+                OriginWatermark.Combine(rootOrigin, settingsSnapshot.OriginWatermark));
         }
 
-        FleetFilamentCoverageDto fleet = await GetForFleetAsync(ct).ConfigureAwait(false);
+        FilamentCoverageResult<FleetFilamentCoverageDto> fleetResult =
+            await GetForFleetWithOriginAsync(ct).ConfigureAwait(false);
+        FleetFilamentCoverageDto fleet = fleetResult.Value;
         TimeSpan lead = TimeSpan.FromMinutes(Math.Max(0, settings.RunoutWarningLeadMinutes));
         DateTime now = DateTime.UtcNow;
 
@@ -226,7 +322,12 @@ public class FilamentCoverageService(
             }
         }
 
-        return warnings;
+        return new FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>>(
+            warnings,
+            OriginWatermark.Combine(
+                rootOrigin,
+                settingsSnapshot.OriginWatermark,
+                fleetResult.OriginWatermark));
     }
 
     // ---------------------------------------------------------------------
@@ -241,9 +342,10 @@ public class FilamentCoverageService(
         Printer printer,
         List<PrintJob> jobs,
         IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> spoolLookup,
-        double? liveProgress)
+        double? liveProgress,
+        SpoolCoverageSettings? settingsOverride = null)
     {
-        SpoolCoverageSettings settings = GetSettings();
+        SpoolCoverageSettings settings = settingsOverride ?? GetSettings();
         DateTime evaluatedAt = DateTime.UtcNow;
         List<Toolhead> allToolheads = (printer.Toolheads ?? [])
             .OrderBy(t => t.Index)

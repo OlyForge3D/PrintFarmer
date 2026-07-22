@@ -3,6 +3,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -23,7 +24,8 @@ public sealed class SdcpPollingService(
     IServiceScopeFactory scopeFactory,
     ILogger<SdcpPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
-    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
     private readonly ILogger<SdcpPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
@@ -201,6 +203,9 @@ public sealed class SdcpPollingService(
 
                     // SDCP uses BackendUrl which combines ServerUrl with BackendPort
                     // The GetCompositeStatusAsync expects the base URL (which it converts to WebSocket URL internally)
+                    long? originWatermark = await OriginWatermark
+                        .CaptureAsync(watermarkReader, _logger, "SDCP status", ct)
+                        .ConfigureAwait(false);
                     PrinterCompositeStatus status = await sdcpClient.GetCompositeStatusAsync(
                         printer.BackendUrl,
                         ct);
@@ -274,7 +279,7 @@ public sealed class SdcpPollingService(
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
                         SpoolInfo: null);
-                    _statusCacheWriter.UpdateStatus(cacheUpdate);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,
@@ -345,7 +350,7 @@ public sealed class SdcpPollingService(
                             HotendTarget: null,
                             BedTarget: null,
                             SpoolInfo: null);
-                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         var offlineSignalRUpdate = new PrinterStatusUpdate(
                             Id: printerId,

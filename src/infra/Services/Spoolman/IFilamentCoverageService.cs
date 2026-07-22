@@ -28,9 +28,39 @@ public interface IFilamentCoverageService
     Task<PrinterFilamentCoverageDto?> GetForPrinterAsync(Guid printerId, CancellationToken ct);
 
     /// <summary>
+    /// Computes one printer's coverage with nullable origin provenance.
+    /// </summary>
+    async Task<FilamentCoverageResult<PrinterFilamentCoverageDto?>> GetForPrinterWithOriginAsync(
+        Guid printerId,
+        CancellationToken ct)
+    {
+        PrinterFilamentCoverageDto? coverage =
+            await GetForPrinterAsync(printerId, ct).ConfigureAwait(false);
+        return new FilamentCoverageResult<PrinterFilamentCoverageDto?>(
+            coverage,
+            OriginWatermark: null);
+    }
+
+    /// <summary>
     /// Computes coverage for every printer in the fleet. Concurrency and
     /// per-printer timeouts are bounded by
     /// <see cref="Settings.SpoolCoverageSettings"/>.
     /// </summary>
     Task<FleetFilamentCoverageDto> GetForFleetAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Computes fleet coverage with nullable origin provenance.
+    /// </summary>
+    async Task<FilamentCoverageResult<FleetFilamentCoverageDto>> GetForFleetWithOriginAsync(CancellationToken ct)
+    {
+        FleetFilamentCoverageDto coverage = await GetForFleetAsync(ct).ConfigureAwait(false);
+        return new FilamentCoverageResult<FleetFilamentCoverageDto>(
+            coverage,
+            OriginWatermark: null);
+    }
 }
+
+/// <summary>
+/// A filament-coverage projection with its conservative origin watermark.
+/// </summary>
+public sealed record FilamentCoverageResult<T>(T Value, long? OriginWatermark);

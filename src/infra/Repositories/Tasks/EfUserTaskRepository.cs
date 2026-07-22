@@ -2,6 +2,8 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Farm.Infrastructure.Repositories.Tasks;
 
@@ -248,7 +250,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     public async Task AddAsync(UserTask task, CancellationToken ct = default)
     {
         _ = _db.UserTasks.Add(task);
-        _ = await _db.SaveChangesAsync(ct);
+        _ = await SaveTaskChangesAsync(ct);
     }
 
     /// <inheritdoc />
@@ -263,7 +265,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     {
         task.UpdatedAt = DateTime.UtcNow;
         _ = _db.UserTasks.Update(task);
-        _ = await _db.SaveChangesAsync(ct);
+        _ = await SaveTaskChangesAsync(ct);
     }
 
     /// <inheritdoc />
@@ -286,14 +288,17 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
-    public Task UpdateFieldsAsync(UserTask task, IReadOnlyCollection<string> propertyNames, CancellationToken ct = default)
+    public async Task UpdateFieldsAsync(
+        UserTask task,
+        IReadOnlyCollection<string> propertyNames,
+        CancellationToken ct = default)
     {
         // Fix R3-5: unlike UpdateAsync/TrackUpdateAsync (which mark the whole entity
         // modified), this only writes the properties the caller names, so a detached
         // caller (loaded via a no-tracking query) cannot clobber columns another
         // writer changed concurrently on the same row.
         task.UpdatedAt = DateTime.UtcNow;
-        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<UserTask> entry = _db.Entry(task);
+        EntityEntry<UserTask> entry = _db.Entry(task);
         if (entry.State == EntityState.Detached)
         {
             _ = _db.UserTasks.Attach(task);
@@ -305,7 +310,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
             entry.Property(propertyName).IsModified = true;
         }
 
-        return _db.SaveChangesAsync(ct);
+        _ = await SaveTaskChangesAsync(ct);
     }
 
     /// <inheritdoc />
@@ -328,20 +333,36 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
         if (properties.SetEquals([nameof(UserTask.RelatedEntityIdsJson), nameof(UserTask.Description)]))
         {
             IQueryable<UserTask> query = _db.UserTasks
-                .Where(t => t.Id == task.Id && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress));
+                .Where(t =>
+                    t.Id == task.Id
+                    && t.LastMutationSequence == task.LastMutationSequence
+                    && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress));
             if (expectedUpdatedAt.HasValue)
             {
                 query = query.Where(t => t.UpdatedAt == expectedUpdatedAt.Value);
             }
 
-            int rows = await query.ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(t => t.UpdatedAt, updatedAt)
-                    .SetProperty(t => t.RelatedEntityIdsJson, task.RelatedEntityIdsJson)
-                    .SetProperty(t => t.Description, task.Description),
+            long committedSequence = 0;
+            bool updated = await ExecuteTaskMutationAsync(
+                async sequence =>
+                {
+                    committedSequence = sequence;
+                    return await query.ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(t => t.UpdatedAt, updatedAt)
+                            .SetProperty(t => t.LastMutationSequence, sequence)
+                            .SetProperty(t => t.RelatedEntityIdsJson, task.RelatedEntityIdsJson)
+                            .SetProperty(t => t.Description, task.Description),
+                        ct);
+                },
                 ct);
+            if (updated)
+            {
+                task.UpdatedAt = updatedAt;
+                task.LastMutationSequence = committedSequence;
+            }
 
-            return rows > 0;
+            return updated;
         }
 
         throw new NotSupportedException(
@@ -355,16 +376,17 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
         // Pending/InProgress at the moment of the update. A concurrent Skip/Dismiss
         // that already committed wins the race instead of being silently overwritten
         // by the compiler's batched SaveChangesAsync.
-        int rows = await _db.UserTasks
-            .Where(t => t.Id == taskId && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(t => t.Status, UserTaskStatus.Completed)
-                    .SetProperty(t => t.CompletedAt, completedAtUtc)
-                    .SetProperty(t => t.UpdatedAt, completedAtUtc),
-                ct);
-
-        return rows > 0;
+        return await ExecuteTaskMutationAsync(
+            sequence => _db.UserTasks
+                .Where(t => t.Id == taskId && (t.Status == UserTaskStatus.Pending || t.Status == UserTaskStatus.InProgress))
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(t => t.Status, UserTaskStatus.Completed)
+                        .SetProperty(t => t.CompletedAt, completedAtUtc)
+                        .SetProperty(t => t.UpdatedAt, completedAtUtc)
+                        .SetProperty(t => t.LastMutationSequence, sequence),
+                    ct),
+            ct);
     }
 
     /// <inheritdoc />
@@ -382,10 +404,182 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     public async Task DeleteAsync(UserTask task, CancellationToken ct = default)
     {
         _ = _db.UserTasks.Remove(task);
-        _ = await _db.SaveChangesAsync(ct);
+        _ = await SaveTaskChangesAsync(ct);
     }
 
     /// <inheritdoc />
     public async Task SaveChangesAsync(CancellationToken ct = default) =>
-        await _db.SaveChangesAsync(ct);
+        _ = await SaveTaskChangesAsync(ct);
+
+    private async Task<int> SaveTaskChangesAsync(CancellationToken ct)
+    {
+        List<EntityEntry<UserTask>> taskEntries = _db.ChangeTracker
+            .Entries<UserTask>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .ToList();
+        if (taskEntries.Count == 0)
+        {
+            return await _db.SaveChangesAsync(ct);
+        }
+
+        IDbContextTransaction? ownedTransaction = await BeginOwnedTransactionAsync(ct);
+        IDbContextTransaction? transaction = ownedTransaction ?? _db.Database.CurrentTransaction;
+        string? savepoint = null;
+        if (ownedTransaction is null && transaction is not null)
+        {
+            if (!transaction.SupportsSavepoints)
+            {
+                throw new InvalidOperationException(
+                    "Task mutations require savepoint support inside a caller-owned transaction.");
+            }
+
+            savepoint = $"user_task_mutation_{Guid.NewGuid():N}";
+            await transaction.CreateSavepointAsync(savepoint, ct);
+        }
+
+        try
+        {
+            long sequence = await BumpMutationSequenceAsync(ct);
+            foreach (EntityEntry<UserTask> entry in taskEntries.Where(entry => entry.State is not EntityState.Deleted))
+            {
+                entry.Property(task => task.LastMutationSequence).CurrentValue = sequence;
+                if (entry.State is EntityState.Modified)
+                {
+                    entry.Property(task => task.LastMutationSequence).IsModified = true;
+                }
+            }
+
+            int rows = await _db.SaveChangesAsync(ct);
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.CommitAsync(ct);
+            }
+            else if (transaction is not null && savepoint is not null)
+            {
+                await transaction.ReleaseSavepointAsync(savepoint, ct);
+            }
+
+            return rows;
+        }
+        catch
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.RollbackAsync(CancellationToken.None);
+            }
+            else if (transaction is not null && savepoint is not null)
+            {
+                await transaction.RollbackToSavepointAsync(savepoint, CancellationToken.None);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<bool> ExecuteTaskMutationAsync(
+        Func<long, Task<int>> mutateAsync,
+        CancellationToken ct)
+    {
+        IDbContextTransaction? ownedTransaction = await BeginOwnedTransactionAsync(ct);
+        IDbContextTransaction? transaction = ownedTransaction ?? _db.Database.CurrentTransaction;
+        string? savepoint = null;
+
+        if (ownedTransaction is null && transaction is not null)
+        {
+            if (!transaction.SupportsSavepoints)
+            {
+                throw new InvalidOperationException(
+                    "Conditional task mutations require savepoint support inside a caller-owned transaction.");
+            }
+
+            savepoint = $"user_task_mutation_{Guid.NewGuid():N}";
+            await transaction.CreateSavepointAsync(savepoint, ct);
+        }
+
+        try
+        {
+            long sequence = await BumpMutationSequenceAsync(ct);
+            int rows = await mutateAsync(sequence);
+            if (rows == 0)
+            {
+                if (ownedTransaction is not null)
+                {
+                    await ownedTransaction.RollbackAsync(CancellationToken.None);
+                }
+                else if (transaction is not null && savepoint is not null)
+                {
+                    await transaction.RollbackToSavepointAsync(savepoint, CancellationToken.None);
+                }
+
+                return false;
+            }
+
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.CommitAsync(ct);
+            }
+            else if (transaction is not null && savepoint is not null)
+            {
+                await transaction.ReleaseSavepointAsync(savepoint, ct);
+            }
+
+            return true;
+        }
+        catch
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.RollbackAsync(CancellationToken.None);
+            }
+            else if (transaction is not null && savepoint is not null)
+            {
+                await transaction.RollbackToSavepointAsync(savepoint, CancellationToken.None);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<long> BumpMutationSequenceAsync(CancellationToken ct)
+    {
+        int rows = await _db.MutationCounters
+            .Where(counter => counter.Id == MutationCounter.GlobalId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(counter => counter.Value, counter => counter.Value + 1),
+                ct);
+        if (rows != 1)
+        {
+            throw new InvalidOperationException("The global mutation counter row is missing.");
+        }
+
+        return await _db.MutationCounters
+            .AsNoTracking()
+            .Where(counter => counter.Id == MutationCounter.GlobalId)
+            .Select(counter => counter.Value)
+            .SingleAsync(ct);
+    }
+
+    private async Task<IDbContextTransaction?> BeginOwnedTransactionAsync(CancellationToken ct)
+    {
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction is not null)
+        {
+            return null;
+        }
+
+        return await _db.Database.BeginTransactionAsync(ct);
+    }
 }

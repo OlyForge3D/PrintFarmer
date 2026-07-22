@@ -60,6 +60,10 @@ public static class DatabaseInitializationExtensions
                             db,
                             logger,
                             startupCts.Token);
+                        await SqliteMutationWatermarkSchemaUpgrade.ApplyAsync(
+                            db,
+                            logger,
+                            startupCts.Token);
                     }
 
                     logger.LogInformation(

@@ -26,7 +26,7 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 public sealed class FilamentRunoutAttentionSource(
     IFilamentCoverageAttentionSource coverageSource,
     IFilamentRunoutSwitchEvaluator? switchEvaluator = null,
-    IOperatorFeatureGate? operatorFeatureGate = null) : IAttentionSource
+    IOperatorFeatureGate? operatorFeatureGate = null) : IAttentionSource, IAttentionSourceWithOrigin
 {
     /// <summary>
     /// Stable timestamp for a continuously-computed runout condition. The same
@@ -51,6 +51,23 @@ public sealed class FilamentRunoutAttentionSource(
     {
         IReadOnlyList<FilamentRunoutWarningDto> warnings =
             await _coverageSource.GetRunoutWarningsAsync(cancellationToken).ConfigureAwait(false);
+        return await MapWarningsAsync(warnings, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<AttentionSourceResult> GetItemsWithOriginAsync(CancellationToken cancellationToken)
+    {
+        FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>> coverageResult =
+            await _coverageSource.GetRunoutWarningsWithOriginAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<AttentionItemDto> items =
+            await MapWarningsAsync(coverageResult.Value, cancellationToken).ConfigureAwait(false);
+        return new AttentionSourceResult(items, coverageResult.OriginWatermark);
+    }
+
+    private async Task<IReadOnlyList<AttentionItemDto>> MapWarningsAsync(
+        IReadOnlyList<FilamentRunoutWarningDto> warnings,
+        CancellationToken cancellationToken)
+    {
         List<AttentionItemDto> items = new(warnings.Count);
 
         // The downgrade path is gated behind the multi-slot-fallback feature AND the presence of a

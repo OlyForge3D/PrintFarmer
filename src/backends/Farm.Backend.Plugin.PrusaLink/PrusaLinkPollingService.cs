@@ -3,6 +3,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -22,7 +23,8 @@ public sealed class PrusaLinkPollingService(
     IServiceScopeFactory scopeFactory,
     ILogger<PrusaLinkPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
-    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IHostedService, IDisposable
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
 {
     private readonly ILogger<PrusaLinkPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
@@ -201,6 +203,9 @@ public sealed class PrusaLinkPollingService(
                     ManagedSpoolProviderHelper spoolProvider = scope.ServiceProvider.GetRequiredService<ManagedSpoolProviderHelper>();
 
                     // Use the Credential property populated by the repository layer
+                    long? originWatermark = await OriginWatermark
+                        .CaptureAsync(watermarkReader, _logger, "PrusaLink status", ct)
+                        .ConfigureAwait(false);
                     PrusaCompositeStatus status = await prusaLinkClient.GetCompositeStatusAsync(
                         printer.ServerUrl,
                         printer.Credential,
@@ -267,7 +272,7 @@ public sealed class PrusaLinkPollingService(
                         SpoolInfo: spoolInfo,
                         PrintTimeLeftSeconds: status.TimeRemainingSeconds,
                         SpeedMultiplier: status.SpeedMultiplier);
-                    _statusCacheWriter.UpdateStatus(cacheUpdate);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,
@@ -324,7 +329,7 @@ public sealed class PrusaLinkPollingService(
                             SpoolInfo: null,
                             PrintTimeLeftSeconds: null,
                             SpeedMultiplier: null);
-                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         var offlineSignalRUpdate = new PrinterStatusUpdate(
                             Id: printerId,

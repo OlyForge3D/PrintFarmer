@@ -199,6 +199,24 @@ public class FilamentRunoutAttentionSourceTests
         item.ToolheadIndex.Should().Be(0);
     }
 
+    [Fact]
+    public async Task GetItemsWithOriginAsync_PreservesCoverageOrigin()
+    {
+        Mock<IFilamentCoverageAttentionSource> coverage = new(MockBehavior.Strict);
+        coverage
+            .Setup(x => x.GetRunoutWarningsWithOriginAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>>(
+                [ActiveRunout()],
+                OriginWatermark: 23));
+        FilamentRunoutAttentionSource source = new(coverage.Object);
+
+        AttentionSourceResult result =
+            await source.GetItemsWithOriginAsync(CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.OriginWatermark.Should().Be(23);
+    }
+
     private static FilamentRunoutWarningDto ActiveRunout()
         => new(
             Guid.NewGuid(),

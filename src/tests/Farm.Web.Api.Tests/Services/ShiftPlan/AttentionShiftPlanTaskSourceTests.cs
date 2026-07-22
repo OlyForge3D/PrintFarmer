@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.ShiftPlan;
 using Farm.Infrastructure.Services.ShiftPlan.Sources;
 using Farm.Infrastructure.Settings;
@@ -146,6 +147,30 @@ public class AttentionShiftPlanTaskSourceTests
         Assert.Contains(UserTaskSourceKind.FilamentCoverage, src.OwnedKinds);
     }
 
+    [Theory]
+    [InlineData(3L, 3L)]
+    [InlineData(null, null)]
+    public async Task ProduceAsync_ComposesOriginalNestedSourceProvenance(
+        long? nestedOrigin,
+        long? expected)
+    {
+        Mock<ISettingsService> settings = new();
+        settings
+            .Setup(s => s.GetSnapshot<SpoolCoverageSettings>())
+            .Returns(new SettingsSnapshot<SpoolCoverageSettings>(
+                new SpoolCoverageSettings(),
+                OriginWatermark: 7));
+        AttentionShiftPlanTaskSource source = new(
+            [new ProvenanceAttentionSource(nestedOrigin)],
+            settings.Object,
+            NullLogger<AttentionShiftPlanTaskSource>.Instance,
+            new ConstantWatermarkReader(9));
+
+        ShiftPlanSourceResult result = await source.ProduceAsync(CancellationToken.None);
+
+        Assert.Equal(expected, result.OriginWatermark);
+    }
+
     private static AttentionShiftPlanTaskSource BuildSource(SpoolCoverageSettings settings, params AttentionItemDto[] items)
     {
         Mock<IAttentionSource> attn = new();
@@ -159,5 +184,23 @@ public class AttentionShiftPlanTaskSourceTests
             new[] { attn.Object },
             svc.Object,
             NullLogger<AttentionShiftPlanTaskSource>.Instance);
+    }
+
+    private sealed class ProvenanceAttentionSource(long? originWatermark)
+        : IAttentionSource, IAttentionSourceWithOrigin
+    {
+        public string SourceName => "provenance-test";
+
+        public Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<AttentionItemDto>>([]);
+
+        public Task<AttentionSourceResult> GetItemsWithOriginAsync(CancellationToken cancellationToken)
+            => Task.FromResult(new AttentionSourceResult([], originWatermark));
+    }
+
+    private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default)
+            => Task.FromResult(value);
     }
 }

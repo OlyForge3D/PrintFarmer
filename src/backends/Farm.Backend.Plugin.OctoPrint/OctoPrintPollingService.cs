@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -24,7 +25,8 @@ public sealed class OctoPrintPollingService(
     IServiceScopeFactory scopeFactory,
     ILogger<OctoPrintPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
-    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IHostedService, IDisposable
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
 {
     private readonly ILogger<OctoPrintPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
@@ -226,7 +228,8 @@ public sealed class OctoPrintPollingService(
                                     octoPrintClient,
                                     _hub,
                                     _statusCacheWriter,
-                                    _coverageBroadcaster);
+                                    _coverageBroadcaster,
+                                    watermarkReader);
 
                                 _webSocketAdapters.TryAdd(id, adapter);
                                 PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
@@ -432,7 +435,7 @@ public sealed class OctoPrintPollingService(
                             PrintTimeLeftSeconds: statusData.PrintTimeLeftSeconds);
 
                         // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(cacheUpdate);
+                        _statusCacheWriter.UpdateStatus(cacheUpdate, statusData.OriginWatermark);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var signalRUpdate = new PrinterStatusUpdate(
@@ -496,7 +499,7 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: null);
 
                         // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var offlineSignalRUpdate = new PrinterStatusUpdate(

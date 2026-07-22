@@ -21,6 +21,14 @@ public interface ISettingsService
         where T : class;
 
     /// <summary>
+    /// Gets a typed settings instance with its nullable origin provenance.
+    /// </summary>
+    /// <typeparam name="T">The settings type to retrieve.</typeparam>
+    /// <returns>The settings instance and the watermark captured before it was loaded.</returns>
+    SettingsSnapshot<T> GetSnapshot<T>()
+        where T : class;
+
+    /// <summary>
     /// Gets a settings object by its unique key.
     /// </summary>
     /// <param name="key">The settings key identifier.</param>
