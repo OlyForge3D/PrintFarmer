@@ -21,6 +21,299 @@ final class JobHistoryViewModelTests: XCTestCase {
         mockJobAnalyticsService = nil
         super.tearDown()
     }
+
+    private func commitHistory(_ page: QueueHistoryPage) async {
+        mockJobAnalyticsService.errorToThrow = nil
+        mockJobAnalyticsService.historyPageToReturn = page
+        await viewModel.loadHistory()
+    }
+
+    private func historyEntry(_ id: String) -> QueueHistoryEntry {
+        QueueHistoryEntry(
+            id: id,
+            jobName: "\(id).gcode",
+            printerName: "Printer \(id)",
+            status: "completed",
+            completedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            durationSeconds: 600
+        )
+    }
+
+    private func historyPage(
+        _ ids: [String],
+        totalCount: Int = 100,
+        currentPage: Int,
+        stats: QueueHistoryStats? = nil
+    ) -> QueueHistoryPage {
+        QueueHistoryPage(
+            entries: ids.map(historyEntry),
+            totalCount: totalCount,
+            currentPage: currentPage,
+            pageSize: 30,
+            stats: stats
+        )
+    }
+
+    private func requireEntry(
+        _ service: ScriptedJobAnalyticsService,
+        registration: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> ScriptedJobAnalyticsService.RecordedCall? {
+        switch await service.awaitEntryOrOperationFinished(registration: registration) {
+        case .entered(let call):
+            XCTAssertEqual(call.index, registration, file: file, line: line)
+            return call
+        case .operationFinished:
+            XCTFail(
+                "history operation finished before registered call \(registration) entered the service",
+                file: file,
+                line: line
+            )
+            return nil
+        }
+    }
+
+    /// Per-call scripted history service for #853 interleaving tests. Every
+    /// operation is registered before dispatch, signals entry only after its
+    /// release continuation is installed, receives an explicit release outcome,
+    /// and is drained by its owning test task. If the view model returns before
+    /// entering the registered call, `operationFinished` resolves the entry wait
+    /// with an assertion-friendly event instead of leaving the test suspended.
+    private final class ScriptedJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sendable {
+        struct RecordedCall: Sendable {
+            let index: Int
+            let limit: Int?
+            let offset: Int?
+            let sortBy: String?
+            let statuses: String?
+            let dateStart: Date?
+            let dateEnd: Date?
+        }
+
+        enum Outcome: Sendable {
+            case success(QueueHistoryPage)
+            case failure
+        }
+
+        enum EntryEvent: Sendable {
+            case entered(RecordedCall)
+            case operationFinished
+        }
+
+        enum ReleaseOutcome: Sendable, Equatable {
+            case released
+            case buffered
+            case rejected
+        }
+
+        private enum ScriptedFailure: Error {
+            case expected
+            case unexpectedCall
+        }
+
+        private let coordinator = Coordinator()
+
+        func register(_ outcome: Outcome) async -> Int {
+            await coordinator.register(outcome)
+        }
+
+        func awaitEntryOrOperationFinished(registration: Int) async -> EntryEvent {
+            await coordinator.awaitEntryOrOperationFinished(registration: registration)
+        }
+
+        func operationFinished(registration: Int) async {
+            await coordinator.operationFinished(registration: registration)
+        }
+
+        func release(registration: Int) async -> ReleaseOutcome {
+            await coordinator.release(registration: registration)
+        }
+
+        var recordedCalls: [RecordedCall] {
+            get async { await coordinator.recordedCalls }
+        }
+
+        func getHistory(
+            limit: Int?,
+            offset: Int?,
+            sortBy: String?,
+            statuses: String?,
+            dateStart: Date?,
+            dateEnd: Date?
+        ) async throws -> QueueHistoryPage {
+            let outcome = await coordinator.recordAndWait(
+                limit: limit,
+                offset: offset,
+                sortBy: sortBy,
+                statuses: statuses,
+                dateStart: dateStart,
+                dateEnd: dateEnd
+            )
+            guard let outcome else {
+                throw ScriptedFailure.unexpectedCall
+            }
+            switch outcome {
+            case .success(let page):
+                return page
+            case .failure:
+                throw ScriptedFailure.expected
+            }
+        }
+
+        func getQueuedJobs(
+            filterStatus: String?,
+            filterModel: String?,
+            filterMaterial: String?,
+            limit: Int?,
+            offset: Int?
+        ) async throws -> [QueuedJobWithMeta] {
+            []
+        }
+
+        func getStats() async throws -> QueueStats {
+            QueueStats(
+                totalQueued: 0,
+                totalPrinting: 0,
+                totalPaused: 0,
+                averageWaitTimeMinutes: 0,
+                byModel: []
+            )
+        }
+
+        func getModelStats() async throws -> [QueuePrinterModelStats] {
+            []
+        }
+
+        func getTimeline(
+            dateFrom: Date?,
+            dateTo: Date?,
+            printerId: UUID?,
+            filterStatus: String?,
+            limit: Int?
+        ) async throws -> [TimelineEvent] {
+            []
+        }
+
+        func getJobStateHistory(jobId: String) async throws -> JobStateHistory {
+            JobStateHistory(
+                jobId: jobId,
+                jobName: "",
+                transitions: [],
+                totalDurationSeconds: 0,
+                estimatedDurationSeconds: nil,
+                variancePercent: nil
+            )
+        }
+
+        func getDurationAnalytics(
+            printerId: UUID?,
+            dateFrom: Date?,
+            dateTo: Date?
+        ) async throws -> DurationAnalytics {
+            throw ScriptedFailure.expected
+        }
+
+        private actor Coordinator {
+            private var outcomes: [Outcome] = []
+            private var recorded: [RecordedCall] = []
+            private var pendingReleases: [Int: CheckedContinuation<Void, Never>] = [:]
+            private var bufferedReleases: Set<Int> = []
+            private var terminalReleases: Set<Int> = []
+            private var enteredRegistrations: Set<Int> = []
+            private var entryEvents: [Int: EntryEvent] = [:]
+            private var entryWaiters: [Int: CheckedContinuation<EntryEvent, Never>] = [:]
+
+            var recordedCalls: [RecordedCall] { recorded }
+
+            func register(_ outcome: Outcome) -> Int {
+                let registration = outcomes.count
+                outcomes.append(outcome)
+                return registration
+            }
+
+            func awaitEntryOrOperationFinished(registration: Int) async -> EntryEvent {
+                if let event = entryEvents.removeValue(forKey: registration) {
+                    return event
+                }
+                return await withCheckedContinuation { continuation in
+                    precondition(
+                        entryWaiters[registration] == nil,
+                        "only one entry waiter is allowed per scripted registration"
+                    )
+                    entryWaiters[registration] = continuation
+                }
+            }
+
+            func operationFinished(registration: Int) {
+                guard !enteredRegistrations.contains(registration) else { return }
+                signal(.operationFinished, registration: registration)
+            }
+
+            func recordAndWait(
+                limit: Int?,
+                offset: Int?,
+                sortBy: String?,
+                statuses: String?,
+                dateStart: Date?,
+                dateEnd: Date?
+            ) async -> Outcome? {
+                let index = recorded.count
+                let call = RecordedCall(
+                    index: index,
+                    limit: limit,
+                    offset: offset,
+                    sortBy: sortBy,
+                    statuses: statuses,
+                    dateStart: dateStart,
+                    dateEnd: dateEnd
+                )
+                recorded.append(call)
+
+                guard outcomes.indices.contains(index) else {
+                    enteredRegistrations.insert(index)
+                    signal(.entered(call), registration: index)
+                    return nil
+                }
+                let outcome = outcomes[index]
+
+                await withCheckedContinuation { continuation in
+                    if bufferedReleases.remove(index) != nil {
+                        continuation.resume()
+                    } else {
+                        pendingReleases[index] = continuation
+                    }
+                    enteredRegistrations.insert(index)
+                    signal(.entered(call), registration: index)
+                }
+                return outcome
+            }
+
+            func release(registration: Int) -> ReleaseOutcome {
+                guard outcomes.indices.contains(registration),
+                      !terminalReleases.contains(registration) else {
+                    return .rejected
+                }
+
+                terminalReleases.insert(registration)
+                if let continuation = pendingReleases.removeValue(forKey: registration) {
+                    continuation.resume()
+                    return .released
+                }
+
+                bufferedReleases.insert(registration)
+                return .buffered
+            }
+
+            private func signal(_ event: EntryEvent, registration: Int) {
+                if let waiter = entryWaiters.removeValue(forKey: registration) {
+                    waiter.resume(returning: event)
+                } else if entryEvents[registration] == nil {
+                    entryEvents[registration] = event
+                }
+            }
+        }
+    }
     
     // MARK: - Initial State
     
@@ -188,17 +481,17 @@ final class JobHistoryViewModelTests: XCTestCase {
             completedAt: Date(),
             durationSeconds: 600
         )
-        viewModel.historyPage = QueueHistoryPage(
+        let dateFrom = Date(timeIntervalSince1970: 1_700_000_000)
+        let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
+        viewModel.dateFrom = dateFrom
+        viewModel.dateTo = dateTo
+        await commitHistory(QueueHistoryPage(
             entries: [previousEntry],
             totalCount: 100,
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
-        let dateFrom = Date(timeIntervalSince1970: 1_700_000_000)
-        let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
-        viewModel.dateFrom = dateFrom
-        viewModel.dateTo = dateTo
+        ))
         viewModel.error = "prior-job-history-error-sentinel"
         mockJobAnalyticsService.errorToThrow = TestError.generic
         
@@ -233,13 +526,13 @@ final class JobHistoryViewModelTests: XCTestCase {
     /// synchronously before `await`, so a thrown request left the view model
     /// pointing at offset 30 despite having no entries from that page.
     func testLoadMorePreservesOffsetWhenRequestFails() async {
-        viewModel.historyPage = QueueHistoryPage(
+        await commitHistory(QueueHistoryPage(
             entries: [],
             totalCount: 100,
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
+        ))
         mockJobAnalyticsService.errorToThrow = TestError.generic
 
         await viewModel.loadMore()
@@ -260,13 +553,13 @@ final class JobHistoryViewModelTests: XCTestCase {
             completedAt: Date(),
             durationSeconds: 3600
         )
-        viewModel.historyPage = QueueHistoryPage(
+        await commitHistory(QueueHistoryPage(
             entries: [existing],
             totalCount: 100,
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
+        ))
 
         // First attempt: request fails. Cursor must stay at 0.
         mockJobAnalyticsService.errorToThrow = TestError.generic
@@ -311,13 +604,14 @@ final class JobHistoryViewModelTests: XCTestCase {
     /// request is in flight, neither the returned page nor the cursor may be
     /// published — the next active `loadMore()` must retry the same offset.
     func testLoadMoreDoesNotAdvanceOffsetWhenViewDeactivatedDuringRequest() async {
-        viewModel.historyPage = QueueHistoryPage(
+        let activationToken = viewModel.activate()
+        await commitHistory(QueueHistoryPage(
             entries: [],
             totalCount: 100,
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
+        ))
 
         let gated = GatedJobAnalyticsService(maxGatedCalls: 1)
         gated.historyPageToReturn = QueueHistoryPage(
@@ -339,7 +633,7 @@ final class JobHistoryViewModelTests: XCTestCase {
             return XCTFail("expected gate entry signal")
         }
 
-        viewModel.isViewActive = false
+        viewModel.deactivate(activationToken: activationToken)
         await gated.release(callIndex: callIndex)
         await task.value
 
@@ -348,6 +642,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         let recorded = await gated.recordedCalls
         XCTAssertEqual(recorded.map(\.offset), [30])
         XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertFalse(viewModel.isLoadingMore)
         // Cursor stayed at 0, and the historyPage was not overwritten.
         XCTAssertEqual(viewModel.historyPage?.entries.count, 0)
         XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
@@ -363,13 +658,13 @@ final class JobHistoryViewModelTests: XCTestCase {
     /// assertion then fails deterministically — the test cannot hang
     /// waiting on an un-released continuation.
     func testLoadMoreConcurrentCallsAreSuppressed() async {
-        viewModel.historyPage = QueueHistoryPage(
+        await commitHistory(QueueHistoryPage(
             entries: [],
             totalCount: 100,
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
+        ))
 
         let gated = GatedJobAnalyticsService(maxGatedCalls: 1)
         gated.historyPageToReturn = QueueHistoryPage(
@@ -550,6 +845,432 @@ final class JobHistoryViewModelTests: XCTestCase {
         let recorded = await gated.recordedCalls
         XCTAssertEqual(recorded.map(\.offset), [30, 60, 90])
     }
+
+    // MARK: - History Authority (Issue #853)
+
+    func testReloadSupersedesLoadMoreWhenPaginationCompletesFirst() async {
+        await commitHistory(historyPage(["old-1"], currentPage: 1))
+
+        let service = ScriptedJobAnalyticsService()
+        let paginationRegistration = await service.register(
+            .success(historyPage(["old-2"], currentPage: 2))
+        )
+        let reloadRegistration = await service.register(
+            .success(historyPage(["replacement"], totalCount: 1, currentPage: 1))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+
+        let paginationTask = Task { @MainActor in
+            await viewModel.loadMore()
+            await service.operationFinished(registration: paginationRegistration)
+        }
+        guard let paginationCall = await requireEntry(
+            service,
+            registration: paginationRegistration
+        ) else {
+            return
+        }
+        XCTAssertEqual(paginationCall.offset, 30)
+
+        let reloadTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: reloadRegistration)
+        }
+        guard let reloadCall = await requireEntry(
+            service,
+            registration: reloadRegistration
+        ) else {
+            _ = await service.release(registration: paginationRegistration)
+            await paginationTask.value
+            return
+        }
+        XCTAssertEqual(reloadCall.offset, 0)
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let paginationRelease = await service.release(registration: paginationRegistration)
+        XCTAssertEqual(paginationRelease, .released)
+        await paginationTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["old-1"])
+        XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let reloadRelease = await service.release(registration: reloadRegistration)
+        XCTAssertEqual(reloadRelease, .released)
+        await reloadTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["replacement"])
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
+        XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testReloadSupersedesLoadMoreWhenReloadCompletesFirst() async {
+        await commitHistory(historyPage(["old-1"], currentPage: 1))
+
+        let service = ScriptedJobAnalyticsService()
+        let paginationRegistration = await service.register(
+            .success(historyPage(["old-2"], currentPage: 2))
+        )
+        let reloadRegistration = await service.register(
+            .success(historyPage(["replacement"], totalCount: 1, currentPage: 1))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+
+        let paginationTask = Task { @MainActor in
+            await viewModel.loadMore()
+            await service.operationFinished(registration: paginationRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: paginationRegistration
+        ) != nil else {
+            return
+        }
+
+        let reloadTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: reloadRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: reloadRegistration
+        ) != nil else {
+            _ = await service.release(registration: paginationRegistration)
+            await paginationTask.value
+            return
+        }
+
+        let reloadRelease = await service.release(registration: reloadRegistration)
+        XCTAssertEqual(reloadRelease, .released)
+        await reloadTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["replacement"])
+        XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let paginationRelease = await service.release(registration: paginationRegistration)
+        XCTAssertEqual(paginationRelease, .released)
+        await paginationTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["replacement"])
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
+        XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testFilterReplacementInvalidatesPaginationAndForwardsCapturedFilters() async {
+        let oldFrom = Date(timeIntervalSince1970: 1_700_000_000)
+        let oldTo = Date(timeIntervalSince1970: 1_700_086_400)
+        let newFrom = Date(timeIntervalSince1970: 1_710_000_000)
+        let newTo = Date(timeIntervalSince1970: 1_710_086_400)
+        viewModel.dateFrom = oldFrom
+        viewModel.dateTo = oldTo
+        await commitHistory(historyPage(["old-1"], currentPage: 1))
+
+        let service = ScriptedJobAnalyticsService()
+        let paginationRegistration = await service.register(
+            .success(historyPage(["old-2"], currentPage: 2))
+        )
+        let reloadRegistration = await service.register(
+            .success(historyPage(["filtered"], totalCount: 1, currentPage: 1))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+
+        let paginationTask = Task { @MainActor in
+            await viewModel.loadMore()
+            await service.operationFinished(registration: paginationRegistration)
+        }
+        guard let paginationCall = await requireEntry(
+            service,
+            registration: paginationRegistration
+        ) else {
+            return
+        }
+        XCTAssertEqual(paginationCall.dateStart, oldFrom)
+        XCTAssertEqual(paginationCall.dateEnd, oldTo)
+
+        viewModel.dateFrom = newFrom
+        viewModel.dateTo = newTo
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let reloadTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: reloadRegistration)
+        }
+        guard let reloadCall = await requireEntry(
+            service,
+            registration: reloadRegistration
+        ) else {
+            _ = await service.release(registration: paginationRegistration)
+            await paginationTask.value
+            return
+        }
+        XCTAssertEqual(reloadCall.dateStart, newFrom)
+        XCTAssertEqual(reloadCall.dateEnd, newTo)
+
+        let paginationRelease = await service.release(registration: paginationRegistration)
+        XCTAssertEqual(paginationRelease, .released)
+        await paginationTask.value
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["old-1"])
+        XCTAssertTrue(viewModel.isLoading)
+
+        let reloadRelease = await service.release(registration: reloadRegistration)
+        XCTAssertEqual(reloadRelease, .released)
+        await reloadTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["filtered"])
+        XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testCancelledRefreshReturningSuccessPreservesPaginatedSnapshot() async {
+        let committedStats = QueueHistoryStats(
+            totalCompleted: 2,
+            totalFailed: 0,
+            averageDurationMinutes: 20
+        )
+        await commitHistory(historyPage(["old-1"], currentPage: 1))
+        mockJobAnalyticsService.historyPageToReturn = historyPage(
+            ["old-2"],
+            currentPage: 2,
+            stats: committedStats
+        )
+        await viewModel.loadMore()
+        XCTAssertEqual(viewModel.currentOffset, 30)
+
+        let service = ScriptedJobAnalyticsService()
+        let refreshRegistration = await service.register(
+            .success(historyPage(["cancelled-replacement"], totalCount: 1, currentPage: 1))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+
+        let refreshTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: refreshRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: refreshRegistration
+        ) != nil else {
+            return
+        }
+
+        refreshTask.cancel()
+        let refreshRelease = await service.release(registration: refreshRegistration)
+        XCTAssertEqual(refreshRelease, .released)
+        await refreshTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["old-1", "old-2"])
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 2)
+        XCTAssertEqual(viewModel.historyPage?.stats?.totalCompleted, 2)
+        XCTAssertEqual(viewModel.currentOffset, 30)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testDeactivateReactivateRetriesPageAndStaleDeactivateCannotRevokeNewWork() async {
+        let firstActivation = viewModel.activate()
+        await commitHistory(historyPage(["old-1"], currentPage: 1))
+
+        let service = ScriptedJobAnalyticsService()
+        let staleRegistration = await service.register(
+            .success(historyPage(["stale-page"], currentPage: 2))
+        )
+        let retryRegistration = await service.register(
+            .success(historyPage(["retry-page"], currentPage: 2))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+
+        let staleTask = Task { @MainActor in
+            await viewModel.loadMore()
+            await service.operationFinished(registration: staleRegistration)
+        }
+        guard let staleCall = await requireEntry(
+            service,
+            registration: staleRegistration
+        ) else {
+            return
+        }
+        XCTAssertEqual(staleCall.offset, 30)
+        XCTAssertTrue(viewModel.isLoadingMore)
+
+        viewModel.deactivate(activationToken: firstActivation)
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let secondActivation = viewModel.activate()
+        let retryTask = Task { @MainActor in
+            await viewModel.loadMore()
+            await service.operationFinished(registration: retryRegistration)
+        }
+        guard let retryCall = await requireEntry(
+            service,
+            registration: retryRegistration
+        ) else {
+            _ = await service.release(registration: staleRegistration)
+            await staleTask.value
+            return
+        }
+        XCTAssertEqual(retryCall.offset, 30)
+        XCTAssertTrue(viewModel.isLoadingMore)
+
+        viewModel.deactivate(activationToken: firstActivation)
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertTrue(viewModel.isLoadingMore)
+
+        let retryRelease = await service.release(registration: retryRegistration)
+        XCTAssertEqual(retryRelease, .released)
+        await retryTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["old-1", "retry-page"])
+        XCTAssertEqual(viewModel.currentOffset, 30)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let staleRelease = await service.release(registration: staleRegistration)
+        XCTAssertEqual(staleRelease, .released)
+        await staleTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["old-1", "retry-page"])
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 2)
+        XCTAssertEqual(viewModel.currentOffset, 30)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        viewModel.deactivate(activationToken: secondActivation)
+    }
+
+    func testFailedRefreshAfterPaginationPreservesCommittedPageCursorAndStats() async {
+        let committedStats = QueueHistoryStats(
+            totalCompleted: 2,
+            totalFailed: 1,
+            averageDurationMinutes: 45
+        )
+        let service = ScriptedJobAnalyticsService()
+        let initialRegistration = await service.register(
+            .success(historyPage(["page-1"], currentPage: 1))
+        )
+        let paginationRegistration = await service.register(
+            .success(historyPage(["page-2"], currentPage: 2, stats: committedStats))
+        )
+        let refreshRegistration = await service.register(.failure)
+        viewModel.configure(jobAnalyticsService: service)
+
+        let initialTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: initialRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: initialRegistration
+        ) != nil else {
+            return
+        }
+        let initialRelease = await service.release(registration: initialRegistration)
+        XCTAssertEqual(initialRelease, .released)
+        await initialTask.value
+
+        let paginationTask = Task { @MainActor in
+            await viewModel.loadMore()
+            await service.operationFinished(registration: paginationRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: paginationRegistration
+        ) != nil else {
+            return
+        }
+        let paginationRelease = await service.release(registration: paginationRegistration)
+        XCTAssertEqual(paginationRelease, .released)
+        await paginationTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["page-1", "page-2"])
+        XCTAssertEqual(viewModel.currentOffset, 30)
+
+        let refreshTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: refreshRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: refreshRegistration
+        ) != nil else {
+            return
+        }
+        let refreshRelease = await service.release(registration: refreshRegistration)
+        XCTAssertEqual(refreshRelease, .released)
+        await refreshTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["page-1", "page-2"])
+        XCTAssertEqual(viewModel.historyPage?.totalCount, 100)
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 2)
+        XCTAssertEqual(viewModel.historyPage?.pageSize, 30)
+        XCTAssertEqual(viewModel.historyPage?.stats?.totalCompleted, 2)
+        XCTAssertEqual(viewModel.historyPage?.stats?.totalFailed, 1)
+        XCTAssertEqual(viewModel.historyPage?.stats?.averageDurationMinutes, 45)
+        XCTAssertEqual(viewModel.currentOffset, 30)
+        XCTAssertNotNil(viewModel.error)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testSupersededReloadCannotClearNewerReloadLoadingFlag() async {
+        await commitHistory(historyPage(["old"], currentPage: 1))
+
+        let service = ScriptedJobAnalyticsService()
+        let staleRegistration = await service.register(
+            .success(historyPage(["stale"], totalCount: 1, currentPage: 1))
+        )
+        let currentRegistration = await service.register(
+            .success(historyPage(["current"], totalCount: 1, currentPage: 1))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+
+        let staleTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: staleRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: staleRegistration
+        ) != nil else {
+            return
+        }
+
+        let currentTask = Task { @MainActor in
+            await viewModel.loadHistory()
+            await service.operationFinished(registration: currentRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: currentRegistration
+        ) != nil else {
+            _ = await service.release(registration: staleRegistration)
+            await staleTask.value
+            return
+        }
+
+        let staleRelease = await service.release(registration: staleRegistration)
+        XCTAssertEqual(staleRelease, .released)
+        await staleTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["old"])
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let currentRelease = await service.release(registration: currentRegistration)
+        XCTAssertEqual(currentRelease, .released)
+        await currentTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["current"])
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
     
     // MARK: - Load Timeline
     
@@ -667,7 +1388,7 @@ final class JobHistoryViewModelTests: XCTestCase {
     
     // MARK: - Computed Properties
     
-    func testHistoryItemsReturnsEntriesFromPage() {
+    func testHistoryItemsReturnsEntriesFromPage() async {
         let entry = QueueHistoryEntry(
             id: "1",
             jobName: "test_print.gcode",
@@ -676,26 +1397,24 @@ final class JobHistoryViewModelTests: XCTestCase {
             completedAt: Date(),
             durationSeconds: 3600
         )
-        viewModel.historyPage = QueueHistoryPage(
+        await commitHistory(QueueHistoryPage(
             entries: [entry],
             totalCount: 1,
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
+        ))
         
         XCTAssertEqual(viewModel.historyItems.count, 1)
         XCTAssertEqual(viewModel.historyItems.first?.id, "1")
     }
     
     func testHistoryItemsReturnsEmptyWhenPageIsNil() {
-        viewModel.historyPage = nil
-        
         XCTAssertTrue(viewModel.historyItems.isEmpty)
     }
     
-    func testCanLoadMoreReturnsTrueWhenMoreDataExists() {
-        viewModel.historyPage = QueueHistoryPage(
+    func testCanLoadMoreReturnsTrueWhenMoreDataExists() async {
+        await commitHistory(QueueHistoryPage(
             entries: Array(repeating: QueueHistoryEntry(
                 id: "1",
                 jobName: "test.gcode",
@@ -708,31 +1427,27 @@ final class JobHistoryViewModelTests: XCTestCase {
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
-        viewModel.currentOffset = 0
+        ))
         
         XCTAssertTrue(viewModel.canLoadMore)
     }
     
-    func testCanLoadMoreReturnsFalseWhenNoMoreData() {
+    func testCanLoadMoreReturnsFalseWhenNoMoreData() async {
         // canLoadMore returns `entries.count < totalCount`. When the loaded page
         // has drained the total, both sides equal zero (or n == n) and the flag
         // is false.
-        viewModel.historyPage = QueueHistoryPage(
+        await commitHistory(QueueHistoryPage(
             entries: [],
             totalCount: 0,
             currentPage: 1,
             pageSize: 30,
             stats: nil
-        )
-        viewModel.currentOffset = 0
+        ))
         
         XCTAssertFalse(viewModel.canLoadMore)
     }
     
     func testCanLoadMoreReturnsFalseWhenPageIsNil() {
-        viewModel.historyPage = nil
-        
         XCTAssertFalse(viewModel.canLoadMore)
     }
     

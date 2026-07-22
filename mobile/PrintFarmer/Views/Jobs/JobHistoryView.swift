@@ -6,6 +6,7 @@ struct JobHistoryView: View {
     @State private var viewModel = JobHistoryViewModel()
     @State private var showDateFilter = false
     @State private var activeTasks: [Task<Void, Never>] = []
+    @State private var activationToken: UUID?
 
     var body: some View {
         Group {
@@ -59,14 +60,17 @@ struct JobHistoryView: View {
             await viewModel.loadHistory()
         }
         .task {
-            viewModel.isViewActive = true
+            activationToken = viewModel.activate()
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
             await viewModel.loadHistory()
         }
         .onDisappear {
+            if let activationToken {
+                viewModel.deactivate(activationToken: activationToken)
+            }
+            activationToken = nil
             activeTasks.forEach { $0.cancel() }
             activeTasks.removeAll()
-            viewModel.isViewActive = false
         }
     }
 

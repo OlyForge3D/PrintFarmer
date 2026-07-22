@@ -3,6 +3,7 @@ import SwiftUI
 struct JobTimelineView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = JobHistoryViewModel()
+    @State private var activationToken: UUID?
 
     var body: some View {
         Group {
@@ -27,12 +28,15 @@ struct JobTimelineView: View {
             await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
         }
         .task {
-            viewModel.isViewActive = true
+            activationToken = viewModel.activate()
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
             await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
         }
         .onDisappear {
-            viewModel.isViewActive = false
+            if let activationToken {
+                viewModel.deactivate(activationToken: activationToken)
+            }
+            activationToken = nil
         }
     }
 
