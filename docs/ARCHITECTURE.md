@@ -148,6 +148,22 @@ Catalog (Manufacturers & Models)
    ├── Name
    ├── ManufacturerId (FK)
    └── Specifications (JSON)
+
+ModelCollection
+├── Id (GUID)
+├── Name (string)
+├── Description (string, optional)
+├── OwnerUserId (GUID, cross-context reference — no FK)
+├── IsShared (bool)
+├── CreatedAt, UpdatedAt
+└── Memberships (navigation collection)
+
+ModelCollectionMembership
+├── Id (GUID)
+├── CollectionId (FK → ModelCollections, cascade)
+├── ModelId (GUID, cross-context reference to Model3D — no FK)
+├── CreatedAt, UpdatedAt
+└── Collection (navigation)
 ```
 
 #### Features
@@ -156,6 +172,7 @@ Catalog (Manufacturers & Models)
 **Timestamps**: All entities track `CreatedAt` and `ModifiedAt` in UTC  
 **Normalization**: Printer counts denormalized on Location for performance  
 **Encryption**: API keys encrypted at rest in database  
+**Cross-Context References**: Some entities (e.g. `ModelCollectionMembership.ModelId`, `OwnerUserId`) reference records owned by another bounded context/DbContext. These are stored as plain GUIDs with **no EF foreign key**; existence is validated at the service layer through the model query abstraction, following the tag/context-boundary precedent.  
 
 ### Data Flow
 

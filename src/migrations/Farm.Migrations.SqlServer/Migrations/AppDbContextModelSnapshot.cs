@@ -1853,6 +1853,72 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Model3DTag", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("IsShared")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("ModelCollections", (string)null);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollectionMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ModelId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.HasIndex("CollectionId", "ModelId")
+                        .IsUnique();
+
+                    b.ToTable("ModelCollectionMemberships", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4564,6 +4630,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Tag");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollectionMembership", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.ModelCollection", "Collection")
+                        .WithMany("Memberships")
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Collection");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
@@ -5168,6 +5245,11 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.Manufacturer", b =>
                 {
                     b.Navigation("Models");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
+                {
+                    b.Navigation("Memberships");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>

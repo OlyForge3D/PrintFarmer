@@ -175,6 +175,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Catalog version tracking for update detection
     public DbSet<CatalogVersion> CatalogVersions => Set<CatalogVersion>();
 
+    // Model collections (user-owned groupings of 3D models; sync epic #835)
+    public DbSet<ModelCollection> ModelCollections => Set<ModelCollection>();
+
+    public DbSet<ModelCollectionMembership> ModelCollectionMemberships => Set<ModelCollectionMembership>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
