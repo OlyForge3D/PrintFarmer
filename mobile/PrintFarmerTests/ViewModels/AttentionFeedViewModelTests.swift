@@ -2271,6 +2271,203 @@ final class AttentionFeedViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Cycle 7: activation-reload closure owner fence
+
+    func testActivationReloadClosureNoOpsAfterServiceReplacement() async {
+        // Reachable sequence (Hicks blocker on cycle 6):
+        //   1. Authority A deactivates.
+        //   2. An inactive `attentionchanged` drain sets
+        //      pendingReloadOnActivate.
+        //   3. activate() queues a refresh() closure through the
+        //      callbackEnqueuer.
+        //   4. configure(B) runs bootstrap BEFORE the queued closure
+        //      drains and performs B's canonical GET.
+        //   5. Old closure drains — pre-cycle-7 it called refresh()
+        //      unconditionally against the new authority, creating
+        //      a duplicate/concurrent GET.
+        //
+        // Cycle-7 fix: activate()'s enqueue path captures
+        // authority+activation and re-checks at drain time. On
+        // authority mismatch, the closure no-ops.
+        let oldService = ScriptedAttentionService(steps: [])
+        let bBootstrapFeed = makeAttentionFeed(healthyPrinterCount: 7)
+        let newService = ScriptedAttentionService(steps: [.value(bBootstrapFeed)])
+        let oldSignalR = MockSignalRService()
+        let newSignalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: oldService,
+            signalRService: oldSignalR,
+            attentionEnabled: true
+        )
+
+        // Step 1: deactivate authority A.
+        vm.deactivate()
+
+        // Step 2: inactive event drain sets pendingReloadOnActivate.
+        oldSignalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // Step 3: activate() queues the reload closure with the
+        // authority-A/activation-A token.
+        vm.activate()
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "activate() enqueues the pending reload closure"
+        )
+        let oldServiceCallCount = await oldService.loadCallCount
+        XCTAssertEqual(oldServiceCallCount, 0)
+
+        // Step 4: configure(B) — service replacement bumps
+        // authorityEpoch (invalidateAuthority path) BEFORE the queued
+        // closure drains.
+        vm.configure(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+
+        // B's canonical GET via bootstrap.
+        _ = await vm.bootstrap(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+        let bAfterBootstrap = await newService.loadCallCount
+        XCTAssertEqual(bAfterBootstrap, 1, "B bootstrap issues exactly one GET")
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 7)
+
+        // Step 5: old activation closure drains. Must no-op — old
+        // authority captured. If pre-cycle-7 code shipped, this would
+        // call refresh() against B and increment B's count to 2.
+        await callbackQueue.runNext()
+        let bAfterOldDrain = await newService.loadCallCount
+        XCTAssertEqual(
+            bAfterOldDrain, 1,
+            "Old-owner activation closure must no-op after service replacement — B GET count stays at 1"
+        )
+        let oldAfterAll = await oldService.loadCallCount
+        XCTAssertEqual(
+            oldAfterAll, 0,
+            "Old-owner closure must not fire against old service either"
+        )
+    }
+
+    func testActivationReloadClosureNoOpsAfterAnotherDeactivateReactivate() async {
+        // Same-authority variant: activation A1 queues a reload
+        // closure. Before it drains, deactivate + reactivate bumps
+        // activationEpoch to A2 (and again to A3 via activate).
+        // A1's closure captured activation-A1; at drain, mismatch
+        // -> no-op. The A3 owner's own reload path (if any) is
+        // unaffected — this test proves the fence is not a wedge
+        // by dispatching an explicit user refresh at the end.
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 2)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Deactivate; inactive event drain sets pendingReloadOnActivate.
+        vm.deactivate()
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // Activate A1 — queues reload with captured activation A1.
+        vm.activate()
+        XCTAssertEqual(callbackQueue.count, 1, "A1 activation queues reload")
+
+        // Deactivate + reactivate BEFORE the A1 reload drains.
+        // pendingReloadOnActivate is currently false (activate
+        // consumed it), so the second activate does NOT enqueue
+        // another reload. This isolates the test to a pure
+        // activation-mismatch no-op check.
+        vm.deactivate()
+        vm.activate()
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "Second activate must not enqueue a duplicate reload (nothing pending)"
+        )
+
+        // A1's reload drains. Activation mismatch (A1 vs A3) -> no-op.
+        await callbackQueue.runNext()
+        let countAfterDrain = await service.loadCallCount
+        XCTAssertEqual(
+            countAfterDrain, 0,
+            "A1-scheduled reload must no-op after activation moved to A3"
+        )
+
+        // Fence-not-a-wedge proof: an explicit user refresh under
+        // the current activation still works.
+        let ok = await vm.refresh()
+        XCTAssertTrue(ok)
+        let finalCount = await service.loadCallCount
+        XCTAssertEqual(finalCount, 1, "Current-owner user refresh fires exactly once")
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 2)
+    }
+
+    func testActivationReloadFencePreservesSameOwnerDrainExactlyOnce() async {
+        // Fence-not-a-wedge in the happy path: same authority, same
+        // activation between schedule and drain. The captured
+        // authority/activation match at drain, and exactly one
+        // canonical GET fires.
+        let feed = makeAttentionFeed(healthyPrinterCount: 4)
+        let service = ScriptedAttentionService(steps: [.value(feed)])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Deactivate; inactive event; activate.
+        vm.deactivate()
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        vm.activate()
+        // Drain the activation-scheduled reload without any interceding
+        // authority/activation change. Fence must pass; exactly one GET.
+        await callbackQueue.runNext()
+
+        let calls = await service.loadCallCount
+        XCTAssertEqual(
+            calls, 1,
+            "Same-owner activation reload must fire exactly once — fence is not a wedge"
+        )
+        XCTAssertEqual(vm.phase, .loaded)
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 4)
+    }
+
     // MARK: - Helpers
 
     private func configuredViewModel(

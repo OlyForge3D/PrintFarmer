@@ -327,10 +327,16 @@ final class AttentionFeedViewModel {
                 activationEpoch &+= 1
                 if pendingReloadOnActivate {
                     pendingReloadOnActivate = false
-                    let enqueue = callbackEnqueuer
-                    enqueue { [weak self] in
-                        await self?.refresh()
-                    }
+                    // Cycle 7: authority/activation-fenced reload.
+                    // The closure captures authority+activation at
+                    // schedule time and no-ops at drain time if
+                    // either has moved. Prevents an A-scheduled
+                    // activation reload from stealing B's bootstrap
+                    // slot after service replacement.
+                    enqueueOwnerCheckedReload(
+                        capturedAuthority: authorityEpoch,
+                        capturedActivation: activationEpoch
+                    )
                 }
             }
             return
@@ -479,9 +485,52 @@ final class AttentionFeedViewModel {
         }
         guard pendingReloadOnActivate else { return }
         pendingReloadOnActivate = false
+        // Cycle 7 fix: authority/activation-fenced reload closure.
+        // Without this, the queued `refresh()` had no owner token and
+        // could fire against a replacement authority (blocker B'):
+        //   1. authority A deactivates,
+        //   2. inactive event drain sets pendingReloadOnActivate,
+        //   3. activate() queues refresh() (unfenced pre-fix),
+        //   4. configure(B) runs bootstrap before drain,
+        //   5. queued closure drains and calls refresh() against B,
+        //      duplicating B's bootstrap GET.
+        // The helper captures current authorityEpoch + activationEpoch
+        // and re-checks them at drain time.
+        enqueueOwnerCheckedReload(
+            capturedAuthority: authorityEpoch,
+            capturedActivation: activationEpoch
+        )
+    }
+
+    /// Enqueue a canonical `refresh()` through `callbackEnqueuer` that
+    /// no-ops at drain time unless the captured authority and
+    /// activation still match the current owner. Shared by the two
+    /// activation-reload sites (`activate()` and configure's
+    /// re-entry) so both are structurally protected against
+    /// old-owner drift between schedule and drain.
+    ///
+    /// Preserves same-owner reload semantics: when the owner hasn't
+    /// changed, this behaves exactly like the pre-cycle-7 raw
+    /// `enqueue { await self?.refresh() }` — exactly one canonical
+    /// GET drains.
+    private func enqueueOwnerCheckedReload(
+        capturedAuthority: UInt64,
+        capturedActivation: UInt64
+    ) {
         let enqueue = callbackEnqueuer
         enqueue { [weak self] in
-            await self?.refresh()
+            guard let self else { return }
+            // Owner-token drift: service replacement bumped authority.
+            if capturedAuthority != self.authorityEpoch { return }
+            // Owner-token drift: deactivate/reactivate (potentially
+            // multiple times) bumped activation.
+            if capturedActivation != self.activationEpoch { return }
+            // VM must still be a valid owner right now.
+            guard self.isActive, self.attentionEnabled,
+                  self.attentionService != nil else { return }
+            // Both identities intact — fire the canonical GET. Same
+            // exactly-one semantics as the pre-fence behavior.
+            await self.refresh()
         }
     }
 
