@@ -90,29 +90,28 @@ export function CollectionsNav({ selectedCollectionId, onSelectCollection }: Col
     setMenuState({ collection, x: rect.left, y: rect.bottom + 4 });
   };
 
+  // Rename/Share/Unshare/Delete are all owner-or-admin actions. Non-owners viewing a shared
+  // collection get no menu items (the actions button itself is hidden in renderCollectionRow)
+  // rather than offering controls that the backend would reject with a 403.
   const buildMenuItems = (collection: ModelCollection): ContextMenuItem[] => {
-    const items: ContextMenuItem[] = [
+    if (!canManage(collection)) return [];
+    return [
       {
         label: 'Rename',
         icon: EditIcon,
         onClick: () => setFormState({ mode: 'rename', collection }),
       },
-    ];
-    if (canManage(collection)) {
-      items.push(
-        collection.isShared
-          ? { label: 'Unshare', icon: LockIcon, onClick: () => unshareCollection.mutate(collection.id) }
-          : { label: 'Share with everyone', icon: ShareIcon, onClick: () => shareCollection.mutate(collection.id) }
-      );
-      items.push({ divider: true });
-      items.push({
+      collection.isShared
+        ? { label: 'Unshare', icon: LockIcon, onClick: () => unshareCollection.mutate(collection.id) }
+        : { label: 'Share with everyone', icon: ShareIcon, onClick: () => shareCollection.mutate(collection.id) },
+      { divider: true },
+      {
         label: 'Delete',
         icon: DeleteIcon,
         variant: 'danger',
         onClick: () => setDeleteTarget(collection),
-      });
-    }
-    return items;
+      },
+    ];
   };
 
   const handleFormSubmit = (values: { name: string; description?: string }) => {
@@ -156,22 +155,24 @@ export function CollectionsNav({ selectedCollectionId, onSelectCollection }: Col
           {collection.isShared && <EarthIcon className="w-3.5 h-3.5 shrink-0 text-pf-text-tertiary" ariaLabel="Shared" />}
           <span className="ml-auto shrink-0 text-xs text-pf-text-tertiary">{collection.memberCount}</span>
         </Button>
-        <Button
-          ref={(el) => {
-            if (el) menuTriggerRefs.current.set(collection.id, el);
-            else menuTriggerRefs.current.delete(collection.id);
-          }}
-          type="button"
-          variant="subtle"
-          size="sm"
-          className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 shrink-0 !px-1.5"
-          aria-label={`Actions for ${collection.name}`}
-          aria-haspopup="menu"
-          aria-expanded={menuState?.collection.id === collection.id}
-          onClick={(event) => openMenuFor(collection, event)}
-        >
-          <MoreVerticalIcon className="w-4 h-4" />
-        </Button>
+        {canManage(collection) && (
+          <Button
+            ref={(el) => {
+              if (el) menuTriggerRefs.current.set(collection.id, el);
+              else menuTriggerRefs.current.delete(collection.id);
+            }}
+            type="button"
+            variant="subtle"
+            size="sm"
+            className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 shrink-0 !px-1.5"
+            aria-label={`Actions for ${collection.name}`}
+            aria-haspopup="menu"
+            aria-expanded={menuState?.collection.id === collection.id}
+            onClick={(event) => openMenuFor(collection, event)}
+          >
+            <MoreVerticalIcon className="w-4 h-4" />
+          </Button>
+        )}
       </li>
     );
   };

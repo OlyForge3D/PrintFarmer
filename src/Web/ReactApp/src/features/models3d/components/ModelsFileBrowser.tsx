@@ -230,26 +230,51 @@ export const ModelsFileBrowser = ({
   const fetcher = useCallback(
     async (params: unknown) => {
       const payload = params as ReturnType<typeof mapQueryParams>;
-      const response = await apiClient.get3DModelsQuery(payload);
-
-      const searchResponse = response as unknown as Model3DSearchResponse;
-      let models = searchResponse.models;
-      let totalCount = searchResponse.totalCount;
-      let totalPages = searchResponse.totalPages;
 
       if (collectionModelIds) {
+        // The /3d-models/query endpoint has no collection/id-list filter (#846), so the
+        // client-side id filter must page through the *entire* (search/tag-filtered) result
+        // set - stopping after a single page would silently drop collection members that
+        // fall on later pages.
         const idSet = new Set(collectionModelIds);
-        models = models.filter((model: Model) => idSet.has(model.id));
-        totalCount = models.length;
-        totalPages = 1;
+        const matches: Model[] = [];
+        const foundIds = new Set<string>();
+        let page = 1;
+        let totalPages: number;
+        do {
+          const response = (await apiClient.get3DModelsQuery({
+            ...payload,
+            page,
+            pageSize: COLLECTION_FILTER_PAGE_SIZE,
+          })) as unknown as Model3DSearchResponse;
+          totalPages = response.totalPages || 1;
+          for (const model of response.models) {
+            if (idSet.has(model.id) && !foundIds.has(model.id)) {
+              foundIds.add(model.id);
+              matches.push(model);
+            }
+          }
+          page += 1;
+        } while (page <= totalPages && foundIds.size < idSet.size);
+
+        const totalSize = matches.reduce((sum, model) => sum + (model.fileSize || 0), 0);
+        return {
+          items: matches,
+          totalItems: matches.length,
+          totalPages: 1,
+          totalSize,
+          page: 1,
+        };
       }
 
-      const totalSize = models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
+      const response = await apiClient.get3DModelsQuery(payload);
+      const searchResponse = response as unknown as Model3DSearchResponse;
+      const totalSize = searchResponse.models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
 
       return {
-        items: models,
-        totalItems: totalCount,
-        totalPages,
+        items: searchResponse.models,
+        totalItems: searchResponse.totalCount,
+        totalPages: searchResponse.totalPages,
         totalSize,
         page: searchResponse.page,
       };

@@ -132,19 +132,38 @@ export function useUnshareModelCollection() {
  * outside the desktop offline-sync protocol, so this issues parallel single-item requests
  * behind one mutation/one loading state/one toast, per #846's "efficient multi-model
  * membership actions" requirement.
+ *
+ * Uses `Promise.allSettled` (not `Promise.all`) so a single failed request doesn't abort the
+ * others mid-flight - the mutation always waits for every request to finish, invalidates the
+ * membership/collection caches so the UI reflects whatever partially succeeded, and reports
+ * a specific error (with the failure count) rather than silently losing the failures.
  */
 export function useAddModelsToCollection() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ collectionId, modelIds }: { collectionId: string; modelIds: string[] }) => {
-      await Promise.all(modelIds.map((modelId) => apiClient.addModelCollectionMember(collectionId, modelId)));
+      const results = await Promise.allSettled(
+        modelIds.map((modelId) => apiClient.addModelCollectionMember(collectionId, modelId))
+      );
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+      return { succeededCount: results.length - failures.length, failures };
     },
-    onSuccess: (_data, variables) => {
+    onSettled: (_data, _error, variables) => {
       invalidateCollectionLists(queryClient);
       queryClient.invalidateQueries({ queryKey: collectionQueryKeys.members(variables.collectionId) });
       queryClient.invalidateQueries({ queryKey: collectionQueryKeys.detail(variables.collectionId) });
-      const count = variables.modelIds.length;
-      toast.success(`Added ${count} model${count === 1 ? '' : 's'} to collection`);
+    },
+    onSuccess: (result, variables) => {
+      if (result.failures.length === 0) {
+        const count = variables.modelIds.length;
+        toast.success(`Added ${count} model${count === 1 ? '' : 's'} to collection`);
+      } else if (result.succeededCount > 0) {
+        toast.error(
+          `Added ${result.succeededCount} model${result.succeededCount === 1 ? '' : 's'}, but ${result.failures.length} failed to add. Please retry the failed ones.`
+        );
+      } else {
+        toast.error('Failed to add models to collection.');
+      }
     },
     onError: (error: ApiError) => {
       toast.error(`Failed to add models to collection: ${error.message}`);
@@ -157,14 +176,28 @@ export function useRemoveModelsFromCollection() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ collectionId, modelIds }: { collectionId: string; modelIds: string[] }) => {
-      await Promise.all(modelIds.map((modelId) => apiClient.removeModelCollectionMember(collectionId, modelId)));
+      const results = await Promise.allSettled(
+        modelIds.map((modelId) => apiClient.removeModelCollectionMember(collectionId, modelId))
+      );
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+      return { succeededCount: results.length - failures.length, failures };
     },
-    onSuccess: (_data, variables) => {
+    onSettled: (_data, _error, variables) => {
       invalidateCollectionLists(queryClient);
       queryClient.invalidateQueries({ queryKey: collectionQueryKeys.members(variables.collectionId) });
       queryClient.invalidateQueries({ queryKey: collectionQueryKeys.detail(variables.collectionId) });
-      const count = variables.modelIds.length;
-      toast.success(`Removed ${count} model${count === 1 ? '' : 's'} from collection`);
+    },
+    onSuccess: (result, variables) => {
+      if (result.failures.length === 0) {
+        const count = variables.modelIds.length;
+        toast.success(`Removed ${count} model${count === 1 ? '' : 's'} from collection`);
+      } else if (result.succeededCount > 0) {
+        toast.error(
+          `Removed ${result.succeededCount} model${result.succeededCount === 1 ? '' : 's'}, but ${result.failures.length} failed to remove. Please retry the failed ones.`
+        );
+      } else {
+        toast.error('Failed to remove models from collection.');
+      }
     },
     onError: (error: ApiError) => {
       toast.error(`Failed to remove models from collection: ${error.message}`);

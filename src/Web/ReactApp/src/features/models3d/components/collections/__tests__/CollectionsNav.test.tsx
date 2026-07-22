@@ -167,25 +167,24 @@ describe('CollectionsNav', () => {
     renderNav();
 
     await screen.findByText('Miniatures');
+    // The non-owned shared collection ("Client Work") gets no actions button at all, since
+    // rename/share/delete are all owner-or-admin actions the backend would otherwise reject.
     const actionButtons = screen.getAllByRole('button', { name: /actions for/i });
-    expect(actionButtons).toHaveLength(2);
+    expect(actionButtons).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: /actions for miniatures/i }));
     const menu = await screen.findByRole('menu');
     expect(within(menu).getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: /share with everyone/i })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: /rename/i })).toBeInTheDocument();
   });
 
-  it('does not offer delete/share for collections the user does not own and is not admin', async () => {
+  it('does not offer an actions menu for collections the user does not own and is not admin', async () => {
     vi.mocked(apiClient.getModelCollections).mockResolvedValue([sharedCollection]);
-    const user = userEvent.setup();
     renderNav();
 
-    await user.click(await screen.findByRole('button', { name: /actions for client work/i }));
-    const menu = await screen.findByRole('menu');
-    expect(within(menu).queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
-    expect(within(menu).queryByRole('menuitem', { name: /unshare/i })).not.toBeInTheDocument();
-    expect(within(menu).getByRole('menuitem', { name: /rename/i })).toBeInTheDocument();
+    await screen.findByText('Client Work');
+    expect(screen.queryByRole('button', { name: /actions for client work/i })).not.toBeInTheDocument();
   });
 
   it('shares a collection via the kebab menu', async () => {

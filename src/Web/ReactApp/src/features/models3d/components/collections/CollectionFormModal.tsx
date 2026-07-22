@@ -13,7 +13,8 @@ export interface CollectionFormModalProps {
   onClose: () => void;
 }
 
-const MAX_NAME_LENGTH = 100;
+const MAX_NAME_LENGTH = 200;
+const MAX_DESCRIPTION_LENGTH = 2000;
 
 /**
  * Create/rename modal for model collections (#843/#846). Collections CRUD uses the plain
@@ -86,6 +87,7 @@ export function CollectionFormModal({ isOpen, collection, isSaving = false, onSu
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What is this collection for?"
+            maxLength={MAX_DESCRIPTION_LENGTH}
             disabled={isSaving}
             rows={3}
           />
