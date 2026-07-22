@@ -155,6 +155,8 @@ ModelCollection
 ├── Description (string, optional)
 ├── OwnerUserId (GUID, cross-context reference — no FK)
 ├── IsShared (bool)
+├── Revision (long, per-entity, app-incremented — sync base revision)
+├── ConcurrencyToken (GUID, optimistic-concurrency ETag)
 ├── CreatedAt, UpdatedAt
 └── Memberships (navigation collection)
 
@@ -162,8 +164,19 @@ ModelCollectionMembership
 ├── Id (GUID)
 ├── CollectionId (FK → ModelCollections, cascade)
 ├── ModelId (GUID, cross-context reference to Model3D — no FK)
+├── Revision (long, per-entity)
 ├── CreatedAt, UpdatedAt
 └── Collection (navigation)
+
+LibrarySyncChange (append-only sync journal + tombstones)
+├── Revision (long, store-generated identity PK — global monotonic cursor)
+├── EntityType (string enum: ModelCollection | ModelCollectionMembership | Tag)
+├── EntityId (GUID, soft reference — no FK, survives hard delete)
+├── Operation (string enum: Create | Update | Delete)
+├── OwnerUserId (GUID?, owner at time of change)
+├── Visibility (string enum: Private | Shared)
+├── ActorUserId (GUID, who made the change)
+└── Timestamp (UTC)
 ```
 
 #### Features
@@ -173,6 +186,31 @@ ModelCollectionMembership
 **Normalization**: Printer counts denormalized on Location for performance  
 **Encryption**: API keys encrypted at rest in database  
 **Cross-Context References**: Some entities (e.g. `ModelCollectionMembership.ModelId`, `OwnerUserId`) reference records owned by another bounded context/DbContext. These are stored as plain GUIDs with **no EF foreign key**; existence is validated at the service layer through the model query abstraction, following the tag/context-boundary precedent.  
+
+#### Library Sync Journal (issue #844)
+
+The library sync layer records an append-only change journal that a desktop client can pull to
+mirror collection/membership state (epic #835; #845 will expose the pull/apply endpoints).
+
+- **`LibrarySyncChange`** is the journal. Its `Revision` is a **store-generated identity** primary
+  key, which is provider-safe and strictly monotonic across PostgreSQL (`bigint` identity),
+  SQL Server (`IDENTITY`), and SQLite (`AUTOINCREMENT`). Ordering by `Revision` is the pull cursor.
+- **Transactional atomicity**: `ILibrarySyncJournal.Record(...)` enlists a journal row into the
+  same `AppDbContext` change tracker used by `EfModelCollectionRepository`. The service's single
+  `SaveChangesAsync` commits the entity mutation and its journal entry in one transaction, so
+  state and journal cannot diverge. Every collection/membership mutation
+  (create/update/delete/set-shared/add-member/remove-member/replace-members) journals an entry.
+- **Durable tombstones**: a `Delete` journal row has **no foreign key** to the entity it
+  references, so it persists after the row is hard-deleted. Deleting a collection first emits a
+  membership `Delete` tombstone for each current membership and then a collection `Delete`
+  tombstone, letting a puller propagate removals.
+- **Optimistic concurrency**: `ModelCollection` and `Tag` carry a `Revision` (base revision) and a
+  `ConcurrencyToken` (`IsConcurrencyToken`, regenerated each write). `TagService.UpdateTagAsync`
+  guards on an `ExpectedRevision` and throws `TagConcurrencyException` (HTTP 409) on a stale write.
+  The token is a plain `Guid` (not `rowversion`/`xmin`) to stay portable across all providers,
+  including SQLite. These columns are additive with safe defaults, so the change is
+  backward-compatible.
+
 
 ### Data Flow
 

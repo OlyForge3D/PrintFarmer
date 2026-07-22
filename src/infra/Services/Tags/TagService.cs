@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
@@ -45,13 +46,7 @@ public class TagService(
         try
         {
             IReadOnlyList<Tag> tags = await _tagRepository.ListAllAsync(ct);
-            return tags.Select(t => new TagDto
-            {
-                Id = t.Id,
-                Name = t.Name,
-                Color = t.Color,
-                Description = t.Description
-            }).ToList();
+            return tags.Select(MapToDto).ToList();
         }
         catch (Exception ex)
         {
@@ -71,15 +66,7 @@ public class TagService(
         try
         {
             Tag? tag = await _tagRepository.GetByIdAsync(tagId, ct);
-            return tag == null
-                ? null
-                : new TagDto
-                {
-                    Id = tag.Id,
-                    Name = tag.Name,
-                    Color = tag.Color,
-                    Description = tag.Description
-                };
+            return tag == null ? null : MapToDto(tag);
         }
         catch (Exception ex)
         {
@@ -113,13 +100,7 @@ public class TagService(
             if (existing != null)
             {
                 // Return the existing tag
-                return new TagDto
-                {
-                    Id = existing.Id,
-                    Name = existing.Name,
-                    Color = existing.Color,
-                    Description = existing.Description
-                };
+                return MapToDto(existing);
             }
 
             Tag tag = new Tag
@@ -129,7 +110,9 @@ public class TagService(
                 Color = dto.Color,
                 Description = dto.Description,
                 CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedAt = DateTime.UtcNow,
+                Revision = 1,
+                ConcurrencyToken = Guid.NewGuid()
             };
 
             await _tagRepository.AddAsync(tag, ct);
@@ -146,25 +129,13 @@ public class TagService(
                 Tag? existingTag = await _tagRepository.GetByNameAsync(normalizedName, ct);
                 if (existingTag != null)
                 {
-                    return new TagDto
-                    {
-                        Id = existingTag.Id,
-                        Name = existingTag.Name,
-                        Color = existingTag.Color,
-                        Description = existingTag.Description
-                    };
+                    return MapToDto(existingTag);
                 }
 
                 throw;
             }
 
-            return new TagDto
-            {
-                Id = tag.Id,
-                Name = tag.Name,
-                Color = tag.Color,
-                Description = tag.Description
-            };
+            return MapToDto(tag);
         }
         catch (Exception ex)
         {
@@ -202,6 +173,68 @@ public class TagService(
             _logger.LogError("Failed to delete tag {TagId}: {Message}", tagId, ex.Message);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Updates a tag's metadata using optimistic concurrency (#844). Fields left null on the
+    /// DTO are unchanged. The tag's current revision must equal
+    /// <see cref="UpdateTagDto.ExpectedRevision"/> or a
+    /// <see cref="TagConcurrencyException"/> is thrown; on success the revision is bumped and the
+    /// concurrency token regenerated.
+    /// </summary>
+    /// <param name="tagId">The unique identifier of the tag to update.</param>
+    /// <param name="dto">The tag update data.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The updated tag.</returns>
+    public async Task<TagDto> UpdateTagAsync(Guid tagId, UpdateTagDto dto, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        Tag? tag = await _tagRepository.GetByIdAsync(tagId, ct) ?? throw new KeyNotFoundException($"Tag {tagId} not found");
+
+        // Optimistic-concurrency guard: reject stale writes before mutating.
+        if (tag.Revision != dto.ExpectedRevision)
+        {
+            throw new TagConcurrencyException(tagId, dto.ExpectedRevision, tag.Revision);
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.Name))
+        {
+            tag.Name = ToPascalCase(dto.Name.Trim());
+        }
+
+        if (dto.Color is not null)
+        {
+            tag.Color = dto.Color;
+        }
+
+        if (dto.Description is not null)
+        {
+            tag.Description = dto.Description;
+        }
+
+        tag.UpdatedAt = DateTime.UtcNow;
+        tag.Revision++;
+        tag.ConcurrencyToken = Guid.NewGuid();
+
+        try
+        {
+            await _tagRepository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // A competing writer changed the concurrency token between load and save.
+            throw new TagConcurrencyException(tagId, dto.ExpectedRevision, tag.Revision);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE constraint failed") == true
+            || ex.InnerException?.Message.Contains("Violation of UNIQUE KEY") == true
+            || ex.InnerException?.Message.Contains("duplicate key") == true)
+        {
+            // Renaming collided with an existing tag name.
+            throw new DuplicateEntityException($"A tag named '{tag.Name}' already exists");
+        }
+
+        return MapToDto(tag);
     }
 
     /// <summary>
@@ -275,13 +308,7 @@ public class TagService(
         {
             // Object type parameter ignored - tags are object-agnostic
             IReadOnlyList<Tag> tags = await _tagRepository.GetTagsByObjectAsync(objectId, ct);
-            return tags.Select(t => new TagDto
-            {
-                Id = t.Id,
-                Name = t.Name,
-                Color = t.Color,
-                Description = t.Description
-            }).ToList();
+            return tags.Select(MapToDto).ToList();
         }
         catch (Exception ex)
         {
@@ -1004,6 +1031,23 @@ public class TagService(
     #endregion
 
     #region Helper Methods
+
+    /// <summary>
+    /// Projects a <see cref="Tag"/> domain entity onto its <see cref="TagDto"/>, including the
+    /// sync revision and concurrency token (#844).
+    /// </summary>
+    private static TagDto MapToDto(Tag tag)
+    {
+        return new TagDto
+        {
+            Id = tag.Id,
+            Name = tag.Name,
+            Color = tag.Color,
+            Description = tag.Description,
+            Revision = tag.Revision,
+            ConcurrencyToken = tag.ConcurrencyToken
+        };
+    }
 
     /// <summary>
     /// Converts a string to PascalCase format for tag name normalization.

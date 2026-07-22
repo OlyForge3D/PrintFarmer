@@ -34,6 +34,15 @@ public class ModelCollectionDto
 
     /// <summary>Ordered list of model ids in the collection (oldest membership first).</summary>
     public IReadOnlyList<Guid> ModelIds { get; set; } = [];
+
+    /// <summary>
+    /// Monotonic per-collection revision, bumped on every metadata mutation. Sync clients use
+    /// it as the base revision / ETag for optimistic-concurrency (#844/#845).
+    /// </summary>
+    public long Revision { get; set; }
+
+    /// <summary>Optimistic-concurrency token regenerated on every metadata mutation.</summary>
+    public Guid ConcurrencyToken { get; set; }
 }
 
 /// <summary>
@@ -55,6 +64,9 @@ public class ModelCollectionMembershipDto
 
     /// <summary>UTC last-modified timestamp.</summary>
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>Monotonic per-membership revision, bumped on every mutation (#844/#845).</summary>
+    public long Revision { get; set; }
 }
 
 /// <summary>

@@ -21,7 +21,8 @@ public class ModelCollectionServiceTests
     private static ModelCollectionService CreateService(AppDbContext db, IModel3DQueryProvider? provider)
     {
         var repo = new EfModelCollectionRepository(db);
-        return new ModelCollectionService(repo, provider);
+        var journal = new Farm.Infrastructure.Services.Sync.LibrarySyncJournal(db);
+        return new ModelCollectionService(repo, journal, provider);
     }
 
     private static Mock<IModel3DQueryProvider> ProviderAllExist()

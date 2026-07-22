@@ -180,6 +180,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<ModelCollectionMembership> ModelCollectionMemberships => Set<ModelCollectionMembership>();
 
+    // Library sync change journal with tombstones (sync epic #835, issue #844)
+    public DbSet<Farm.Infrastructure.Domain.Sync.LibrarySyncChange> LibrarySyncChanges => Set<Farm.Infrastructure.Domain.Sync.LibrarySyncChange>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

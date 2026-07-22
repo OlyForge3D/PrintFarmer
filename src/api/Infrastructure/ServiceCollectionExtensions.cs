@@ -287,6 +287,9 @@ public static class ServiceCollectionExtensions
         // Model collection repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Collections.IModelCollectionRepository, Farm.Infrastructure.Repositories.Collections.EfModelCollectionRepository>();
 
+        // Library sync journal (change journal + tombstones, issue #844)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Sync.ILibrarySyncJournal, Farm.Infrastructure.Services.Sync.LibrarySyncJournal>();
+
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 

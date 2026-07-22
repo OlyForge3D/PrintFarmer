@@ -18,6 +18,11 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
         _ = builder.Property(t => t.Color).HasMaxLength(7); // Hex color codes
         _ = builder.Property(t => t.Description).HasMaxLength(512);
 
+        // Sync revision / optimistic-concurrency metadata (#844). ConcurrencyToken is an EF
+        // concurrency token so conflicting writes are detected; both are additive.
+        _ = builder.Property(t => t.Revision).IsRequired().HasDefaultValue(0L);
+        _ = builder.Property(t => t.ConcurrencyToken).IsConcurrencyToken();
+
         // Index for quick tag lookups
         _ = builder.HasIndex(t => t.Name).IsUnique();
 

@@ -22,4 +22,18 @@ public class Tag
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Monotonically increasing per-tag revision, bumped on every mutation. Sync clients use
+    /// it as the base revision / ETag for optimistic-concurrency (#844/#845). Additive and
+    /// backward-compatible: existing rows default to 0.
+    /// </summary>
+    public long Revision { get; set; }
+
+    /// <summary>
+    /// Optimistic-concurrency token regenerated on every mutation. Configured as an EF
+    /// concurrency token so conflicting writes surface as a concurrency failure. Stored as a
+    /// plain GUID column for provider portability (PostgreSQL, SQL Server, and SQLite tests).
+    /// </summary>
+    public Guid ConcurrencyToken { get; set; }
 }
