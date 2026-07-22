@@ -2996,10 +2996,27 @@ final class AttentionFeedViewModelTests: XCTestCase {
         // task resumes with UNCHANGED server generation (no service
         // swap) → old code configured/refreshed off-screen anyway.
         //
-        // Fix: restore the token re-check immediately after the
-        // capability await. This proof gates the capability closure,
-        // bumps the token via `vm.deactivate()` mid-await, resolves
-        // the gate, and asserts ZERO VM mutation and ZERO GET.
+        // NON-VACUITY (delta re-review fix): the recovery task must
+        // be genuinely SUSPENDED inside the capability await before
+        // we bump the token. Otherwise the pre-work guard catches
+        // the drift and the post-await guard is not exercised.
+        //
+        // Timeline (established by handshake):
+        //   1. Recovery task starts on MainActor.
+        //   2. Passes pre-work generation+token guards.
+        //   3. Enters `capabilityRefresh` closure.
+        //   4. Closure fires `enteredSignal.set()` (SYNCHRONOUS,
+        //      before its own suspension).
+        //   5. Closure `await`s `capabilityGate.wait()` — suspends.
+        //   6. Test's `await enteredSignal.wait()` returns — we know
+        //      pre-work guards passed and closure is suspended.
+        //   7. Test calls `vm.deactivate()` (sync) — token bumps.
+        //   8. Test resolves `capabilityGate.succeed(())`.
+        //   9. Closure resumes and returns. Orchestrator's
+        //      `await capabilityRefresh()` resumes.
+        //  10. Post-await guard checks token → mismatch → return
+        //      with ZERO VM ops.
+        let enteredSignal = AsyncSignal()
         let capabilityGate = AttentionResultGate<Void>()
         let service = ScriptedAttentionService(steps: [])
         let signalR = MockSignalRService()
@@ -3010,7 +3027,6 @@ final class AttentionFeedViewModelTests: XCTestCase {
             attentionEnabled: true
         )
 
-        // Simulate the view state.
         let capturedGeneration = 1
         let capturedToken = vm.currentLifecycleToken()
         let currentGenerationBox = SendableIntBox(initial: 1)
@@ -3026,7 +3042,14 @@ final class AttentionFeedViewModelTests: XCTestCase {
                 capturedLifecycleToken: capturedToken,
                 currentServerGeneration: { currentGenerationBox.value },
                 currentLifecycleToken: { vmForClosures.currentLifecycleToken() },
-                capabilityRefresh: { _ = try? await capabilityGate.wait() },
+                capabilityRefresh: {
+                    // Handshake: signal that we are ENTERING the
+                    // capability await. Fires synchronously BEFORE
+                    // the closure suspends on the gate, so
+                    // pre-work guards must have already passed.
+                    enteredSignal.set()
+                    _ = try? await capabilityGate.wait()
+                },
                 resolvedAttentionEnabled: { true },
                 getAttentionEnabled: { attentionEnabled },
                 setAttentionEnabled: { attentionEnabled = $0 },
@@ -3049,31 +3072,50 @@ final class AttentionFeedViewModelTests: XCTestCase {
             )
         }
 
-        // The recovery is suspended on the capability gate. Simulate
-        // the reachable race: deactivate bumps the lifecycle token
-        // while we're waiting.
+        // Wait until recovery is DEFINITELY inside the capability
+        // await, past the pre-work guards. If the guards had failed
+        // (e.g. because we'd deactivated too early), `enteredSignal`
+        // would never fire and this would hang — proving the
+        // handshake positions the drift precisely in the post-await
+        // window.
+        await enteredSignal.wait()
+
+        // Recovery is now suspended inside capabilityRefresh.
+        // Bump the lifecycle token via deactivate. Server generation
+        // remains UNCHANGED, so ONLY the restored post-await token
+        // guard can catch this drift.
         vm.deactivate()
 
-        // Resolve the capability gate so the recovery resumes.
+        // Resolve capability gate. Recovery resumes; post-await
+        // guard must abort.
         await capabilityGate.succeed(())
         await recoveryTask.value
 
-        // Post-await token guard must have caught the deactivate —
-        // ZERO VM mutation, ZERO GET.
+        // Non-vacuity assertions: if the post-await token guard
+        // were absent, `resolvedAttentionEnabled` returning `true`
+        // with `previouslyEnabled == true` would skip the configure
+        // branch, but `resetDisabledLatch(true)` and `refresh()`
+        // would both fire (they only check server generation). This
+        // test would FAIL without the restored guard.
         XCTAssertEqual(configureCallCount, 0, "No configure after token drift")
-        XCTAssertEqual(resetLatchCallCount, 0, "No latch reset after token drift")
-        XCTAssertEqual(refreshCallCount, 0, "No refresh after token drift")
+        XCTAssertEqual(
+            resetLatchCallCount, 0,
+            "No latch reset — only the token guard can catch this drift (server gen unchanged)"
+        )
+        XCTAssertEqual(
+            refreshCallCount, 0,
+            "No refresh — only the token guard can catch this drift (server gen unchanged)"
+        )
         let calls = await service.loadCallCount
         XCTAssertEqual(calls, 0, "Zero canonical GET after token drift")
     }
 
     func testRecoveryOrchestratorBailsWhenTokenBumpsViaDeactivateReactivate() async {
-        // Same fence, more aggressive drift: deactivate + reactivate
-        // during the capability await. Token has bumped multiple
-        // times; the recovery captured T0, current is T2+. Post-await
-        // token check catches it → zero VM mutation. The current
-        // owner is authoritative — this test ends without any
-        // recovery-driven GET, proving the OLD task is inert.
+        // Same handshake fence, more aggressive drift: deactivate +
+        // reactivate during the capability await. Token has bumped
+        // multiple times by application time; the captured token
+        // is stale.
+        let enteredSignal = AsyncSignal()
         let capabilityGate = AttentionResultGate<Void>()
         let service = ScriptedAttentionService(steps: [])
         let signalR = MockSignalRService()
@@ -3089,6 +3131,7 @@ final class AttentionFeedViewModelTests: XCTestCase {
         let currentGenerationBox = SendableIntBox(initial: 1)
         var attentionEnabled = true
         var configureCallCount = 0
+        var resetLatchCallCount = 0
         var refreshCallCount = 0
         let vmForClosures = vm
 
@@ -3098,7 +3141,10 @@ final class AttentionFeedViewModelTests: XCTestCase {
                 capturedLifecycleToken: capturedToken,
                 currentServerGeneration: { currentGenerationBox.value },
                 currentLifecycleToken: { vmForClosures.currentLifecycleToken() },
-                capabilityRefresh: { _ = try? await capabilityGate.wait() },
+                capabilityRefresh: {
+                    enteredSignal.set()
+                    _ = try? await capabilityGate.wait()
+                },
                 resolvedAttentionEnabled: { true },
                 getAttentionEnabled: { attentionEnabled },
                 setAttentionEnabled: { attentionEnabled = $0 },
@@ -3110,7 +3156,9 @@ final class AttentionFeedViewModelTests: XCTestCase {
                         attentionEnabled: newEnabled
                     )
                 },
-                resetDisabledLatch: { _ in },
+                resetDisabledLatch: { _ in
+                    resetLatchCallCount += 1
+                },
                 refresh: {
                     refreshCallCount += 1
                     _ = await vmForClosures.refresh()
@@ -3118,9 +3166,12 @@ final class AttentionFeedViewModelTests: XCTestCase {
             )
         }
 
-        // Deactivate + reactivate during the capability await — token
-        // bumps at least twice; captured T0 is stale by application
-        // time.
+        // Wait for recovery to reach capability-await suspension.
+        await enteredSignal.wait()
+
+        // Drift the lifecycle: deactivate + reactivate during the
+        // capability await. Token bumps at least twice; captured
+        // token is stale by post-await guard time.
         vm.deactivate()
         vm.activate()
 
@@ -3130,6 +3181,10 @@ final class AttentionFeedViewModelTests: XCTestCase {
         XCTAssertEqual(
             configureCallCount, 0,
             "Old task must not configure after multi-drift"
+        )
+        XCTAssertEqual(
+            resetLatchCallCount, 0,
+            "Old task must not reset disabled latch after multi-drift"
         )
         XCTAssertEqual(
             refreshCallCount, 0,
@@ -3146,6 +3201,12 @@ final class AttentionFeedViewModelTests: XCTestCase {
         // Fence-not-a-wedge proof: same-owner recovery with
         // unchanged token and generation between capture and drain
         // fires exactly one canonical GET.
+        //
+        // Uses the same handshake barrier so the timeline is
+        // symmetric with the drift tests — the ONLY difference is
+        // that no drift occurs between `enteredSignal.wait()` and
+        // gate resolution.
+        let enteredSignal = AsyncSignal()
         let capabilityGate = AttentionResultGate<Void>()
         let feed = makeAttentionFeed(healthyPrinterCount: 4)
         let service = ScriptedAttentionService(steps: [.value(feed)])
@@ -3171,7 +3232,10 @@ final class AttentionFeedViewModelTests: XCTestCase {
                 capturedLifecycleToken: capturedToken,
                 currentServerGeneration: { currentGenerationBox.value },
                 currentLifecycleToken: { vmForClosures.currentLifecycleToken() },
-                capabilityRefresh: { _ = try? await capabilityGate.wait() },
+                capabilityRefresh: {
+                    enteredSignal.set()
+                    _ = try? await capabilityGate.wait()
+                },
                 resolvedAttentionEnabled: { true },
                 getAttentionEnabled: { attentionEnabled },
                 setAttentionEnabled: { attentionEnabled = $0 },
@@ -3193,7 +3257,10 @@ final class AttentionFeedViewModelTests: XCTestCase {
             )
         }
 
-        // NO drift during the capability await.
+        // Wait for recovery to reach capability-await suspension.
+        // NO drift here — this is the fence-not-a-wedge scenario.
+        await enteredSignal.wait()
+
         await capabilityGate.succeed(())
         await recoveryTask.value
 
@@ -3245,5 +3312,43 @@ private final class SendableIntBox: @unchecked Sendable {
     func set(_ v: Int) {
         lock.lock(); defer { lock.unlock() }
         _value = v
+    }
+}
+
+/// One-shot async signal: `set()` and `wait()`, thread-safe. Used by
+/// the recovery-orchestrator token-drift tests to establish a
+/// non-vacuous "capability await entry" handshake. The recovery
+/// closure signals `set()` synchronously before its own `await` on
+/// the result gate; the test's `await wait()` resumes only when
+/// the recovery is DEFINITELY suspended inside the capability
+/// refresh, past the pre-work guards. This lets the test
+/// deactivate/reactivate the VM while the recovery is genuinely
+/// mid-await, so the post-await lifecycle-token guard — not the
+/// pre-work guard — is what catches the drift.
+private final class AsyncSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isSet = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func set() {
+        lock.lock()
+        isSet = true
+        let waiters = continuations
+        continuations.removeAll()
+        lock.unlock()
+        waiters.forEach { $0.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if isSet {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            continuations.append(continuation)
+            lock.unlock()
+        }
     }
 }
