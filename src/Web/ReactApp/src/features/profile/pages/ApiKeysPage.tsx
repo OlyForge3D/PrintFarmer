@@ -428,9 +428,9 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                       <Button
                         variant="secondary"
                         onClick={() => handleRotate(apiKey.id, apiKey.name)}
-                        disabled={rotateMutation.isPending}
+                        disabled={rotateMutation.isPending || apiKey.isExpired}
                         iconLeft={<RefreshIcon className="w-4 h-4" />}
-                        title="Rotate (generate new key)"
+                        title={apiKey.isExpired ? 'Expired API keys cannot be rotated' : 'Rotate (generate new key)'}
                         aria-label={`Rotate API key ${apiKey.name}`}
                       />
                       <Button
