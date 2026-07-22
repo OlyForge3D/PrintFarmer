@@ -5,6 +5,7 @@ import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import { usePrinters } from '@/common/hooks/useApi';
+import { sortPrintersByAvailability } from '@/utils/printerSort';
 import type { PrinterGroupPrinter } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
@@ -33,11 +34,11 @@ export function PrinterAssignment({ groupId, assignedPrinters }: PrinterAssignme
     : undefined;
 
   // Filter: exclude already assigned, and if group has a model, only show matching printers
-  const availablePrinters = allPrinters.filter((p) => {
+  const availablePrinters = sortPrintersByAvailability(allPrinters.filter((p) => {
     if (assignedPrinters.some((ap) => ap.id === p.id)) return false;
     if (groupModelId && p.modelId !== groupModelId) return false;
     return true;
-  });
+  }));
 
   const assignMutation = useMutation({
     mutationFn: ({ groupId, printerId }: { groupId: string; printerId: string }) =>

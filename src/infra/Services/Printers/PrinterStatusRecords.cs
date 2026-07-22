@@ -8,7 +8,7 @@ public record PrinterStatus(bool IsOnline, string? State);
 /// <summary>
 /// Current print job information.
 /// </summary>
-public record PrinterJob(string? PrintState, double? Progress, string? JobName, string? ThumbnailUrl);
+public record PrinterJob(string? PrintState, double? Progress, string? JobName, string? ThumbnailUrl, double? PrintDurationSeconds = null);
 
 /// <summary>
 /// Temperature reading for a single extruder (Tn index).
@@ -35,5 +35,6 @@ public record PrinterCompositeStatus(
     double? HotendTarget = null,
     double? BedTarget = null,
     IReadOnlyDictionary<int, ExtruderTemperature>? ExtruderTemperatures = null,
-    int? DetectedExtruderCount = null);
+    int? DetectedExtruderCount = null,
+    double? PrintTimeLeftSeconds = null);
 #pragma warning restore CA1056 // URI-like properties should not be strings

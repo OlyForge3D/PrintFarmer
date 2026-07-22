@@ -1,0 +1,27 @@
+author:	jpapiez
+association:	member
+edited:	false
+status:	commented
+--
+Vote: REQUEST_CHANGES
+
+- `docs/design/printer-controls-section.md:355-360,543-545` only defines idle/pending/printing/offline. It never specifies the capability-gated states Hudson needs for #284-#286 (`supportsTemperatureControl == false` or `supportsMovement == false`), so the implementer still has to guess whether those subgroups hide or render disabled.
+- `docs/design/printer-controls-section.md:339-344,540-541` sets Jog's default step to `10` / `10.0`, but #286 locks the default at `1 mm`. That is a build-breaking mismatch for the first implementation.
+- `docs/design/printer-controls-section.md:231-235` says Home XY and Home Z call `POST /api/printers/{id}/home`. The backend/service contract for #281 uses dedicated `/homexy` and `/homez` routes, so this spec currently points Hudson at the wrong API.
+
+--
+author:	jpapiez
+association:	member
+edited:	false
+status:	none
+--
+Addressed all three blocking issues:
+
+- **Capability gating (lines 355-387 new):** Added explicit rule — hide entire subgroup when `supportsTemperatureControl` or `supportsMovement` is `false`. Cleaner UX than disabled-row clutter. Implementation code sample included.
+
+- **Jog default (lines 342, 567):** Fixed step default from `10` to `1 mm` per #286 acceptance criteria. Segmented control offers `0.1 / 1 / 10 / 100` as spec'd.
+
+- **Home API endpoints (lines 231-235):** Corrected to dedicated routes: `/home` (all), `/homexy`, `/homez`. No axes body for dedicated routes per Gorman's #281 verification.
+
+Also updated Implementation Notes (lines 564-570) with capability gating guidance and correct API references.
+--

@@ -253,8 +253,8 @@ public sealed class SdcpPollingService(
                         await CheckAndSyncJobCompletionAsync(printerId, previousState, status.State, ct);
                     }
 
-                    // Broadcast update via SignalR using PrinterStatusDto
-                    var update = new PrinterStatusDto(
+                    // Update cache before broadcasting to clients
+                    var cacheUpdate = new PrinterStatusDto(
                         Id: printerId,
                         IsOnline: status.IsOnline,
                         State: PrinterStateNormalizer.NormalizeState(status.State),
@@ -271,11 +271,28 @@ public sealed class SdcpPollingService(
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
                         SpoolInfo: null);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate);
 
-                    // Update cache before broadcasting to clients
-                    _statusCacheWriter.UpdateStatus(update);
+                    var signalRUpdate = new PrinterStatusUpdate(
+                        Id: printerId,
+                        IsOnline: status.IsOnline,
+                        State: PrinterStateNormalizer.NormalizeState(status.State),
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        X: status.X,
+                        Y: status.Y,
+                        Z: status.Z,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        HomedAxes: null,
+                        SpoolInfo: null,
+                        FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
+                    await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -305,7 +322,7 @@ public sealed class SdcpPollingService(
 
                         RecordHealthTransition(printerId, printer?.Name ?? printerId.ToString(), PrinterConnectionState.Offline, $"Failed {state.ConsecutiveFailures} consecutive times");
 
-                        var offlineUpdate = new PrinterStatusDto(
+                        var offlineCacheUpdate = new PrinterStatusDto(
                             Id: printerId,
                             IsOnline: false,
                             State: null,
@@ -322,11 +339,28 @@ public sealed class SdcpPollingService(
                             HotendTarget: null,
                             BedTarget: null,
                             SpoolInfo: null);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
 
-                        // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(offlineUpdate);
+                        var offlineSignalRUpdate = new PrinterStatusUpdate(
+                            Id: printerId,
+                            IsOnline: false,
+                            State: null,
+                            Progress: null,
+                            JobName: null,
+                            ThumbnailUrl: null,
+                            CameraStreamUrl: null,
+                            X: null,
+                            Y: null,
+                            Z: null,
+                            HotendTemp: null,
+                            BedTemp: null,
+                            HotendTarget: null,
+                            BedTarget: null,
+                            HomedAxes: null,
+                            SpoolInfo: null,
+                            FileName: null);
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 

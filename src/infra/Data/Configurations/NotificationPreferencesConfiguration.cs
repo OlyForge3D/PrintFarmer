@@ -14,6 +14,18 @@ public class NotificationPreferencesConfiguration : IEntityTypeConfiguration<Not
         _ = builder.Property(np => np.Frequency).IsRequired().HasDefaultValue(NotificationFrequency.RealTime);
         _ = builder.Property(np => np.RetentionDays).IsRequired().HasDefaultValue(30);
         _ = builder.Property(np => np.UpdatedAt).IsRequired();
+        _ = builder.Property(np => np.InAppOnJobStarted).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.InAppOnJobCompleted).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.InAppOnJobFailed).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.InAppOnJobPaused).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnJobStarted).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.EmailOnJobCompleted).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnJobFailed).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.EmailOnJobPaused).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.PushOnJobStarted).IsRequired().HasDefaultValue(false);
+        _ = builder.Property(np => np.PushOnJobCompleted).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.PushOnJobFailed).IsRequired().HasDefaultValue(true);
+        _ = builder.Property(np => np.PushOnJobPaused).IsRequired().HasDefaultValue(true);
 
         // Foreign Key - one-to-one relationship with User
         _ = builder.HasOne(np => np.User)

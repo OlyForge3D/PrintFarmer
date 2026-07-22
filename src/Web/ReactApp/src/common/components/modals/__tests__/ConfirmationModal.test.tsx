@@ -136,7 +136,7 @@ describe('ConfirmationModal', () => {
   });
 
   it('should display alert icon for dangerous operations', () => {
-    const { container } = render(
+    render(
       <ConfirmationModal
         isOpen={true}
         title="Delete Item"
@@ -148,8 +148,8 @@ describe('ConfirmationModal', () => {
       />
     );
 
-    // The alert icon should be present when isDangerous is true
-    expect(container.querySelector('svg')).toBeInTheDocument();
+    // Modal renders via portal, so query the document
+    expect(document.querySelector('svg')).toBeInTheDocument();
   });
 
   it('should handle long messages', () => {
@@ -169,7 +169,7 @@ describe('ConfirmationModal', () => {
   });
 
   it('should render with proper button layout', () => {
-    const { container } = render(
+    render(
       <ConfirmationModal
         isOpen={true}
         title="Confirm"
@@ -179,7 +179,8 @@ describe('ConfirmationModal', () => {
       />
     );
 
-    const buttons = container.querySelectorAll('button');
+    // Modal renders via portal, so query the document
+    const buttons = document.querySelectorAll('button');
     expect(buttons.length).toBeGreaterThanOrEqual(2); // At least Cancel and Confirm buttons
   });
 });

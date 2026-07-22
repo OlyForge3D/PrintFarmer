@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CubeIcon, UploadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
-import { Button, FileUpload } from '@/common/components/ui';
+import { Button, FileUpload, ProgressBar } from '@/common/components/ui';
 import { Modal } from './Modal';
 import { slicerService } from '@/services/slicerService';
 import { toast } from 'sonner';
@@ -28,14 +28,17 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   const queryClient = useQueryClient();
   const [dragOver, setDragOver] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
+  const [isClosing, setIsClosing] = useState(false);
 
   // Upload mutation with progress tracking
   const uploadMutation = useMutation({
     mutationFn: (file: File) => {
       return new Promise<{ id: string; url: string }>((resolve, reject) => {
         slicerService.uploadModel(file, (progress) => {
+          // Cap progress at 95% during upload to show backend is still processing
+          const displayProgress = Math.min(95, progress);
           setUploadQueue(prev => prev.map(item =>
-            item.file === file ? { ...item, progress } : item
+            item.file === file ? { ...item, progress: displayProgress } : item
           ));
         }).then(resolve).catch(reject);
       });
@@ -104,8 +107,10 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
           it.id === item.id ? { ...it, status: 'uploading', progress: 0 } : it
         ));
 
+        // Wait for backend to fully complete upload + processing (includes thumbnail generation)
         await uploadMutation.mutateAsync(item.file);
 
+        // Only mark as done and show toast after backend confirms completion
         setUploadQueue(prev => prev.map(it =>
           it.id === item.id ? { ...it, progress: 100, status: 'done' } : it
         ));
@@ -126,19 +131,27 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   };
 
   const handleClose = async () => {
-    // Invalidate models-search query to refresh the models list
-    queryClient.invalidateQueries({ queryKey: ['models-search'] });
-    
-    // Call onUploadSuccess callback if provided
-    if (onUploadSuccess) {
-      try {
-        await onUploadSuccess();
-      } catch (error) {
-        console.error('Error calling onUploadSuccess:', error);
+    setIsClosing(true);
+    try {
+      // Invalidate file-browser queries to refresh the models list.
+      // useFileBrowser keys are ['file-browser', ...] — prefix match invalidates all.
+      await queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+      
+      // Call onUploadSuccess callback if provided and wait for it to complete
+      if (onUploadSuccess) {
+        try {
+          await onUploadSuccess();
+        } catch (error) {
+          console.error('Error calling onUploadSuccess:', error);
+        }
       }
+      
+      // Reset upload queue when closing
+      setUploadQueue([]);
+      onClose();
+    } finally {
+      setIsClosing(false);
     }
-    
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -148,7 +161,13 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   const completedCount = uploadQueue.filter(item => item.status === 'done').length;
 
   const modalFooter = (
-    <Button onClick={handleClose} variant="secondary" size="sm">
+    <Button 
+      onClick={handleClose} 
+      variant="secondary" 
+      size="sm"
+      loading={isClosing}
+      disabled={isClosing}
+    >
       Close
     </Button>
   );
@@ -173,12 +192,12 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
         <div className="flex flex-col items-center space-y-2">
           <CubeIcon className="w-8 h-8 text-pf-text-tertiary" />
           <p className="text-sm font-medium text-pf-text-secondary">Drag files here or click to browse</p>
-          <p className="text-xs text-pf-text-tertiary">STL, 3MF, OBJ, PLY</p>
+          <p className="text-xs text-pf-text-tertiary">STL, 3MF, OBJ, PLY, STEP</p>
         </div>
         <FileUpload
           id="model-file-upload"
           multiple
-          accept=".stl,.3mf,.obj,.ply"
+          accept=".stl,.3mf,.obj,.ply,.step,.stp"
           onChange={handleFileSelect}
           buttonText="Browse Files"
           buttonVariant="secondary"
@@ -225,12 +244,12 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
 
                 {/* Progress Bar */}
                 {(item.status === 'uploading' || item.status === 'done') && (
-                  <div className="h-1.5 bg-pf-bg-0 rounded-full border border-pf-border overflow-hidden">
-                    <div
-                      className="h-full transition-all bg-pf-accent"
-                      style={{ width: `${Math.min(100, item.progress)}%` }}
-                    />
-                  </div>
+                  <ProgressBar
+                    value={item.progress}
+                    ariaLabel={`${item.file.name} upload progress`}
+                    showPercent={false}
+                    size="xs"
+                  />
                 )}
 
                 {/* Error Message */}

@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Cameras;
 
 namespace Farm.Infrastructure;
 
@@ -38,6 +39,10 @@ namespace Farm.Infrastructure;
 /// <param name="Location">Location information (farm location assignment).</param>
 /// <param name="ObicoEnabled">Whether Obico AI failure detection is enabled for the printer.</param>
 /// <param name="HasCatalogUpdate">True when the printer's linked catalog model has been updated since the last template sync.</param>
+/// <param name="UseModelDispatchDefaults">Whether this printer inherits dispatch settings from its model.</param>
+/// <param name="CameraAccessMode">Client presentation mode for snapshot-only versus stream-capable cameras.</param>
+/// <param name="CameraStreamFormat">Transport format for the stream URL, such as MJPEG, WebRTC, or RTSP.</param>
+/// <param name="CameraSnapshotStrategy">Snapshot capture strategy required by the backend.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -71,4 +76,8 @@ public record PrinterDto(
     string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,
-    bool HasCatalogUpdate = false);
+    bool HasCatalogUpdate = false,
+    bool UseModelDispatchDefaults = true,
+    CameraAccessMode CameraAccessMode = CameraAccessMode.Unknown,
+    CameraStreamFormat CameraStreamFormat = CameraStreamFormat.Unknown,
+    CameraSnapshotStrategy CameraSnapshotStrategy = CameraSnapshotStrategy.None);

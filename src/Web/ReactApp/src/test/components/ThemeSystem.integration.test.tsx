@@ -187,13 +187,25 @@ describe('Theme System Integration', () => {
     });
     expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: printfarmer-dark');
     
-    // Click 3: printfarmer-dark -> system
+    // Click 3: printfarmer-dark -> matrix
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: matrix');
+    
+    // Click 4: matrix -> forge
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: forge');
+    
+    // Click 5: forge -> system
     await act(async () => {
       fireEvent.click(toggle);
     });
     expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: system');
     
-    // Click 4: system -> light
+    // Click 6: system -> light
     await act(async () => {
       fireEvent.click(toggle);
     });

@@ -83,11 +83,11 @@ public static class ModelBuilderExtensions
         string provider = providerName;
         if (provider.Contains("sqlite", StringComparison.OrdinalIgnoreCase))
         {
-            ConfigureSqliteOptimizations(modelBuilder);
+            ConfigureSqliteOptimizations();
         }
         else if (provider.Contains("postgres", StringComparison.OrdinalIgnoreCase) || provider.Contains("npgsql", StringComparison.OrdinalIgnoreCase))
         {
-            ConfigurePostgreSqlOptimizations(modelBuilder);
+            ConfigurePostgreSqlOptimizations();
         }
         else if (provider.Contains("sqlserver", StringComparison.OrdinalIgnoreCase))
         {
@@ -95,13 +95,13 @@ public static class ModelBuilderExtensions
         }
     }
 
-    private static void ConfigureSqliteOptimizations(ModelBuilder modelBuilder)
+    private static void ConfigureSqliteOptimizations()
     {
         // SQLite-specific optimizations
         // SQLite has limited computed column support, so keep it simple
     }
 
-    private static void ConfigurePostgreSqlOptimizations(ModelBuilder modelBuilder)
+    private static void ConfigurePostgreSqlOptimizations()
     {
         // PostgreSQL-specific optimizations
         // PostgreSQL has excellent full-text search capabilities

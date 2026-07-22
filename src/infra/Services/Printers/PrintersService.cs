@@ -25,7 +25,9 @@ using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -52,6 +54,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Initializes a new instance of the PrintersService with all required dependencies.
 /// </remarks>
 /// <param name="unitOfWork">Unit of Work for database operations</param>
+/// <param name="db">Application DbContext used for snapshot pre-deletion</param>
 /// <param name="backendFactory">Factory for creating backend clients</param>
 /// <param name="capabilityFactory">Factory for checking backend capabilities</param>
 /// <param name="catalogService">Service for manufacturer/model lookups</param>
@@ -64,9 +67,12 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="locationService">Service for location management</param>
 /// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
+/// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
+/// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
+    AppDbContext db,
     IBackendClientFactory backendFactory,
     IBackendCapabilityFactory capabilityFactory,
     Catalog.ICatalogService catalogService,
@@ -78,9 +84,12 @@ public class PrintersService(
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     Farm.Infrastructure.Services.Locations.ILocationService locationService,
     Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
-    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService) : IPrintersService
+    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
+    Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
+    IStoragePathService storagePathService) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
     private readonly IBackendClientFactory _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
@@ -93,6 +102,8 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
     private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
+    private readonly Farm.Infrastructure.Services.Cameras.IGo2RtcService _go2RtcService = go2RtcService ?? throw new ArgumentNullException(nameof(go2RtcService));
+    private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -107,6 +118,71 @@ public class PrintersService(
     private IBackendClient GetBackendClient(PrinterBackend backend)
     {
         return _backendFactory.GetClient(backend);
+    }
+
+    /// <summary>
+    /// Resolves Snapmaker U1-style Moonraker port and catalog hints during manual onboarding.
+    /// </summary>
+    private async Task ApplyMoonrakerOnboardingHintsAsync(CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
+    {
+        if (dto.Backend != PrinterBackend.Moonraker ||
+            !Uri.TryCreate(dto.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        {
+            return;
+        }
+
+        using HttpClient client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(5);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            serverUri,
+            dto.BackendPort,
+            ct);
+
+        if (resolution is null)
+        {
+            return;
+        }
+
+        dto.BackendPort = resolution.BackendPort;
+        if (resolution.BackendPort == MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort)
+        {
+            dto.FrontendPort = MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort;
+        }
+
+        if (resolution.IsSnapmakerU1)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Manufacturer))
+            {
+                dto.Manufacturer = resolution.Manufacturer;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Model))
+            {
+                dto.Model = resolution.Model;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+            {
+                dto.NewManufacturerName = resolution.Manufacturer;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.NewModelName))
+            {
+                dto.NewModelName = resolution.Model;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Name) && !string.IsNullOrWhiteSpace(resolution.DeviceName))
+            {
+                dto.Name = resolution.DeviceName;
+            }
+        }
+    }
+
+    private static string? FirstNonWhiteSpace(params string?[] values)
+    {
+        return values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
     }
 
     /// <summary>
@@ -604,7 +680,7 @@ public class PrintersService(
                 };
             }
 
-            return dto;
+            return ApplyCameraContract(dto);
         }
         catch (Exception ex)
         {
@@ -630,7 +706,7 @@ public class PrintersService(
         PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
         {
             (string? streamUrl, string? snapshotUrl) = await ResolveCameraUrlsFromTableAsync(p.Id, ct).ConfigureAwait(false);
-            return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
+            return PrinterCameraUrlsDto.FromUrls(p.Id, p.Name, streamUrl, snapshotUrl);
         }));
         return dtos;
     }
@@ -850,7 +926,12 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
             catch (Exception ex)
             {
@@ -896,7 +977,11 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
         }
 
@@ -1251,6 +1336,10 @@ public class PrintersService(
             ["lastUpdated"] = p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
             ["maxBedTemp"] = p.MaxBedTemp,
 
+            // Z-offset calibration
+            ["zOffsetMm"] = p.ZOffsetMm,
+            ["lastZOffsetCalibrationAt"] = p.LastZOffsetCalibrationAt,
+
             // All toolheads as array (supports multi-toolhead printers)
             ["toolheads"] = p.Toolheads?.Select(t => new Dictionary<string, object?>
             {
@@ -1281,7 +1370,7 @@ public class PrintersService(
 
     private static PrinterDto CreateOfflinePrinterDto(Printer p, string? cameraStreamUrl = null, string? cameraSnapshotUrl = null)
     {
-        return new PrinterDto(
+        return ApplyCameraContract(new PrinterDto(
             Id: p.Id,
             Name: p.Name,
             Notes: p.Notes,
@@ -1315,7 +1404,18 @@ public class PrintersService(
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
-            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
+            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+    }
+
+    private static PrinterDto ApplyCameraContract(PrinterDto dto)
+    {
+        return dto with
+        {
+            CameraAccessMode = CameraContractClassifier.GetAccessMode(dto.CameraStreamUrl, dto.CameraSnapshotUrl),
+            CameraStreamFormat = CameraContractClassifier.GetStreamFormat(dto.CameraStreamUrl),
+            CameraSnapshotStrategy = CameraContractClassifier.GetSnapshotStrategy(dto.CameraSnapshotUrl)
+        };
     }
 
     /// <summary>
@@ -1390,14 +1490,17 @@ public class PrintersService(
             throw new InvalidOperationException($"A printer already exists at this address: {duplicate.Name}");
         }
 
+        await ApplyMoonrakerOnboardingHintsAsync(dto, ct);
+
         // resolve manufacturer/model - use Unknown if not found
         // NOTE: We use CatalogService for all catalog lookups, which provides caching
         // to avoid repeated database queries during bulk operations like CSV import.
         // We don't create new manufacturers/models - if not found, we default to "Unknown" instead.
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
-        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+        string? manufacturerName = FirstNonWhiteSpace(dto.NewManufacturerName, dto.Manufacturer);
+        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(manufacturerName))
         {
-            string name = dto.NewManufacturerName!.Trim();
+            string name = manufacturerName.Trim();
 
             // Try to find existing manufacturer from catalog service (with caching), but don't create - use Unknown if not found
             ManufacturerDto? existingMfg = await _catalogService.FindManufacturerByNameAsync(name, ct);
@@ -1415,9 +1518,10 @@ public class PrintersService(
         }
 
         Guid modelId = dto.ModelId ?? Guid.Empty;
-        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
+        string? modelName = FirstNonWhiteSpace(dto.NewModelName, dto.Model);
+        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(modelName) && manufacturerId != Guid.Empty)
         {
-            string mname = dto.NewModelName!.Trim();
+            string mname = modelName.Trim();
 
             // Try to find existing model from catalog service (with caching), but don't create - use Unknown if not found
             PrinterModelDto? existingModel = await _catalogService.FindModelByNameAsync(mname, manufacturerId, ct);
@@ -1529,7 +1633,12 @@ public class PrintersService(
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
-            MachineHourlyRate = dto.MachineHourlyRate
+            MachineHourlyRate = dto.MachineHourlyRate,
+
+            // Inherit auto-dispatch defaults from model template
+            AutoDispatchEnabled = modelTemplate?.DefaultAutoDispatchState != null
+                && modelTemplate.DefaultAutoDispatchState != AutoDispatchState.None,
+            UseModelDispatchDefaults = true
         };
 
         // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)
@@ -1809,7 +1918,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        Printer? p = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
             return null;
@@ -1831,6 +1940,16 @@ public class PrintersService(
                         : p.BackendUrl;
 
                     snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (IsSnapmakerU1Printer(p) &&
+                (string.IsNullOrWhiteSpace(snapshotUrl) || CameraContractClassifier.IsSnapmakerU1MonitorSnapshotUrl(snapshotUrl)))
+            {
+                byte[]? u1Snapshot = await TryGetSnapmakerU1CameraSnapshotAsync(p, ct).ConfigureAwait(false);
+                if (u1Snapshot is { Length: > 0 })
+                {
+                    return u1Snapshot;
                 }
             }
 
@@ -2031,12 +2150,12 @@ public class PrintersService(
     /// Pass null for heater to skip temperature change (e.g., hotend=210, bed=null sets only hotend).
     /// Temperatures clamped to safe ranges by backend firmware (typically 0-300°C hotend, 0-120°C bed).
     /// </remarks>
-    public async Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
+    public async Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2065,25 +2184,31 @@ public class PrintersService(
                         success = success && hotendSuccess;
                     }
 
-                    return success;
+                    return success ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
                 }
 
-                return false;
+                return PrinterControlOutcome.BackendUnsupported;
             }
 
             // Moonraker, PrusaLink, SDCP: use generic temperature control
             if (client is ISupportsTemperatureControl tempControl)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused temperature command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to set temperatures on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2103,12 +2228,12 @@ public class PrintersService(
     /// At least one axis parameter should be provided; null values are ignored.
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2119,15 +2244,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                bool ok = await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused move command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2148,12 +2279,12 @@ public class PrintersService(
     /// Coordinates are typically limited to printer build volume (e.g., 0-250mm for Prusa).
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2164,15 +2295,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused moveto command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move to position on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2448,6 +2585,92 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
+    public async Task<PrintJobObjectListDto?> GetPrintJobObjectsAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer == null)
+        {
+            return null;
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        IBackendClient client = GetBackendClient(backend);
+        if (client is not ISupportsObjectExclusion objectExclusionClient)
+        {
+            return new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>());
+        }
+
+        string url = backend == PrinterBackend.Moonraker
+            ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+            : printer.BackendUrl;
+
+        PrintJobObjectListDto? objects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
+        return objects is null
+            ? new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>())
+            : objects with { PrinterId = id };
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> ExcludePrintJobObjectAsync(Guid id, string objectName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(objectName))
+        {
+            return new CommandResult(false, "Object name is required.");
+        }
+
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer == null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)printer.Backend;
+            IBackendClient client = GetBackendClient(backend);
+            if (client is not ISupportsObjectExclusion objectExclusionClient)
+            {
+                return new CommandResult(false, $"Backend '{backend}' does not support object exclusion");
+            }
+
+            string url = backend == PrinterBackend.Moonraker
+                ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+                : printer.BackendUrl;
+
+            PrintJobObjectListDto? currentObjects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
+            if (currentObjects is null || string.IsNullOrWhiteSpace(currentObjects.JobName))
+            {
+                return new CommandResult(false, "No active printing job is available for object exclusion.");
+            }
+
+            PrintJobObjectDto? objectToExclude = currentObjects.Objects.FirstOrDefault(o => string.Equals(o.Name, objectName, StringComparison.Ordinal));
+            if (objectToExclude is null)
+            {
+                return new CommandResult(false, $"Object '{objectName}' was not found in the current print job.");
+            }
+
+            if (objectToExclude.IsExcluded)
+            {
+                return new CommandResult(false, $"Object '{objectName}' is already excluded.");
+            }
+
+            bool result = await objectExclusionClient.ExcludeObjectAsync(url, objectName, ct).ConfigureAwait(false);
+            return result
+                ? new CommandResult(true, $"Object '{objectName}' skipped")
+                : new CommandResult(false, "Printer rejected the object exclusion command");
+        }
+        catch (ArgumentException ex)
+        {
+            return new CommandResult(false, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to exclude object on printer {PName} ({Id})", printer.Name, id);
+            return new CommandResult(false, $"Failed to exclude object: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<CommandResult> LoadFilamentAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -2689,7 +2912,7 @@ public class PrintersService(
 
             if (p.MultiMaterial)
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
+                int gateCount = Math.Max(4, toolheadIndex);
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
@@ -2774,7 +2997,7 @@ public class PrintersService(
 
             if (p.MultiMaterial)
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
+                int gateCount = Math.Max(4, toolheadIndex);
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
@@ -2931,7 +3154,9 @@ public class PrintersService(
             mmuGateCount, printer.Name, printer.Id);
 
         var gates = new List<Toolhead>();
-        for (int i = 1; i < mmuGateCount; i++)
+
+        // Indices 1..mmuGateCount: T0 is the physical hotend, T1..Tn are AMS gates.
+        for (int i = 1; i <= mmuGateCount; i++)
         {
             gates.Add(new Toolhead
             {
@@ -3936,6 +4161,7 @@ public class PrintersService(
         var backend = (PrinterBackend)printer.Backend;
         string? streamUrl = null;
         string? snapshotUrl = null;
+        bool isSnapmakerU1 = IsSnapmakerU1Printer(printer);
 
         try
         {
@@ -3959,6 +4185,12 @@ public class PrintersService(
                     ct).ConfigureAwait(false);
 
                 _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from detection - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
+
+                if (isSnapmakerU1 && string.IsNullOrWhiteSpace(streamUrl) && string.IsNullOrWhiteSpace(snapshotUrl))
+                {
+                    (streamUrl, snapshotUrl) = GetSnapmakerU1CameraUrls(printer);
+                    _logger.LogInformation("RefreshCameraUrlsAsync: Using Snapmaker U1 snapshot-only camera strategy - snapshot={SnapshotUrl}", snapshotUrl);
+                }
             }
             else
             {
@@ -4060,6 +4292,134 @@ public class PrintersService(
         _ => CameraSource.Standalone,
     };
 
+    private async Task<byte[]?> TryGetSnapmakerU1CameraSnapshotAsync(Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            IBackendClient client = _backendFactory.GetClient(PrinterBackend.Moonraker);
+            if (client is not ISupportsTriggeredCameraSnapshot triggeredSnapshotClient)
+            {
+                return null;
+            }
+
+            string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+            return await triggeredSnapshotClient.GetTriggeredCameraSnapshotAsync(moonrakerUrl, printer.Credential, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Snapmaker U1 camera snapshot failed for printer {PrinterId}: {Message}", printer.Id, ex.Message);
+            return null;
+        }
+    }
+
+    private static (string? StreamUrl, string? SnapshotUrl) GetSnapmakerU1CameraUrls(Printer printer)
+    {
+        string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+        Uri baseUri = new(moonrakerUrl);
+        UriBuilder builder = new(baseUri)
+        {
+            Path = "server/files/camera/monitor.jpg",
+            Query = string.Empty
+        };
+
+        return (null, builder.Uri.ToString());
+    }
+
+    private static bool IsSnapmakerU1Printer(Printer printer)
+    {
+        if ((PrinterBackend)printer.Backend != PrinterBackend.Moonraker)
+        {
+            return false;
+        }
+
+        return printer.Manufacturer?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerManufacturerName, StringComparison.OrdinalIgnoreCase) == true &&
+               printer.Model?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerU1ModelName, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    /// <inheritdoc/>
+    public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)
+    {
+        string trimmedIp = buddyCameraIp.Trim();
+
+        // Find existing Buddy camera (PrusaLink source with RTSP stream URL)
+        Domain.Camera? existing = printer.Cameras?.FirstOrDefault(c => c.Source == CameraSource.PrusaLink
+            && !string.IsNullOrEmpty(c.StreamUrl) && c.StreamUrl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrEmpty(trimmedIp))
+        {
+            // Clear: remove BuddyCameraIp and delete the camera entity
+            printer.BuddyCameraIp = null;
+            if (existing != null)
+            {
+                await _go2RtcService.RemoveStreamAsync(existing.Id, ct);
+
+                // Pre-delete snapshot files and DB rows before removing the camera entity.
+                // Camera→CameraSnapshot FK is Restrict, so SaveChanges would throw
+                // if any snapshot rows still reference this camera when it is removed.
+                await Farm.Infrastructure.Services.Cameras.SnapshotCleanupHelper.DeleteSnapshotsForCameraAsync(
+                    existing.Id, _db, _storagePathService, _logger, ct);
+
+                _unitOfWork.Cameras.Remove(existing);
+                _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
+            }
+
+            return;
+        }
+
+        string rtspUrl = $"rtsp://{FormatRtspHost(trimmedIp)}:554/live/";
+        printer.BuddyCameraIp = trimmedIp;
+
+        if (existing != null)
+        {
+            // Update existing camera's stream URL if IP changed
+            if (existing.StreamUrl != rtspUrl)
+            {
+                existing.StreamUrl = rtspUrl;
+                existing.IsEnabled = true;
+                existing.HealthStatus = CameraHealthStatus.Unknown;
+                existing.ConsecutiveFailures = 0;
+                existing.HealthMessage = null;
+
+                // Re-register stream in go2rtc with updated URL
+                string? snapshotUrl = await _go2RtcService.AddStreamAsync(existing.Id, rtspUrl, ct);
+                if (snapshotUrl != null)
+                {
+                    existing.SnapshotUrl = snapshotUrl;
+                }
+
+                _logger.LogInformation("[BuddyCamera] Updated Buddy camera {CameraId} stream URL to {RtspUrl}", existing.Id, rtspUrl);
+            }
+        }
+        else
+        {
+            // Create new Buddy camera
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"{printer.Name} Buddy Camera",
+                StreamUrl = rtspUrl,
+                SnapshotUrl = null,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = CameraSource.PrusaLink,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Unknown,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            // Register stream in go2rtc and derive snapshot URL
+            string? snapshot = await _go2RtcService.AddStreamAsync(camera.Id, rtspUrl, ct);
+            if (snapshot != null)
+            {
+                camera.SnapshotUrl = snapshot;
+            }
+
+            _unitOfWork.Cameras.Add(camera);
+            _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, printer.Name, rtspUrl);
+        }
+    }
+
     /// <summary>
     /// Resolves camera URLs from the Cameras table for a given printer.
     /// Returns the first enabled camera ordered by SortOrder, preferring General type.
@@ -4081,6 +4441,28 @@ public class PrintersService(
         return camera is not null
             ? (camera.StreamUrl, camera.SnapshotUrl)
             : (null, null);
+    }
+
+    /// <summary>
+    /// Formats a host string for use in an RTSP URL, bracketing bare IPv6 addresses
+    /// as required by RFC 2732 / RFC 3986 (e.g. <c>2001:db8::1</c> → <c>[2001:db8::1]</c>).
+    /// Already-bracketed values and IPv4/hostname values are returned unchanged.
+    /// </summary>
+    internal static string FormatRtspHost(string host)
+    {
+        // Already bracketed — pass through as-is (bracketed IPv4 is rejected at the controller level).
+        if (host.StartsWith('[') && host.EndsWith(']'))
+        {
+            return host;
+        }
+
+        // Bare IPv6 must be wrapped in brackets for URL construction.
+        if (IPAddress.TryParse(host, out IPAddress? ip) && ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return $"[{host}]";
+        }
+
+        return host;
     }
 
     /// <summary>

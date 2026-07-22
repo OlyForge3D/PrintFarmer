@@ -99,6 +99,13 @@ public class NfcScanEventDto
 
     public int? SpoolId { get; set; }
 
+    /// <summary>
+    /// Hardware UID of the NFC tag chip (hex string, e.g. "A1:B2:C3:D4").
+    /// Used for NfcTagBinding lookups.
+    /// </summary>
+    [StringLength(64)]
+    public string? TagUid { get; set; }
+
     [Required]
     [StringLength(32)]
     public string TagFormat { get; set; } = "nfc";
@@ -130,4 +137,52 @@ public class NfcScanHistoryDto
     public string? Action { get; set; }
 
     public DateTime ScannedAt { get; set; }
+}
+
+/// <summary>
+/// DTO for reading NFC tag binding data.
+/// </summary>
+public class NfcTagBindingDto
+{
+    public Guid Id { get; set; }
+
+    public string TagUid { get; set; } = string.Empty;
+
+    public int? SpoolId { get; set; }
+
+    public string? SpoolName { get; set; }
+
+    public Guid? PrinterId { get; set; }
+
+    public string? PrinterName { get; set; }
+
+    public string? TrayId { get; set; }
+
+    public DateTime? SpoolLastSeenAt { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Request body for POST /api/nfc/link — binds a tag UID to a spool + printer/tray context.
+/// </summary>
+public class LinkNfcTagRequest
+{
+    [Required]
+    [StringLength(64, MinimumLength = 1)]
+    public string TagUid { get; set; } = string.Empty;
+
+    public int? SpoolId { get; set; }
+
+    [StringLength(256)]
+    public string? SpoolName { get; set; }
+
+    public Guid? PrinterId { get; set; }
+
+    [StringLength(64)]
+    public string? TrayId { get; set; }
+
+    public DateTime? ReadAt { get; set; }
 }

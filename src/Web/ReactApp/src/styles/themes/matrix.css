@@ -1,0 +1,203 @@
+/* =============================================================================
+   Matrix Theme — "The Matrix" / RatOS Inspired
+   Deep blacks, phosphor greens, CRT terminal aesthetic
+   ============================================================================= */
+
+[data-theme="matrix"] {
+  /* Color system metadata */
+  --pf-theme-name: 'matrix';
+  
+  /* Primary background colors — Pure blacks like CRT displays */
+  --pf-bg-0: #000000;           /* True black canvas */
+  --pf-bg-1: #0a0f0a;           /* Slightly lifted black with green tint */
+  --pf-bg-2: #0d120d;           /* Tertiary surface */
+  --pf-panel: #050805;          /* Panel background — near black */
+  --pf-card-bg: #0a0f0a;        /* Card background */
+  --pf-sidebar-bg: #050805;     /* Sidebar — darkest */
+  
+  /* Button glow effect — Phosphor green glow */
+  --pf-btn-glow: 0 0 12px rgba(0, 255, 65, 0.25), 0 0 4px rgba(0, 255, 65, 0.15);
+  
+  /* Border and divider colors — Subtle green-tinted */
+  --pf-border: #1a2e1a;         /* Main border — dark green */
+  --pf-border-light: #2d4a2d;   /* Light border — visible green */
+  --pf-border-medium: #1f331f;  /* Medium border */
+  --pf-border-dark: #0d150d;    /* Dark border */
+  --pf-border-gray: #3d5c3d;    /* Gray-green border */
+  
+  /* Text colors — Terminal phosphor greens */
+  --pf-text-primary: #00ff41;   /* Bright phosphor green — Matrix iconic */
+  --pf-text-secondary: #33cc52; /* Dimmer green for secondary text */
+  --pf-text-tertiary: #1a8033;  /* Muted green */
+  --pf-text-light: #7fff96;     /* Light green for contrast */
+  --pf-text-muted: #267339;     /* Very muted green */
+  
+  /* Accent and brand colors — Matrix green spectrum */
+  --pf-accent: #00ff41;         /* Primary accent — Matrix green */
+  --pf-accent-bg: #0d3d14;      /* Dark green button background */
+  --pf-accent-hover: #0a2e0f;   /* Darker green for hover */
+  --pf-accent-2: #39ff14;       /* Electric green — neon variant */
+  --pf-success: #00ff41;        /* Success = Matrix green */
+  --pf-success-bg: #0d3d14;     /* Success button background */
+  --pf-success-hover: #0a4a12;  /* Success hover */
+  --pf-error-hover: #8b0000;    /* Dark red hover */
+  --pf-link: #39ff14;           /* Links — electric green */
+  
+  /* Semantic status colors — Matrix palette */
+  --pf-status-online-bg: #001a06;
+  --pf-status-online-text: #00ff41;
+  --pf-status-online-border: #003d0f;
+  --pf-status-offline-bg: #1a0000;
+  --pf-status-offline-text: #ff3333;
+  --pf-status-offline-border: #4d0000;
+  
+  /* Error and warning colors — Still red/amber for semantics */
+  --pf-error: #ff3333;          /* Red for errors (distinct from green) */
+  --pf-error-bg: #1a0000;
+  --pf-error-text: #ff6666;
+  --pf-error-border: #660000;
+  --pf-warning: #ffcc00;        /* Amber for warnings */
+  --pf-warning-text: #ffdd44;
+  
+  /* Loading and disabled states */
+  --pf-loading: #39ff14;
+  --pf-loading-border: #003d0f;
+  --pf-disabled: #1a4d26;
+  
+  /* Gradient colors — Subtle depth */
+  --pf-gradient-primary-start: #0d120d;
+  --pf-gradient-primary-end: #000000;
+  --pf-gradient-secondary-start: #0f1a0f;
+  --pf-gradient-secondary-end: #050a05;
+  --pf-gradient-success-start: #0a2e0f;
+  --pf-gradient-success-end: #0d3d14;
+  --pf-gradient-green-start: #0d3d14;
+  --pf-gradient-green-end: #0a2e0f;
+  --pf-gradient-green-active-start: #1a5c26;
+  --pf-gradient-green-active-end: #0d3d14;
+  --pf-gradient-gray-start: #1a3d26;
+  --pf-gradient-gray-end: #0f2617;
+  --pf-gradient-gray-dark-start: #0f2617;
+  --pf-gradient-gray-dark-end: #0a1a0f;
+  
+  /* Focus and interaction states — Glowing green */
+  --pf-focus-ring: rgba(0, 255, 65, 0.5);
+  --pf-focus-ring-offset: #000000;
+  --pf-hover-overlay: rgba(0, 255, 65, 0.08);
+  --pf-active-overlay: rgba(0, 255, 65, 0.15);
+
+  /* Skeleton / shimmer surfaces */
+  --pf-skeleton-bg: #0d150d;
+  --pf-skeleton-bg-alt: #1a2e1a;
+  --pf-skeleton-accent: #003d0f;
+  --pf-focus-outline: var(--pf-accent);
+  
+  /* ========== CONTROL STYLING VARIABLES ========== */
+  /* Input/Select/Textarea Controls */
+  --pf-control-bg: #000000;            /* Pure black input background */
+  --pf-control-border: #1a2e1a;        /* Input border default */
+  --pf-control-border-hover: #2d4a2d;  /* Input border on hover */
+  --pf-control-border-focus: #00ff41;  /* Input border on focus — glowing green */
+  --pf-control-text: #00ff41;          /* Input text — terminal green */
+  --pf-control-placeholder: #1a4d26;   /* Placeholder text */
+  --pf-control-disabled-bg: #050805;   /* Disabled control background */
+  --pf-control-disabled-text: #1a4d26; /* Disabled control text */
+  
+  /* Focus Ring */
+  --pf-control-focus-ring: rgba(0, 255, 65, 0.5);  /* Green focus ring */
+  --pf-control-focus-ring-offset: #000000;  /* Offset background */
+  --pf-control-focus-ring-width: 2px;
+  
+  /* Button States (Primary variant) */
+  --pf-button-primary-bg: #0d3d14;
+  --pf-button-primary-hover: #1a5c26;
+  --pf-button-primary-active: #0a2e0f;
+  --pf-button-primary-text: #00ff41;
+  --pf-button-primary-border: #00ff41;
+  
+  /* Button States (Secondary variant) */
+  --pf-button-secondary-bg: #0a0f0a;
+  --pf-button-secondary-hover: #0d150d;
+  --pf-button-secondary-active: #050805;
+  --pf-button-secondary-text: #33cc52;
+  --pf-button-secondary-border: #1a2e1a;
+
+  /* Home buttons (axis homed state) */
+  --pf-home-homed-bg: #00ff41;
+  --pf-home-not-homed-bg: #ffcc00;
+  
+  /* Button States (Danger variant) */
+  --pf-button-danger-bg: #4d0000;
+  --pf-button-danger-hover: #660000;
+  --pf-button-danger-active: #330000;
+  --pf-button-danger-text: #ff6666;
+  --pf-button-danger-border: #ff3333;
+  
+  /* Validation States */
+  --pf-validation-error-bg: rgba(255, 51, 51, 0.1);
+  --pf-validation-error-border: #ff3333;
+  --pf-validation-error-text: #ff6666;
+  --pf-validation-success-border: #00ff41;
+  --pf-validation-success-text: #00ff41;
+  
+  color-scheme: dark;
+}
+
+/* ============================================================================
+   Matrix Theme — Special Visual Effects
+   ============================================================================ */
+
+/* Subtle CRT scan-line effect on main content (opt-in via class) */
+[data-theme="matrix"] .matrix-scanlines {
+  position: relative;
+}
+
+[data-theme="matrix"] .matrix-scanlines::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.15) 0px,
+    rgba(0, 0, 0, 0.15) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Terminal-style text glow for headings */
+[data-theme="matrix"] h1,
+[data-theme="matrix"] h2,
+[data-theme="matrix"] h3 {
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5), 0 0 20px rgba(0, 255, 65, 0.3);
+}
+
+/* Subtle glow on focused inputs */
+[data-theme="matrix"] input:focus,
+[data-theme="matrix"] select:focus,
+[data-theme="matrix"] textarea:focus {
+  box-shadow: 
+    0 0 0 2px rgba(0, 255, 65, 0.5),
+    0 0 15px rgba(0, 255, 65, 0.2);
+}
+
+/* Glowing border effect on cards */
+[data-theme="matrix"] .card-pf:hover {
+  border-color: rgba(0, 255, 65, 0.4);
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
+}
+
+/* Progress bar glow */
+[data-theme="matrix"] [role="progressbar"] {
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+}
+
+/* Status badge glow effect */
+[data-theme="matrix"] .status-pf-online {
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+}

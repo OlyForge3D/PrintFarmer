@@ -4,12 +4,13 @@ import { EyeIcon, EyeOffIcon, UserPlusIcon } from '@/common/components/icons/Mdi
 import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button, Input } from '@/common/components/ui';
-import { Modal } from '@/common/components/modals/Modal';
+import { AuthSurface, type AuthSurfaceVariant } from '@/features/auth/components/AuthSurface';
 
 interface RegisterModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSwitchToLogin: () => void;
+  surface?: AuthSurfaceVariant;
 }
 
 function validateRegisterForm(data: {
@@ -39,7 +40,12 @@ function validateRegisterForm(data: {
   return errors;
 }
 
-export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModalProps) {
+export function RegisterModal({
+  isOpen,
+  onClose,
+  onSwitchToLogin,
+  surface = 'modal',
+}: RegisterModalProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -116,39 +122,42 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
   }, [isLoading, onClose]);
 
   const handleInputChange = (field: keyof typeof formData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
+
   const allErrors = [...clientErrors, ...(authError ? [authError] : [])];
 
   return (
-    <Modal
+    <AuthSurface
       isOpen={isOpen}
       onClose={handleClose}
       title="Create Account"
       titleIcon={<PrintFarmerLogo size={28} />}
       width="max-w-md"
       isDisabled={isLoading}
-      closeButtonVariant="ghost"
+      closeButtonVariant={surface === 'page' ? 'subtle' : 'ghost'}
+      closeAriaLabel="Close account creation"
+      showCloseButton
+      surface={surface}
     >
-      {isLoading && (
-        <div className="px-6 pt-4"><FormSkeleton fields={6} /></div>
-      )}
-      <form onSubmit={handleSubmit} className="space-y-4" aria-live="polite">
-        <div className="sr-only" role="status" aria-live="polite">
-          {isLoading ? 'Creating account...' : 'Form ready'}
-        </div>
-
-        {allErrors.length > 0 && (
-          <div className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm space-y-1" style={{ color: 'var(--pf-error)' }}>
-            {allErrors.map((err, index) => (
-              <div key={index}>{err}</div>
-            ))}
+      <div className="space-y-4">
+        {isLoading && <FormSkeleton fields={6} />}
+        <form onSubmit={handleSubmit} className="space-y-4" aria-live="polite">
+          <div className="sr-only" role="status" aria-live="polite">
+            {isLoading ? 'Creating account...' : 'Form ready'}
           </div>
-        )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {allErrors.length > 0 && (
+            <div className="space-y-1 rounded-md border border-pf-border bg-pf-bg-2 px-4 py-3 text-sm" style={{ color: 'var(--pf-error)' }}>
+              {allErrors.map((err, index) => (
+                <div key={index}>{err}</div>
+              ))}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="firstName" className="block text-sm font-medium text-pf-text-primary mb-1">
+              <label htmlFor="firstName" className="mb-1 block text-sm font-medium text-pf-text-primary">
                 First Name
               </label>
               <Input
@@ -164,7 +173,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               />
             </div>
             <div>
-              <label htmlFor="lastName" className="block text-sm font-medium text-pf-text-primary mb-1">
+              <label htmlFor="lastName" className="mb-1 block text-sm font-medium text-pf-text-primary">
                 Last Name
               </label>
               <Input
@@ -182,7 +191,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
           </div>
 
           <div>
-            <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="username" className="mb-1 block text-sm font-medium text-pf-text-primary">
               Username *
             </label>
             <Input
@@ -200,7 +209,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-pf-text-primary">
               Email Address *
             </label>
             <Input
@@ -218,7 +227,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="password" className="mb-1 block text-sm font-medium text-pf-text-primary">
               Password *
             </label>
             <div className="relative">
@@ -228,7 +237,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 name="password"
                 value={formData.password}
                 onChange={(e) => handleInputChange('password', e.target.value)}
-                className="pr-10 bg-pf-bg-0"
+                className="bg-pf-bg-0 pr-10"
                 placeholder="Create a password"
                 required
                 autoComplete="new-password"
@@ -240,7 +249,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 size="sm"
                 disabled={isLoading}
                 type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+                className="absolute right-3 top-1/2 !h-auto !p-0 -translate-y-1/2"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
@@ -249,7 +258,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-pf-text-primary mb-1">
+            <label htmlFor="confirmPassword" className="mb-1 block text-sm font-medium text-pf-text-primary">
               Confirm Password *
             </label>
             <div className="relative">
@@ -259,7 +268,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                className="pr-10 bg-pf-bg-0"
+                className="bg-pf-bg-0 pr-10"
                 placeholder="Confirm your password"
                 required
                 autoComplete="new-password"
@@ -271,7 +280,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 size="sm"
                 disabled={isLoading}
                 type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+                className="absolute right-3 top-1/2 !h-auto !p-0 -translate-y-1/2"
                 aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
               >
                 {showConfirmPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
@@ -279,7 +288,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             </div>
           </div>
 
-          <div className="pt-4 space-y-3">
+          <div className="space-y-3 pt-4">
             <Button
               type="submit"
               disabled={isLoading || !formData.username || !formData.email || !formData.password || !formData.confirmPassword}
@@ -289,7 +298,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             >
               {isLoading ? (
                 <>
-                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <div className="pf-animate-spin h-4 w-4 rounded-full border-b-2 border-white"></div>
                   <span>Creating Account...</span>
                 </>
               ) : (
@@ -310,6 +319,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             </div>
           </div>
         </form>
-      </Modal>
-    );
-  }
+      </div>
+    </AuthSurface>
+  );
+}

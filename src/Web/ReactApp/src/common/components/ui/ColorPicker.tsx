@@ -15,6 +15,18 @@ export interface ColorPickerProps {
   placeholder?: string;
   /** Whether the field is disabled. */
   disabled?: boolean;
+  /**
+   * Compact mode: render only the color swatch (no inline hex input). The hex
+   * text input is moved inside the popover. Useful for dense rows.
+   */
+  swatchOnly?: boolean;
+  /** Optional className applied to the swatch button (e.g. to size it down). */
+  swatchClassName?: string;
+  /**
+   * Optional content rendered inside the swatch button (e.g. an extruder number).
+   * Its text colour auto-adjusts to black/white for contrast against the swatch.
+   */
+  swatchContent?: React.ReactNode;
 }
 
 /**
@@ -31,6 +43,9 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   'aria-label': ariaLabel = 'Color',
   placeholder = '#FF5733',
   disabled = false,
+  swatchOnly = false,
+  swatchClassName,
+  swatchContent,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -83,7 +98,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   );
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={clsx('flex items-center gap-2', swatchOnly && 'inline-flex')}>
       {/* Color swatch — toggles the picker popover */}
       <div className="relative">
         {/* eslint-disable-next-line local/pf-no-raw-html-controls -- Custom color swatch requires raw button for background-color styling */}
@@ -93,16 +108,19 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
           onClick={() => !disabled && setIsOpen((o) => !o)}
           disabled={disabled}
           className={clsx(
-            'w-9 h-9 rounded-md border-2 border-pf-border shrink-0 cursor-pointer transition',
+            'flex items-center justify-center rounded-md border-2 border-pf-border shrink-0 cursor-pointer transition',
             'hover:border-pf-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent',
             disabled && 'opacity-50 cursor-not-allowed',
+            swatchClassName ?? 'w-9 h-9',
           )}
-          style={{ backgroundColor: normalizedHex }}
+          style={{ backgroundColor: normalizedHex, color: readableTextColor(normalizedHex) }}
           aria-label={`${ariaLabel} — click to ${isOpen ? 'close' : 'open'} color picker`}
           aria-expanded={isOpen}
           title={isOpen ? 'Close color picker' : 'Open color picker'}
           data-pf-button=""
-        />
+        >
+          {swatchContent}
+        </button>
 
         {/* Popover with react-colorful HEX picker */}
         {isOpen && (
@@ -116,29 +134,49 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
               color={normalizedHex}
               onChange={handlePickerChange}
             />
+            {swatchOnly && (
+              <input
+                id={id}
+                type="text"
+                value={value ? `#${value}` : ''}
+                onChange={handleTextChange}
+                placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
+                disabled={disabled}
+                maxLength={7}
+                aria-label={ariaLabel}
+                className={clsx(
+                  'mt-2 w-full border rounded-sm p-1.5 text-xs font-mono',
+                  'bg-pf-bg-0 text-pf-text-primary border-pf-border',
+                  'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition',
+                  'disabled:bg-pf-disabled disabled:cursor-not-allowed',
+                )}
+              />
+            )}
           </div>
         )}
       </div>
 
-      {/* Hex text input */}
-      <div className="flex-1">
-        <input
-          id={id}
-          type="text"
-          value={value ? `#${value}` : ''}
-          onChange={handleTextChange}
-          placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
-          disabled={disabled}
-          maxLength={7}
-          aria-label={ariaLabel}
-          className={clsx(
-            'w-full border rounded-sm p-2 text-sm font-mono',
-            'bg-pf-bg-0 text-pf-text-primary border-pf-border',
-            'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition',
-            'disabled:bg-pf-disabled disabled:cursor-not-allowed',
-          )}
-        />
-      </div>
+      {/* Hex text input (full mode only) */}
+      {!swatchOnly && (
+        <div className="flex-1">
+          <input
+            id={id}
+            type="text"
+            value={value ? `#${value}` : ''}
+            onChange={handleTextChange}
+            placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
+            disabled={disabled}
+            maxLength={7}
+            aria-label={ariaLabel}
+            className={clsx(
+              'w-full border rounded-sm p-2 text-sm font-mono',
+              'bg-pf-bg-0 text-pf-text-primary border-pf-border',
+              'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition',
+              'disabled:bg-pf-disabled disabled:cursor-not-allowed',
+            )}
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -153,6 +191,21 @@ function normalizeToHash(hex: string): string {
     return `#${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`;
   }
   return '#888888';
+}
+
+/**
+ * Pick black or white for legible text on top of a hex background, using the
+ * W3C relative-luminance threshold. Expects a normalized '#RRGGBB' value.
+ */
+function readableTextColor(hex: string): string {
+  const clean = hex.replace(/^#/, '');
+  if (clean.length !== 6) return '#000000';
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  return luminance > 0.179 ? '#000000' : '#FFFFFF';
 }
 
 export default ColorPicker;

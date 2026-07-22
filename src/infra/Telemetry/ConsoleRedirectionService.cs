@@ -85,9 +85,9 @@ public class ConsoleRedirectionService(ILogger<ConsoleRedirectionService> unifie
     }
 }
 
-internal class UnifiedConsoleWriter(ILogger<ConsoleRedirectionService> unifiedLogger, LogLevel logLevel) : TextWriter
+internal class UnifiedConsoleWriter(ILogger unifiedLogger, LogLevel logLevel) : TextWriter
 {
-    private readonly ILogger<ConsoleRedirectionService> _unifiedLogger = unifiedLogger;
+    private readonly ILogger _unifiedLogger = unifiedLogger;
     private readonly LogLevel _logLevel = logLevel;
     private readonly StringBuilder _buffer = new();
 

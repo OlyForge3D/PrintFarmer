@@ -9,12 +9,14 @@ export interface TimePeriodFilterProps {
   value: TimePeriodFilterValue;
   onChange: (value: TimePeriodFilterValue) => void;
   options?: readonly TimePeriodOption[];
+  allowCustom?: boolean;
 }
 
 export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
   value,
   onChange,
   options = TIME_PERIOD_OPTIONS,
+  allowCustom = true,
 }) => {
   const isCustom = value.type === 'custom';
   const presetDays = value.type === 'preset' ? value.days : undefined;
@@ -60,38 +62,42 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
           {opt.label}
         </Button>
       ))}
-      <Button
-        variant="unstyled"
-        onClick={handleCustomToggle}
-        className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-          isCustom
-            ? 'bg-pf-primary text-white'
-            : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
-        }`}
-        aria-pressed={isCustom}
-      >
-        Custom
-      </Button>
-      {isCustom && (
-        <div className="flex items-center gap-2 ml-2">
-          <Input
-            type="date"
-            value={startDate}
-            onChange={(e) => handleStartChange(e.target.value)}
-            className="w-36 text-sm"
-            aria-label="Start date"
-            max={endDate || undefined}
-          />
-          <span className="text-pf-text-secondary text-sm">to</span>
-          <Input
-            type="date"
-            value={endDate}
-            onChange={(e) => handleEndChange(e.target.value)}
-            className="w-36 text-sm"
-            aria-label="End date"
-            min={startDate || undefined}
-          />
-        </div>
+      {allowCustom && (
+        <>
+          <Button
+            variant="unstyled"
+            onClick={handleCustomToggle}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              isCustom
+                ? 'bg-pf-primary text-white'
+                : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
+            }`}
+            aria-pressed={isCustom}
+          >
+            Custom
+          </Button>
+          {isCustom && (
+            <div className="flex items-center gap-2 ml-2">
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => handleStartChange(e.target.value)}
+                className="w-36 text-sm"
+                aria-label="Start date"
+                max={endDate || undefined}
+              />
+              <span className="text-pf-text-secondary text-sm">to</span>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => handleEndChange(e.target.value)}
+                className="w-36 text-sm"
+                aria-label="End date"
+                min={startDate || undefined}
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -54,6 +54,9 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isTaggingOpen, setIsTaggingOpen] = useState(false);
   const [isAddToProjectOpen, setIsAddToProjectOpen] = useState(false);
+
+  if (!file) return null;
+
   return (
     <>
     <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group min-h-0">

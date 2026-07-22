@@ -13,22 +13,8 @@ enum PrinterBackend: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .unknown
-            case 1: self = .moonraker
-            case 2: self = .prusaLink
-            case 3: self = .sdcp
-            case 4: self = .octoPrint
-            case 5: self = .flashForge
-            default: self = .unknown
-            }
-        } else {
-            self = .unknown
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
     }
 }
 
@@ -40,19 +26,48 @@ enum MotionType: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .cartesian
-            case 1: self = .coreXY
-            case 2: self = .delta
-            default: self = .unknown
-            }
-        } else {
-            self = .unknown
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
+    }
+}
+
+enum CameraAccessMode: String, Codable, Sendable {
+    case unknown = "Unknown"
+    case streamAndSnapshot = "StreamAndSnapshot"
+    case snapshotOnly = "SnapshotOnly"
+    case streamOnly = "StreamOnly"
+    case unsupportedStream = "UnsupportedStream"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
+    }
+}
+
+enum CameraStreamFormat: String, Codable, Sendable {
+    case unknown = "Unknown"
+    case mjpeg = "Mjpeg"
+    case webRtc = "WebRtc"
+    case rtsp = "Rtsp"
+    case unsupported = "Unsupported"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .unknown
+    }
+}
+
+enum CameraSnapshotStrategy: String, Codable, Sendable {
+    case none = "None"
+    case directUrl = "DirectUrl"
+    case snapmakerU1MonitorJpeg = "SnapmakerU1MonitorJpeg"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .none
     }
 }
 
@@ -68,24 +83,8 @@ enum PrintJobStatus: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .queued
-            case 1: self = .assigned
-            case 2: self = .starting
-            case 3: self = .printing
-            case 4: self = .paused
-            case 5: self = .completed
-            case 6: self = .failed
-            case 7: self = .cancelled
-            default: self = .queued
-            }
-        } else {
-            self = .queued
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .queued
     }
 }
 
@@ -97,23 +96,14 @@ enum PrintJobPriority: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .low
-            case 1: self = .normal
-            case 2: self = .high
-            case 3: self = .urgent
-            default: self = .normal
-            }
-        } else {
-            self = .normal
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .normal
     }
 
     /// Maps the backend integer priority value to the enum.
+    /// PrintJobDto serializes `priority` as a raw `int`, not as a `JsonStringEnumConverter` enum,
+    /// so callers that consume that field continue to use this helper.
+
     static func from(intValue: Int) -> PrintJobPriority? {
         switch intValue {
         case 0: .low
@@ -133,20 +123,8 @@ enum AutoDispatchState: String, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self(rawValue: str) {
-            self = value
-        } else if let num = try? container.decode(Int.self) {
-            switch num {
-            case 0: self = .none
-            case 1: self = .pendingReady
-            case 2: self = .ready
-            case 3: self = .dismissed
-            default: self = .none
-            }
-        } else {
-            self = .none
-        }
+        let str = (try? container.decode(String.self)) ?? ""
+        self = Self(rawValue: str) ?? .none
     }
 }
 
@@ -207,6 +185,9 @@ struct Printer: Codable, Identifiable, Sendable {
     var thumbnailUrl: String?
     var cameraStreamUrl: String?
     var cameraSnapshotUrl: String?
+    var cameraAccessMode: CameraAccessMode
+    var cameraStreamFormat: CameraStreamFormat
+    var cameraSnapshotStrategy: CameraSnapshotStrategy
 
     // Telemetry
     var x: Double?
@@ -235,6 +216,7 @@ struct Printer: Codable, Identifiable, Sendable {
         case inMaintenance, isEnabled
         case isOnline, state, progress, jobName, fileName, thumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
+        case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
         case x, y, z, hotendTemp, bedTemp, hotendTarget, bedTarget, homedAxes
         case spoolInfo, backendUrl, frontendUrl, location
         case obicoEnabled
@@ -262,13 +244,20 @@ struct Printer: Codable, Identifiable, Sendable {
 
         isOnline = try c.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
         state = try c.decodeIfPresent(String.self, forKey: .state)
-        // Backend sends progress as 0-100; normalize to 0-1.0 for SwiftUI
-        progress = try c.decodeIfPresent(Double.self, forKey: .progress).map { $0 / 100.0 }
+        // Backend contract: progress is 0–100 (percent). iOS internal scale is 0–1.0
+        // (PrintProgressBar / SwiftUI ProgressView consumers). Clamp out-of-range backend
+        // values to [0, 100] before normalizing so drift never produces UI > 100% or < 0%.
+        // See PrinterProgressContractTests for the pin (issue #277).
+        progress = try c.decodeIfPresent(Double.self, forKey: .progress)
+            .map { min(max($0, 0), 100) / 100.0 }
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         thumbnailUrl = try c.decodeIfPresent(String.self, forKey: .thumbnailUrl)
         cameraStreamUrl = try c.decodeIfPresent(String.self, forKey: .cameraStreamUrl)
         cameraSnapshotUrl = try c.decodeIfPresent(String.self, forKey: .cameraSnapshotUrl)
+        cameraAccessMode = try c.decodeIfPresent(CameraAccessMode.self, forKey: .cameraAccessMode) ?? .unknown
+        cameraStreamFormat = try c.decodeIfPresent(CameraStreamFormat.self, forKey: .cameraStreamFormat) ?? .unknown
+        cameraSnapshotStrategy = try c.decodeIfPresent(CameraSnapshotStrategy.self, forKey: .cameraSnapshotStrategy) ?? .none
 
         x = try c.decodeIfPresent(Double.self, forKey: .x)
         y = try c.decodeIfPresent(Double.self, forKey: .y)
@@ -284,6 +273,88 @@ struct Printer: Codable, Identifiable, Sendable {
         frontendUrl = try c.decodeIfPresent(String.self, forKey: .frontendUrl)
         location = try c.decodeIfPresent(LocationSummary.self, forKey: .location)
         obicoEnabled = try c.decodeIfPresent(Bool.self, forKey: .obicoEnabled) ?? false
+    }
+}
+
+// MARK: - Camera URL Contracts
+
+struct PrinterCameraUrls: Codable, Identifiable, Sendable {
+    let id: UUID
+    let name: String
+    let cameraStreamUrl: String?
+    let cameraSnapshotUrl: String?
+    let cameraAccessMode: CameraAccessMode
+    let cameraStreamFormat: CameraStreamFormat
+    let cameraSnapshotStrategy: CameraSnapshotStrategy
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name
+        case cameraStreamUrl, cameraSnapshotUrl
+        case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
+    }
+
+    init(
+        id: UUID,
+        name: String,
+        cameraStreamUrl: String?,
+        cameraSnapshotUrl: String?,
+        cameraAccessMode: CameraAccessMode = .unknown,
+        cameraStreamFormat: CameraStreamFormat = .unknown,
+        cameraSnapshotStrategy: CameraSnapshotStrategy = .none
+    ) {
+        self.id = id
+        self.name = name
+        self.cameraStreamUrl = cameraStreamUrl
+        self.cameraSnapshotUrl = cameraSnapshotUrl
+        self.cameraAccessMode = cameraAccessMode
+        self.cameraStreamFormat = cameraStreamFormat
+        self.cameraSnapshotStrategy = cameraSnapshotStrategy
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        cameraStreamUrl = try c.decodeIfPresent(String.self, forKey: .cameraStreamUrl)
+        cameraSnapshotUrl = try c.decodeIfPresent(String.self, forKey: .cameraSnapshotUrl)
+        cameraAccessMode = try c.decodeIfPresent(CameraAccessMode.self, forKey: .cameraAccessMode) ?? .unknown
+        cameraStreamFormat = try c.decodeIfPresent(CameraStreamFormat.self, forKey: .cameraStreamFormat) ?? .unknown
+        cameraSnapshotStrategy = try c.decodeIfPresent(CameraSnapshotStrategy.self, forKey: .cameraSnapshotStrategy) ?? .none
+    }
+}
+
+struct PrinterCameraUrl: Codable, Sendable {
+    let streamUrl: String?
+    let snapshotUrl: String?
+    let accessMode: CameraAccessMode
+    let streamFormat: CameraStreamFormat
+    let snapshotStrategy: CameraSnapshotStrategy
+
+    private enum CodingKeys: String, CodingKey {
+        case streamUrl, snapshotUrl, accessMode, streamFormat, snapshotStrategy
+    }
+
+    init(
+        streamUrl: String?,
+        snapshotUrl: String?,
+        accessMode: CameraAccessMode = .unknown,
+        streamFormat: CameraStreamFormat = .unknown,
+        snapshotStrategy: CameraSnapshotStrategy = .none
+    ) {
+        self.streamUrl = streamUrl
+        self.snapshotUrl = snapshotUrl
+        self.accessMode = accessMode
+        self.streamFormat = streamFormat
+        self.snapshotStrategy = snapshotStrategy
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        streamUrl = try c.decodeIfPresent(String.self, forKey: .streamUrl)
+        snapshotUrl = try c.decodeIfPresent(String.self, forKey: .snapshotUrl)
+        accessMode = try c.decodeIfPresent(CameraAccessMode.self, forKey: .accessMode) ?? .unknown
+        streamFormat = try c.decodeIfPresent(CameraStreamFormat.self, forKey: .streamFormat) ?? .unknown
+        snapshotStrategy = try c.decodeIfPresent(CameraSnapshotStrategy.self, forKey: .snapshotStrategy) ?? .none
     }
 }
 
@@ -357,8 +428,50 @@ struct PrinterStatusDetail: Codable, Sendable {
     let bedTemp: Double?
     let hotendTarget: Double?
     let bedTarget: Double?
+    // Compact axis homing string from backend, e.g. "xyz", "xy", "" or nil. Mirrors `Printer.homedAxes`.
+    let homedAxes: String?
     let spoolInfo: PrinterSpoolInfo?
     let mmuStatus: MmuStatus?
+
+    init(
+        id: UUID,
+        isOnline: Bool,
+        state: String?,
+        progress: Double?,
+        jobName: String?,
+        thumbnailUrl: String?,
+        cameraStreamUrl: String?,
+        cameraSnapshotUrl: String?,
+        x: Double?,
+        y: Double?,
+        z: Double?,
+        hotendTemp: Double?,
+        bedTemp: Double?,
+        hotendTarget: Double?,
+        bedTarget: Double?,
+        homedAxes: String? = nil,
+        spoolInfo: PrinterSpoolInfo?,
+        mmuStatus: MmuStatus?
+    ) {
+        self.id = id
+        self.isOnline = isOnline
+        self.state = state
+        self.progress = progress
+        self.jobName = jobName
+        self.thumbnailUrl = thumbnailUrl
+        self.cameraStreamUrl = cameraStreamUrl
+        self.cameraSnapshotUrl = cameraSnapshotUrl
+        self.x = x
+        self.y = y
+        self.z = z
+        self.hotendTemp = hotendTemp
+        self.bedTemp = bedTemp
+        self.hotendTarget = hotendTarget
+        self.bedTarget = bedTarget
+        self.homedAxes = homedAxes
+        self.spoolInfo = spoolInfo
+        self.mmuStatus = mmuStatus
+    }
 }
 
 // MARK: - MMU Status (matches MmuStatusDto)
