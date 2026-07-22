@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "assignments": [
+    {
+      "assignment_id": "printfarmer-2026-07-22",
+      "universe": "Firefly",
+      "created_at": "2026-07-22T19:54:59Z",
+      "members": ["Mal", "Kaylee", "Zoe", "Wash", "Book"]
+    }
+  ]
+}
