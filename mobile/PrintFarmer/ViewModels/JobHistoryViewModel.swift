@@ -3,6 +3,60 @@ import os
 
 @MainActor @Observable
 final class JobHistoryViewModel {
+    typealias CancellationCleanupEnqueuer = @Sendable (
+        @escaping @MainActor @Sendable () -> Void
+    ) -> Void
+
+    private final class CancellationAttempt: @unchecked Sendable {
+        struct CleanupClaim {
+            let isFirst: Bool
+            let operationToken: UUID?
+        }
+
+        private let lock = NSLock()
+        private var cancelled = false
+        private var operationToken: UUID?
+        private var cleanupClaimed = false
+        private var completionClaimed = false
+
+        var isCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            lock.unlock()
+        }
+
+        func install(operationToken: UUID) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            self.operationToken = operationToken
+            return !cancelled
+        }
+
+        func claimCompletion() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !cancelled, !completionClaimed else { return false }
+            completionClaimed = true
+            return true
+        }
+
+        func claimCleanup() -> CleanupClaim {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !cleanupClaimed else {
+                return CleanupClaim(isFirst: false, operationToken: nil)
+            }
+            cleanupClaimed = true
+            return CleanupClaim(isFirst: true, operationToken: operationToken)
+        }
+    }
+
     private struct HistoryFilters: Equatable {
         let dateFrom: Date?
         let dateTo: Date?
@@ -31,6 +85,11 @@ final class JobHistoryViewModel {
         let targetOffset: Int
     }
 
+    private struct SecondaryOperation {
+        let token: UUID
+        let activationToken: UUID
+    }
+
     private var committedHistory = CommittedHistory(
         page: nil,
         offset: 0,
@@ -43,7 +102,11 @@ final class JobHistoryViewModel {
     var selectedJobHistory: JobStateHistory?
     var isLoading = false
     var isLoadingMore = false
+    private(set) var isTimelineLoading = false
+    private(set) var isJobStateLoading = false
     var error: String?
+    private(set) var timelineError: String?
+    private(set) var jobStateError: String?
     private(set) var isViewActive = true
     var currentOffset: Int { committedHistory.offset }
 
@@ -68,7 +131,37 @@ final class JobHistoryViewModel {
     private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
     private var historyGeneration: UInt64 = 0
     private var activeHistoryOperation: HistoryOperation?
+    private var activeTimelineOperation: SecondaryOperation?
+    private var activeJobStateOperation: SecondaryOperation?
     private var activeViewToken: UUID? = UUID()
+    @ObservationIgnored private let cancellationCleanupEnqueuer: CancellationCleanupEnqueuer
+
+    #if DEBUG
+    @ObservationIgnored private var cancellationCleanupTick: UInt64 = 0
+    @ObservationIgnored private var cancellationCleanupWaiters:
+        [(target: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
+    @ObservationIgnored var beforeHistoryApplyForTesting:
+        (@MainActor @Sendable () async -> Void)?
+
+    var cancellationCleanupTickForTesting: UInt64 { cancellationCleanupTick }
+
+    func waitForCancellationCleanupForTesting(atLeast target: UInt64) async {
+        if cancellationCleanupTick >= target { return }
+        await withCheckedContinuation { continuation in
+            cancellationCleanupWaiters.append((target, continuation))
+        }
+    }
+    #endif
+
+    init(
+        cancellationCleanupEnqueuer: @escaping CancellationCleanupEnqueuer = { operation in
+            _ = Task { @MainActor in
+                operation()
+            }
+        }
+    ) {
+        self.cancellationCleanupEnqueuer = cancellationCleanupEnqueuer
+    }
 
     func configure(jobAnalyticsService: any JobAnalyticsServiceProtocol) {
         self.jobAnalyticsService = jobAnalyticsService
@@ -76,7 +169,7 @@ final class JobHistoryViewModel {
 
     @discardableResult
     func activate() -> UUID {
-        invalidateHistoryAuthority()
+        invalidateOperationAuthorities()
         let token = UUID()
         activeViewToken = token
         isViewActive = true
@@ -87,7 +180,7 @@ final class JobHistoryViewModel {
         guard activeViewToken == activationToken else { return }
         activeViewToken = nil
         isViewActive = false
-        invalidateHistoryAuthority()
+        invalidateOperationAuthorities()
     }
 
     func loadHistory() async {
@@ -96,40 +189,60 @@ final class JobHistoryViewModel {
     }
 
     func loadHistory(activationToken: UUID) async {
-        guard !Task.isCancelled,
-              let jobAnalyticsService,
-              let operation = beginReload(activationToken: activationToken) else {
-            return
-        }
+        let cancellation = CancellationAttempt()
+        let enqueueCleanup = cancellationCleanupEnqueuer
 
-        do {
-            let result = try await jobAnalyticsService.getHistory(
-                limit: pageSize,
-                offset: operation.targetOffset,
-                sortBy: nil,
-                statuses: nil,
-                dateStart: operation.filters.dateFrom,
-                dateEnd: operation.filters.dateTo
-            )
-            guard owns(operation) else { return }
-            guard !Task.isCancelled else {
-                finish(operation)
+        await withTaskCancellationHandler {
+            guard !Task.isCancelled,
+                  !cancellation.isCancelled,
+                  let jobAnalyticsService,
+                  let operation = beginReload(activationToken: activationToken) else {
                 return
             }
-            committedHistory = CommittedHistory(
-                page: result,
-                offset: operation.targetOffset,
-                filters: operation.filters,
-                generation: operation.generation
-            )
-        } catch {
-            guard owns(operation) else { return }
-            if !Task.isCancelled, !(error is CancellationError) {
-                self.error = error.localizedDescription
+
+            guard cancellation.install(operationToken: operation.token),
+                  !Task.isCancelled,
+                  !cancellation.isCancelled else {
+                cancelHistoryOperation(cancellation)
+                return
+            }
+
+            do {
+                let result = try await jobAnalyticsService.getHistory(
+                    limit: pageSize,
+                    offset: operation.targetOffset,
+                    sortBy: nil,
+                    statuses: nil,
+                    dateStart: operation.filters.dateFrom,
+                    dateEnd: operation.filters.dateTo
+                )
+                guard owns(operation) else { return }
+                #if DEBUG
+                if let beforeHistoryApplyForTesting {
+                    await beforeHistoryApplyForTesting()
+                }
+                #endif
+                guard owns(operation), cancellation.claimCompletion() else { return }
+                committedHistory = CommittedHistory(
+                    page: result,
+                    offset: operation.targetOffset,
+                    filters: operation.filters,
+                    generation: operation.generation
+                )
+            } catch {
+                guard owns(operation), cancellation.claimCompletion() else { return }
+                if !(error is CancellationError) {
+                    self.error = error.localizedDescription
+                }
+            }
+
+            finish(operation)
+        } onCancel: {
+            cancellation.cancel()
+            enqueueCleanup { [weak self] in
+                self?.cancelHistoryOperation(cancellation)
             }
         }
-
-        finish(operation)
     }
 
     /// Loads the next page of history and appends it to `historyPage`.
@@ -143,47 +256,67 @@ final class JobHistoryViewModel {
     }
 
     func loadMore(activationToken: UUID) async {
-        guard !Task.isCancelled,
-              let jobAnalyticsService,
-              let operation = beginPagination(activationToken: activationToken),
-              let basePage = operation.basePage else {
-            return
-        }
+        let cancellation = CancellationAttempt()
+        let enqueueCleanup = cancellationCleanupEnqueuer
 
-        do {
-            let nextPage = try await jobAnalyticsService.getHistory(
-                limit: pageSize,
-                offset: operation.targetOffset,
-                sortBy: nil,
-                statuses: nil,
-                dateStart: operation.filters.dateFrom,
-                dateEnd: operation.filters.dateTo
-            )
-            guard owns(operation) else { return }
-            guard !Task.isCancelled else {
-                finish(operation)
+        await withTaskCancellationHandler {
+            guard !Task.isCancelled,
+                  !cancellation.isCancelled,
+                  let jobAnalyticsService,
+                  let operation = beginPagination(activationToken: activationToken),
+                  let basePage = operation.basePage else {
                 return
             }
-            committedHistory = CommittedHistory(
-                page: QueueHistoryPage(
-                    entries: basePage.entries + nextPage.entries,
-                    totalCount: nextPage.totalCount,
-                    currentPage: nextPage.currentPage,
-                    pageSize: nextPage.pageSize,
-                    stats: nextPage.stats
-                ),
-                offset: operation.targetOffset,
-                filters: operation.filters,
-                generation: operation.generation
-            )
-        } catch {
-            guard owns(operation) else { return }
-            if !Task.isCancelled, !(error is CancellationError) {
-                logger.warning("Failed to load more history: \(error.localizedDescription)")
+
+            guard cancellation.install(operationToken: operation.token),
+                  !Task.isCancelled,
+                  !cancellation.isCancelled else {
+                cancelHistoryOperation(cancellation)
+                return
+            }
+
+            do {
+                let nextPage = try await jobAnalyticsService.getHistory(
+                    limit: pageSize,
+                    offset: operation.targetOffset,
+                    sortBy: nil,
+                    statuses: nil,
+                    dateStart: operation.filters.dateFrom,
+                    dateEnd: operation.filters.dateTo
+                )
+                guard owns(operation) else { return }
+                #if DEBUG
+                if let beforeHistoryApplyForTesting {
+                    await beforeHistoryApplyForTesting()
+                }
+                #endif
+                guard owns(operation), cancellation.claimCompletion() else { return }
+                committedHistory = CommittedHistory(
+                    page: QueueHistoryPage(
+                        entries: basePage.entries + nextPage.entries,
+                        totalCount: nextPage.totalCount,
+                        currentPage: nextPage.currentPage,
+                        pageSize: nextPage.pageSize,
+                        stats: nextPage.stats
+                    ),
+                    offset: operation.targetOffset,
+                    filters: operation.filters,
+                    generation: operation.generation
+                )
+            } catch {
+                guard owns(operation), cancellation.claimCompletion() else { return }
+                if !(error is CancellationError) {
+                    logger.warning("Failed to load more history: \(error.localizedDescription)")
+                }
+            }
+
+            finish(operation)
+        } onCancel: {
+            cancellation.cancel()
+            enqueueCleanup { [weak self] in
+                self?.cancelHistoryOperation(cancellation)
             }
         }
-
-        finish(operation)
     }
 
     func loadTimeline(dateFrom: Date?, dateTo: Date?) async {
@@ -200,40 +333,93 @@ final class JobHistoryViewModel {
         dateTo: Date?,
         activationToken: UUID
     ) async {
-        guard !Task.isCancelled,
-              let jobAnalyticsService,
-              matchesActiveView(activationToken) else {
-            return
-        }
-        do {
-            let result = try await jobAnalyticsService.getTimeline(
-                dateFrom: dateFrom,
-                dateTo: dateTo,
-                printerId: nil,
-                filterStatus: nil,
-                limit: 100
-            )
-            guard matchesActiveView(activationToken), !Task.isCancelled else { return }
-            timeline = result
-        } catch {
-            guard matchesActiveView(activationToken), !Task.isCancelled else { return }
-            logger.warning("Failed to load timeline: \(error.localizedDescription)")
+        let cancellation = CancellationAttempt()
+        let enqueueCleanup = cancellationCleanupEnqueuer
+
+        await withTaskCancellationHandler {
+            guard !Task.isCancelled,
+                  !cancellation.isCancelled,
+                  let jobAnalyticsService,
+                  let operation = beginTimeline(activationToken: activationToken) else {
+                return
+            }
+
+            guard cancellation.install(operationToken: operation.token),
+                  !Task.isCancelled,
+                  !cancellation.isCancelled else {
+                cancelTimelineOperation(cancellation)
+                return
+            }
+
+            do {
+                let result = try await jobAnalyticsService.getTimeline(
+                    dateFrom: dateFrom,
+                    dateTo: dateTo,
+                    printerId: nil,
+                    filterStatus: nil,
+                    limit: 100
+                )
+                guard ownsTimeline(operation), cancellation.claimCompletion() else { return }
+                timeline = result
+            } catch {
+                guard ownsTimeline(operation), cancellation.claimCompletion() else { return }
+                if !(error is CancellationError) {
+                    timelineError = error.localizedDescription
+                    logger.warning("Failed to load timeline: \(error.localizedDescription)")
+                }
+            }
+
+            finishTimeline(operation)
+        } onCancel: {
+            cancellation.cancel()
+            enqueueCleanup { [weak self] in
+                self?.cancelTimelineOperation(cancellation)
+            }
         }
     }
 
     func loadJobStateHistory(jobId: String) async {
-        guard let jobAnalyticsService,
-              let activationToken = activeViewToken,
-              isViewActive else {
-            return
-        }
-        do {
-            let result = try await jobAnalyticsService.getJobStateHistory(jobId: jobId)
-            guard matchesActiveView(activationToken), !Task.isCancelled else { return }
-            selectedJobHistory = result
-        } catch {
-            guard matchesActiveView(activationToken), !Task.isCancelled else { return }
-            self.error = error.localizedDescription
+        guard let activationToken = activeViewToken else { return }
+        await loadJobStateHistory(jobId: jobId, activationToken: activationToken)
+    }
+
+    func loadJobStateHistory(jobId: String, activationToken: UUID) async {
+        let cancellation = CancellationAttempt()
+        let enqueueCleanup = cancellationCleanupEnqueuer
+
+        await withTaskCancellationHandler {
+            guard !Task.isCancelled,
+                  !cancellation.isCancelled,
+                  let jobAnalyticsService,
+                  let operation = beginJobState(activationToken: activationToken) else {
+                return
+            }
+
+            guard cancellation.install(operationToken: operation.token),
+                  !Task.isCancelled,
+                  !cancellation.isCancelled else {
+                cancelJobStateOperation(cancellation)
+                return
+            }
+
+            do {
+                let result = try await jobAnalyticsService.getJobStateHistory(jobId: jobId)
+                guard ownsJobState(operation), cancellation.claimCompletion() else { return }
+                selectedJobHistory = result
+            } catch {
+                guard ownsJobState(operation), cancellation.claimCompletion() else { return }
+                if !(error is CancellationError) {
+                    jobStateError = error.localizedDescription
+                    self.error = error.localizedDescription
+                }
+            }
+
+            finishJobState(operation)
+        } onCancel: {
+            cancellation.cancel()
+            enqueueCleanup { [weak self] in
+                self?.cancelJobStateOperation(cancellation)
+            }
         }
     }
 
@@ -283,6 +469,24 @@ final class JobHistoryViewModel {
         return operation
     }
 
+    private func beginTimeline(activationToken: UUID) -> SecondaryOperation? {
+        guard !Task.isCancelled, matchesActiveView(activationToken) else { return nil }
+        let operation = SecondaryOperation(token: UUID(), activationToken: activationToken)
+        activeTimelineOperation = operation
+        isTimelineLoading = true
+        timelineError = nil
+        return operation
+    }
+
+    private func beginJobState(activationToken: UUID) -> SecondaryOperation? {
+        guard !Task.isCancelled, matchesActiveView(activationToken) else { return nil }
+        let operation = SecondaryOperation(token: UUID(), activationToken: activationToken)
+        activeJobStateOperation = operation
+        isJobStateLoading = true
+        jobStateError = nil
+        return operation
+    }
+
     private var selectedFilters: HistoryFilters {
         HistoryFilters(dateFrom: dateFrom, dateTo: dateTo)
     }
@@ -306,6 +510,73 @@ final class JobHistoryViewModel {
         }
     }
 
+    private func ownsTimeline(_ operation: SecondaryOperation) -> Bool {
+        matchesActiveView(operation.activationToken)
+            && activeTimelineOperation?.token == operation.token
+    }
+
+    private func finishTimeline(_ operation: SecondaryOperation) {
+        guard ownsTimeline(operation) else { return }
+        activeTimelineOperation = nil
+        isTimelineLoading = false
+    }
+
+    private func ownsJobState(_ operation: SecondaryOperation) -> Bool {
+        matchesActiveView(operation.activationToken)
+            && activeJobStateOperation?.token == operation.token
+    }
+
+    private func finishJobState(_ operation: SecondaryOperation) {
+        guard ownsJobState(operation) else { return }
+        activeJobStateOperation = nil
+        isJobStateLoading = false
+    }
+
+    private func cancelHistoryOperation(_ cancellation: CancellationAttempt) {
+        let claim = cancellation.claimCleanup()
+        guard claim.isFirst else { return }
+        if let operationToken = claim.operationToken,
+           let operation = activeHistoryOperation,
+           operation.token == operationToken {
+            activeHistoryOperation = nil
+            switch operation.kind {
+            case .reload:
+                isLoading = false
+            case .pagination:
+                isLoadingMore = false
+            }
+        }
+        recordCancellationCleanup()
+    }
+
+    private func cancelTimelineOperation(_ cancellation: CancellationAttempt) {
+        let claim = cancellation.claimCleanup()
+        guard claim.isFirst else { return }
+        if let operationToken = claim.operationToken,
+           activeTimelineOperation?.token == operationToken {
+            activeTimelineOperation = nil
+            isTimelineLoading = false
+        }
+        recordCancellationCleanup()
+    }
+
+    private func cancelJobStateOperation(_ cancellation: CancellationAttempt) {
+        let claim = cancellation.claimCleanup()
+        guard claim.isFirst else { return }
+        if let operationToken = claim.operationToken,
+           activeJobStateOperation?.token == operationToken {
+            activeJobStateOperation = nil
+            isJobStateLoading = false
+        }
+        recordCancellationCleanup()
+    }
+
+    private func invalidateOperationAuthorities() {
+        invalidateHistoryAuthority()
+        invalidateTimelineAuthority()
+        invalidateJobStateAuthority()
+    }
+
     private func invalidateHistoryAuthority() {
         historyGeneration &+= 1
         committedHistory.generation = historyGeneration
@@ -320,9 +591,38 @@ final class JobHistoryViewModel {
         }
     }
 
+    private func invalidateTimelineAuthority() {
+        activeTimelineOperation = nil
+        isTimelineLoading = false
+    }
+
+    private func invalidateJobStateAuthority() {
+        activeJobStateOperation = nil
+        isJobStateLoading = false
+    }
+
     private func matchesActiveView(_ activationToken: UUID) -> Bool {
         isViewActive && activeViewToken == activationToken
     }
+
+    #if DEBUG
+    private func recordCancellationCleanup() {
+        cancellationCleanupTick &+= 1
+        let current = cancellationCleanupTick
+        var remaining:
+            [(target: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
+        for waiter in cancellationCleanupWaiters {
+            if current >= waiter.target {
+                waiter.continuation.resume()
+            } else {
+                remaining.append(waiter)
+            }
+        }
+        cancellationCleanupWaiters = remaining
+    }
+    #else
+    private func recordCancellationCleanup() {}
+    #endif
 
     // MARK: - Computed
 

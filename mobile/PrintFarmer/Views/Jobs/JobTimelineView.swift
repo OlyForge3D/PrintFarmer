@@ -7,7 +7,7 @@ struct JobTimelineView: View {
 
     var body: some View {
         Group {
-            if viewModel.isLoading && viewModel.timeline.isEmpty {
+            if viewModel.isTimelineLoading && viewModel.timeline.isEmpty {
                 ProgressView("Loading timeline…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.timeline.isEmpty {
