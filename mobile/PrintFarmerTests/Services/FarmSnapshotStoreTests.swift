@@ -116,7 +116,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
         let (store, authority) = makeStore(root: root)
         let session = await activate(store, authority, namespace)
 
-        let first = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets())])
+        let first = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets(), isPendingReady: false)])
         XAssertEqual(await store.commit(first, capturedSession: session), .committed)
         let equalStamp = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [])
         XAssertEqual(await store.commit(equalStamp, capturedSession: session), .notNewer)

@@ -67,13 +67,14 @@ actor AuthService: AuthServiceProtocol {
         self.authEpoch = authEpoch
     }
 
+    /// Whether `operation` is still the current auth operation (or unspecified).
+    private func isCurrentOperation(_ operation: AuthOperationToken) -> Bool {
+        operation == .unspecified || authEpoch.isCurrent(operation.value)
+    }
+
     /// Authenticate against a Printfarmer server.
     /// Stores the JWT and applies it to the shared API client for the active server on success.
-    func login(serverURL: String, username: String, password: String) async throws -> AuthResponse {
-        // H2: capture the auth-operation epoch at entry. If a logout / newer op
-        // supersedes this login while it is in flight, durable owner/credential
-        // mutations are skipped so a late login cannot resurrect auth/owner state.
-        let epoch = authEpoch.current
+    func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
         guard let normalizedURL = APIClient.normalizedServerURLString(serverURL),
               let url = URL(string: normalizedURL) else {
             throw NetworkError.invalidURL(serverURL)
@@ -93,7 +94,9 @@ actor AuthService: AuthServiceProtocol {
             throw NetworkError.authFailed(response.error ?? "Login failed")
         }
 
-        guard authEpoch.isCurrent(epoch) else { return response }
+        // H2: gate every durable mutation on exactly this operation token at the
+        // mutation point. A superseded login performs no durable work.
+        guard isCurrentOperation(operation) else { return .superseded }
         credentialsStore.save(
             ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
             serverId: server.id
@@ -102,7 +105,7 @@ actor AuthService: AuthServiceProtocol {
         await apiClient.setAccessToken(token)
         await registerTokenExpiryChecker(for: server)
 
-        // H2: the snapshot owner must be a VERIFIED current identity. A token-only
+        // The snapshot owner must be a VERIFIED current identity. A token-only
         // response (`user == nil`) must never reuse a persisted prior owner — verify
         // via an authoritative `currentUser()` fetch, and fail closed (clear any
         // stale owner) if no stable id can be established.
@@ -110,22 +113,30 @@ actor AuthService: AuthServiceProtocol {
         if verifiedUser == nil {
             verifiedUser = try? await currentUser()
         }
-        guard authEpoch.isCurrent(epoch) else { return response }
+        guard isCurrentOperation(operation) else { return .superseded }
         if let user = verifiedUser {
             snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
         } else {
             snapshotOwnerStore.clearOwner(serverID: server.id)
         }
         await activate(server)
-        return response
+        // Carry the VERIFIED user back to the caller (not the original nil).
+        let verifiedResponse = AuthResponse(
+            success: response.success,
+            token: response.token,
+            expiresAt: response.expiresAt,
+            user: verifiedUser,
+            error: response.error
+        )
+        return .applied(verifiedResponse)
     }
 
-    func logout() async {
-        // Supersede any in-flight login/restore so its late completion cannot
-        // resurrect credentials/owner/session (H2).
-        authEpoch.advance()
+    func logout(operation: AuthOperationToken) async {
         let currentServer = await activeServer()
         try? await apiClient.postVoid("/api/auth/logout")
+        // H2: a late logout whose operation was superseded by a newer login must
+        // not erase the newer login's credentials/owner/session.
+        guard isCurrentOperation(operation) else { return }
         if let server = currentServer {
             credentialsStore.clear(serverId: server.id)
             // Explicit logout clears the persisted owner identity for this server.
@@ -135,12 +146,10 @@ actor AuthService: AuthServiceProtocol {
     }
 
     /// Attempt to restore a previous session from Keychain.
-    /// Returns the current user on success, nil if no valid session.
-    func restoreSession() async -> UserDTO? {
-        let epoch = authEpoch.current
-        guard let server = await activeServer() else { return nil }
+    func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
+        guard let server = await activeServer() else { return .noSession }
         migrateLegacyCredentialsIfAllowed(to: server)
-        guard let credentials = credentialsStore.load(serverId: server.id) else { return nil }
+        guard let credentials = credentialsStore.load(serverId: server.id) else { return .noSession }
 
         await apiClient.updateBaseURL(server.baseURL)
         await apiClient.setAccessToken(credentials.accessToken)
@@ -150,18 +159,18 @@ actor AuthService: AuthServiceProtocol {
             let user: UserDTO = try await apiClient.get("/api/auth/me")
             // H2: if a logout / newer op superseded this restore mid-flight, do not
             // persist the owner or report success (no resurrection).
-            guard authEpoch.isCurrent(epoch) else { return nil }
+            guard isCurrentOperation(operation) else { return .superseded }
             // Online-verified restore: persist the owner (transient offline never
             // reaches here, so the last verified owner is preserved).
             snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
-            return user
+            return .restored(user)
         } catch {
             if isDefinitiveAuthRejection(error) {
                 credentialsStore.clear(serverId: server.id)
                 snapshotOwnerStore.clearOwner(serverID: server.id)
                 await apiClient.setAccessToken(nil)
             }
-            return nil
+            return .noSession
         }
     }
 

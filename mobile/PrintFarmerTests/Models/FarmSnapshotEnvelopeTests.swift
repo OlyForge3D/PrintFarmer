@@ -8,7 +8,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
         let printerID = UUID()
         let locationID = UUID()
         let printer = FarmSnapshotFixtures.printerWithSecrets(id: printerID, locationID: locationID)
-        let projected = FarmSnapshotPrinter(printer)
+        let projected = FarmSnapshotPrinter(printer, isPendingReady: false)
 
         XCTAssertEqual(projected.id, printerID)
         XCTAssertEqual(projected.name, "Voron-01")
@@ -40,6 +40,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
         let envelope = FarmSnapshotEnvelope(
             namespace: namespace,
             printers: [printer],
+            pendingReadyPrinterIDs: [],
             lastUpdatedAtMillis: 1_700_000_000_000
         )
         let data = try FarmSnapshotEnvelope.makeEncoder().encode(envelope)
@@ -60,7 +61,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
 
     func testPresentEmptyPayloadRoundTrips() throws {
         let namespace = FarmSnapshotFixtures.namespace()
-        let envelope = FarmSnapshotEnvelope(namespace: namespace, printers: [], lastUpdatedAtMillis: 42)
+        let envelope = FarmSnapshotEnvelope(namespace: namespace, payload: [], lastUpdatedAtMillis: 42)
         let data = try FarmSnapshotEnvelope.makeEncoder().encode(envelope)
         let decoded = try FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: data)
         XCTAssertEqual(decoded.payload.count, 0)
@@ -69,7 +70,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
 
     func testTimestampEncodesAsInteger() throws {
         let namespace = FarmSnapshotFixtures.namespace()
-        let envelope = FarmSnapshotEnvelope(namespace: namespace, printers: [], lastUpdatedAtMillis: 100_900)
+        let envelope = FarmSnapshotEnvelope(namespace: namespace, payload: [], lastUpdatedAtMillis: 100_900)
         let data = try FarmSnapshotEnvelope.makeEncoder().encode(envelope)
         let text = String(decoding: data, as: UTF8.self)
         XCTAssertTrue(text.contains("\"lastUpdatedAtMillis\":100900"))
@@ -106,7 +107,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
         let notPendingProjection = FarmSnapshotPrinter(printer, isPendingReady: false)
         XCTAssertFalse(notPendingProjection.isPendingReady)
         // The Printer-only convenience defaults to false (no auto-dispatch context).
-        XCTAssertFalse(FarmSnapshotPrinter(printer).isPendingReady)
+        XCTAssertFalse(FarmSnapshotPrinter(printer, isPendingReady: false).isPendingReady)
     }
 
     func testEnvelopeWiresPendingReadyFromPrinterIDSet() throws {

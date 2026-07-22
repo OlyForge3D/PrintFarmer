@@ -38,6 +38,10 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     var disconnectCalled = false
     var fallbackGroupsUpdatedHandler: (@Sendable (FallbackGroupsUpdatedEvent) -> Void)?
     var errorToThrow: Error?
+    /// Optional deterministic hook awaited at the start of `disconnect()`. Lets a
+    /// test park a switch operation exactly at its outgoing-service teardown
+    /// suspension point (issue #816 H1) without sleeps/polling.
+    var disconnectHook: (@Sendable () async -> Void)?
 
     func connect() async throws {
         connectCalled = true
@@ -47,6 +51,7 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     func disconnect() async {
         disconnectCalled = true
+        if let disconnectHook { await disconnectHook() }
         connectionStateHub.setStateSync(.disconnected)
     }
 

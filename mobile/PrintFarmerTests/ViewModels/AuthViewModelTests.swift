@@ -18,8 +18,11 @@ final class AuthViewModelTests: XCTestCase {
         super.setUp()
         mockAPIClient = MockAPIClient()
         apiClient = mockAPIClient.apiClient
-        authService = AuthService(apiClient: apiClient)
-        services = ServiceContainer()
+        // These tests exercise the AuthViewModel → AuthService → APIClient auth path;
+        // they do not test server switching, so the container does not observe the
+        // registry (avoids cross-test churn from the shared registry).
+        services = ServiceContainer(observeRegistry: false)
+        authService = AuthService(apiClient: apiClient, authEpoch: services.authOperationEpoch)
         services.authService = authService
         viewModel = AuthViewModel(services: services)
     }

@@ -32,9 +32,20 @@ final class AuthViewModel {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                await self.logout()
+                await self.handleSessionExpiration()
             }
         }
+    }
+
+    /// React to a server-reported session expiry. This is NOT a user logout: it
+    /// must not advance the auth-operation token (else it would supersede a fresh
+    /// concurrent login). It clears the current session state and revokes the
+    /// snapshot for the expired session only (issue #816, H2).
+    private func handleSessionExpiration() async {
+        await services.revokeFarmSnapshot()
+        await services.authService.logout(operation: .unspecified)
+        isAuthenticated = false
+        currentUser = nil
     }
 
     // MARK: - Session Restoration
@@ -51,10 +62,10 @@ final class AuthViewModel {
             return
         }
 
-        let epoch = services.authOperationEpoch.advance()
+        let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         isLoading = true
-        if let user = await services.authService.restoreSession() {
-            guard services.authOperationEpoch.isCurrent(epoch) else {
+        if case .restored(let user) = await services.authService.restoreSession(operation: token) {
+            guard services.authOperationEpoch.isCurrent(token.value) else {
                 isLoading = false
                 hasCheckedAuth = true
                 return
@@ -85,21 +96,32 @@ final class AuthViewModel {
     // MARK: - Login / Logout
 
     func login(serverURL: String, username: String, password: String) async {
-        // Advance the auth-operation epoch so this login supersedes any in-flight
-        // restore and the AuthService can fence a later logout (H2).
-        services.authOperationEpoch.advance()
+        // H2: mint a unique operation token and thread it end-to-end. Every durable
+        // side effect (in the service) and the view-state/activation (here) are
+        // gated on exactly this token.
+        let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         isLoading = true
         errorMessage = nil
 
         do {
-            let response = try await services.authService.login(
+            let outcome = try await services.authService.login(
                 serverURL: serverURL,
                 username: username,
-                password: password
+                password: password,
+                operation: token
             )
-            currentUser = response.user
-            isAuthenticated = true
-            await services.activateFarmSnapshotForActiveServer()
+            switch outcome {
+            case .applied(let response):
+                guard services.authOperationEpoch.isCurrent(token.value) else {
+                    isLoading = false
+                    return
+                }
+                currentUser = response.user // VERIFIED user
+                isAuthenticated = true
+                await services.activateFarmSnapshotForActiveServer()
+            case .superseded:
+                break // no view-state change for superseded work
+            }
         } catch let error as NetworkError {
             errorMessage = friendlyMessage(for: error)
         } catch {
@@ -113,9 +135,9 @@ final class AuthViewModel {
         // Supersede any in-flight login/restore (H2), then revoke snapshot
         // authority (synchronous) and await store deactivation before the auth
         // service tears down the session.
-        services.authOperationEpoch.advance()
+        let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         await services.revokeFarmSnapshot()
-        await services.authService.logout()
+        await services.authService.logout(operation: token)
         isAuthenticated = false
         currentUser = nil
     }

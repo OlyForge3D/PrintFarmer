@@ -126,6 +126,12 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
 
     // Barriers (fire on first call of each op unless nil).
     var writeCandidateBarrier: AsyncBarrier?
+    /// Fires AFTER the candidate is fully written+closed and returns, i.e. exactly
+    /// between candidate durability and the atomic promote (issue #816 H7). This is
+    /// the correct phase to prove the externally observable live path is old-or-new,
+    /// never torn. The synchronous `promoteAtomically` primitive is left untouched so
+    /// the atomic section is never made reentrant.
+    var postWriteCandidateBarrier: AsyncBarrier?
     var readDataBarrier: AsyncBarrier?
     var createDirectoryBarrier: AsyncBarrier?
 
@@ -164,6 +170,12 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
         }
         if failWriteCandidate { throw IOFailure() }
         try await backing.writeCandidate(data, to: url)
+        // Post-write seam: candidate bytes are now fully durable on disk but not yet
+        // promoted. A test can park here and observe live==old, candidate==new (H7).
+        if let barrier = postWriteCandidateBarrier {
+            postWriteCandidateBarrier = nil
+            await barrier.arriveAndWait()
+        }
     }
 
     func removeItem(at url: URL) async throws {
@@ -192,8 +204,16 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
         try backing.promoteAtomically(candidate: candidate, to: live)
     }
 
+    /// Synchronous probe fired at the REAL compare-and-move boundary, immediately
+    /// before the backing `moveIfContentEquals` primitive (issue #816 H5). Runs
+    /// inside the authority lock, so it must stay synchronous and must not re-enter
+    /// the authority (that would deadlock / make the atomic section reentrant). Used
+    /// to prove the destructive move is a single serialized primitive.
+    var moveBoundaryProbe: (@Sendable () -> Void)?
+
     func moveIfContentEquals(from: URL, to: URL, expected: Data) throws -> Bool {
         bump(\.moveCount)
+        moveBoundaryProbe?()
         if failMove { throw IOFailure() }
         return try backing.moveIfContentEquals(from: from, to: to, expected: expected)
     }

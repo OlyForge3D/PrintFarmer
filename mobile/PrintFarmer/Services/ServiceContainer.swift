@@ -49,11 +49,11 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private var observesRegistry: Bool
     @ObservationIgnored private var activeServerID: UUID?
     @ObservationIgnored private var activeServerSwitchTask: Task<Void, Never>?
-    @ObservationIgnored private var activeServerSwitchRequested = false
-    /// Monotonic switch-operation epoch (H1). Each service rebuild / snapshot
-    /// (re)bind captures this; an older switch that has been superseded must not
-    /// rebuild, bind, or clear newer state.
-    @ObservationIgnored private var switchEpoch = 0
+    /// Shared monotonic transition epoch (H1). Advanced SYNCHRONOUSLY at every
+    /// target-intent change (registry callback, demo/real, switch requests), not
+    /// when the worker later observes it, so a suspended switch is invalidated the
+    /// instant a newer intent arrives.
+    @ObservationIgnored private let transitionEpoch = ActiveServerGeneration()
 
     // MARK: Farm snapshot lifecycle authority (issue #816)
     /// Shared synchronous authority for origin-pinned snapshot sessions. A
@@ -211,6 +211,9 @@ final class ServiceContainer: @unchecked Sendable {
 
     /// Replaces all services with demo implementations at runtime.
     func switchToDemo() {
+        // H1: advance the transition epoch synchronously so any pending/suspended
+        // real switch is invalidated and cannot publish after demo takes over.
+        transitionEpoch.advance()
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
@@ -246,6 +249,8 @@ final class ServiceContainer: @unchecked Sendable {
 
     /// Replaces all services with real implementations backed by the active or given base URL.
     func switchToReal(baseURL: URL? = nil) {
+        // H1: advance the transition epoch synchronously (intent change).
+        transitionEpoch.advance()
         // Revoke synchronously before the composition changes.
         farmSnapshotAuthority.revoke()
         let server = serverRegistry?.activeServer
@@ -266,7 +271,8 @@ final class ServiceContainer: @unchecked Sendable {
 
     func switchToServer(_ server: RegisteredServer) async {
         guard activeServerID != server.id else { return }
-        await switchToActiveServer(server)
+        transitionEpoch.advance() // intent change
+        await switchToActiveServer(server, epoch: transitionEpoch.current)
     }
 
     // MARK: - Farm snapshot lifecycle authority (issue #816)
@@ -288,17 +294,23 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     /// Bind the snapshot session to the current active server using only that
-    /// server's persisted owner identity. Does not await the switch task, so it is
-    /// safe to call from inside the switch loop.
+    /// server's persisted owner identity. Uses conditional deactivation only — it
+    /// never globally revokes, so a concurrent newer switch's binding is never
+    /// cleared (H1).
     private func bindSnapshotToActiveServer() async {
         guard let serverRegistry, let active = serverRegistry.activeServer else {
-            await revokeFarmSnapshot()
+            // No active server: conditionally clear the current session if any.
+            if let session = farmSnapshotAuthority.currentSession() {
+                farmSnapshotAuthority.deactivate(session)
+            }
             return
         }
         guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: active.id) else {
-            // Token-only / unverified server: fail closed, no hydrate until an
-            // online verification establishes the owner.
-            await revokeFarmSnapshot()
+            // Token-only / unverified server: fail closed. Deactivate only a session
+            // belonging to THIS active server; never a newer server's binding.
+            if let session = farmSnapshotAuthority.currentSession(), session.serverID == active.id {
+                farmSnapshotAuthority.deactivate(session)
+            }
             return
         }
         let namespace = FarmSnapshotNamespace(serverID: active.id, userID: ownerID)
@@ -310,7 +322,7 @@ final class ServiceContainer: @unchecked Sendable {
         // Revalidate that the active server did not change under us during the
         // await; if it did, the newer switch owns activation.
         guard serverRegistry.activeServerID == active.id, farmSnapshotAuthority.isCurrent(session) else {
-            await revokeFarmSnapshot()
+            farmSnapshotAuthority.deactivate(session) // conditional; never clobbers newer
             return
         }
     }
@@ -325,10 +337,14 @@ final class ServiceContainer: @unchecked Sendable {
 
     private func observeActiveServer() {
         guard observesRegistry, let serverRegistry else { return }
+        let transitionEpoch = self.transitionEpoch
         withObservationTracking {
             _ = serverRegistry.activeServerID
             _ = serverRegistry.servers
         } onChange: { [weak self] in
+            // H1: advance the transition epoch SYNCHRONOUSLY at the intent change,
+            // on the mutating (MainActor) thread, before any worker observes it.
+            transitionEpoch.advance()
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.observeActiveServer()
@@ -338,9 +354,7 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     private func scheduleActiveServerSwitch() {
-        activeServerSwitchRequested = true
         guard activeServerSwitchTask == nil else { return }
-
         activeServerSwitchTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.runActiveServerSwitchLoop()
@@ -352,47 +366,53 @@ final class ServiceContainer: @unchecked Sendable {
         guard let serverRegistry else { return }
 
         while true {
-            activeServerSwitchRequested = false
-            let targetID = serverRegistry.activeServerID
+            // Capture the intent epoch for THIS processing pass.
+            let epoch = transitionEpoch.current
             if let server = serverRegistry.activeServer {
-                await switchToServer(server)
+                await switchToActiveServer(server, epoch: epoch)
             } else {
-                await switchToNoActiveServer()
+                await switchToNoActiveServer(epoch: epoch)
             }
-
-            if serverRegistry.activeServerID == targetID && !activeServerSwitchRequested {
-                break
-            }
+            // Re-process only if the target intent changed during the pass.
+            if transitionEpoch.isCurrent(epoch) { break }
         }
     }
 
-    private func switchToActiveServer(_ server: RegisteredServer) async {
-        switchEpoch += 1
-        let epoch = switchEpoch
-        let oldSignalRService = signalRService
-        await oldSignalRService.disconnect()
-        guard epoch == switchEpoch else { return } // superseded by a newer switch
+    private func switchToActiveServer(_ server: RegisteredServer, epoch: Int) async {
+        // Capture immutable target + outgoing service/session BEFORE any await (H1).
+        let outgoingSignalR = signalRService
+        let outgoingSession = farmSnapshotAuthority.currentSession()
+        await outgoingSignalR.disconnect()
+        guard transitionEpoch.isCurrent(epoch) else {
+            // Superseded during disconnect: install a fresh (disconnected) signalR so
+            // the reconciliation loop's next pass does not re-tear-down the outgoing
+            // one — but publish NO target state (H1: an older switch never rebuilds).
+            replaceSignalRAfterSupersededSwitch()
+            return
+        }
 
-        // H3: conditionally deactivate ONLY the outgoing session (compare-and-set),
-        // so a stale switch cannot clear a newer login's session.
-        if let outgoing = farmSnapshotAuthority.currentSession() {
-            farmSnapshotAuthority.deactivate(outgoing)
+        // Conditionally deactivate ONLY the captured outgoing session (never a
+        // global revoke that could clear a newer binding).
+        if let outgoingSession {
+            farmSnapshotAuthority.deactivate(outgoingSession)
         }
         activeServerGeneration = activeGeneration.advance()
         let capturedGeneration = activeServerGeneration
 
         let accessToken = Self.validAccessToken(for: server, credentialsStore: credentialsStore)
+        guard transitionEpoch.isCurrent(epoch) else { return }
+        // CAS publish: the synchronous rebuild follows the epoch check with no await
+        // between them, so an older switch cannot publish stale services.
         let client = rebuildRealServices(baseURL: server.baseURL, server: server, accessToken: accessToken)
         userDefaultsBox.userDefaults.set(server.normalizedURLString, forKey: APIClient.serverURLKey)
         await configureTokenExpiryChecker(client: client, serverID: server.id)
-        guard epoch == switchEpoch else { return } // superseded during the awaits
+        guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
 
-        // H1: bind the snapshot to the SAME captured server + generation the
-        // services were rebuilt for — never a re-read that could diverge from the
-        // rebuilt API client.
+        // Bind the snapshot to the SAME captured server + generation the services
+        // were rebuilt for.
         await bindSnapshotToServer(server, generation: capturedGeneration, epoch: epoch)
 
-        guard epoch == switchEpoch, accessToken != nil else { return }
+        guard transitionEpoch.isCurrent(epoch), accessToken != nil else { return }
         do {
             try await signalRService.connect()
         } catch {
@@ -401,32 +421,44 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     /// Bind the snapshot to a specific captured server + generation for a switch
-    /// operation, guarded by the switch epoch (H1). Resolves that server's OWN
+    /// operation, guarded by the transition epoch (H1). Resolves that server's OWN
     /// verified owner; token-only/unverified or tombstoned → no bind (fail closed).
+    /// A superseded/older switch conditionally deactivates only its own session and
+    /// never clears newer authority.
     private func bindSnapshotToServer(_ server: RegisteredServer, generation: Int, epoch: Int) async {
         guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: server.id) else { return }
+        guard transitionEpoch.isCurrent(epoch) else { return }
         let namespace = FarmSnapshotNamespace(serverID: server.id, userID: ownerID)
         guard let session = farmSnapshotAuthority.mint(namespace: namespace, generation: generation) else { return }
         await farmSnapshotStore.activate(session: session)
-        // Revalidate: an older switch that lost the race must not leave its binding.
-        guard epoch == switchEpoch, farmSnapshotAuthority.isCurrent(session) else {
-            farmSnapshotAuthority.deactivate(session)
+        guard transitionEpoch.isCurrent(epoch), farmSnapshotAuthority.isCurrent(session) else {
+            farmSnapshotAuthority.deactivate(session) // conditional: only if still exactly this session
             return
         }
     }
 
-    private func switchToNoActiveServer() async {
+    private func switchToNoActiveServer(epoch: Int) async {
         guard activeServerID != nil else { return }
-        switchEpoch += 1
-        let epoch = switchEpoch
-        let oldSignalRService = signalRService
-        await oldSignalRService.disconnect()
-        guard epoch == switchEpoch else { return }
-        if let outgoing = farmSnapshotAuthority.currentSession() {
-            farmSnapshotAuthority.deactivate(outgoing)
+        let outgoingSignalR = signalRService
+        let outgoingSession = farmSnapshotAuthority.currentSession()
+        await outgoingSignalR.disconnect()
+        guard transitionEpoch.isCurrent(epoch) else {
+            replaceSignalRAfterSupersededSwitch()
+            return
+        }
+        if let outgoingSession {
+            farmSnapshotAuthority.deactivate(outgoingSession)
         }
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
+    }
+
+    /// After a superseded switch (which must not rebuild/publish), replace the
+    /// already-disconnected signalR with a fresh one so the reconciliation loop's
+    /// next pass tears down a clean service rather than the outgoing one again.
+    private func replaceSignalRAfterSupersededSwitch() {
+        guard let client = apiClient else { return }
+        signalRService = signalRServiceFactory(APIClient.savedBaseURL() ?? AppConfig.baseURL, client)
     }
 
     @discardableResult

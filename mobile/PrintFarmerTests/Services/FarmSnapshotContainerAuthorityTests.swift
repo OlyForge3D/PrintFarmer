@@ -138,7 +138,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         await seedStore.activate(session: seedSession)
         let env = FarmSnapshotFixtures.envelope(
             namespace: namespace, millis: 5000,
-            printers: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets())]
+            printers: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets(), isPendingReady: false)]
         )
         XAssertEqual(await seedStore.commit(env, capturedSession: seedSession), .committed)
 
@@ -313,6 +313,10 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
     }
 
     func testRapidABASwitchSettlesToFinalServerOwner() async throws {
+        // Deterministic A→B→A: a barrier parks the B-switch at its outgoing-service
+        // teardown; the newer A intent advances the transition epoch WHILE B is
+        // suspended, so the resumed B pass is invalidated before it can build or
+        // bind B services. Proven without sleeps/polling (H1).
         let reg = registry()
         let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
         let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
@@ -322,23 +326,104 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         owners.setOwner(userID: userB, serverID: b.id)
         try reg.setActive(id: a.id)
 
-        let authority = FarmSnapshotAuthority()
+        let authority = FarmSnapshotFixtures.makeAuthority()
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: true,
-            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners,
+            signalRServiceFactory: recorder.factory
         )
 
-        // Rapid A→B→A: the reconciliation loop must settle to the final server, and
-        // the snapshot must bind that server's own owner (never a stale cross-bind).
+        // Request B: the reconciliation loop parks at the initial (A) service's
+        // disconnect barrier before it can capture/build B.
         try reg.setActive(id: b.id)
+        await recorder.firstDisconnectBarrier.waitUntilArrived()
+
+        // Newer intent (A) supersedes the suspended B switch. Release B: it must be
+        // epoch-invalidated and never build or bind B services.
         try reg.setActive(id: a.id)
+        recorder.firstDisconnectBarrier.release()
+
         await container.activateFarmSnapshotForActiveServer()
 
         let session = await store.currentSession()
         XCTAssertEqual(session?.serverID, a.id)
         XCTAssertEqual(session?.userID, userA)
         XCTAssertEqual(reg.activeServerID, a.id)
+        XCTAssertFalse(recorder.createdBaseURLs.contains { $0.host == "b.example.com" },
+                       "superseded B switch must never build B services")
+    }
+
+    // MARK: H1 — a suspended switch is invalidated by a newer intent before publish
+
+    func testSuspendedSwitchSupersededByDemoNeverBindsRealServer() async throws {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        let userA = UUID(), userB = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        owners.setOwner(userID: userB, serverID: b.id)
+        try reg.setActive(id: a.id)
+
+        let authority = FarmSnapshotFixtures.makeAuthority()
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
+        // observeRegistry:false isolates the epoch mechanism from registry re-drive:
+        // the suspended switch is driven manually via switchToServer.
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners,
+            signalRServiceFactory: recorder.factory
+        )
+
+        // Begin a manual switch to B; it parks at the outgoing (A) service teardown.
+        let switchTask = Task { await container.switchToServer(b) }
+        await recorder.firstDisconnectBarrier.waitUntilArrived()
+
+        // Demo supersedes the suspended real switch by advancing the shared
+        // transition epoch synchronously. The resumed B switch is invalidated and
+        // must neither build nor bind B services.
+        container.switchToDemo()
+        recorder.firstDisconnectBarrier.release()
+        await switchTask.value
+
+        let session = await store.currentSession()
+        XCTAssertNil(session, "demo revoke + supersession leaves no live real session")
+        XCTAssertFalse(recorder.createdBaseURLs.contains { $0.host == "b.example.com" },
+                       "superseded B switch must never build B services")
+    }
+
+    // MARK: Structural helper — records factory-created services + a first-disconnect barrier
+
+    final class SignalRFactoryRecorder: @unchecked Sendable {
+        let firstDisconnectBarrier = AsyncBarrier()
+        private let lock = NSLock()
+        private(set) var createdBaseURLs: [URL] = []
+        private var callCount = 0
+        private let barrierOnFirst: Bool
+
+        init(barrierOnFirst: Bool) { self.barrierOnFirst = barrierOnFirst }
+
+        var factory: ServiceContainer.SignalRServiceFactory {
+            { [weak self] baseURL, _ in
+                guard let self else { return MockSignalRService() }
+                let service = MockSignalRService()
+                let isFirst: Bool = {
+                    self.lock.lock(); defer { self.lock.unlock() }
+                    self.createdBaseURLs.append(baseURL)
+                    defer { self.callCount += 1 }
+                    return self.callCount == 0
+                }()
+                if isFirst && self.barrierOnFirst {
+                    let barrier = self.firstDisconnectBarrier
+                    service.disconnectHook = { await barrier.arriveAndWait() }
+                }
+                return service
+            }
+        }
     }
 }

@@ -106,6 +106,10 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
 
     private let lock = NSLock()
     private var tokenCounter: UInt64 = 0
+    /// Permanent monotonic high-water mark of the newest token ever made current.
+    /// Survives `current == nil` (revoke/deactivate) for the store's lifetime, so a
+    /// delayed older session can never re-adopt after the current was cleared (H3).
+    private var highWater: UInt64 = 0
     private var current: FarmSnapshotSession?
     private var tombstones: Set<UUID>
     private let tombstoneStore: FarmSnapshotTombstoneStore
@@ -119,32 +123,38 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
 
     /// Mint a fresh authoritative session for a settled server + verified owner.
     /// Returns `nil` when the server is tombstoned (purged) so nothing can
-    /// resurrect it. Every mint advances the monotonic token, so a same-user /
-    /// same-server relogin supersedes any in-flight pre-logout session.
+    /// resurrect it. Every mint advances the monotonic token AND the high-water
+    /// mark, so a same-user / same-server relogin supersedes any in-flight session.
     func mint(namespace: FarmSnapshotNamespace, generation: Int) -> FarmSnapshotSession? {
         lock.lock()
         defer { lock.unlock() }
         guard !tombstones.contains(namespace.serverID) else { return nil }
         tokenCounter += 1
+        highWater = tokenCounter
         let session = FarmSnapshotSession(namespace: namespace, generation: generation, token: tokenCounter)
         current = session
         return session
     }
 
-    /// Adopt an externally-minted session as current — monotonic compare-and-set:
-    /// a delayed OLDER session (token ≤ the current token) can never replace a
-    /// newer one (H3). Returns whether the session became current.
+    /// Adopt an externally-minted session as current — serialized compare-and-set
+    /// against the permanent high-water mark: a delayed OLDER or already-consumed
+    /// token can never re-adopt, even after the current was revoked/deactivated
+    /// (H3). Re-adopting the exact current session is idempotent. Returns whether
+    /// the session is current after the call.
     @discardableResult
     func adopt(_ session: FarmSnapshotSession) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard !tombstones.contains(session.serverID) else { return false }
-        if let current, session.token <= current.token { return false }
+        if session == current { return true } // idempotent for the exact current
+        guard session.token > highWater else { return false }
+        highWater = session.token
         current = session
         return true
     }
 
-    /// Unconditionally clear the current session (explicit logout / no-server).
+    /// Unconditionally clear the current session (explicit logout / no-server). The
+    /// high-water barrier is retained so nothing older can re-adopt afterward.
     func revoke() {
         lock.lock()
         defer { lock.unlock() }
@@ -187,6 +197,13 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return tombstones.contains(serverID)
+    }
+
+    /// Snapshot of all durably-tombstoned server IDs (for startup residue sweep, H4).
+    func tombstonedServerIDs() -> Set<UUID> {
+        lock.lock()
+        defer { lock.unlock() }
+        return tombstones
     }
 
     func currentSession() -> FarmSnapshotSession? {
@@ -241,6 +258,47 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         self.ownerStore = ownerStore
     }
 
+    // MARK: Per-server filesystem operation leases (H4)
+    //
+    // Every write/quarantine operation holds a lease for its server. Purge
+    // tombstones durably, refuses new leases, then drains existing leases before
+    // its final sweep — so no in-flight operation can recreate a purged namespace.
+
+    private var leaseCounts: [UUID: Int] = [:]
+    private var purging: Set<UUID> = []
+    private var drainWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
+    private var sweptTombstonesOnStartup = false
+
+    /// Acquire a lease for `serverID`. Refused (nil result → caller aborts) when the
+    /// server is purging or tombstoned, so no new operation starts against a purged
+    /// namespace.
+    private func acquireLease(_ serverID: UUID) -> Bool {
+        guard !purging.contains(serverID), !authority.isTombstoned(serverID) else { return false }
+        leaseCounts[serverID, default: 0] += 1
+        return true
+    }
+
+    private func releaseLease(_ serverID: UUID) {
+        let remaining = (leaseCounts[serverID] ?? 1) - 1
+        if remaining <= 0 {
+            leaseCounts[serverID] = nil
+            if let waiters = drainWaiters[serverID] {
+                drainWaiters[serverID] = nil
+                waiters.forEach { $0.resume() }
+            }
+        } else {
+            leaseCounts[serverID] = remaining
+        }
+    }
+
+    /// Suspend until all in-flight leases for `serverID` have drained.
+    private func drain(_ serverID: UUID) async {
+        guard (leaseCounts[serverID] ?? 0) > 0 else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            drainWaiters[serverID, default: []].append(continuation)
+        }
+    }
+
     static func defaultRootURL() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
@@ -276,6 +334,9 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     // MARK: Lifecycle
 
     func activate(session: FarmSnapshotSession) async {
+        // H4: on first use, replay durable tombstones and sweep residual namespaces
+        // a crash may have left before activating anything.
+        await sweepTombstonedResidueOnStartup()
         authority.adopt(session)
     }
 
@@ -330,6 +391,9 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     private enum RecoverResult: Sendable { case recovered, changed, revoked, failed }
 
     private func recover(live: URL, expected: Data, session: FarmSnapshotSession) async -> RecoverResult {
+        // H4: hold a lease so purge drains this quarantine operation before sweeping.
+        guard acquireLease(session.serverID) else { return .revoked }
+        defer { releaseLease(session.serverID) }
         let dest = quarantineURL(session.namespace)
         do {
             try await fileIO.createDirectory(at: quarantineDir(session.serverID))
@@ -366,6 +430,10 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         guard envelope.namespace == capturedSession.namespace else { return .namespaceMismatch }
         // 3. Cheap short-circuit; the authoritative check is inside the promotion.
         guard authority.isCurrent(capturedSession) else { return .superseded }
+        // H4: hold a filesystem lease for the whole durable region so purge cannot
+        // sweep until this operation drains; refused if the server is purging.
+        guard acquireLease(capturedSession.serverID) else { return .superseded }
+        defer { releaseLease(capturedSession.serverID) }
 
         let live = liveURL(capturedSession.namespace)
 
@@ -481,15 +549,16 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     // MARK: Purge
 
     func purge(serverID: UUID) async -> FarmSnapshotPurgeResult {
-        // H4: establish the durable tombstone BEFORE any wait and revoke a matching
-        // active session, so no activation/commit can resurrect the namespace
-        // mid-purge and the tombstone survives a restart/crash between here and
-        // registry removal.
+        // H4 ordered drain-then-sweep:
+        // 1. Durable tombstone FIRST — blocks new mints/activation, survives restart.
         authority.tombstone(serverID)
-        // Clear the persisted owner mapping so a stale owner can never re-select
-        // this server's cache after purge.
+        // 2. Refuse new filesystem leases for this server.
+        purging.insert(serverID)
+        // 3. Clear the persisted owner mapping so a stale owner cannot re-select it.
         ownerStore?.clearOwner(serverID: serverID)
-
+        // 4. Drain all in-flight commit/quarantine leases before touching the disk.
+        await drain(serverID)
+        // 5. Final recursive sweep of live/temp/quarantine; surface removal failures.
         var failures = 0
         for dir in [serverDir(serverID), quarantineDir(serverID)] {
             do {
@@ -498,6 +567,18 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
                 failures += 1
             }
         }
+        purging.remove(serverID) // tombstone remains the durable barrier
         return failures == 0 ? .purged : .failed(failureCount: failures)
+    }
+
+    /// Replay durable tombstones on first use and sweep any residual namespaces a
+    /// crash may have left between purge and registry removal (H4). Idempotent.
+    private func sweepTombstonedResidueOnStartup() async {
+        guard !sweptTombstonesOnStartup else { return }
+        sweptTombstonesOnStartup = true
+        for serverID in authority.tombstonedServerIDs() {
+            try? await fileIO.removeItem(at: serverDir(serverID))
+            try? await fileIO.removeItem(at: quarantineDir(serverID))
+        }
     }
 }

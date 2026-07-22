@@ -5,22 +5,22 @@ import Foundation
 final class DemoAuthService: AuthServiceProtocol, @unchecked Sendable {
     private var _isAuthenticated = false
 
-    func login(serverURL: String, username: String, password: String) async throws -> AuthResponse {
+    func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
         _isAuthenticated = true
-        return DemoData.demoAuthResponse
+        return .applied(DemoData.demoAuthResponse)
     }
 
-    func logout() async {
+    func logout(operation: AuthOperationToken) async {
         _isAuthenticated = false
     }
 
-    func restoreSession() async -> UserDTO? {
+    func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
         let isActive = await MainActor.run { DemoMode.shared.isActive }
         if isActive {
             _isAuthenticated = true
-            return DemoData.demoUser
+            return .restored(DemoData.demoUser)
         }
-        return nil
+        return .noSession
     }
 
     func currentUser() async throws -> UserDTO {

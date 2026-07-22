@@ -141,13 +141,13 @@ private final class BarrierAuthService: AuthServiceProtocol, @unchecked Sendable
         self.restoreUser = restoreUser
     }
 
-    func login(serverURL: String, username: String, password: String) async throws -> AuthResponse {
-        AuthResponse(success: true, token: "t", expiresAt: nil, user: restoreUser, error: nil)
+    func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
+        .applied(AuthResponse(success: true, token: "t", expiresAt: nil, user: restoreUser, error: nil))
     }
-    func logout() async {}
-    func restoreSession() async -> UserDTO? {
+    func logout(operation: AuthOperationToken) async {}
+    func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
         await restoreBarrier.arriveAndWait()
-        return restoreUser
+        return .restored(restoreUser)
     }
     func currentUser() async throws -> UserDTO { restoreUser }
     var isAuthenticated: Bool { get async { true } }

@@ -127,23 +127,23 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
         self.obicoEnabled = printer.obicoEnabled
     }
 
-    /// Convenience for callers without auto-dispatch context (defaults
-    /// `isPendingReady` to `false`).
-    init(_ printer: Printer) {
-        self.init(printer, isPendingReady: false)
-    }
-
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // H6: every field that was required in the original v1 schema stays
+        // REQUIRED (a corrupt/truncated record missing any of them fails to decode
+        // and is quarantined). Only the newly-added `isPendingReady` is defaulted
+        // when absent, so a valid old v1 record still decodes.
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
+        isOnline = try c.decode(Bool.self, forKey: .isOnline)
+        isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
+        inMaintenance = try c.decode(Bool.self, forKey: .inMaintenance)
+        obicoEnabled = try c.decode(Bool.self, forKey: .obicoEnabled)
+        isPendingReady = try c.decodeIfPresent(Bool.self, forKey: .isPendingReady) ?? false
+        // Fields that were optional in v1 remain optional.
         location = try c.decodeIfPresent(FarmSnapshotLocation.self, forKey: .location)
         modelName = try c.decodeIfPresent(String.self, forKey: .modelName)
         manufacturerName = try c.decodeIfPresent(String.self, forKey: .manufacturerName)
-        isOnline = try c.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
-        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
-        inMaintenance = try c.decodeIfPresent(Bool.self, forKey: .inMaintenance) ?? false
-        isPendingReady = try c.decodeIfPresent(Bool.self, forKey: .isPendingReady) ?? false
         state = try c.decodeIfPresent(String.self, forKey: .state)
         progress = try c.decodeIfPresent(Double.self, forKey: .progress)
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
@@ -153,7 +153,6 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
         bedTemp = try c.decodeIfPresent(Double.self, forKey: .bedTemp)
         bedTarget = try c.decodeIfPresent(Double.self, forKey: .bedTarget)
         spool = try c.decodeIfPresent(FarmSnapshotSpool.self, forKey: .spool)
-        obicoEnabled = try c.decodeIfPresent(Bool.self, forKey: .obicoEnabled) ?? false
     }
 }
 
@@ -184,10 +183,9 @@ struct FarmSnapshotEnvelope: Codable, Sendable, Equatable {
         self.lastUpdatedAtMillis = lastUpdatedAtMillis
     }
 
-    /// Convenience projection from live `Printer` values plus the authoritative
-    /// set of printer IDs currently in auto-dispatch "pending ready" state (issue
-    /// #816, H6). Callers (#817) supply `pendingReadyPrinterIDs` from the
-    /// auto-dispatch status source — it is not reconstructed from `Printer.state`.
+    /// The ONLY live projection from `Printer` values — every caller must supply the
+    /// authoritative set of printer IDs in auto-dispatch "pending ready" state (issue
+    /// #816, H6). Pending-ready is never reconstructed from `Printer.state`.
     init(
         namespace: FarmSnapshotNamespace,
         printers: [Printer],
@@ -197,21 +195,6 @@ struct FarmSnapshotEnvelope: Codable, Sendable, Equatable {
         self.init(
             namespace: namespace,
             payload: printers.map { FarmSnapshotPrinter($0, isPendingReady: pendingReadyPrinterIDs.contains($0.id)) },
-            lastUpdatedAtMillis: lastUpdatedAtMillis
-        )
-    }
-
-    /// Convenience projection from live `Printer` values with no pending-ready
-    /// context (all `isPendingReady == false`).
-    init(
-        namespace: FarmSnapshotNamespace,
-        printers: [Printer],
-        lastUpdatedAtMillis: Int64
-    ) {
-        self.init(
-            namespace: namespace,
-            printers: printers,
-            pendingReadyPrinterIDs: [],
             lastUpdatedAtMillis: lastUpdatedAtMillis
         )
     }

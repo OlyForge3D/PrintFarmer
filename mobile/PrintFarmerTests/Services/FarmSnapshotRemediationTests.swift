@@ -119,17 +119,57 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let commitTask = Task { await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000), capturedSession: session) }
 
         await barrier.waitUntilArrived()
-        // Purge lands while the commit is suspended before its candidate write.
-        let purgeResult = await store.purge(serverID: ns.serverID)
-        XCTAssertEqual(purgeResult, .purged)
+        // Purge lands while the commit holds a lease (suspended before its write). It
+        // must DRAIN the lease — it cannot sweep/return until the commit releases —
+        // so purge is started concurrently and only completes after the commit does.
+        let purgeTask = Task { await store.purge(serverID: ns.serverID) }
         barrier.release()
 
         XAssertEqual(await commitTask.value, .superseded)
+        XAssertEqual(await purgeTask.value, .purged)
         // No resurrection: the server subtree the late write may have recreated is gone.
         XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path))
     }
 
     // MARK: H5 — quarantine linearization (both completion orders)
+
+    func testPurgeDrainsInFlightLeaseBeforeCompleting() async {
+        // Deterministic completion-order proof: purge must not finish until an
+        // in-flight commit (holding a filesystem lease) releases it (issue #816 H4).
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority()
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        let session = await activate(store, authority, ns)
+
+        let recorder = CompletionOrderRecorder()
+        let barrier = AsyncBarrier()
+        io.writeCandidateBarrier = barrier
+        let commitTask = Task { () -> FarmSnapshotCommitResult in
+            let r = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session)
+            await recorder.record("commit")
+            return r
+        }
+        await barrier.waitUntilArrived()
+        let purgeTask = Task { () -> FarmSnapshotPurgeResult in
+            let r = await store.purge(serverID: ns.serverID)
+            await recorder.record("purge")
+            return r
+        }
+        barrier.release()
+        XAssertEqual(await commitTask.value, .superseded)
+        XAssertEqual(await purgeTask.value, .purged)
+
+        // Purge completed strictly AFTER the commit released its lease.
+        let order = await recorder.order
+        XCTAssertEqual(order, ["commit", "purge"])
+    }
+
+    actor CompletionOrderRecorder {
+        private(set) var order: [String] = []
+        func record(_ label: String) { order.append(label) }
+    }
 
     func testQuarantineMoveCommitsWhenAuthorityHeldToRelease() async {
         // Corrupt record; authority stays current across the suspended dir-create;
@@ -181,6 +221,40 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
     // MARK: H7 — atomicity / interruption
 
+    func testQuarantineCompareFalseAtMoveBoundaryPreservesLiveByteIdentical() async {
+        // A change landing at the exact compare-and-move boundary (the live file is
+        // rewritten just before the destructive move) makes the content no longer
+        // match `expected`; the move must decline and preserve the live bytes
+        // byte-identical — never a torn/partial quarantine (issue #816 H5).
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority()
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        _ = await activate(store, authority, ns)
+
+        let live = liveURL(root: root, ns)
+        try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data("{ broken".utf8).write(to: live)
+
+        // The probe fires synchronously at the real move boundary and rewrites live,
+        // so the compare (against the originally-read bytes) is now false.
+        let replacement = Data("{ changed-at-boundary".utf8)
+        io.moveBoundaryProbe = { try? replacement.write(to: live) }
+
+        let result = await store.hydrateActive()
+        // Compare-false: not recovered; the live file holds exactly the boundary
+        // replacement bytes (the destructive move did not fire).
+        XCTAssertNotEqual(result, .recovered)
+        XCTAssertEqual(io.moveCount, 1, "probe fired at the real move boundary")
+        XCTAssertEqual(try? Data(contentsOf: live), replacement)
+        let quarantineServerDir = root.appendingPathComponent("quarantine", isDirectory: true)
+            .appendingPathComponent(ns.serverID.uuidString, isDirectory: true)
+        let quarantined = (try? FileManager.default.contentsOfDirectory(atPath: quarantineServerDir.path)) ?? []
+        XCTAssertTrue(quarantined.isEmpty, "compare-false must not quarantine")
+    }
+
+
     func testInterruptionAtTempWriteLeavesLiveUnchanged() async {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
@@ -214,16 +288,22 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let live = liveURL(root: root, ns)
         let newer = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let barrier = AsyncBarrier()
-        io.writeCandidateBarrier = barrier
+        io.postWriteCandidateBarrier = barrier
         let task = Task { await store.commit(newer, capturedSession: session) }
         await barrier.waitUntilArrived()
-        // Mid-commit (candidate written to temp, not yet promoted): the live path is
-        // still the OLD fully-valid record — never absent/torn.
+        // Parked at the REAL boundary: candidate fully written+closed, promote not yet
+        // performed. Counts are cumulative (the prior commit wrote+promoted once), so
+        // the newer candidate is written (writeCount 1→2) but not yet promoted
+        // (promoteCount still 1). The live path is still the OLD valid record.
+        XCTAssertEqual(io.writeCount, 2, "newer candidate is fully written at the seam")
+        XCTAssertEqual(io.promoteCount, 1, "newer promote has not happened yet")
         let midCommit = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: Data(contentsOf: live))
         XCTAssertEqual(midCommit, prior)
         barrier.release()
         XAssertEqual(await task.value, .committed)
-        // After the atomic promotion: the live path is the NEW fully-valid record.
+        // After the atomic promotion: exactly one more promote, and the live path is
+        // the NEW fully-valid record.
+        XCTAssertEqual(io.promoteCount, 2)
         let afterCommit = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: Data(contentsOf: live))
         XCTAssertEqual(afterCommit, newer)
     }
@@ -260,9 +340,10 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         io.writeCandidateBarrier = barrier
         let commitTask = Task { await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session) }
         await barrier.waitUntilArrived()
-        _ = await store.purge(serverID: ns.serverID)
+        let purgeTask = Task { await store.purge(serverID: ns.serverID) }
         barrier.release()
         XAssertEqual(await commitTask.value, .superseded)
+        _ = await purgeTask.value
 
         // Commit: 1 async existence read + 1 candidate write; no promotion (tombstoned).
         XCTAssertEqual(io.readCount, 1)
