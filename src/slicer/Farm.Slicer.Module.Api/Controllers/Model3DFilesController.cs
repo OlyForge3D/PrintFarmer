@@ -80,7 +80,7 @@ public class Model3DFilesController(
                     parsedClientUploadId,
                     ct)
                 : await _modelService.UploadModelAsync(modelFile, thumbnailFile, ct);
-            Response.Headers.ETag = result.ETag;
+            SetETagHeader(result.ETag);
             _logger.LogInformation("Upload complete, returning response: {ModelId}", result.Id);
             return Created($"/api/models/{result.Id}", result);
         }
@@ -114,6 +114,7 @@ public class Model3DFilesController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "Thumbnail replacement is explicitly capped at 10 MiB plus multipart overhead.")]
     [RequestSizeLimit(11 * 1024 * 1024)]
     [RequestFormLimits(MultipartBodyLengthLimit = 11 * 1024 * 1024)]
     public async Task<IActionResult> ReplaceThumbnailAsync(
@@ -145,7 +146,7 @@ public class Model3DFilesController(
                 isAdmin,
                 Request.Headers.IfMatch.ToString(),
                 ct);
-            Response.Headers.ETag = result.ETag;
+            SetETagHeader(result.ETag);
             return Ok(result);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -232,7 +233,7 @@ public class Model3DFilesController(
             return NotFound();
         }
 
-        Response.Headers.ETag = model.ETag;
+        SetETagHeader(model.ETag);
         return Ok(model);
     }
 
@@ -252,7 +253,7 @@ public class Model3DFilesController(
             return NotFound();
         }
 
-        Response.Headers.ETag = model.ETag;
+        SetETagHeader(model.ETag);
         return Ok(model);
     }
 
@@ -667,5 +668,13 @@ public class Model3DFilesController(
             ".jpg" or ".jpeg" => "image/jpeg",
             _ => "application/octet-stream"
         };
+    }
+
+    private void SetETagHeader(string etag)
+    {
+        if (HttpContext is not null)
+        {
+            Response.Headers.ETag = etag;
+        }
     }
 }

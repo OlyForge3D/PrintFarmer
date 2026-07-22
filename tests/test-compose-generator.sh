@@ -208,25 +208,29 @@ test_model_thumbnail_replacement_routing() {
     start_test "model thumbnail replacement routing"
 
     local split_config="$REPO_ROOT/deploy/nginx/nginx-proxy-split.conf"
-    assert_file_exists "$split_config"
+    assert_file_exists "$split_config" || return 1
 
     local route_count
     route_count=$(grep -c "location /api/3d-models/" "$split_config")
-    assert_equals "2" "$route_count" "Split proxy should route 3D model endpoints over HTTP and HTTPS"
+    assert_equals "2" "$route_count" "Split proxy should route 3D model endpoints over HTTP and HTTPS" || return 1
+
+    local upstream_count
+    upstream_count=$(grep -c 'set $slicer_upstream http://slicer-host:5246;' "$split_config")
+    assert_equals "2" "$upstream_count" "Both split proxy server blocks should resolve slicer-host" || return 1
 
     local routed_to_slicer
     routed_to_slicer=$(awk '
         /location \/api\/3d-models\// { in_route = 1; next }
-        in_route && /proxy_pass http:\/\/slicer_backend/ { routed++; in_route = 0 }
+        in_route && /proxy_pass \$slicer_upstream\$request_uri;/ { routed++; in_route = 0 }
         in_route && /^        }/ { in_route = 0 }
         END { print routed + 0 }
     ' "$split_config")
-    assert_equals "2" "$routed_to_slicer" "Both 3D model routes should target slicer_backend"
+    assert_equals "2" "$routed_to_slicer" "Both 3D model routes should target the slicer upstream" || return 1
 
     assert_contains \
         "$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy.conf")" \
         "location /api/" \
-        "Monolith proxy should route 3D model endpoints through the main API"
+        "Monolith proxy should route 3D model endpoints through the main API" || return 1
 
     pass_test
 }
