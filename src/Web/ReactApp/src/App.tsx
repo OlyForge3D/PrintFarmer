@@ -24,7 +24,6 @@ import { printerSignalRService } from '@/services/printer-signalr';
 import { apiClient } from '@/services/api';
 
 // Feature Pages
-import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
@@ -32,12 +31,6 @@ import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
-import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
-import { AnalyticsHubPage } from '@/features/analytics/pages/AnalyticsHubPage';
-import { PowerMonitorSettingsPage } from '@/features/power-monitors';
-import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
-import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
-import { PrintablesOAuthCallbackPage } from '@/features/models3d/pages/PrintablesOAuthCallbackPage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -47,10 +40,6 @@ import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet }
 import { Toaster, toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
-
-const LazyNewSliceJobPage = lazy(() =>
-  import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
-);
 
 const LazyPrinterDashboard = lazy(() =>
   import('@/features/printers/components/PrinterDashboard').then(mod => ({ default: mod.PrinterDashboard }))
@@ -66,6 +55,9 @@ const LazyPrintersPage = lazy(() =>
 );
 const LazyPrinterGroupsPage = lazy(() =>
   import('@/features/printer-groups/pages/PrinterGroupsPage').then(mod => ({ default: mod.PrinterGroupsPage }))
+);
+const LazySettingsShell = lazy(() =>
+  import('@/features/settings/pages/SettingsShell').then(mod => ({ default: mod.SettingsShell }))
 );
 const LazyApiKeysPage = lazy(() =>
   import('@/features/profile/pages/ApiKeysPage').then(mod => ({ default: mod.ApiKeysPage }))
@@ -85,6 +77,12 @@ const LazyMaintenanceDashboardPage = lazy(() =>
 const LazyPrinterMaintenancePage = lazy(() =>
   import('@/features/maintenance/pages/PrinterMaintenancePage').then(mod => ({ default: mod.PrinterMaintenancePage }))
 );
+const LazyNfcBindingsPage = lazy(() =>
+  import('@/features/nfc/pages/NfcBindingsPage').then(mod => ({ default: mod.NfcBindingsPage }))
+);
+const LazyAnalyticsHubPage = lazy(() =>
+  import('@/features/analytics/pages/AnalyticsHubPage').then(mod => ({ default: mod.AnalyticsHubPage }))
+);
 const LazyLocationDashboardPage = lazy(() =>
   import('@/features/locations/pages/LocationDashboardPage').then(mod => ({ default: mod.LocationDashboardPage }))
 );
@@ -94,8 +92,23 @@ const LazyAutoDispatchDashboardPage = lazy(() =>
 const LazySchedulingPage = lazy(() =>
   import('@/features/scheduling/pages/SchedulingPage').then(mod => ({ default: mod.SchedulingPage }))
 );
+const LazyPowerMonitorSettingsPage = lazy(() =>
+  import('@/features/power-monitors').then(mod => ({ default: mod.PowerMonitorSettingsPage }))
+);
+const LazyNotificationPreferencesPage = lazy(() =>
+  import('@/features/notifications/pages/NotificationPreferencesPage').then(mod => ({ default: mod.NotificationPreferencesPage }))
+);
+const LazyPasskeysPage = lazy(() =>
+  import('@/features/profile/pages/PasskeysPage').then(mod => ({ default: mod.PasskeysPage }))
+);
+const LazyPrintablesOAuthCallbackPage = lazy(() =>
+  import('@/features/models3d/pages/PrintablesOAuthCallbackPage').then(mod => ({ default: mod.PrintablesOAuthCallbackPage }))
+);
 const LazyProfileImportWizardPage = lazy(() =>
   import('@/features/tasks').then(mod => ({ default: mod.ProfileImportWizardPage }))
+);
+const LazyNewSliceJobPage = lazy(() =>
+  import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
 
 function RouteLoader() {
@@ -162,7 +175,7 @@ function SystemSettingsRoute() {
     return <Navigate to="/locations/dashboard" replace />;
   }
 
-  return <SettingsShell routeScope="system" />;
+  return lazyRoute(<LazySettingsShell routeScope="system" />);
 }
 
 /**
@@ -247,7 +260,7 @@ function AuthenticatedAppRoutes() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/confirm-email" element={<ConfirmEmailPage />} />
-      <Route path="/oauth/printables/callback" element={<PrintablesOAuthCallbackPage />} />
+      <Route path="/oauth/printables/callback" element={lazyRoute(<LazyPrintablesOAuthCallbackPage />)} />
       <Route path="/registration-pending" element={<RegistrationPendingPage />} />
       <Route path="/*" element={<Layout />}>
         <Route index element={lazyRoute(<LazyPrinterDashboard />)} />
@@ -266,18 +279,18 @@ function AuthenticatedAppRoutes() {
         <Route path="cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
         <Route path="cameras/:tabId" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
         <Route path="nfc-devices" element={<Navigate to="/admin/settings?tab=hardware&sub=nfc" replace />} />
-        <Route path="nfc-bindings" element={<NfcBindingsPage />} />
+        <Route path="nfc-bindings" element={lazyRoute(<LazyNfcBindingsPage />)} />
         <Route path="maintenance" element={lazyRoute(<LazyMaintenanceDashboardPage />)} />
         <Route path="auto-dispatch" element={lazyRoute(<LazyAutoDispatchDashboardPage />)} />
         <Route path="statistics" element={<Navigate to="/analytics?lens=production" replace />} />
         <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
-        <Route path="analytics" element={<AnalyticsHubPage />} />
+        <Route path="analytics" element={lazyRoute(<LazyAnalyticsHubPage />)} />
         <Route path="scheduling" element={lazyRoute(<LazySchedulingPage />)} />
         <Route path="locations" element={<Navigate to="/locations/dashboard" replace />} />
         <Route path="locations/dashboard" element={lazyRoute(<LazyLocationDashboardPage />)} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyCatalogPage />)}</ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/manage?tab=users&sub=accounts" replace /></ProtectedRoute>} />
-        <Route path="settings" element={<SettingsShell routeScope="user" />} />
+        <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="user" />)} />
         <Route path="settings/system" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/settings?tab=general" replace /></ProtectedRoute>} />
         <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/settings?tab=general" replace /></ProtectedRoute>} />
         {/*
@@ -289,12 +302,12 @@ function AuthenticatedAppRoutes() {
          */}
         <Route path="preferences" element={<Navigate to="/settings" replace />} />
         <Route path="profile/api-keys" element={lazyRoute(<LazyApiKeysPage />)} />
-        <Route path="profile/notifications" element={<NotificationPreferencesPage />} />
-        <Route path="profile/passkeys" element={<PasskeysPage />} />
+        <Route path="profile/notifications" element={lazyRoute(<LazyNotificationPreferencesPage />)} />
+        <Route path="profile/passkeys" element={lazyRoute(<LazyPasskeysPage />)} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route index element={<Navigate to="/admin/settings" replace />} />
           <Route path="settings" element={<SystemSettingsRoute />} />
-          <Route path="manage" element={<SettingsShell routeScope="admin" />} />
+          <Route path="manage" element={lazyRoute(<LazySettingsShell routeScope="admin" />)} />
           <Route path="printers" element={<Navigate to="/printers" replace />} />
           <Route path="workers" element={<LegacySettingsRedirect to="/admin/manage?tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
           <Route path="file-health" element={<Navigate to="/admin/manage?tab=operations&sub=status" replace />} />
@@ -304,7 +317,7 @@ function AuthenticatedAppRoutes() {
           <Route path="custom-fields" element={<Navigate to="/admin/settings?tab=hardware&sub=custom-fields" replace />} />
           <Route path="webhooks" element={<Navigate to="/admin/settings?tab=integrations" replace />} />
           <Route path="quotas" element={<Navigate to="/admin/settings?tab=quotas" replace />} />
-          <Route path="power-monitors" element={<PowerMonitorSettingsPage />} />
+          <Route path="power-monitors" element={lazyRoute(<LazyPowerMonitorSettingsPage />)} />
           <Route path="data" element={<Navigate to="/admin/manage?tab=data&sub=management" replace />} />
           <Route path="system" element={<LegacySystemTabRedirect />} />
           <Route path="monitoring" element={<Navigate to="/admin/manage?tab=operations&sub=status" replace />} />
