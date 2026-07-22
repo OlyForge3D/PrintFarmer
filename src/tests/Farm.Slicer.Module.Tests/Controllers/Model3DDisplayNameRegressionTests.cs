@@ -131,7 +131,10 @@ public class Model3DDisplayNameRegressionTests
             UploadedAt = DateTime.UtcNow
         };
 
-        mockService.Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.UploadModelAsync(
+                It.IsAny<IFormFile>(),
+                It.IsAny<IFormFile?>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(uploadResult);
 
         var controller = CreateController(mockService);

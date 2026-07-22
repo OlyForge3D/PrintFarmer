@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -11,6 +12,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Integration;
@@ -477,6 +480,30 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         result.Should().NotBeNull();
         result.Id.Should().NotBe(Guid.Empty);
         result.Id.Should().NotBe(Guid.Empty);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithClientThumbnail_PersistsThumbnailAndLinksModel()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        IModel3DFileRepository repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
+        IStoragePathService storagePathService = scope.ServiceProvider.GetRequiredService<IStoragePathService>();
+        using Image<Rgba32> image = new(16, 16);
+        using MemoryStream thumbnailStream = new();
+        image.SaveAsPng(thumbnailStream);
+        thumbnailStream.Position = 0;
+        FormFile thumbnailFile = new(thumbnailStream, 0, thumbnailStream.Length, "thumbnailFile", "client.png");
+
+        Model3DUploadResultDto result = await service.UploadModelAsync(
+            CreateMockFormFile("client-thumbnail.stl"),
+            thumbnailFile,
+            CancellationToken.None);
+
+        Model3D? model = await repository.GetByIdAsync(result.Id, CancellationToken.None);
+        model.Should().NotBeNull();
+        model!.ThumbnailFileName.Should().Be($"{result.Id}_thumb.png");
+        File.Exists(Path.Combine(storagePathService.GetModelUploadDirectory(), model.ThumbnailFileName!)).Should().BeTrue();
     }
 
     [Fact]
