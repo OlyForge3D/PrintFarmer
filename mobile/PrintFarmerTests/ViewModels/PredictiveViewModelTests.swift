@@ -279,7 +279,10 @@ final class PredictiveViewModelTests: XCTestCase {
         await service.callState.enqueue(.success(refreshedSuccess))
 
         async let retryCall: Void = vm.retryPrediction()
-        while await !refreshGate.hasWaiters { await Task.yield() }
+        // Deterministic entry handshake — waits for the mock's
+        // `beforeReturnHook` to have reached `refreshGate.wait()`. No
+        // polling loop, no yields, no elapsed-time gate.
+        await refreshGate.waitForEntry()
 
         // While blocked at the gate, the view model must expose the
         // refreshing-with-stale signal so the view renders a refreshing
@@ -393,9 +396,11 @@ final class PredictiveViewModelTests: XCTestCase {
         let printerId = testPrinterId
         async let firstCall: Void = vm.predictFailure(printerId: printerId, material: "PLA", duration: 3600)
 
-        // Deterministically wait until the first request is blocked at the
-        // gate (a real suspension point inside the mock), not a sleep.
-        while await !firstGate.hasWaiters { await Task.yield() }
+        // Deterministic entry handshake — resumes exactly when the mock's
+        // `beforeReturnHook` reaches `firstGate.wait()` for call A. Lost-
+        // wakeup-safe: if the entry has already occurred, returns
+        // immediately without polling.
+        await firstGate.waitForEntry()
 
         // Detach hook so the second scripted call completes normally.
         service.beforeReturnHook = nil
@@ -459,9 +464,60 @@ final class PredictiveViewModelTests: XCTestCase {
         let callCount = await service.callState.callCount
         XCTAssertEqual(callCount, 1)
     }
-    
+
+    // MARK: - AsyncGate handshake (helper proof)
+
+    /// Direct proof: wait() before waitForEntry() must be observed without
+    /// polling (lost-wakeup safe via pendingEntrySignals).
+    func testAsyncGateWaitBeforeEntryObserverIsObserved() async {
+        let gate = AsyncGate()
+        async let blocker: Void = gate.wait()
+
+        // Give the blocker a chance to enqueue its entry signal by
+        // observing the entry synchronously afterwards; this must return
+        // deterministically whether the entry happened before or after
+        // this call arrives at the actor.
+        await gate.waitForEntry()
+
+        await gate.open()
+        await blocker
+    }
+
+    /// Direct proof: waitForEntry() before wait() must suspend and then
+    /// resume exactly once when the first wait() reaches the gate.
+    func testAsyncGateEntryObserverBeforeWaitResumesOnce() async {
+        let gate = AsyncGate()
+
+        async let entryObserved: Void = gate.waitForEntry()
+
+        // Drive an arrival at the gate. `wait()` will suspend (opened is
+        // false) — but the entry observer must have been resumed as part
+        // of that arrival, so `entryObserved` completes even though the
+        // waiter is still blocked.
+        async let blocker: Void = gate.wait()
+
+        await entryObserved
+
+        await gate.open()
+        await blocker
+    }
+
+    /// Direct proof: open-before-wait still emits an entry signal so a
+    /// later `waitForEntry()` observer is not stranded, and repeated
+    /// `open()` is a safe no-op.
+    func testAsyncGateOpenBeforeWaitStillSignalsEntry() async {
+        let gate = AsyncGate()
+        await gate.open()
+        await gate.open()   // idempotent — must not crash or double-resume.
+
+        // `wait()` returns immediately because the gate is open, but must
+        // still emit an entry signal so the observer proceeds.
+        await gate.wait()
+        await gate.waitForEntry()
+    }
+
     // MARK: - Load Alerts
-    
+
     func testLoadAlertsPopulatesData() async {
         let alert = PredictiveAlert(
             alertType: "maintenance_overdue",
@@ -704,17 +760,56 @@ final class PredictiveViewModelTests: XCTestCase {
 }
 
 /// Deterministic suspension gate used to hold a request in flight across a
-/// real suspension point (never `Task.sleep`/yield). Mirrors the private
-/// helper already used in `HarvestViewModelTests`.
+/// real suspension point (never `Task.sleep`/yield). Extended from the
+/// polling helper originally used in `HarvestViewModelTests` with an
+/// explicit lost-wakeup-safe entry handshake so tests can synchronise on
+/// "the `wait()` caller has reached the gate" without polling loops.
+///
+/// Ordering guarantees (all handled by actor serialisation):
+///   * open-before-wait — `wait()` returns immediately AND still signals
+///     an entry, so any observer waiting on entry is not stranded.
+///   * wait-before-entry-observer — `wait()` bumps `pendingEntrySignals`;
+///     a later `waitForEntry()` consumes exactly one and returns.
+///   * entry-observer-before-wait — `waitForEntry()` parks a continuation;
+///     the next `wait()` resumes exactly that continuation.
+///   * repeated open — `opened` latches true; second `open()` drains an
+///     empty waiter list and is a no-op.
+///   * teardown/early assertion — no pollers to leak; unresumed observer
+///     continuations are released when the actor is deallocated.
+///   * exactly-once continuation resume — waiters are drained to a local
+///     copy before resume; entry observers are removed from their queue
+///     before resume.
 private actor AsyncGate {
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var entryObservers: [CheckedContinuation<Void, Never>] = []
+    private var pendingEntrySignals = 0
     private var opened = false
 
-    var hasWaiters: Bool { !waiters.isEmpty }
-
+    /// Suspends the caller until `open()` is invoked. Regardless of whether
+    /// the gate is already open, an entry signal is emitted so observers
+    /// can deterministically synchronise on "wait() reached the gate".
     func wait() async {
+        signalEntryLocked()
         if opened { return }
-        await withCheckedContinuation { c in waiters.append(c) }
+        await withCheckedContinuation { c in
+            waiters.append(c)
+        }
+    }
+
+    /// Lost-wakeup-safe entry handshake. If one or more entries have
+    /// already occurred since the last observation, returns immediately by
+    /// consuming exactly one pending signal. Otherwise suspends until the
+    /// next entry signal. Exactly-once resume is guaranteed because the
+    /// installed continuation is removed from `entryObservers` before
+    /// `resume()` is called.
+    func waitForEntry() async {
+        if pendingEntrySignals > 0 {
+            pendingEntrySignals -= 1
+            return
+        }
+        await withCheckedContinuation { c in
+            entryObservers.append(c)
+        }
     }
 
     func open() {
@@ -722,5 +817,14 @@ private actor AsyncGate {
         let toResume = waiters
         waiters.removeAll()
         for c in toResume { c.resume() }
+    }
+
+    private func signalEntryLocked() {
+        if entryObservers.isEmpty {
+            pendingEntrySignals += 1
+        } else {
+            let observer = entryObservers.removeFirst()
+            observer.resume()
+        }
     }
 }
