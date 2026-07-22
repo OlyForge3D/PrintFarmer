@@ -39,13 +39,68 @@ struct PredictiveInsightsView: View {
     private var insightsContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                riskGauge
-                riskFactorsSection
+                if case .failed(let message) = viewModel.predictionStatus {
+                    if viewModel.prediction != nil {
+                        stalePredictionBanner(message: message)
+                        riskGauge
+                        riskFactorsSection
+                    } else {
+                        predictionUnavailable(message: message)
+                    }
+                } else {
+                    riskGauge
+                    riskFactorsSection
+                }
                 alertsSection
                 forecastsSection
             }
             .padding()
         }
+    }
+
+    // MARK: - Failure & Retry
+
+    private func stalePredictionBanner(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Predictive data may be out of date", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(Color.pfError)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button("Retry") {
+                Task { await viewModel.retryPrediction() }
+            }
+            .frame(minHeight: 44)
+            .accessibilityLabel("Retry predictive data load")
+            .accessibilityHint("Reloads the latest predictive failure data.")
+            .accessibilityIdentifier("predictiveInsights.retry")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.pfError, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("predictiveInsights.stale")
+    }
+
+    private func predictionUnavailable(message: String) -> some View {
+        ContentUnavailableView {
+            Label("Predictive data unavailable", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(message)
+        } actions: {
+            Button("Retry") {
+                Task { await viewModel.retryPrediction() }
+            }
+            .accessibilityLabel("Retry predictive data load")
+            .accessibilityHint("Reloads the latest predictive failure data.")
+            .accessibilityIdentifier("predictiveInsights.retry")
+        }
+        .accessibilityIdentifier("predictiveInsights.unavailable")
     }
 
     // MARK: - Risk Gauge

@@ -31,6 +31,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.forecasts.isEmpty)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.predictionStatus, .idle)
     }
     
     // MARK: - Predict Failure Success
@@ -61,6 +62,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.prediction?.factors.count, 1)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.predictionStatus, .success)
         
         let request = mockPredictiveService.predictJobFailureCalledWith
         XCTAssertEqual(request?.printerId, testPrinterId)
@@ -68,8 +70,31 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(request?.estimatedDurationSeconds, 3600)
     }
     
-    func testPredictFailureHandlesError() async {
-        viewModel.prediction = JobFailurePrediction(
+    func testPredictFailureHandlesErrorWhenNoPriorPrediction() async {
+        // No prior success: `prediction` stays nil, but the view model must
+        // now surface an explicit failure state and error message instead of
+        // silently rendering as low risk (issue #808).
+        mockPredictiveService.errorToThrow = TestError.generic
+
+        await viewModel.predictFailure(printerId: testPrinterId, material: "PETG", duration: 7200)
+
+        let request = mockPredictiveService.predictJobFailureCalledWith
+        XCTAssertEqual(request?.printerId, testPrinterId)
+        XCTAssertEqual(request?.material, "PETG")
+        XCTAssertEqual(request?.estimatedDurationSeconds, 7200)
+        XCTAssertNil(viewModel.prediction)
+        XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
+        XCTAssertEqual(viewModel.error, PredictiveViewModel.failureMessage)
+        XCTAssertEqual(viewModel.riskLevel, "Unavailable")
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testPredictFailurePreservesStalePriorPrediction() async {
+        // Stale-data policy: on failure we preserve the last successful
+        // prediction so the operator still sees real risk context alongside
+        // the failure banner. The alternative — clearing to nil — is what
+        // caused #808 (nil rendered as "Low").
+        let stalePrediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: "PLA",
             estimatedDurationMinutes: 30,
@@ -77,30 +102,45 @@ final class PredictiveViewModelTests: XCTestCase {
             riskLevel: "critical",
             factors: []
         )
+        viewModel.prediction = stalePrediction
         mockPredictiveService.errorToThrow = TestError.generic
-        
+
         await viewModel.predictFailure(printerId: testPrinterId, material: "PETG", duration: 7200)
-        
-        // predictFailure() logs via `logger.warning` on failure and clears any
-        // stale prediction; it does not surface `viewModel.error`, so the UI
-        // renders the neutral risk level rather than a red banner. Issue #808
-        // tracks presenting that failure to users. This test intentionally
-        // preserves the current clear-to-nil behavior of `error`; it does not
-        // bless it as correct UX.
-        let request = mockPredictiveService.predictJobFailureCalledWith
-        XCTAssertEqual(request?.printerId, testPrinterId)
-        XCTAssertEqual(request?.material, "PETG")
-        XCTAssertEqual(request?.estimatedDurationSeconds, 7200)
-        XCTAssertNil(viewModel.prediction)
-        XCTAssertNil(viewModel.error)
+
+        XCTAssertEqual(viewModel.prediction?.predictedFailureLikelihood, 85.0)
+        XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
+        XCTAssertEqual(viewModel.error, PredictiveViewModel.failureMessage)
+        // Stale prediction still renders its real level, never a spurious "Low".
+        XCTAssertEqual(viewModel.riskLevel, "Critical")
         XCTAssertFalse(viewModel.isLoading)
     }
-    
+
+    func testPredictFailureHandlesDecodingError() async {
+        // Decoding failures must surface identically to transport failures —
+        // never fall through to a benign low-risk presentation.
+        struct FakeKey: CodingKey { var stringValue = "x"; var intValue: Int? = nil
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { self.intValue = intValue; self.stringValue = "\(intValue)" }
+        }
+        mockPredictiveService.errorToThrow = DecodingError.keyNotFound(
+            FakeKey(stringValue: "riskLevel")!,
+            DecodingError.Context(codingPath: [], debugDescription: "missing riskLevel")
+        )
+
+        await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+
+        XCTAssertNil(viewModel.prediction)
+        XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
+        XCTAssertEqual(viewModel.error, PredictiveViewModel.failureMessage)
+        XCTAssertEqual(viewModel.riskLevel, "Unavailable")
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
     func testPredictFailureClearsPreviousError() async {
         // Seed a prior error directly — predictFailure() always resets
-        // `error = nil` at the start regardless of outcome, and the mocked
-        // service intentionally does not populate `viewModel.error`.
+        // `error = nil` at the start regardless of outcome.
         viewModel.error = "prior failure"
+        viewModel.predictionStatus = .failed("prior failure")
 
         mockPredictiveService.predictionToReturn = JobFailurePrediction(
             printerId: testPrinterId,
@@ -110,10 +150,123 @@ final class PredictiveViewModelTests: XCTestCase {
             riskLevel: "low",
             factors: []
         )
-        
+
         await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
-        
+
         XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.predictionStatus, .success)
+    }
+
+    // MARK: - Retry
+
+    func testRetryPredictionReplaysLastCanonicalRequest() async {
+        // First call fails; retry must re-issue exactly the same request
+        // (single canonical call) without needing the view to remember the
+        // original arguments.
+        mockPredictiveService.errorToThrow = TestError.generic
+        await viewModel.predictFailure(printerId: testPrinterId, material: "PETG", duration: 5400)
+
+        XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
+        let initialRequest = mockPredictiveService.predictJobFailureCalledWith
+
+        // Clear tracker to prove retry issues a fresh call with identical params.
+        mockPredictiveService.predictJobFailureCalledWith = nil
+        mockPredictiveService.errorToThrow = TestError.generic
+
+        await viewModel.retryPrediction()
+
+        let retryRequest = mockPredictiveService.predictJobFailureCalledWith
+        XCTAssertEqual(retryRequest?.printerId, initialRequest?.printerId)
+        XCTAssertEqual(retryRequest?.material, initialRequest?.material)
+        XCTAssertEqual(retryRequest?.estimatedDurationSeconds, initialRequest?.estimatedDurationSeconds)
+        XCTAssertEqual(retryRequest?.estimatedDurationSeconds, 5400)
+    }
+
+    func testRetryAfterFailureSuccessClearsFailureState() async {
+        mockPredictiveService.errorToThrow = TestError.generic
+        await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+        XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
+        XCTAssertNotNil(viewModel.error)
+
+        // Retry now succeeds.
+        mockPredictiveService.errorToThrow = nil
+        mockPredictiveService.predictionToReturn = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 15.0,
+            riskLevel: "low",
+            factors: []
+        )
+
+        await viewModel.retryPrediction()
+
+        XCTAssertEqual(viewModel.predictionStatus, .success)
+        XCTAssertNil(viewModel.error)
+        XCTAssertEqual(viewModel.prediction?.predictedFailureLikelihood, 15.0)
+        XCTAssertEqual(viewModel.riskLevel, "Low")
+    }
+
+    func testRetryWithoutPriorPredictionIsNoOp() async {
+        // No canonical request captured yet → nothing to retry.
+        await viewModel.retryPrediction()
+
+        XCTAssertNil(mockPredictiveService.predictJobFailureCalledWith)
+        XCTAssertEqual(viewModel.predictionStatus, .idle)
+        XCTAssertNil(viewModel.prediction)
+    }
+
+    // MARK: - Stale / Late Completion
+
+    func testLateCompletingRequestDoesNotOverwriteNewerResult() async {
+        // Gate the first call so we can start a second call while it is
+        // still in flight, then let the (superseded) first call complete
+        // and prove it does not clobber the newer state.
+        let firstGate = AsyncGate()
+        let vm = viewModel!
+        let service = mockPredictiveService!
+        service.predictionToReturn = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 90.0,
+            riskLevel: "critical",
+            factors: []
+        )
+        service.beforeReturnHook = { [firstGate] in
+            await firstGate.wait()
+        }
+
+        let printerId = testPrinterId
+        async let firstCall: Void = vm.predictFailure(printerId: printerId, material: "PLA", duration: 3600)
+
+        // Deterministically wait until the first request is blocked at the
+        // gate (a real suspension point inside the mock), not a sleep.
+        while await !firstGate.hasWaiters { await Task.yield() }
+
+        // Second (newer) call: no hook, no gate — completes normally.
+        service.beforeReturnHook = nil
+        service.predictionToReturn = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 10.0,
+            riskLevel: "low",
+            factors: []
+        )
+        await vm.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+
+        // Newer call landed.
+        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, 10.0)
+        XCTAssertEqual(vm.predictionStatus, .success)
+
+        // Now let the stale first call complete. It must NOT overwrite the
+        // newer result.
+        await firstGate.open()
+        await firstCall
+
+        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, 10.0)
+        XCTAssertEqual(vm.predictionStatus, .success)
     }
     
     // MARK: - Load Alerts
@@ -320,10 +473,13 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.riskLevel, "Critical")
     }
     
-    func testRiskLevelReturnsLowWhenNoPrediction() {
+    func testRiskLevelReturnsUnavailableWhenNoPrediction() {
+        // Regression guard for #808: nil prediction must NOT map to "Low",
+        // which is what allowed transport/decode failures to render as a
+        // benign successful result.
         viewModel.prediction = nil
-        
-        XCTAssertEqual(viewModel.riskLevel, "Low")
+
+        XCTAssertEqual(viewModel.riskLevel, "Unavailable")
     }
     
     // MARK: - Unconfigured Guard
@@ -353,5 +509,27 @@ final class PredictiveViewModelTests: XCTestCase {
         
         XCTAssertTrue(viewModel.forecasts.isEmpty)
         XCTAssertNil(mockPredictiveService.getMaintenanceForecastCalledWith)
+    }
+}
+
+/// Deterministic suspension gate used to hold a request in flight across a
+/// real suspension point (never `Task.sleep`/yield). Mirrors the private
+/// helper already used in `HarvestViewModelTests`.
+private actor AsyncGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var opened = false
+
+    var hasWaiters: Bool { !waiters.isEmpty }
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { c in waiters.append(c) }
+    }
+
+    func open() {
+        opened = true
+        let toResume = waiters
+        waiters.removeAll()
+        for c in toResume { c.resume() }
     }
 }
