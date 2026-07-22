@@ -59,6 +59,13 @@ struct DashboardView: View {
                 }
             }
             .navigationTitle("Dashboard")
+            .toolbar {
+                if sizeClass == .compact {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ServerSwitcherMenu(style: .toolbar)
+                    }
+                }
+            }
             .refreshable {
                 await viewModel.loadDashboard()
             }
@@ -67,6 +74,7 @@ struct DashboardView: View {
             }
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(
                 printerService: services.printerService,
                 jobService: services.jobService,
@@ -170,12 +178,13 @@ struct DashboardView: View {
             await dispatchViewModel.loadHistory()
         }
         .task {
+            dispatchViewModel.isViewActive = true
             dispatchViewModel.configure(dispatchService: services.dispatchService)
             await dispatchViewModel.loadQueueStatus()
             await dispatchViewModel.loadHistory()
         }
         .onDisappear {
-            viewModel.isViewActive = false
+            dispatchViewModel.isViewActive = false
             dispatchRetryTask?.cancel()
             retryTask?.cancel()
         }

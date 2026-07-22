@@ -61,6 +61,15 @@ public interface ISliceJobRepository
     /// <summary>Increments retry count and requeues or fails the job.</summary>
     Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default);
 
+    /// <summary>Returns the total count of jobs, optionally filtered by status.</summary>
+    Task<int> CountAsync(string? status = null, CancellationToken ct = default);
+
+    /// <summary>Returns a paged list of jobs with sorting and optional status filter.</summary>
+    Task<IReadOnlyList<SliceJob>> GetPagedAsync(int page, int pageSize, string? status = null, string? sortBy = null, string? sortDir = null, CancellationToken ct = default);
+
+    /// <summary>Requeues a single failed job for retry (user-initiated).</summary>
+    Task RetryJobAsync(Guid jobId, CancellationToken ct = default);
+
     /// <summary>Saves pending changes to the database.</summary>
     Task SaveChangesAsync(CancellationToken ct = default);
 }

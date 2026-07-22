@@ -7,6 +7,7 @@ export interface PrinterSupport {
   supportsHistory: boolean;
   supportsFileList: boolean;
   supportsFilamentControl: boolean;
+  supportsObjectExclusion: boolean;
 }
 
 /**
@@ -26,6 +27,7 @@ export function getPrinterSupport(
     supportsHistory: backendCapabilities?.supportsHistory ?? defaults?.supportsHistory ?? true,
     supportsFileList: backendCapabilities?.supportsFileList ?? defaults?.supportsFileList ?? true,
     supportsFilamentControl: backendCapabilities?.supportsFilamentControl ?? defaults?.supportsFilamentControl ?? false,
+    supportsObjectExclusion: backendCapabilities?.supportsObjectExclusion ?? defaults?.supportsObjectExclusion ?? false,
   };
 }
 
@@ -103,4 +105,9 @@ export function canFilamentControl(args: { isOnline: boolean; isEnabled?: boolea
 export function canFilamentChange(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {
   const isEnabled = args.isEnabled ?? true;
   return isEnabled && args.isOnline && args.support.supportsFilamentControl;
+}
+
+export function canExcludeObject(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; isPaused?: boolean; support: PrinterSupport }): boolean {
+  const isEnabled = args.isEnabled ?? true;
+  return isEnabled && args.isOnline && (args.isPrinting || !!args.isPaused) && args.support.supportsObjectExclusion;
 }

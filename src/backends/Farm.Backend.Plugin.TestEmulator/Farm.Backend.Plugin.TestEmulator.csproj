@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Farm.Backend.Plugin.TestEmulator</RootNamespace>
+    <AssemblyName>Farm.Backend.Plugin.TestEmulator</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

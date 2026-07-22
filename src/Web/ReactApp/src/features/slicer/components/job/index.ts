@@ -6,7 +6,6 @@ export { PrinterProfileSelector } from './PrinterProfileSelector';
 export { TargetPrinterSelector } from './TargetPrinterSelector';
 export { FilamentProfileSelector } from './FilamentProfileSelector';
 export { ProcessProfileSelector } from './ProcessProfileSelector';
-export { ModelSelector } from './ModelSelector';
 export { SlicerSettingsPanel } from './SlicerSettingsPanel';
 export type { SlicerSettings } from './SlicerSettingsPanel';
 

@@ -125,7 +125,7 @@ public class ModelServiceAdditionalTests
         _ = mockFileManagement.Setup(s => s.ValidateModelExtension(It.IsAny<string>()))
             .Callback<string>(ext =>
             {
-                string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
+                string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step", ".stp" };
                 string extension = ext.StartsWith('.') ? ext : "." + ext;
                 if (!allowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
                 {

@@ -62,6 +62,7 @@ struct AutoDispatchSection: View {
             )
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(autoDispatchService: services.autoPrintService)
             await viewModel.loadStatus(printerId: printerId)
         }

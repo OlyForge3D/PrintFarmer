@@ -19,8 +19,9 @@ interface Props {
   error: Error | null;
 }
 
-export const PrinterUtilizationChart: React.FC<Props> = ({ data, isLoading, error }) => (
-  <Card title="Printer Utilization" className="h-96">
+export const PrinterUtilizationChart = React.memo(function PrinterUtilizationChart({ data, isLoading, error }: Props) {
+  return (
+    <Card title="Printer Utilization" className="h-96">
     {isLoading ? (
       <ChartSkeleton />
     ) : error ? (
@@ -42,5 +43,6 @@ export const PrinterUtilizationChart: React.FC<Props> = ({ data, isLoading, erro
         </BarChart>
       </ResponsiveContainer>
     )}
-  </Card>
-);
+    </Card>
+  );
+});

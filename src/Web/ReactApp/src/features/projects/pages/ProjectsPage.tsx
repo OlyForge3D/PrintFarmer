@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectService } from '@/services/projectService';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Select, EmptyState } from '@/common/components/ui';
+import { Button, Select, EmptyState, ProgressBar } from '@/common/components/ui';
 import { Card } from '@/common/components/ui/Card';
 import { Badge } from '@/common/components/ui/Badge';
 import { 
@@ -98,7 +98,7 @@ export const ProjectsPage: React.FC = () => {
 
  if (error) {
  return (
- <PageTemplate title="Projects" showHeader={false} padding="px-4" backgroundColor="bg-pf-bg-2">
+ <PageTemplate title="Projects" padding="px-4" backgroundColor="bg-pf-bg-2">
  <div className="p-4 text-pf-error">Failed to load projects: {String(error)}</div>
  </PageTemplate>
  );
@@ -108,7 +108,6 @@ export const ProjectsPage: React.FC = () => {
  <PageTemplate
  title="Projects"
  subtitle="Track multi-print jobs and progress"
- showHeader={false}
  padding="px-4"
  backgroundColor="bg-pf-bg-2"
  >
@@ -342,12 +341,11 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
  <span>{project.completedPrints} / {project.totalPrints} prints</span>
  <span>{project.progressPercent}%</span>
  </div>
- <div className="h-2 bg-pf-bg-2 rounded-full overflow-hidden">
- <div
- className="h-full bg-pf-accent rounded-full transition-all duration-300"
- style={{ width: `${project.progressPercent}%` }}
+ <ProgressBar
+ value={project.progressPercent}
+ ariaLabel={`${project.name} progress`}
+ showPercent={false}
  />
- </div>
  </div>
 
  {/* Footer info */}

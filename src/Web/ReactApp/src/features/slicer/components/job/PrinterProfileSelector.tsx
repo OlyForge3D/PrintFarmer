@@ -41,14 +41,20 @@ export const PrinterProfileSelector: React.FC<PrinterProfileSelectorProps> = ({
   onMachineProfileChange,
   className
 }) => {
+  const fieldIdPrefix = React.useId();
+  const manufacturerSelectId = `${fieldIdPrefix}-manufacturer`;
+  const printerModelSelectId = `${fieldIdPrefix}-printer-model`;
+  const machineProfileSelectId = `${fieldIdPrefix}-machine-profile`;
+
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3 ${className ?? ''}`}>
       <label className="block text-sm font-semibold text-pf-text-primary">Printer Profile</label>
       
       {/* Manufacturer Selection */}
       <div>
-        <label className="block text-xs text-pf-text-muted mb-1">Manufacturer</label>
+        <label htmlFor={manufacturerSelectId} className="block text-xs text-pf-text-muted mb-1">Manufacturer</label>
         <Select
+          id={manufacturerSelectId}
           value={selectedManufacturer}
           onChange={e => onManufacturerChange(e.target.value)}
           className="w-full"
@@ -62,8 +68,9 @@ export const PrinterProfileSelector: React.FC<PrinterProfileSelectorProps> = ({
 
       {/* Printer Model Selection */}
       <div>
-        <label className="block text-xs text-pf-text-muted mb-1">Printer Model</label>
+        <label htmlFor={printerModelSelectId} className="block text-xs text-pf-text-muted mb-1">Printer Model</label>
         <Select
+          id={printerModelSelectId}
           value={selectedPrinterModel}
           onChange={e => onPrinterModelChange(e.target.value)}
           disabled={!selectedManufacturer}
@@ -78,8 +85,9 @@ export const PrinterProfileSelector: React.FC<PrinterProfileSelectorProps> = ({
 
       {/* Machine Profile Selection (nozzle variants) */}
       <div>
-        <label className="block text-xs text-pf-text-muted mb-1">Machine Profile</label>
+        <label htmlFor={machineProfileSelectId} className="block text-xs text-pf-text-muted mb-1">Machine Profile</label>
         <Select
+          id={machineProfileSelectId}
           value={selectedMachineProfileId}
           onChange={e => onMachineProfileChange(e.target.value)}
           disabled={!selectedPrinterModel || availableMachineProfiles.length === 0}

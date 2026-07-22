@@ -1,6 +1,7 @@
 import React from 'react';
 import { Badge } from '@/common/components/ui/Badge';
 import { Button } from '@/common/components/ui/Button';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { DeleteIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import type { PrintProjectListDto } from '@/types/api';
 
@@ -78,12 +79,12 @@ export const ProjectsTableView: React.FC<ProjectsTableViewProps> = ({
               {/* Progress bar */}
               <td className="px-4 py-3 min-w-[140px]">
                 <div className="flex items-center gap-2">
-                  <div className="flex-1 h-2 bg-pf-bg-2 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-pf-accent rounded-full transition-all duration-300"
-                      style={{ width: `${project.progressPercent}%` }}
-                    />
-                  </div>
+                  <ProgressBar
+                    value={project.progressPercent}
+                    ariaLabel={`${project.name} progress`}
+                    showPercent={false}
+                    className="flex-1"
+                  />
                   <span className="text-xs text-pf-text-secondary w-10 text-right">{project.progressPercent}%</span>
                 </div>
               </td>

@@ -213,6 +213,35 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)/status") ?? false)
     }
 
+    // MARK: - Camera URLs
+
+    func testListCameraUrlsCallsCorrectEndpoint() async throws {
+        MockAPIClient.stubResponse(json: TestJSON.printerCameraUrls)
+
+        let cameras = try await printerService.listCameraUrls()
+
+        XCTAssertEqual(cameras.count, 2)
+        XCTAssertEqual(cameras[1].cameraAccessMode, .snapshotOnly)
+        XCTAssertEqual(cameras[1].cameraSnapshotStrategy, .snapmakerU1MonitorJpeg)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "GET")
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/api/printers/camera-urls") ?? false)
+    }
+
+    func testGetCameraUrlCallsCorrectEndpoint() async throws {
+        MockAPIClient.stubResponse(json: TestJSON.printerCameraUrl)
+
+        let camera = try await printerService.getCameraUrl(id: TestData.testUUID)
+
+        XCTAssertEqual(camera.accessMode, .snapshotOnly)
+        XCTAssertEqual(camera.snapshotStrategy, .snapmakerU1MonitorJpeg)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "GET")
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/api/printers/\(TestData.testUUID)/camera/url") ?? false)
+    }
+
     // MARK: - Command Error Handling
 
     func testCommandThrowsOnServerError() async {
@@ -245,5 +274,234 @@ final class PrinterServiceTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    // MARK: - setTemperatures()
+
+    func testSetTemperaturesPostsBothFields() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 215, bed: 60)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)/temps") ?? false)
+
+        let body = captured?.capturedHTTPBody()
+        XCTAssertNotNil(body)
+        let json = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]
+        XCTAssertEqual(json?["hotend"] as? Double, 215)
+        XCTAssertEqual(json?["bed"] as? Double, 60)
+    }
+
+    func testSetTemperaturesOmitsNilFields() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 200, bed: nil)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        let body = captured?.capturedHTTPBody()
+        let json = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]
+        XCTAssertEqual(json?["hotend"] as? Double, 200)
+        XCTAssertNil(json?["bed"], "nil bed must be omitted from request body")
+    }
+
+    func testSetTemperaturesCooldownSendsZeros() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 0, bed: 0)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        let body = captured?.capturedHTTPBody()
+        let json = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]
+        XCTAssertEqual(json?["hotend"] as? Double, 0)
+        XCTAssertEqual(json?["bed"] as? Double, 0)
+    }
+
+    // MARK: - home()
+
+    func testHomeAllAxesRoutesToHomeEndpoint() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.home(printerId: TestData.testUUID, axes: ["X", "Y", "Z"])
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/home") ?? false,
+                      "axes [X,Y,Z] must route to /home, got \(captured?.url?.path ?? "nil")")
+    }
+
+    func testHomeXYAxesRoutesToHomeXYEndpoint() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.home(printerId: TestData.testUUID, axes: ["X", "Y"])
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/homexy") ?? false,
+                      "axes [X,Y] must route to /homexy")
+    }
+
+    func testHomeZAxisRoutesToHomeZEndpoint() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.home(printerId: TestData.testUUID, axes: ["Z"])
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/homez") ?? false,
+                      "axes [Z] must route to /homez")
+    }
+
+    func testHomeXYConvenienceWrapper() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.homeXY(printerId: TestData.testUUID)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/homexy") ?? false)
+    }
+
+    func testHomeZConvenienceWrapper() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.homeZ(printerId: TestData.testUUID)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertTrue(captured?.url?.path.hasSuffix("/homez") ?? false)
+    }
+
+    // MARK: - move()
+
+    func testMoveOnXAxisSendsCorrectBody() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.move(printerId: TestData.testUUID, axis: "X", distanceMm: 10.0, feedrateMmMin: 3000)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)/move") ?? false)
+
+        let body = captured?.capturedHTTPBody()
+        XCTAssertNotNil(body)
+        let json = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]
+        XCTAssertEqual(json?["x"] as? Double, 10.0)
+        XCTAssertNil(json?["y"], "non-target axes must be omitted")
+        XCTAssertNil(json?["z"], "non-target axes must be omitted")
+        XCTAssertEqual(json?["f"] as? Double, 3000)
+    }
+
+    func testMoveOnYAxisSendsCorrectBody() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.move(printerId: TestData.testUUID, axis: "Y", distanceMm: -5.0, feedrateMmMin: 3000)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        let body = captured?.capturedHTTPBody()
+        let json = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]
+        XCTAssertNil(json?["x"])
+        XCTAssertEqual(json?["y"] as? Double, -5.0)
+        XCTAssertNil(json?["z"])
+        XCTAssertEqual(json?["f"] as? Double, 3000)
+    }
+
+    func testMoveOnZAxisUsesLockedFeedrate() async throws {
+        MockAPIClient.stubEmptySuccess()
+
+        try await printerService.move(printerId: TestData.testUUID, axis: "Z", distanceMm: 0.1, feedrateMmMin: 600)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        let body = captured?.capturedHTTPBody()
+        let json = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]
+        XCTAssertNil(json?["x"])
+        XCTAssertNil(json?["y"])
+        XCTAssertEqual(json?["z"] as? Double, 0.1)
+        XCTAssertEqual(json?["f"] as? Double, 600)
+    }
+
+    func testSetTemperaturesPropagatesServerError() async {
+        MockAPIClient.stubResponse(json: "{}", statusCode: 502)
+
+        do {
+            try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 200, bed: 60)
+            XCTFail("Expected error")
+        } catch let error as NetworkError {
+            if case .serverError(let code) = error {
+                XCTAssertEqual(code, 502)
+            } else {
+                XCTFail("Expected .serverError, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    // MARK: - getBackendCapabilities()
+
+    func testGetBackendCapabilities_happyPath_returnsMergedCapabilities() async throws {
+        let capJson = """
+        {
+            "printerId": "\(TestData.testUUID)",
+            "printerName": "Test Moonraker",
+            "backend": "Moonraker",
+            "supportsMovement": true,
+            "supportsTemperatureControl": true,
+            "supportsCamera": true,
+            "supportsControlOperations": true,
+            "supportsFileList": true,
+            "supportsFileUpload": true,
+            "supportsFileDownload": true,
+            "supportsStartPrint": true,
+            "supportsFilamentControl": true,
+            "supportsFileMetadata": true,
+            "supportsPrinterInformation": true,
+            "supportsHistory": true
+        }
+        """
+        MockAPIClient.stubResponse(json: capJson)
+
+        let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertTrue(captured?.url?.path.contains("backend-capabilities") ?? false,
+                      "Must hit the backend-capabilities endpoint first")
+        XCTAssertTrue(caps.supportsMovement, "Moonraker wire DTO supportsMovement=true must be honoured")
+        XCTAssertTrue(caps.supportsTemperatureControl)
+    }
+
+    func testGetBackendCapabilities_404_fallsBackToStaticTable() async throws {
+        // Stub per-path: capabilities returns 404, printer get returns Moonraker printer
+        MockAPIClient.stubResponses([
+            "backend-capabilities": (statusCode: 404, json: "{}"),
+            "/api/printers/\(TestData.testUUID)": (statusCode: 200, json: TestJSON.printer)
+        ])
+
+        let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
+
+        // Moonraker fallback: all controls supported
+        XCTAssertTrue(caps.supportsMovement,
+                      "Moonraker fallback must report supportsMovement=true")
+        XCTAssertTrue(caps.supportsTemperatureControl)
+        XCTAssertTrue(caps.supportsBedTemperature)
+        XCTAssertTrue(caps.supportsFanControl)
+    }
+
+    func testGetBackendCapabilities_resin_sdcp_movementFalse() async throws {
+        let sdcpPrinterJson = TestJSON.printer
+            .replacingOccurrences(of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"SDCP\"")
+
+        MockAPIClient.stubResponses([
+            "backend-capabilities": (statusCode: 404, json: "{}"),
+            "/api/printers/\(TestData.testUUID)": (statusCode: 200, json: sdcpPrinterJson)
+        ])
+
+        let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
+
+        // SDCP (resin) fallback: no movement, no temperature
+        XCTAssertFalse(caps.supportsMovement,
+                       "Resin/SDCP fallback must report supportsMovement=false")
+        XCTAssertFalse(caps.supportsTemperatureControl)
+        XCTAssertFalse(caps.supportsBedTemperature)
+        XCTAssertFalse(caps.supportsFanControl)
     }
 }

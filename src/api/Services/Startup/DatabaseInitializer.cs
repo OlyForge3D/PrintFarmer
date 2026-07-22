@@ -494,7 +494,12 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             {
                 using DbCommand cmd = conn.CreateCommand();
                 cmd.Transaction = tx;
-                cmd.CommandText = $"SELECT 1 FROM pragma_table_info('{table}') WHERE lower(name)=lower(@col) LIMIT 1";
+                cmd.CommandText = table switch
+                {
+                    "Manufacturers" => "SELECT 1 FROM pragma_table_info('Manufacturers') WHERE lower(name)=lower(@col) LIMIT 1",
+                    "PrinterModels" => "SELECT 1 FROM pragma_table_info('PrinterModels') WHERE lower(name)=lower(@col) LIMIT 1",
+                    _ => throw new InvalidOperationException($"Unsupported table for shadow-column check: {table}"),
+                };
                 DbParameter p = cmd.CreateParameter();
                 p.ParameterName = "@col";
                 p.Value = column;
@@ -522,7 +527,12 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 {
                     using DbCommand alter = conn.CreateCommand();
                     alter.Transaction = tx;
-                    alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''";
+                    alter.CommandText = (table, column) switch
+                    {
+                        ("Manufacturers", "NameLowered") => "ALTER TABLE Manufacturers ADD COLUMN NameLowered TEXT NOT NULL DEFAULT ''",
+                        ("PrinterModels", "NameLowered") => "ALTER TABLE PrinterModels ADD COLUMN NameLowered TEXT NOT NULL DEFAULT ''",
+                        _ => throw new InvalidOperationException($"Unsupported shadow column: {table}.{column}"),
+                    };
                     _ = await alter.ExecuteNonQueryAsync();
                     _logger.LogInformation("[DB] Added missing column {Table}.{Column}", table, column);
                 }
@@ -543,7 +553,12 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             {
                 using DbCommand upd = conn.CreateCommand();
                 upd.Transaction = tx;
-                upd.CommandText = $"UPDATE {table} SET NameLowered = lower(Name) WHERE NameLowered = '' OR NameLowered IS NULL";
+                upd.CommandText = table switch
+                {
+                    "Manufacturers" => "UPDATE Manufacturers SET NameLowered = lower(Name) WHERE NameLowered = '' OR NameLowered IS NULL",
+                    "PrinterModels" => "UPDATE PrinterModels SET NameLowered = lower(Name) WHERE NameLowered = '' OR NameLowered IS NULL",
+                    _ => throw new InvalidOperationException($"Unsupported table for NameLowered backfill: {table}"),
+                };
                 int rows = await upd.ExecuteNonQueryAsync();
                 if (rows >= 0)
                 {

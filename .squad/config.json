@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "teamRoot": ".",
+  "defaultModel": "claude-opus-4.7",
+  "agentModelOverrides": {
+    "scribe": "claude-haiku-4.5",
+    "ripley": "claude-opus-4.7",
+    "newt": "claude-opus-4.7-xhigh",
+    "bishop": "claude-opus-4.8",
+    "hicks": "gpt-5.5",
+    "vasquez": "gemini-3.1-pro-preview"
+  }
+}

@@ -10,6 +10,7 @@ export interface PrinterAsset {
   cover?: string; // PNG image URL for printer thumbnail
   bedTexture?: string; // SVG or PNG URL for bed texture
   bedTextureFormat?: "svg" | "png" | null; // Format of bed texture (SVG preferred for scaling)
+  bedModel?: string; // STL URL for 3D bed model
 }
 
 export interface ManufacturerAssets {
@@ -127,7 +128,27 @@ class AssetService {
 
     // Final fallback: try with dashes instead of spaces
     const keyWithDashes = key.replace(/\s+/g, "-");
-    return this.printerMap.get(keyWithDashes);
+    result = this.printerMap.get(keyWithDashes);
+    if (result) return result;
+
+    // Name-based fallback: search all printers by display name match
+    if (model) {
+      const lowerModel = model.toLowerCase();
+      for (const printer of this.printerMap.values()) {
+        if (printer.name.toLowerCase() === lowerModel) {
+          return printer;
+        }
+      }
+      // Partial name match: try stripping manufacturer prefix from model name
+      // e.g., "QIDI X-Plus 4" → search for printer named "Qidi X-Plus 4"
+      for (const printer of this.printerMap.values()) {
+        if (printer.name.toLowerCase().replace(/\s+/g, '_') === lowerModel.replace(/\s+/g, '_')) {
+          return printer;
+        }
+      }
+    }
+
+    return undefined;
   }
 
   /**
