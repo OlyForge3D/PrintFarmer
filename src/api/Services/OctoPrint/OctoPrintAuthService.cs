@@ -51,6 +51,11 @@ public class OctoPrintAuthService(
 
         // Try raw key match first (when hashing is disabled)
         ApiKey? stored = await _apiKeyRepo.GetByRawKeyAsync(apiKey);
+        if (stored is not null && !IsUsableForSlicerAuth(stored))
+        {
+            stored = null;
+        }
+
         if (stored is not null)
         {
             _logger.LogInformation("OctoPrint API key validated (raw match) for user {UserId}", stored.UserId);
@@ -60,14 +65,24 @@ public class OctoPrintAuthService(
         // Hash the provided key and compare against stored KeyHash
         string hash = ComputeSha256Hash(apiKey);
         stored = await _apiKeyRepo.GetByKeyHashAsync(hash);
-        if (stored is null)
+        if (stored is null || !IsUsableForSlicerAuth(stored))
         {
-            _logger.LogWarning("Invalid OctoPrint API key presented (redacted)");
+            _logger.LogWarning("Invalid, expired, or non-General-purpose OctoPrint API key presented (redacted)");
             return false;
         }
 
         _logger.LogInformation("OctoPrint API key validated for user {UserId}", stored.UserId);
         return true;
+    }
+
+    /// <summary>
+    /// Slicer/OctoPrint-compatible uploads only accept General-purpose, non-expired keys.
+    /// Desktop-purpose keys (see issue #837/#838) are scoped to the desktop token exchange
+    /// and must never be usable here.
+    /// </summary>
+    private static bool IsUsableForSlicerAuth(ApiKey key)
+    {
+        return key.Purpose == ApiKeyPurpose.General && !key.IsExpired;
     }
 
     private static string ComputeSha256Hash(string rawData)

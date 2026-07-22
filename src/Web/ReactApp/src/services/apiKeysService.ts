@@ -1,20 +1,33 @@
 import { apiClient } from '@/services/api';
 
+export type ApiKeyPurpose = 'General' | 'Desktop';
+
+export type ApiKeyScope = 'None' | 'ModelRead' | 'ModelWrite' | 'LibrarySync' | string;
+
 export interface ApiKeyDto {
   id: string;
   name: string;
   isActive: boolean;
   createdAt: string;
   expiresAt?: string;
+  purpose: ApiKeyPurpose;
+  scopes: ApiKeyScope;
+  isExpired: boolean;
 }
 
 export interface CreateApiKeyResponse {
   key: string;
   id: string;
+  purpose?: ApiKeyPurpose;
+  scopes?: ApiKeyScope;
+  expiresAt?: string;
 }
 
 export interface CreateApiKeyRequest {
   name: string;
+  purpose?: ApiKeyPurpose;
+  scopes?: ApiKeyScope;
+  expiresAt?: string;
 }
 
 export interface ToggleApiKeyResponse {

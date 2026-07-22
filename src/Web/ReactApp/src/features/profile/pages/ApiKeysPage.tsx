@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Toggle } from '@/common/components/ui';
+import { Button, Toggle, FormField, Select, Checkbox, Input, Badge } from '@/common/components/ui';
 import { KeyIcon, PlusIcon, DeleteIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import {
   listApiKeys,
@@ -13,12 +13,22 @@ import {
   revealApiKey,
   getApiKeySettings,
   type ApiKeyDto,
+  type ApiKeyPurpose,
 } from '@/services/apiKeysService';
+
+const SCOPE_OPTIONS: { value: string; label: string; description: string }[] = [
+  { value: 'ModelRead', label: 'Model Read', description: 'Read 3D model/library metadata and files.' },
+  { value: 'ModelWrite', label: 'Model Write', description: 'Create, update, or delete model/library entries.' },
+  { value: 'LibrarySync', label: 'Library Sync', description: 'Sync the local desktop model library with the server.' },
+];
 
 export function ApiKeysPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyPurpose, setNewKeyPurpose] = useState<ApiKeyPurpose>('General');
+  const [newKeyScopes, setNewKeyScopes] = useState<string[]>([]);
+  const [newKeyExpiresAt, setNewKeyExpiresAt] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createdKey, setCreatedKey] = useState<{ key: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,13 +56,16 @@ export function ApiKeysPage() {
 
   // Create API key mutation
   const createMutation = useMutation({
-    mutationFn: (name: string) => {
+    mutationFn: (request: { name: string; purpose: ApiKeyPurpose; scopes?: string; expiresAt?: string }) => {
       if (!userId) throw new Error('User ID required');
-      return createApiKey(userId, { name });
+      return createApiKey(userId, request);
     },
     onSuccess: (data) => {
       setCreatedKey(data);
       setNewKeyName('');
+      setNewKeyPurpose('General');
+      setNewKeyScopes([]);
+      setNewKeyExpiresAt('');
       setShowCreateForm(false);
       setError(null);
       queryClient.invalidateQueries({ queryKey: ['apiKeys', userId] });
@@ -110,7 +123,20 @@ export function ApiKeysPage() {
       setError('API key name is required');
       return;
     }
-    createMutation.mutate(newKeyName.trim());
+    if (newKeyPurpose === 'Desktop' && newKeyScopes.length === 0) {
+      setError('Select at least one scope for a Desktop-purpose API key');
+      return;
+    }
+    createMutation.mutate({
+      name: newKeyName.trim(),
+      purpose: newKeyPurpose,
+      scopes: newKeyPurpose === 'Desktop' ? newKeyScopes.join(',') : undefined,
+      expiresAt: newKeyPurpose === 'Desktop' && newKeyExpiresAt ? new Date(newKeyExpiresAt).toISOString() : undefined,
+    });
+  };
+
+  const toggleScope = (scope: string) => {
+    setNewKeyScopes((prev) => (prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope]));
   };
 
   const handleToggle = (keyId: string) => {
@@ -231,32 +257,85 @@ export function ApiKeysPage() {
           {showCreateForm && (
             <div className="mb-6 p-4 bg-pf-bg-2 rounded-sm border border-pf-border">
               <h3 className="font-semibold text-pf-text-primary mb-3">Create New API Key</h3>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                  placeholder="Enter a descriptive name (e.g., 'PrusaSlicer Workstation')"
-                  className="flex-1 px-3 py-2 bg-pf-bg-1 border border-pf-border rounded-sm text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-primary"
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-                />
-                <Button
-                  variant="primary"
-                  onClick={handleCreate}
-                  disabled={createMutation.isPending}
-                >
-                  {createMutation.isPending ? 'Creating...' : 'Create'}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setShowCreateForm(false);
-                    setNewKeyName('');
-                    setError(null);
-                  }}
-                >
-                  Cancel
-                </Button>
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    placeholder="Enter a descriptive name (e.g., 'PrusaSlicer Workstation')"
+                    className="flex-1 px-3 py-2 bg-pf-bg-1 border border-pf-border rounded-sm text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-primary"
+                  />
+                </div>
+
+                <FormField label="Purpose" htmlFor="apikey-purpose" helper="Desktop keys require explicit scopes and an expiry date; legacy/slicer keys never gain desktop access.">
+                  <Select
+                    id="apikey-purpose"
+                    value={newKeyPurpose}
+                    onChange={(e) => {
+                      setNewKeyPurpose(e.target.value as ApiKeyPurpose);
+                      setNewKeyScopes([]);
+                      setNewKeyExpiresAt('');
+                    }}
+                  >
+                    <option value="General">General (OctoPrint-compatible slicer uploads)</option>
+                    <option value="Desktop">Desktop (PrintFarmer Desktop app)</option>
+                  </Select>
+                </FormField>
+
+                {newKeyPurpose === 'Desktop' && (
+                  <>
+                    <FormField label="Scopes" required helper="At least one scope is required for Desktop-purpose keys.">
+                      <div className="space-y-2">
+                        {SCOPE_OPTIONS.map((scope) => (
+                          <Checkbox
+                            key={scope.value}
+                            id={`scope-${scope.value}`}
+                            checked={newKeyScopes.includes(scope.value)}
+                            onChange={() => toggleScope(scope.value)}
+                            label={`${scope.label} — ${scope.description}`}
+                          />
+                        ))}
+                      </div>
+                    </FormField>
+
+                    <FormField
+                      label="Expires At"
+                      htmlFor="apikey-expiry"
+                      helper="Optional. Defaults to 90 days from creation if left blank (max 365 days)."
+                    >
+                      <Input
+                        id="apikey-expiry"
+                        type="datetime-local"
+                        value={newKeyExpiresAt}
+                        onChange={(e) => setNewKeyExpiresAt(e.target.value)}
+                      />
+                    </FormField>
+                  </>
+                )}
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={handleCreate}
+                    disabled={createMutation.isPending}
+                  >
+                    {createMutation.isPending ? 'Creating...' : 'Create'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setShowCreateForm(false);
+                      setNewKeyName('');
+                      setNewKeyPurpose('General');
+                      setNewKeyScopes([]);
+                      setNewKeyExpiresAt('');
+                      setError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -278,7 +357,7 @@ export function ApiKeysPage() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <h3 className="font-semibold text-pf-text-primary">{apiKey.name}</h3>
                         <span
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -289,11 +368,24 @@ export function ApiKeysPage() {
                         >
                           {apiKey.isActive ? 'Active' : 'Disabled'}
                         </span>
+                        <Badge variant={apiKey.purpose === 'Desktop' ? 'primary' : 'default'} size="sm">
+                          {apiKey.purpose === 'Desktop' ? 'Desktop' : 'General'}
+                        </Badge>
+                        {apiKey.isExpired && (
+                          <Badge variant="error" size="sm">
+                            Expired
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm text-pf-text-secondary mt-1">
                         Created: {formatDate(apiKey.createdAt)}
                         {apiKey.expiresAt && ` • Expires: ${formatDate(apiKey.expiresAt)}`}
                       </p>
+                      {apiKey.purpose === 'Desktop' && apiKey.scopes && apiKey.scopes !== 'None' && (
+                        <p className="text-sm text-pf-text-secondary mt-1">
+                          Scopes: {apiKey.scopes}
+                        </p>
+                      )}
                     </div>
                     <div className="flex gap-2 items-center">
                       <Toggle

@@ -15,6 +15,12 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/users/{userId:guid}/apikeys")]
 public class UserApiKeysController : ControllerBase
 {
+    /// <summary>Applied to Desktop-purpose keys when the caller doesn't specify an expiry.</summary>
+    internal static readonly TimeSpan DefaultDesktopKeyLifetime = TimeSpan.FromDays(90);
+
+    /// <summary>Maximum allowed expiry horizon for a Desktop-purpose key.</summary>
+    internal static readonly TimeSpan MaxDesktopKeyLifetime = TimeSpan.FromDays(365);
+
     private readonly Farm.Infrastructure.Repositories.Api.IApiKeyRepository _repo;
     private readonly ISettingsService _settingsService;
 
@@ -41,7 +47,10 @@ public class UserApiKeysController : ControllerBase
             k.Name,
             k.IsActive,
             k.CreatedAt,
-            k.ExpiresAt));
+            k.ExpiresAt,
+            k.Purpose,
+            k.Scopes,
+            k.IsExpired));
         return Ok(result);
     }
 
@@ -54,6 +63,15 @@ public class UserApiKeysController : ControllerBase
             return Forbid();
         }
 
+        ApiKeyPurpose purpose = req?.Purpose ?? ApiKeyPurpose.General;
+        ApiKeyScope scopes = req?.Scopes ?? ApiKeyScope.None;
+        DateTime? expiresAt = req?.ExpiresAt;
+
+        if (!TryValidateScopesAndExpiry(purpose, ref scopes, ref expiresAt, out string? validationError))
+        {
+            return BadRequest(new { error = validationError });
+        }
+
         OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
         string rawKey = GenerateKey();
         string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
@@ -63,12 +81,22 @@ public class UserApiKeysController : ControllerBase
             UserId = userId,
             Name = req?.Name ?? "user-generated",
             KeyHash = storedValue,
-            IsActive = true
+            IsActive = true,
+            Purpose = purpose,
+            Scopes = scopes,
+            ExpiresAt = expiresAt
         };
 
         await _repo.AddAsync(key);
 
-        return Ok(new { key = rawKey, id = key.Id });
+        return Ok(new
+        {
+            key = rawKey,
+            id = key.Id,
+            purpose = key.Purpose,
+            scopes = key.Scopes,
+            expiresAt = key.ExpiresAt
+        });
     }
 
     [HttpPatch("{keyId:guid}/toggle")]
@@ -192,6 +220,77 @@ public class UserApiKeysController : ControllerBase
         return User.IsInRole("Admin") || User.IsInRole("Administrator");
     }
 
+    /// <summary>
+    /// Validates and normalizes the requested purpose/scopes/expiry combination, applying
+    /// safe defaults for Desktop-purpose keys. General-purpose (legacy/OctoPrint) keys are
+    /// never allowed to carry scopes, so existing or unscoped keys can never gain desktop
+    /// access.
+    /// </summary>
+    private static bool TryValidateScopesAndExpiry(
+        ApiKeyPurpose purpose,
+        ref ApiKeyScope scopes,
+        ref DateTime? expiresAt,
+        out string? error)
+    {
+        error = null;
+
+        if (!Enum.IsDefined(typeof(ApiKeyPurpose), purpose))
+        {
+            error = "Invalid API key purpose.";
+            return false;
+        }
+
+        if ((scopes & ~ApiKeyScope.All) != ApiKeyScope.None)
+        {
+            error = "Invalid API key scope.";
+            return false;
+        }
+
+        switch (purpose)
+        {
+            case ApiKeyPurpose.General:
+                if (scopes != ApiKeyScope.None)
+                {
+                    error = "Scopes can only be granted to Desktop-purpose API keys.";
+                    return false;
+                }
+
+                break;
+
+            case ApiKeyPurpose.Desktop:
+                if (scopes == ApiKeyScope.None)
+                {
+                    error = "At least one scope (ModelRead, ModelWrite, or LibrarySync) is required for Desktop-purpose API keys.";
+                    return false;
+                }
+
+                DateTime now = DateTime.UtcNow;
+                if (expiresAt is null)
+                {
+                    // Safe default: Desktop keys always expire even when the caller doesn't specify a date.
+                    expiresAt = now.Add(DefaultDesktopKeyLifetime);
+                }
+                else if (expiresAt <= now)
+                {
+                    error = "Desktop-purpose API key expiry must be in the future.";
+                    return false;
+                }
+                else if (expiresAt > now.Add(MaxDesktopKeyLifetime))
+                {
+                    error = $"Desktop-purpose API key expiry cannot exceed {MaxDesktopKeyLifetime.TotalDays:0} days from now.";
+                    return false;
+                }
+
+                break;
+
+            default:
+                error = "Unsupported API key purpose.";
+                return false;
+        }
+
+        return true;
+    }
+
     private static string GenerateKey()
     {
         byte[] data = new byte[32];
@@ -209,11 +308,14 @@ public class UserApiKeysController : ControllerBase
     }
 }
 
-public record CreateApiKeyRequest(string? Name);
+public record CreateApiKeyRequest(string? Name, ApiKeyPurpose? Purpose = null, ApiKeyScope? Scopes = null, DateTime? ExpiresAt = null);
 
 public record ApiKeyDto(
     Guid Id,
     string Name,
     bool IsActive,
     DateTime CreatedAt,
-    DateTime? ExpiresAt);
+    DateTime? ExpiresAt,
+    ApiKeyPurpose Purpose,
+    ApiKeyScope Scopes,
+    bool IsExpired);
