@@ -3,17 +3,16 @@ import Foundation
 // MARK: - Printer Filament Coverage View Model (F4-M / issue #778)
 //
 // Per-printer variant of `FarmFilamentCoverageViewModel`. Same
-// generation-authoritative and owner-epoch discipline as the fleet
-// VM (see FarmFilamentCoverageViewModel.swift for the full
-// contract); the only differences are:
+// three-authority discipline (see FarmFilamentCoverageViewModel.swift
+// for the full split-authority rationale); the only differences:
 //
 //   * `load()` calls the single-printer endpoint
 //     `GET /api/printers/{id}/filament-coverage`.
 //   * The invalidation subscription filters events by
 //     `event.printerId == self.printerId` OR `event.printerId == nil`
-//     (fleet-scoped). Filtering happens under the owner-epoch check
-//     so a stale event from an old subscription cannot even reach
-//     the filter.
+//     (fleet-scoped). Filtering happens under the SignalR-epoch
+//     check so a stale S1 callback cannot even reach the filter.
+//   * Adds a `notFound` commit path distinct from `featureDisabled`.
 
 @MainActor @Observable
 final class PrinterFilamentCoverageViewModel {
@@ -32,7 +31,8 @@ final class PrinterFilamentCoverageViewModel {
     private var lastCommittedGeneration: UInt64 = 0
     private var lastCommittedEvaluatedAt: Date?
 
-    private var authorityEpoch: UInt64 = 0
+    private var coverageAuthorityEpoch: UInt64 = 0
+    private var signalRAuthorityEpoch: UInt64 = 0
 
     @ObservationIgnored private var invalidationSubscription: SignalRSubscription?
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
@@ -46,7 +46,7 @@ final class PrinterFilamentCoverageViewModel {
 
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
-        bumpAuthorityEpoch()
+        coverageAuthorityEpoch &+= 1
     }
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
@@ -54,8 +54,8 @@ final class PrinterFilamentCoverageViewModel {
 
         invalidationSubscription?.cancel()
         connectionStateSubscription?.cancel()
-        bumpAuthorityEpoch()
-        let myEpoch = authorityEpoch
+        signalRAuthorityEpoch &+= 1
+        let mySigEpoch = signalRAuthorityEpoch
         hasSeenAnyConnected = false
 
         let scopeId = printerId
@@ -65,7 +65,7 @@ final class PrinterFilamentCoverageViewModel {
                 await self.deliverInvalidationCallback(
                     event: event,
                     scopeId: scopeId,
-                    underAuthority: myEpoch
+                    underSignalREpoch: mySigEpoch
                 )
             }
         }
@@ -73,7 +73,7 @@ final class PrinterFilamentCoverageViewModel {
         let (initial, subscription) = service.onConnectionStateChanged { [weak self] newState in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.deliverConnectionStateCallback(newState, underAuthority: myEpoch)
+                await self.deliverConnectionStateCallback(newState, underSignalREpoch: mySigEpoch)
             }
         }
         connectionStateSubscription = subscription
@@ -85,12 +85,12 @@ final class PrinterFilamentCoverageViewModel {
         invalidationSubscription = nil
         connectionStateSubscription?.cancel()
         connectionStateSubscription = nil
-        bumpAuthorityEpoch()
+        signalRAuthorityEpoch &+= 1
         hasSeenAnyConnected = false
     }
 
     func load() async {
-        await load(underAuthority: authorityEpoch)
+        await load(underCoverageEpoch: coverageAuthorityEpoch)
     }
 
     // MARK: - Test seams (DEBUG-only)
@@ -114,10 +114,8 @@ final class PrinterFilamentCoverageViewModel {
 
     private var callbackTick: UInt64 = 0
     private var callbackTickWaiters: [(target: UInt64, cont: CheckedContinuation<Void, Never>)] = []
-    /// Sound absence barrier: after `waitForCallbackTick` returns,
-    /// every callback that was in flight has either dispatched (and
-    /// its load committed) or was filtered. `dispatchedRequestCount`
-    /// is authoritative at that point.
+    /// See `FarmFilamentCoverageViewModel.waitForCallbackTick` for
+    /// the absence-barrier semantics.
     func waitForCallbackTick(atLeast target: UInt64) async {
         if callbackTick >= target { return }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -134,7 +132,8 @@ final class PrinterFilamentCoverageViewModel {
         callbackTickWaiters = remaining
     }
 
-    var authorityEpochForTesting: UInt64 { authorityEpoch }
+    var coverageAuthorityEpochForTesting: UInt64 { coverageAuthorityEpoch }
+    var signalRAuthorityEpochForTesting: UInt64 { signalRAuthorityEpoch }
     var callbackTickForTesting: UInt64 { callbackTick }
     var hasSeenAnyConnectedForTesting: Bool { hasSeenAnyConnected }
     #else
@@ -146,20 +145,16 @@ final class PrinterFilamentCoverageViewModel {
 
     // MARK: - Internal
 
-    private func bumpAuthorityEpoch() {
-        authorityEpoch &+= 1
-    }
-
-    private func load(underAuthority epoch: UInt64) async {
-        guard epoch == authorityEpoch, let coverageService else { return }
+    private func load(underCoverageEpoch cvEpoch: UInt64) async {
+        guard cvEpoch == coverageAuthorityEpoch, let coverageService else { return }
         requestGeneration &+= 1
         let myGen = requestGeneration
         do {
             let snapshot = try await coverageService.getForPrinter(id: printerId)
-            guard epoch == authorityEpoch else { return }
+            guard cvEpoch == coverageAuthorityEpoch else { return }
             commitSuccess(snapshot: snapshot, generation: myGen)
         } catch let error as NetworkError {
-            guard epoch == authorityEpoch else { return }
+            guard cvEpoch == coverageAuthorityEpoch else { return }
             switch error {
             case .featureDisabled:
                 commitFeatureDisabled(generation: myGen)
@@ -169,7 +164,7 @@ final class PrinterFilamentCoverageViewModel {
                 commitError(error, generation: myGen)
             }
         } catch {
-            guard epoch == authorityEpoch else { return }
+            guard cvEpoch == coverageAuthorityEpoch else { return }
             commitError(error, generation: myGen)
         }
     }
@@ -179,29 +174,29 @@ final class PrinterFilamentCoverageViewModel {
     private func deliverInvalidationCallback(
         event: FilamentCoverageChangedEvent,
         scopeId: UUID,
-        underAuthority epoch: UInt64
+        underSignalREpoch sigEpoch: UInt64
     ) async {
         defer { advanceCallbackTick() }
-        guard epoch == authorityEpoch else { return }
+        guard sigEpoch == signalRAuthorityEpoch else { return }
         // Fleet-scoped events (`printerId == nil`) apply to every
         // open coverage screen; otherwise refetch only on events
         // targeting our printer id.
         guard event.printerId == nil || event.printerId == scopeId else { return }
-        await load(underAuthority: epoch)
+        await load()
     }
 
     private func deliverConnectionStateCallback(
         _ newState: SignalRConnectionState,
-        underAuthority epoch: UInt64
+        underSignalREpoch sigEpoch: UInt64
     ) async {
         defer { advanceCallbackTick() }
-        guard epoch == authorityEpoch else { return }
+        guard sigEpoch == signalRAuthorityEpoch else { return }
         guard newState == .connected else { return }
         if !hasSeenAnyConnected {
             hasSeenAnyConnected = true
             return
         }
-        await load(underAuthority: epoch)
+        await load()
     }
 
     // MARK: - Commit paths
@@ -258,7 +253,6 @@ final class PrinterFilamentCoverageViewModel {
 
     // MARK: - Connection-state classification
 
-    /// See `FarmFilamentCoverageViewModel.seedColdConnectClassification`.
     private func seedColdConnectClassification(fromInitialState state: SignalRConnectionState) {
         switch state {
         case .connected, .reconnecting:

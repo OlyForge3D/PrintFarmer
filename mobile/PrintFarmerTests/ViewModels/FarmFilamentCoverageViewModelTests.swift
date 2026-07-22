@@ -490,6 +490,274 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 0)
     }
 
+    // MARK: - Split-authority proofs (cycle-3 round-2 blocker H)
+
+    /// A still-current SignalR invalidation callback that DRAINS
+    /// AFTER coverage A→B replacement must dispatch exactly ONE
+    /// load — against the CURRENT (B) coverage service — and commit
+    /// under B's coverage authority. The SignalR epoch was NOT
+    /// bumped by the coverage replace, so the callback stays valid.
+    ///
+    /// Freezing sequence (deterministic, no yield): the test is on
+    /// MainActor and does not `await` between `simulate…` and
+    /// `configure(coverageService: B)`. The Task the invalidation
+    /// callback enqueues therefore cannot start running until the
+    /// test yields at `await B.awaitPending`. That gives us the
+    /// EXACT `emit → callback queued but not drained → replace →
+    /// drain` sequence Hicks required.
+    func testStillCurrentSignalRInvalidationDrainsAgainstReplacementCoverage() async throws {
+        let coverageA = ControlledFilamentCoverageService()
+        let coverageB = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: coverageA)
+        vm.configureSignalR(signalR)
+
+        // Baseline load against A so we have a known request count.
+        async let baseline: Void = vm.load()
+        await coverageA.awaitPending(count: 1)
+        await coverageA.completeSuccess(index: 0, fleet: Self.fleet(
+            evaluatedAt: Date(timeIntervalSinceReferenceDate: 1),
+            printerName: "A-baseline"))
+        _ = await baseline
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+
+        let sigEpochBefore = vm.signalRAuthorityEpochForTesting
+
+        // 1. Emit invalidation → callback Task enqueued on MainActor.
+        //    Test is on MainActor and does not yield → callback body
+        //    cannot run yet.
+        signalR.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: nil, reason: "still-current-sub", occurredAt: Date()
+        ))
+
+        // 2. Replace coverage BEFORE the callback drains. Bumps ONLY
+        //    the coverage epoch. SignalR epoch is unchanged, so the
+        //    queued callback remains valid.
+        vm.configure(coverageService: coverageB)
+        XCTAssertEqual(vm.signalRAuthorityEpochForTesting, sigEpochBefore,
+                       "Coverage replacement must NOT bump the SignalR epoch.")
+
+        // 3. Drain — the queued callback runs, sees its SignalR
+        //    epoch still current, and dispatches a load. That load
+        //    captures the CURRENT coverage epoch (B's) and hits
+        //    coverageB.
+        await coverageB.awaitPending(count: 1)
+        let __pending = await coverageA.pendingCount
+        XCTAssertEqual(__pending, 0,
+                       "The drained callback MUST dispatch against B (the current owner), not A.")
+
+        // 4. Complete B's load and let the commit land.
+        await coverageB.completeSuccess(index: 0, fleet: Self.fleet(
+            evaluatedAt: Date(timeIntervalSinceReferenceDate: 2),
+            printerName: "B-from-invalidation"))
+        await vm.waitForCommittedGeneration(atLeast: 2)
+
+        XCTAssertEqual(vm.dispatchedRequestCount, 2,
+                       "Exactly one refetch was dispatched by the drained callback.")
+        XCTAssertEqual(vm.coverageByPrinter.values.first?.printerName, "B-from-invalidation",
+                       "The commit must reflect the B-service snapshot, not A's.")
+    }
+
+    /// Reconnect recovery symmetrically survives a coverage
+    /// replacement: after A→B swap, a still-current SignalR
+    /// `.reconnecting → .connected` transition must dispatch
+    /// exactly one recovery load against B.
+    func testStillCurrentSignalRReconnectRecoveryDrainsAgainstReplacementCoverage() async throws {
+        let coverageA = ControlledFilamentCoverageService()
+        let coverageB = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: coverageA)
+        vm.configureSignalR(signalR)
+
+        // Cold `.connected` first (arm the classifier so the next
+        // transition counts as recovery). Absence gated by
+        // waitForCallbackTick.
+        let tickBefore = vm.callbackTickForTesting
+        signalR.simulateConnectionStateChange(.connected)
+        await vm.waitForCallbackTick(atLeast: tickBefore + 1)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+
+        // 1. Emit `.reconnecting` then `.connected` — the second
+        //    IS recovery. Two callback Tasks enqueued.
+        signalR.simulateConnectionStateChange(.reconnecting)
+        signalR.simulateConnectionStateChange(.connected)
+
+        // 2. Replace coverage BEFORE the recovery Task drains. Only
+        //    coverage epoch bumps; SignalR remains current.
+        vm.configure(coverageService: coverageB)
+
+        // 3. Drain — the recovery callback dispatches ONE load
+        //    against B (current coverage owner). A sees zero
+        //    pending; only B does.
+        await coverageB.awaitPending(count: 1)
+        let __pending = await coverageA.pendingCount
+        XCTAssertEqual(__pending, 0,
+                       "Reconnect recovery MUST dispatch against B, not A.")
+
+        await coverageB.completeSuccess(index: 0, fleet: Self.fleet(
+            evaluatedAt: Date(timeIntervalSinceReferenceDate: 10),
+            printerName: "B-from-reconnect"))
+        await vm.waitForCommittedGeneration(atLeast: 1)
+
+        XCTAssertEqual(vm.dispatchedRequestCount, 1,
+                       "Exactly one recovery refetch was dispatched.")
+        XCTAssertEqual(vm.coverageByPrinter.values.first?.printerName, "B-from-reconnect")
+    }
+
+    /// S1 emits an invalidation → callback Task queued but not
+    /// drained → `configureSignalR(S2)` replaces the subscription
+    /// (bumps SignalR epoch) → drain. The S1 callback's captured
+    /// epoch is stale, so it no-ops. Zero GETs on either service.
+    ///
+    /// This is the genuine "queued-before-replace" proof Hicks
+    /// required — NOT a substituted `subscriberCount == 0` test.
+    func testS1InvalidationQueuedBeforeS2ReplaceDrainsAsNoOp() async throws {
+        let coverage = ControlledFilamentCoverageService()
+        let s1 = MockSignalRService()
+        let s2 = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: coverage)
+        vm.configureSignalR(s1)
+
+        let s1TickBefore = vm.callbackTickForTesting
+
+        // 1. Emit on S1 → callback Task enqueued on MainActor.
+        //    Test is on MainActor and does not yield → callback body
+        //    cannot run yet.
+        s1.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: nil, reason: "queued-before-replace", occurredAt: Date()
+        ))
+
+        // 2. Replace SignalR BEFORE the queued Task drains. This
+        //    bumps the SignalR epoch; the queued Task's captured
+        //    epoch is now stale.
+        vm.configureSignalR(s2)
+
+        // 3. Drain — the queued Task runs on MainActor, its guard
+        //    fails, tick advances, returns. Zero dispatch.
+        await vm.waitForCallbackTick(atLeast: s1TickBefore + 1)
+
+        let pending = await coverage.pendingCount
+        XCTAssertEqual(pending, 0,
+                       "S1 callback drained AFTER S2 replacement MUST NOT dispatch a GET.")
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+    }
+
+    /// S1 emits an invalidation → callback Task queued but not
+    /// drained → `tearDownSignalR()` → drain. The S1 callback's
+    /// captured epoch is stale, so it no-ops. Zero GETs.
+    func testS1InvalidationQueuedBeforeTeardownDrainsAsNoOp() async throws {
+        let coverage = ControlledFilamentCoverageService()
+        let s1 = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: coverage)
+        vm.configureSignalR(s1)
+
+        let s1TickBefore = vm.callbackTickForTesting
+
+        // Emit → queued.
+        s1.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: nil, reason: "queued-before-teardown", occurredAt: Date()
+        ))
+
+        // Teardown BEFORE the queued Task drains. Bumps SignalR
+        // epoch; captured epoch is stale.
+        vm.tearDownSignalR()
+
+        // Drain — queued Task runs, guard fails, tick advances.
+        await vm.waitForCallbackTick(atLeast: s1TickBefore + 1)
+
+        let pending = await coverage.pendingCount
+        XCTAssertEqual(pending, 0,
+                       "S1 callback drained AFTER teardown MUST NOT dispatch a GET.")
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+    }
+
+    /// S1 emits a `.reconnecting` transition (queued) → replace S2
+    /// → the queued transition drains under a stale SignalR epoch
+    /// and no-ops. NO recovery is armed under S1's classifier
+    /// state. This proves the classifier doesn't get corrupted by
+    /// a stale queued state transition.
+    func testS1ConnectionStateChangeQueuedBeforeS2ReplaceDrainsAsNoOp() async throws {
+        let coverage = ControlledFilamentCoverageService()
+        let s1 = MockSignalRService()
+        let s2 = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: coverage)
+        vm.configureSignalR(s1)
+
+        // Arm S1's classifier (cold `.connected` skipped).
+        let tickA = vm.callbackTickForTesting
+        s1.simulateConnectionStateChange(.connected)
+        await vm.waitForCallbackTick(atLeast: tickA + 1)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+
+        // Emit a reconnect cycle on S1 — queued but not drained.
+        let tickB = vm.callbackTickForTesting
+        s1.simulateConnectionStateChange(.reconnecting)
+        s1.simulateConnectionStateChange(.connected)
+
+        // Replace SignalR BEFORE those queued transitions drain.
+        vm.configureSignalR(s2)
+
+        // Drain both queued S1 transitions — both no-op under stale
+        // epoch. Tick advances twice.
+        await vm.waitForCallbackTick(atLeast: tickB + 2)
+
+        let pending = await coverage.pendingCount
+        XCTAssertEqual(pending, 0,
+                       "Stale S1 reconnect-recovery transition MUST NOT dispatch a load.")
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+    }
+
+    // MARK: - Configuration-order permutations (blocker H last bullet)
+
+    /// Configure coverage FIRST, then SignalR — the standard order
+    /// used by the views. Baseline behavior.
+    func testCoverageThenSignalRPermutation() async throws {
+        let coverage = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: coverage)
+        vm.configureSignalR(signalR)
+        XCTAssertEqual(vm.coverageAuthorityEpochForTesting, 1)
+        XCTAssertEqual(vm.signalRAuthorityEpochForTesting, 1)
+    }
+
+    /// Configure SignalR FIRST, then coverage. The load() called
+    /// via a callback captures the current coverage epoch fresh, so
+    /// once coverage is set the callback dispatches correctly.
+    func testSignalRThenCoveragePermutation_CallbackDispatchesAfterCoverageAttached() async throws {
+        let coverage = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configureSignalR(signalR)  // coverageService is still nil
+        // Emit BEFORE coverage is attached — load() guard on
+        // coverage epoch will fail (coverageService == nil).
+        let tickBefore = vm.callbackTickForTesting
+        signalR.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: nil, reason: "no-coverage-yet", occurredAt: Date()
+        ))
+        await vm.waitForCallbackTick(atLeast: tickBefore + 1)
+        let pending0 = await coverage.pendingCount
+        XCTAssertEqual(pending0, 0,
+                       "With coverage not yet attached, callback MUST NOT dispatch.")
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+
+        // Attach coverage. Now a fresh emit dispatches correctly.
+        vm.configure(coverageService: coverage)
+        let tickBefore2 = vm.callbackTickForTesting
+        signalR.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: nil, reason: "post-attach", occurredAt: Date()
+        ))
+        await coverage.awaitPending(count: 1)
+        await coverage.completeSuccess(index: 0, fleet: Self.oneCoverPrinterFleet())
+        await vm.waitForCallbackTick(atLeast: tickBefore2 + 1)
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+    }
+
     // MARK: - Fixtures
 
     private static func oneCoverPrinterFleet() -> FleetFilamentCoverage {

@@ -359,6 +359,120 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.lastCommittedGenerationForTesting, 0)
     }
 
+    // MARK: - Split-authority proofs (cycle-3 round-2 blocker H)
+
+    /// Still-current SignalR invalidation for THIS printer that
+    /// drains AFTER coverage A→B replacement dispatches exactly
+    /// one load against B and commits under B's authority.
+    func testStillCurrentSignalRInvalidationDrainsAgainstReplacementCoverage() async throws {
+        let coverageA = ControlledFilamentCoverageService()
+        let coverageB = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
+        vm.configure(coverageService: coverageA)
+        vm.configureSignalR(signalR)
+
+        async let baseline: Void = vm.load()
+        await coverageA.awaitPending(count: 1)
+        await coverageA.completeSuccess(index: 0, printer: Self.coverage(for: printerA, status: .covers))
+        _ = await baseline
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+
+        // 1. Emit matching-scope invalidation → callback queued.
+        signalR.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: printerA, reason: "still-current-sub", occurredAt: Date()
+        ))
+
+        // 2. Replace coverage BEFORE the callback drains.
+        vm.configure(coverageService: coverageB)
+
+        // 3. Drain — callback dispatches against B.
+        await coverageB.awaitPending(count: 1)
+        let __pending = await coverageA.pendingCount
+        XCTAssertEqual(__pending, 0,
+                       "Callback MUST dispatch against B, not A.")
+        await coverageB.completeSuccess(index: 0, printer: Self.coverage(for: printerA, status: .runout))
+        await vm.waitForCommittedGeneration(atLeast: 2)
+
+        XCTAssertEqual(vm.dispatchedRequestCount, 2)
+        XCTAssertEqual(vm.coverage?.status, .runout,
+                       "Commit reflects B's snapshot.")
+    }
+
+    /// Symmetric reconnect variant.
+    func testStillCurrentSignalRReconnectRecoveryDrainsAgainstReplacementCoverage() async throws {
+        let coverageA = ControlledFilamentCoverageService()
+        let coverageB = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
+        vm.configure(coverageService: coverageA)
+        vm.configureSignalR(signalR)
+
+        // Arm classifier.
+        let tick0 = vm.callbackTickForTesting
+        signalR.simulateConnectionStateChange(.connected)
+        await vm.waitForCallbackTick(atLeast: tick0 + 1)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+
+        // Emit reconnect cycle → recovery callback queued.
+        signalR.simulateConnectionStateChange(.reconnecting)
+        signalR.simulateConnectionStateChange(.connected)
+
+        // Swap coverage BEFORE drain.
+        vm.configure(coverageService: coverageB)
+
+        // Drain — recovery hits B.
+        await coverageB.awaitPending(count: 1)
+        let __pending = await coverageA.pendingCount
+        XCTAssertEqual(__pending, 0)
+        await coverageB.completeSuccess(index: 0, printer: Self.coverage(for: printerA, status: .runout))
+        await vm.waitForCommittedGeneration(atLeast: 1)
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+        XCTAssertEqual(vm.coverage?.status, .runout)
+    }
+
+    /// S1 invalidation queued → configureSignalR(S2) → drain →
+    /// no-op. Genuine queued-before-replace proof.
+    func testS1InvalidationQueuedBeforeS2ReplaceDrainsAsNoOp() async throws {
+        let coverage = ControlledFilamentCoverageService()
+        let s1 = MockSignalRService()
+        let s2 = MockSignalRService()
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
+        vm.configure(coverageService: coverage)
+        vm.configureSignalR(s1)
+
+        let tickBefore = vm.callbackTickForTesting
+        s1.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: printerA, reason: "queued-before-replace", occurredAt: Date()
+        ))
+        vm.configureSignalR(s2)
+        await vm.waitForCallbackTick(atLeast: tickBefore + 1)
+
+        let __pending = await coverage.pendingCount
+        XCTAssertEqual(__pending, 0)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+    }
+
+    /// S1 invalidation queued → tearDownSignalR → drain → no-op.
+    func testS1InvalidationQueuedBeforeTeardownDrainsAsNoOp() async throws {
+        let coverage = ControlledFilamentCoverageService()
+        let s1 = MockSignalRService()
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
+        vm.configure(coverageService: coverage)
+        vm.configureSignalR(s1)
+
+        let tickBefore = vm.callbackTickForTesting
+        s1.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: printerA, reason: "queued-before-teardown", occurredAt: Date()
+        ))
+        vm.tearDownSignalR()
+        await vm.waitForCallbackTick(atLeast: tickBefore + 1)
+
+        let __pending = await coverage.pendingCount
+        XCTAssertEqual(__pending, 0)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+    }
+
     // MARK: - Fixtures
 
     private static func coverage(for id: UUID, status: FilamentCoverageStatus) -> PrinterFilamentCoverage {
