@@ -36,8 +36,11 @@ final class LoginViewModel {
 
     // MARK: - Initialization
 
-    init() {
-        if let saved = APIClient.savedServerURLString(), !saved.isEmpty {
+    init(activeServer: RegisteredServer? = nil) {
+        if let activeServer {
+            self.serverURL = activeServer.normalizedURLString
+            self.isServerURLExpanded = false
+        } else if let saved = APIClient.savedServerURLString(), !saved.isEmpty {
             self.serverURL = saved
             self.isServerURLExpanded = false
         } else {

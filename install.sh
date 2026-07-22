@@ -17,6 +17,7 @@
 #   --db sqlite|postgres  Database engine (default: sqlite)
 #   --with-spoolman URL   Enable Spoolman filament tracking
 #   --dry-run             Generate files only, don't start containers
+#   --reuse-config        Reuse existing .env if found (preserves secrets)
 #   --upgrade             Upgrade an existing installation in-place
 #   --uninstall           Remove containers and images (preserves data)
 #   --status              Show status of a running installation
@@ -50,6 +51,7 @@ DO_UPGRADE=false
 DO_UNINSTALL=false
 DO_STATUS=false
 SHOW_HELP=false
+REUSE_CONFIG=false
 
 # ─── Terminal capabilities ──────────────────────────────────────────────────
 USE_COLOR=true
@@ -143,6 +145,7 @@ while [[ $# -gt 0 ]]; do
         --with-spoolman)    SPOOLMAN_URL="${2:?--with-spoolman requires a URL}"; shift 2 ;;
         --with-spoolman=*)  SPOOLMAN_URL="${1#*=}"; shift ;;
         --dry-run)          DRY_RUN=true; shift ;;
+        --reuse-config)     REUSE_CONFIG=true; shift ;;
         --upgrade)          DO_UPGRADE=true; shift ;;
         --uninstall)        DO_UNINSTALL=true; shift ;;
         --status)           DO_STATUS=true; shift ;;
@@ -171,6 +174,7 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     --db sqlite|postgres  Database engine (default: sqlite — zero config)
     --with-spoolman URL   Connect to Spoolman for filament tracking
     --dry-run             Generate config files without starting containers
+    --reuse-config        Reuse existing .env if found (preserves secrets/DB config)
     --upgrade             Pull latest images and restart an existing install
     --uninstall           Stop and remove containers (data volumes preserved)
     --status              Show running container status
@@ -204,6 +208,9 @@ if [[ "$SHOW_HELP" == "true" ]]; then
 
     # Upgrade to a specific version
     ./install.sh --upgrade --version v2.1.0
+
+    # Reinstall preserving existing config (secrets, DB passwords, port)
+    ./install.sh --reuse-config --dir /opt/printfarmer
 
     # Generate files for review before starting
     ./install.sh --dry-run
@@ -680,6 +687,76 @@ check_disk_space "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 info "Directory: $INSTALL_DIR"
 
+# ─── Detect existing configuration ─────────────────────────────────────────
+EXISTING_ENV=""
+if [[ -f "$INSTALL_DIR/.env" ]]; then
+    # Auto-detect: existing installation found
+    if [[ "$REUSE_CONFIG" == "true" ]]; then
+        EXISTING_ENV="$INSTALL_DIR/.env"
+        ok "Reusing existing config: $EXISTING_ENV"
+    elif [[ "$NON_INTERACTIVE" == "true" ]]; then
+        # Non-interactive mode: reuse by default (safe — preserves secrets)
+        EXISTING_ENV="$INSTALL_DIR/.env"
+        ok "Existing config detected — reusing (non-interactive mode)"
+    else
+        warn "Existing installation found at $INSTALL_DIR/.env"
+        read -rp "$(printf "  ${BLUE}?${NC} Reuse existing config (preserves secrets/DB)? ${DIM}[Y/n]${NC}: ")" reuse_yn
+        if ! yn_no "$reuse_yn"; then
+            EXISTING_ENV="$INSTALL_DIR/.env"
+            ok "Reusing existing config"
+        else
+            warn "Generating fresh config (existing .env will be overwritten)"
+        fi
+    fi
+fi
+
+# Load values from existing .env if reusing
+if [[ -n "$EXISTING_ENV" ]]; then
+    # Extract preserved values (secrets we must not regenerate)
+    _existing_jwt=$(grep "^Jwt__Key=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_db_pw=$(grep "^POSTGRES_PASSWORD=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_connstr=$(grep "^ConnectionStrings__Default=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_provider=$(grep "^DB_PROVIDER=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_port=$(grep "^HTTP_PORT=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_profile=$(grep "^DEPLOY_PROFILE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_tag=$(grep "^IMAGE_TAG=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_spoolman=$(grep "^PFARM__Spoolman__BaseUrl=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+
+    # Apply preserved values (CLI flags override where explicitly set)
+    if [[ -n "$_existing_jwt" ]]; then
+        JWT_KEY_PRESERVED="$_existing_jwt"
+    fi
+    if [[ -n "$_existing_db_pw" ]]; then
+        DB_PASSWORD="$_existing_db_pw"
+    fi
+    if [[ -n "$_existing_connstr" ]]; then
+        CONNSTR_PRESERVED="$_existing_connstr"
+    fi
+    if [[ -n "$_existing_provider" ]]; then
+        # Only override DB_ENGINE if user didn't explicitly set --db
+        if [[ "$DB_EXPLICIT" != "true" ]]; then
+            DB_ENGINE="$(lc "$_existing_provider")"
+        fi
+    fi
+    if [[ -n "$_existing_port" && "$HTTP_PORT" == "${PRINTFARMER_PORT:-8080}" ]]; then
+        HTTP_PORT="$_existing_port"
+    fi
+    if [[ -n "$_existing_profile" && -z "$DEPLOY_PROFILE" ]]; then
+        DEPLOY_PROFILE="$_existing_profile"
+    fi
+    if [[ -n "$_existing_tag" && "$IMAGE_TAG" == "${PRINTFARMER_VERSION:-latest}" ]]; then
+        # Don't override if user explicitly passed --version
+        IMAGE_TAG="$_existing_tag"
+    fi
+    if [[ -n "$_existing_spoolman" && -z "$SPOOLMAN_URL" ]]; then
+        SPOOLMAN_URL="$_existing_spoolman"
+    fi
+
+    dimtext "Preserved: JWT key, DB credentials, connection string"
+    if [[ -n "$_existing_port" ]]; then dimtext "Port: $_existing_port"; fi
+    if [[ -n "$_existing_profile" ]]; then dimtext "Profile: $_existing_profile"; fi
+fi
+
 # ─── Generate secrets ───────────────────────────────────────────────────────
 generate_secret() {
     local length="${1:-48}"
@@ -693,7 +770,7 @@ generate_secret() {
     printf '%s' "${raw:0:$length}"
 }
 
-JWT_KEY="$(generate_secret 64)"
+JWT_KEY="${JWT_KEY_PRESERVED:-$(generate_secret 64)}"
 
 # ─── Detect LAN IP ──────────────────────────────────────────────────────────
 detect_lan_ip() {
@@ -716,7 +793,8 @@ LAN_IP="$(detect_lan_ip)"
 info "Writing configuration..."
 
 if [[ "$DB_ENGINE" == "postgres" ]]; then
-    DB_PASSWORD="$(generate_secret 32)"
+    DB_PASSWORD="${DB_PASSWORD:-$(generate_secret 32)}"
+    CONNSTR="${CONNSTR_PRESERVED:-Host=database;Port=5432;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD}}"
     cat > "$INSTALL_DIR/.env" <<ENVEOF
 # PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
 REGISTRY_HOST=${REGISTRY_HOST}
@@ -729,7 +807,7 @@ DB_PROVIDER=Postgres
 POSTGRES_DB=printfarmer
 POSTGRES_USER=printfarmer
 POSTGRES_PASSWORD=${DB_PASSWORD}
-ConnectionStrings__Default=Host=database;Port=5432;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD}
+ConnectionStrings__Default=${CONNSTR}
 
 # Auth
 Jwt__Key=${JWT_KEY}
@@ -746,6 +824,7 @@ PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
 ENVEOF
 else
     # SQLite — no database container needed
+    CONNSTR="${CONNSTR_PRESERVED:-Data Source=/data/printfarmer.db}"
     cat > "$INSTALL_DIR/.env" <<ENVEOF
 # PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
 REGISTRY_HOST=${REGISTRY_HOST}
@@ -755,7 +834,7 @@ DEPLOY_PROFILE=${DEPLOY_PROFILE}
 
 # Database: SQLite (zero config)
 DB_PROVIDER=Sqlite
-ConnectionStrings__Default=Data Source=/data/printfarmer.db
+ConnectionStrings__Default=${CONNSTR}
 
 # Auth
 Jwt__Key=${JWT_KEY}

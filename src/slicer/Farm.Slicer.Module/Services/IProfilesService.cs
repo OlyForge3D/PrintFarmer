@@ -63,6 +63,14 @@ public interface IProfilesService
     /// <param name="ct">Cancellation token.</param>
     Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct);
 
+    /// <summary>
+    /// Fetches profile hierarchy from OrcaSlicer worker filtered to only include
+    /// manufacturers and models present in the PrintFarmer catalog.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<AllProfilesResponseDto?> GetCatalogFilteredWorkerHierarchyAsync(HttpClient httpClient, CancellationToken ct);
+
     /// <summary>Fetches machine profiles for a specific manufacturer and model from the worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="manufacturer">Manufacturer name.</param>
@@ -80,6 +88,15 @@ public interface IProfilesService
     /// <param name="printerModel">The OrcaSlicer alias (printer_model value).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(HttpClient httpClient, string printerModel, CancellationToken ct);
+
+    /// <summary>Fetches machine profiles for a catalog model by matching configured OrcaSlicer aliases.</summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="orcaAliases">OrcaSlicer aliases configured for the catalog model.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
+        HttpClient httpClient,
+        IEnumerable<string> orcaAliases,
+        CancellationToken ct);
 
     /// <summary>Fetches process profiles compatible with specific machines from the worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>

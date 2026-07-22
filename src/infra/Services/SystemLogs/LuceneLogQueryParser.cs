@@ -165,5 +165,9 @@ internal static class LuceneVersionExtensions
     /// Currently only LUCENE_48 is supported.
     /// </summary>
     /// <param name="version">The version string to convert.</param>
-    public static LuceneVersion AsVersionEnum(this string version) => LuceneVersion.LUCENE_48;
+    public static LuceneVersion AsVersionEnum(this string version)
+    {
+        _ = version;
+        return LuceneVersion.LUCENE_48;
+    }
 }

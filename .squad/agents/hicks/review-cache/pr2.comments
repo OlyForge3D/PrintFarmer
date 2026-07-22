@@ -1,0 +1,27 @@
+author:	jpapiez
+association:	member
+edited:	false
+status:	commented
+--
+Vote: REQUEST_CHANGES
+
+- `PrintFarmer/Models/PrinterBackendCapabilities.swift:17-28` makes every capability a required `Bool`. If the backend omits one key, decode throws instead of defaulting that missing capability to `false`.
+- `PrintFarmer/Services/PrinterService.swift:103-112` then catches that decoding failure and falls back to the static backend table, which can turn omitted capabilities back on instead of preserving the safe-by-default contract.
+- `PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift:13-205` covers full/partial/resin fixtures but never exercises an omitted-key payload, so this regression path is unprotected.
+
+--
+author:	jpapiez
+association:	member
+edited:	false
+status:	none
+--
+Addressed all three blocking issues from Bishop's review:
+
+- **Issue 1 — Safe-by-default Bool decoding**: Added CodingKeys enum and custom init(from decoder:) to PrinterBackendCapabilities. All 12 capability booleans now use decodeIfPresent(_:forKey:) ?? false. The three identity fields (printerId, printerName, backend) remain required and still throw on absence. A backend omitting any capability key will never cause a decode error — the field simply reads false.
+
+- **Issue 2 — Fallback contract documented**: The fallback(for:) static method is preserved — still needed for total network failures (404s, network errors, completely malformed JSON). Updated its doc-comment with the new contract: it must not be used to infer capabilities from a partial server payload, because partial payloads now decode cleanly through the custom init.
+
+- **Issue 3 — Omitted-key tests added**: Added two new XCTest cases in PrinterBackendCapabilitiesTests: testOmittedTemperatureControlDefaultsFalse (single omission — supportsTemperatureControl absent, asserts false on raw field and derived supportsBedTemperature) and testOmittedTemperatureAndMovementDefaultFalse (multiple omissions — only 4 keys present, asserts both omitted caps are false and explicit caps decode correctly).
+
+Stack: PRs #4 and #7 have been rebased onto the new head of this branch with --force-with-lease.
+--

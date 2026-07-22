@@ -25,7 +25,9 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
     {
         await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
 
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers
+            .Include(p => p.ServiceState)
+            .FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             _logger.LogWarning("[ObicoAssignment] Printer {PrinterId} not found", printerId);
@@ -59,7 +61,9 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
     {
         await using AppDbContext db = await _dbFactory.CreateDbContextAsync(ct);
 
-        Printer? printer = await db.Printers.FindAsync([printerId], ct);
+        Printer? printer = await db.Printers
+            .Include(p => p.ServiceState)
+            .FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             return;

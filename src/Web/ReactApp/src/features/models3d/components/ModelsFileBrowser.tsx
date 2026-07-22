@@ -8,10 +8,14 @@ import {
 } from '@/features/fileBrowser/types';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { PrintablesBrowserModal } from '@/features/models3d/components/PrintablesBrowserModal';
+import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
 import { Button } from '@/common/components/ui';
+import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
 import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Model, Model3DSearchResponse } from '@/types/models';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 
@@ -124,6 +128,9 @@ export const ModelsFileBrowser = ({
 }: ModelsFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
+  const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
+  const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
   const fileBrowserRef = useRef<FileBrowserHandle>(null);
 
@@ -132,7 +139,7 @@ export const ModelsFileBrowser = ({
       if (onSliceModel) {
         onSliceModel(model);
       } else {
-        window.location.assign(`/jobs/new?modelId=${model.id}`);
+        window.location.assign(`/slicer?modelId=${model.id}`);
       }
     },
     [onSliceModel]
@@ -142,7 +149,7 @@ export const ModelsFileBrowser = ({
     if (file.isDirectory) return;
     const model3dFile = file.meta?.model3d as { name?: string } | undefined;
     const originalName = model3dFile?.name || file.fileName;
-    const downloadUrl = `/api/3d-models/file/${file.id}`;
+    const downloadUrl = `${getApiBaseUrl()}/3d-models/file/${file.id}`;
     
     // Create a link with the original filename for download
     const link = document.createElement('a');
@@ -170,6 +177,7 @@ export const ModelsFileBrowser = ({
     try {
       await apiClient.deleteModel3dFile(file.id);
       toast.success('Model deleted successfully');
+      await fileBrowserRef.current?.refetch();
     } catch (error) {
       toast.error('Failed to delete model');
       console.error('Delete error:', error);
@@ -219,14 +227,17 @@ export const ModelsFileBrowser = ({
       const response = await apiClient.get3DModelsQuery(payload);
 
       const searchResponse = response as unknown as Model3DSearchResponse;
-      const totalSize = searchResponse.models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
+
+      // Guard against stub/malformed responses (e.g. slicer module disabled returns [])
+      const models = Array.isArray(searchResponse?.models) ? searchResponse.models : [];
+      const totalSize = models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
 
       return {
-        items: searchResponse.models,
-        totalItems: searchResponse.totalCount,
-        totalPages: searchResponse.totalPages,
+        items: models,
+        totalItems: searchResponse?.totalCount ?? 0,
+        totalPages: searchResponse?.totalPages ?? 0,
         totalSize,
-        page: searchResponse.page,
+        page: searchResponse?.page ?? 1,
       };
     },
     []
@@ -320,6 +331,18 @@ export const ModelsFileBrowser = ({
       {hasPermission('3d_models', 'create') && (
         <Button
           type="button"
+          onClick={() => setShowPrintablesBrowserModal(true)}
+          variant="secondary"
+          size="sm"
+          title="Import from Printables"
+          iconLeft={<PrintablesIcon />}
+        >
+          Printables
+        </Button>
+      )}
+      {hasPermission('3d_models', 'create') && (
+        <Button
+          type="button"
           onClick={() => setShowUploadModal(true)}
           variant="secondary"
           size="sm"
@@ -359,6 +382,25 @@ export const ModelsFileBrowser = ({
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadSuccess={() => fileBrowserRef.current?.refetch() ?? Promise.resolve()}
+      />
+      {showPrintablesBrowserModal && (
+        <PrintablesBrowserModal
+          isOpen={showPrintablesBrowserModal}
+          onClose={() => setShowPrintablesBrowserModal(false)}
+          onImportUrl={(url) => {
+            setSelectedPrintablesUrl(url);
+            setShowPrintablesBrowserModal(false);
+            setShowPrintablesImportModal(true);
+          }}
+        />
+      )}
+      <PrintablesImportModal
+        isOpen={showPrintablesImportModal}
+        initialUrl={selectedPrintablesUrl}
+        onClose={() => {
+          setShowPrintablesImportModal(false);
+          setSelectedPrintablesUrl(null);
+        }}
       />
       <ConfirmationModal
         isOpen={deleteConfirm.isOpen}

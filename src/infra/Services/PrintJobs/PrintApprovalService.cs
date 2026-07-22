@@ -44,7 +44,7 @@ public class PrintApprovalService(IPrintApprovalRepository repo, IJobQueueServic
             RequiredNozzleDiameter = null,
             RequiredMaterialType = null
         };
-        JobQueuePrintJobDto? enqueued = await _queueService.AddJobToQueueAsync(req, CancellationToken.None);
+        JobQueuePrintJobDto? enqueued = await _queueService.AddJobToQueueAsync(req, null, CancellationToken.None);
         if (enqueued is not null)
         {
             await _repo.RemoveAsync(approval);

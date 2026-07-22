@@ -1,5 +1,12 @@
 import { apiClient } from '@/services/api';
-import type { CameraDto, CreateCameraDto, UpdateCameraDto, DisplayCameraDto } from '@/types/api';
+import type {
+  CameraDto,
+  CreateCameraDto,
+  DetectCameraEndpointsRequest,
+  DetectCameraEndpointsResponse,
+  UpdateCameraDto,
+  DisplayCameraDto,
+} from '@/types/api';
 
 /**
  * Camera service - manages standalone webcams and provides combined camera views
@@ -39,5 +46,11 @@ export const cameraService = {
 
   async getCamerasByPrinter(printerId: string): Promise<CameraDto[]> {
     return apiClient.getCamerasByPrinter(printerId);
+  },
+
+  async detectCameraEndpoints(
+    request: DetectCameraEndpointsRequest
+  ): Promise<DetectCameraEndpointsResponse> {
+    return apiClient.detectCameraEndpoints(request);
   },
 };

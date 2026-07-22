@@ -3,7 +3,7 @@ import { usePrinterUptime } from '../hooks/usePrinterUptime';
 import { Card } from '@/common/components/ui/Card';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 
-export const PrinterUptimeChart: React.FC = () => {
+export const PrinterUptimeChart = React.memo(function PrinterUptimeChart() {
   const { data, isLoading, error } = usePrinterUptime();
 
   return (
@@ -27,4 +27,4 @@ export const PrinterUptimeChart: React.FC = () => {
       )}
     </Card>
   );
-};
+});

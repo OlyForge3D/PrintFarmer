@@ -1,14 +1,14 @@
 ﻿namespace Farm.Slicer.Module.Contracts.Libraries;
 
 /// <summary>
-/// Represents a versioned slicer library (e.g., OrcaSlicer 2.3.1, PrusaSlicer 2.9.3).
+/// Represents a versioned slicer library (e.g., OrcaSlicer 2.4.0, PrusaSlicer 2.9.3).
 /// </summary>
 public interface ISlicerLibrary
 {
     /// <summary>Gets the slicer name (e.g., "OrcaSlicer").</summary>
     string SlicerName { get; }
 
-    /// <summary>Gets the slicer version (e.g., "2.3.1").</summary>
+    /// <summary>Gets the slicer version (e.g., "2.4.0").</summary>
     string SlicerVersion { get; }
 
     /// <summary>Gets the slicer type identifier.</summary>

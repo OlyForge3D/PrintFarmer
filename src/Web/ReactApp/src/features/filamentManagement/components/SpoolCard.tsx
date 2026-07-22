@@ -1,6 +1,6 @@
 import { Button } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
-import { EditIcon, CopyIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { EditIcon, CopyIcon, DeleteIcon, TagIcon } from '@/common/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { SpoolUsageBar } from '@/features/filamentManagement/components/SpoolUsageBar';
@@ -14,10 +14,11 @@ interface SpoolCardProps {
   onEdit: () => void;
   onClone: () => void;
   onDelete: () => void;
+  onPrintLabel: () => void;
 }
 
 /** Card view for a single physical Spoolman spool. */
-export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, onDelete }: SpoolCardProps) {
+export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, onDelete, onPrintLabel }: SpoolCardProps) {
   const spoolLabel = spool.filamentName || spool.name || 'spool';
 
   return (
@@ -37,6 +38,9 @@ export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, 
         </div>
         <Button variant="subtle" size="sm" onClick={onEdit} aria-label={`Edit ${spoolLabel}`} title="Edit spool">
           <EditIcon className="h-3.5 w-3.5" />
+        </Button>
+        <Button variant="subtle" size="sm" onClick={onPrintLabel} aria-label={`Print label for ${spoolLabel}`} title="Print label">
+          <TagIcon className="h-3.5 w-3.5" />
         </Button>
         <Button variant="subtle" size="sm" onClick={onClone} aria-label={`Clone ${spoolLabel}`} title="Clone spool">
           <CopyIcon className="h-3.5 w-3.5" />

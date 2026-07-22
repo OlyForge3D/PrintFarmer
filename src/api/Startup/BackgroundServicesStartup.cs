@@ -42,6 +42,9 @@ public static class BackgroundServicesStartup
         services.Configure<Farm.Web.Api.Services.Workers.HistorySeedingSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.HistorySeedingSettings.SectionName));
         services.AddHostedService<Farm.Web.Api.Services.Workers.HistorySeedingBackgroundService>();
 
+        // Active External Job Sync - faster cadence for non-terminal externally-started jobs
+        services.AddHostedService<Farm.Web.Api.Services.Workers.ActiveExternalJobSyncBackgroundService>();
+
         // Register asset service for OrcaSlicer printer images and bed textures
         services.AddSingleton<IAssetService, AssetService>();
 
@@ -61,6 +64,13 @@ public static class BackgroundServicesStartup
                 modelStoragePath,
                 gcodeStoragePath);
         });
+
+        // Electricity Module - prune PowerReading rows older than 90 days, runs daily
+        services.AddHostedService<Farm.Infrastructure.Services.Electricity.PowerReadingPruneService>();
+
+        // Electricity Module - poll enabled PowerMonitor records, persist PowerReading rows,
+        // and aggregate KwhUsed for completed print jobs
+        services.AddHostedService<Farm.Web.Api.Services.PowerMonitor.PowerMonitorPollingService>();
 
         return services;
     }

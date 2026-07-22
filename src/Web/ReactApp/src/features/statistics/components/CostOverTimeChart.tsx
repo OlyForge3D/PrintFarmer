@@ -18,8 +18,9 @@ interface Props {
   error: Error | null;
 }
 
-export const CostOverTimeChart: React.FC<Props> = ({ data, isLoading, error }) => (
-  <Card title="Cost Over Time" className="h-96">
+export const CostOverTimeChart = React.memo(function CostOverTimeChart({ data, isLoading, error }: Props) {
+  return (
+    <Card title="Cost Over Time" className="h-96">
     {isLoading ? (
       <ChartSkeleton />
     ) : error ? (
@@ -37,5 +38,6 @@ export const CostOverTimeChart: React.FC<Props> = ({ data, isLoading, error }) =
         </BarChart>
       </ResponsiveContainer>
     )}
-  </Card>
-);
+    </Card>
+  );
+});

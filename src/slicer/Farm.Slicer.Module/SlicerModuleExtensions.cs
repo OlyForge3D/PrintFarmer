@@ -144,6 +144,7 @@ public static class SlicerModuleExtensions
         _ = services.AddScoped<IProfileParsingService, ProfileParsingService>();
         _ = services.AddScoped<ISlicerProfileParsingService>(sp => sp.GetRequiredService<IProfileParsingService>() as ISlicerProfileParsingService
             ?? throw new InvalidOperationException("ProfileParsingService must implement ISlicerProfileParsingService"));
+        _ = services.AddSingleton<IThreeMfMetadataService, ThreeMfMetadataService>();
 
         // Discover slicer engine plugins (OrcaSlicer, PrusaSlicer, etc.) and build registry
         _ = services
@@ -186,7 +187,6 @@ public static class SlicerModuleExtensions
         _ = services.AddHostedService<SlicerDbInitializationHostedService>();
 
         _ = services.AddHostedService<WorkerHealthMonitorService>();
-        _ = services.AddHostedService<JobDispatchingService>();
 
         // Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
         _ = services.Configure<JobDispatchRetrySettings>(configuration.GetSection("JobDispatchRetry"));

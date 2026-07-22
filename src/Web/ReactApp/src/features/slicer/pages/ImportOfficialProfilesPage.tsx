@@ -1,17 +1,19 @@
 import React, { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertCircleIcon } from '@/common/components/icons/MdiIcons';
+import { useNavigate } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
+import { AlertCircleIcon, LayersIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Select, FormField, Checkbox } from '@/common/components/ui';
-import { Download, Check } from 'lucide-react';
+import { Button, Select, FormField, Badge, Spinner } from '@/common/components/ui';
+import { Download, ArrowRight, Printer, Settings2, LinkIcon } from 'lucide-react';
 import { officialProfilesService } from '@/services/officialProfilesService';
 import { PrinterBackend } from '@/types/api';
 import { apiClient } from '@/services/api';
+import type { MachineProfileDto } from '@/features/tasks/components/profile-wizard';
 
 interface PrinterListItem {
     id: string;
     name: string;
-    backend: PrinterBackend; // Moonraker, PrusaLink, SDCP, OctoPrint
+    backend: PrinterBackend;
     modelId?: string;
     modelName?: string;
 }
@@ -28,26 +30,9 @@ function getBackendName(backend: PrinterBackend | string): string {
     }
 }
 
-interface AvailableProfile {
-    id: string;
-    name: string;
-    material: string;
-    quality: string;
-    layerHeight: number;
-    infillPercentage: number;
-    isSystem: boolean;
-    slicerType: string;
-}
-
 export const ImportOfficialProfilesPage: React.FC = () => {
-    const qc = useQueryClient();
-
-    // State
+    const navigate = useNavigate();
     const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
-    const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
-    const [makePublic, setMakePublic] = useState(false);
-    const [importMessage, setImportMessage] = useState<string | null>(null);
-    const [importError, setImportError] = useState<string | null>(null);
 
     // Fetch registered printers
     const { data: printers = [] } = useQuery({
@@ -59,103 +44,77 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                 name: p.name || 'Unknown',
                 backend: p.backend ?? 0,
                 modelId: p.modelId,
-                modelName: p.modelName
+                modelName: p.modelName,
             } as PrinterListItem));
         },
-        staleTime: 30_000
+        staleTime: 30_000,
     });
-
-    // Fetch available profiles for the selected printer
-    // These are system profiles that were automatically seeded from the OrcaSlicer worker on registration
-    const { data: officialProfiles = [], isLoading: profilesLoading, error: profilesError } = useQuery({
-        queryKey: ["official-profiles-for-printer", selectedPrinterId],
-        queryFn: async () => {
-            if (!selectedPrinterId) {
-                return [];
-            }
-            try {
-                const profiles = await officialProfilesService.getAvailableProfilesForPrinter(selectedPrinterId);
-                return profiles;
-            } catch (error) {
-                console.error("Failed to fetch profiles for printer:", error);
-                throw error;
-            }
-        },
-        retry: false, // Don't retry failed requests
-        enabled: !!selectedPrinterId // Only fetch when a printer is selected
-    });
-
-    // Group profiles by material and quality
-    const groupedProfiles = useMemo(() => {
-        const groups: { [key: string]: AvailableProfile[] } = {};
-        // Filter to only process profiles
-        const processProfiles = officialProfiles.filter(p => p.profileType === 'process') as AvailableProfile[];
-        processProfiles.forEach((profile: AvailableProfile) => {
-            const key = `${profile.material} • ${profile.quality}`;
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(profile);
-        });
-        return Object.entries(groups).sort();
-    }, [officialProfiles]);
-
-    // Import mutation
-    const importMutation = useMutation({
-        mutationFn: async () => {
-            if (!selectedPrinterId || selectedProfileIds.size === 0) {
-                throw new Error('Please select a printer and at least one profile');
-            }
-
-            const result = await officialProfilesService.bulkImportProfilesForPrinter(
-                selectedPrinterId,
-                {
-                    profileIds: Array.from(selectedProfileIds),
-                    makePublic
-                }
-            );
-
-            return result;
-        },
-        onSuccess: (result) => {
-            setImportMessage(
-                `Successfully imported ${result.imported} profile(s) for ${result.printerName}. ` +
-                `${result.duplicated} were already imported.`
-            );
-            setImportError(null);
-            setSelectedProfileIds(new Set());
-            qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
-        },
-        onError: (err: Error) => {
-            setImportError(err.message);
-            setImportMessage(null);
-        }
-    });
-
-    const toggleProfileSelection = (profileId: string) => {
-        const newSet = new Set(selectedProfileIds);
-        if (newSet.has(profileId)) {
-            newSet.delete(profileId);
-        } else {
-            newSet.add(profileId);
-        }
-        setSelectedProfileIds(newSet);
-    };
-
-    const selectAllProfiles = () => {
-        // Filter to only process profiles
-        const processProfiles = officialProfiles.filter(p => p.profileType === 'process') as AvailableProfile[];
-        setSelectedProfileIds(new Set(processProfiles.map((p: AvailableProfile) => p.id)));
-    };
-
-    const clearSelection = () => {
-        setSelectedProfileIds(new Set());
-    };
 
     const selectedPrinter = printers.find(p => p.id === selectedPrinterId);
+    const modelId = selectedPrinter?.modelId;
+
+    // Fetch machine profiles from OrcaSlicer worker for the printer's model
+    const {
+        data: machineProfiles = [],
+        isLoading: machineProfilesLoading,
+        error: machineProfilesError,
+    } = useQuery({
+        queryKey: ['machine-profiles-for-model', modelId],
+        queryFn: async () => {
+            if (!modelId) return [];
+            const res = await apiClient.get<MachineProfileDto[]>(`/slicer/profiles/machine/for-model/${modelId}`);
+            return res.data;
+        },
+        enabled: !!modelId,
+        retry: false,
+        staleTime: 60_000,
+    });
+
+    // Fetch already-imported profile names
+    const { data: importedNames } = useQuery({
+        queryKey: ['imported-profile-names', modelId],
+        queryFn: async () => {
+            if (!modelId) return null;
+            return await officialProfilesService.getImportedProfileNamesForModel(modelId);
+        },
+        enabled: !!modelId,
+        staleTime: 30_000,
+    });
+
+    const importedMachineSet = useMemo(
+        () => new Set(importedNames?.machineProfileNames ?? []),
+        [importedNames],
+    );
+
+    const alreadyImportedCount = useMemo(
+        () => machineProfiles.filter(p => importedMachineSet.has(p.name)).length,
+        [machineProfiles, importedMachineSet],
+    );
+
+    // Group machine profiles by nozzle diameter
+    const groupedByNozzle = useMemo(() => {
+        const groups = new Map<string, MachineProfileDto[]>();
+        for (const profile of machineProfiles) {
+            const key = profile.nozzleDiameter != null
+                ? `${profile.nozzleDiameter}mm nozzle`
+                : 'Default';
+            const list = groups.get(key) ?? [];
+            list.push(profile);
+            groups.set(key, list);
+        }
+        return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+    }, [machineProfiles]);
+
+    const handleStartWizard = () => {
+        if (modelId) {
+            navigate(`/profiles/import?modelId=${modelId}`);
+        }
+    };
 
     return (
         <PageTemplate
             title="Import Official Profiles"
-            subtitle="Import system OrcaSlicer profiles for your registered printers"
+            subtitle="Import OrcaSlicer profiles for your registered printers"
             icon={Download}
         >
             <div className="grid md:grid-cols-4 gap-6">
@@ -167,12 +126,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                         <FormField label="Printer">
                             <Select
                                 value={selectedPrinterId}
-                                onChange={e => {
-                                    setSelectedPrinterId(e.target.value);
-                                    setSelectedProfileIds(new Set());
-                                    setImportMessage(null);
-                                    setImportError(null);
-                                }}
+                                onChange={e => setSelectedPrinterId(e.target.value)}
                             >
                                 <option value="">-- Choose Printer --</option>
                                 {printers.map(p => (
@@ -185,119 +139,130 @@ export const ImportOfficialProfilesPage: React.FC = () => {
 
                         {selectedPrinter && (
                             <div className="mt-4 p-3 bg-pf-background rounded-sm text-sm space-y-1">
-                                <p className="text-pf-text-muted">Printer: <span className="font-medium text-pf-text-primary">{selectedPrinter.name}</span></p>
+                                <p className="text-pf-text-muted">
+                                    Printer: <span className="font-medium text-pf-text-primary">{selectedPrinter.name}</span>
+                                </p>
                                 {selectedPrinter.modelName && (
-                                    <p className="text-pf-text-muted">Model: <span className="font-medium text-pf-text-primary">{selectedPrinter.modelName}</span></p>
+                                    <p className="text-pf-text-muted">
+                                        Model: <span className="font-medium text-pf-text-primary">{selectedPrinter.modelName}</span>
+                                    </p>
                                 )}
                             </div>
                         )}
 
-                        {selectedPrinterId && (
-                            <>
-                                <div className="mt-6 p-3 bg-pf-background rounded-sm text-sm">
-                                    <p className="text-pf-text-muted mb-2">Selected: {selectedProfileIds.size} profile(s)</p>
-                                    <div className="space-y-2">
-                                        <Button
-                                            type="button"
-                                            variant="secondary"
-                                            size="sm"
-                                            className="w-full"
-                                            onClick={selectAllProfiles}
-                                            disabled={officialProfiles.length === 0}
-                                        >
-                                            Select All
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            variant="secondary"
-                                            size="sm"
-                                            className="w-full"
-                                            onClick={clearSelection}
-                                        >
-                                            Clear
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                <Checkbox
-                                    id="make-public"
-                                    label="Make public"
-                                    checked={makePublic}
-                                    onChange={e => setMakePublic(e.target.checked)}
-                                    className="mt-4"
-                                />
-
-                                <Button
-                                    type="button"
-                                    variant="primary"
-                                    className="w-full mt-4"
-                                    onClick={() => importMutation.mutate()}
-                                    loading={importMutation.isPending}
-                                    disabled={selectedProfileIds.size === 0}
-                                >
-                                    Import Selected
-                                </Button>
-
-                                {importError && <Alert type="error" className="mt-4">{importError}</Alert>}
-                                {importMessage && <Alert type="success" className="mt-4">{importMessage}</Alert>}
-                            </>
+                        {selectedPrinter && modelId && machineProfiles.length > 0 && (
+                            <Button
+                                type="button"
+                                variant="primary"
+                                className="w-full mt-6"
+                                onClick={handleStartWizard}
+                                iconRight={<ArrowRight className="w-4 h-4" />}
+                            >
+                                Start Import Wizard
+                            </Button>
                         )}
                     </div>
                 </div>
 
-                {/* Right: Profile List */}
+                {/* Right: Profile Preview */}
                 <div className="md:col-span-3">
                     {!selectedPrinterId ? (
                         <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">
-                            <AlertCircleIcon className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
+                            <Printer className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
                             <p className="text-pf-text-muted">Select a printer to see available profiles</p>
                         </div>
-                    ) : profilesError ? (
+                    ) : !modelId ? (
+                        <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">
+                            <LinkIcon className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
+                            <p className="text-pf-text-primary font-medium mb-2">No Printer Model Linked</p>
+                            <p className="text-pf-text-muted text-sm mb-4">
+                                This printer is not associated with a catalog model. Link it to a printer model to import official profiles.
+                            </p>
+                            <Button
+                                variant="secondary"
+                                onClick={() => navigate(`/printers/${selectedPrinterId}/edit`)}
+                            >
+                                Edit Printer
+                            </Button>
+                        </div>
+                    ) : machineProfilesError ? (
                         <div className="card bg-pf-error/10 border border-pf-error rounded-sm shadow-sm p-8 text-center">
                             <AlertCircleIcon className="w-12 h-12 text-pf-error mx-auto mb-4" />
                             <p className="text-pf-error font-medium mb-2">Failed to Load Profiles</p>
-                            <p className="text-pf-error text-sm">{(profilesError as Error).message}</p>
-                            <p className="text-pf-error text-xs mt-3 italic">The OrcaSlicer worker service may not be running. Please check the server logs and ensure the worker is started.</p>
+                            <p className="text-pf-error text-sm">{(machineProfilesError as Error).message}</p>
+                            <p className="text-pf-error text-xs mt-3 italic">
+                                The OrcaSlicer worker service may not be running. Check the server logs.
+                            </p>
                         </div>
-                    ) : profilesLoading ? (
+                    ) : machineProfilesLoading ? (
                         <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">
-                            <p className="text-pf-text-muted">Loading profiles...</p>
+                            <Spinner size="lg" />
+                            <p className="text-pf-text-muted mt-4">Loading profiles from OrcaSlicer worker…</p>
                         </div>
-                    ) : officialProfiles.length === 0 ? (
+                    ) : machineProfiles.length === 0 ? (
                         <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">
                             <AlertCircleIcon className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
-                            <p className="text-pf-text-muted">No official profiles available</p>
+                            <p className="text-pf-text-muted">No official profiles found for this printer model</p>
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            {groupedProfiles.map(([group, profiles]) => (
+                            {/* Summary banner */}
+                            <div className="card bg-pf-accent-bg border border-pf-accent/30 rounded-sm shadow-sm p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                                <LayersIcon className="w-8 h-8 text-pf-accent shrink-0" />
+                                <div className="flex-1">
+                                    <p className="font-semibold text-pf-text-primary">
+                                        {machineProfiles.length} machine profile{machineProfiles.length !== 1 ? 's' : ''} available
+                                        {selectedPrinter?.modelName && (
+                                            <> for <span className="text-pf-accent">{selectedPrinter.modelName}</span></>
+                                        )}
+                                    </p>
+                                    <p className="text-sm text-pf-text-secondary mt-1">
+                                        {alreadyImportedCount > 0
+                                            ? `${alreadyImportedCount} already imported. `
+                                            : ''}
+                                        Use the import wizard to select machine, filament, and process profiles.
+                                    </p>
+                                </div>
+                                <Button
+                                    variant="primary"
+                                    onClick={handleStartWizard}
+                                    iconRight={<ArrowRight className="w-4 h-4" />}
+                                >
+                                    Import Wizard
+                                </Button>
+                            </div>
+
+                            {/* Machine profiles grouped by nozzle */}
+                            {groupedByNozzle.map(([group, profiles]) => (
                                 <div key={group} className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm">
-                                    <div className="card-header bg-pf-bg-2 p-3">
+                                    <div className="card-header bg-pf-bg-2 p-3 flex items-center gap-2">
+                                        <Settings2 className="w-4 h-4 text-pf-text-muted" />
                                         <h4 className="font-semibold text-sm">{group}</h4>
+                                        <Badge variant="default" size="sm">{profiles.length}</Badge>
                                     </div>
                                     <div className="card-body p-3">
                                         <div className="space-y-2">
-                                            {profiles.map(profile => (
-                                                <div
-                                                    key={profile.id}
-                                                    className={`flex items-center gap-3 p-2 rounded-sm cursor-pointer transition-colors ${selectedProfileIds.has(profile.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}
-                                                >
-                                                    <Checkbox
-                                                        id={`profile-${profile.id}`}
-                                                        checked={selectedProfileIds.has(profile.id)}
-                                                        onChange={() => toggleProfileSelection(profile.id)}
-                                                    />
-                                                    <div className="flex-1">
-                                                        <p className="text-sm font-medium">{profile.name}</p>
-                                                        <p className="text-xs text-pf-text-muted">
-                                                            {profile.layerHeight}mm • {profile.infillPercentage}% infill
-                                                        </p>
+                                            {profiles.map(profile => {
+                                                const isImported = importedMachineSet.has(profile.name);
+                                                return (
+                                                    <div
+                                                        key={profile.name}
+                                                        className="flex items-center gap-3 p-2 rounded-sm"
+                                                    >
+                                                        <div className="flex-1">
+                                                            <p className="text-sm font-medium">{profile.name}</p>
+                                                            {profile.manufacturer && (
+                                                                <p className="text-xs text-pf-text-muted">
+                                                                    {profile.manufacturer}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                        {isImported && (
+                                                            <Badge variant="success" size="sm">Imported</Badge>
+                                                        )}
                                                     </div>
-                                                    {selectedProfileIds.has(profile.id) && (
-                                                        <Check className="w-5 h-5 text-pf-success" />
-                                                    )}
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 </div>

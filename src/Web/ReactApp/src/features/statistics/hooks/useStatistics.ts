@@ -62,7 +62,7 @@ export function useStatisticsSummary(days?: number, startDate?: string, endDate?
   });
 }
 
-export function useJobsOverTime(days = 30, startDate?: string, endDate?: string) {
+export function useJobsOverTime(days?: number, startDate?: string, endDate?: string) {
   return useQuery<DailyJobCount[]>({
     queryKey: ['statistics', 'jobs-over-time', days, startDate, endDate],
     queryFn: async () => {
@@ -73,7 +73,7 @@ export function useJobsOverTime(days = 30, startDate?: string, endDate?: string)
   });
 }
 
-export function useCostOverTime(days = 30, startDate?: string, endDate?: string) {
+export function useCostOverTime(days?: number, startDate?: string, endDate?: string) {
   return useQuery<DailyCost[]>({
     queryKey: ['statistics', 'cost-over-time', days, startDate, endDate],
     queryFn: async () => {

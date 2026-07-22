@@ -7,7 +7,7 @@ set -e
 #
 # Usage: pfdev <command> [service]
 # Commands: redeploy, build, deploy, help, install, uninstall
-# Services: api, frontend, orcaslicer-worker, printer-discovery, nginx
+# Services: any current docker compose service, plus convenience aliases like nginx
 #
 # IMPORTANT: This script does NOT generate docker-compose.yml
 # Only ./scripts/deploy-docker.sh should generate that file.
@@ -53,12 +53,8 @@ remove_symlink() {
     fi
 }
 
-# Service configuration (user-facing alias : docker compose service)
-SERVICES=(
-    "api:api"
-    "frontend:frontend"
-    "orcaslicer-worker:orcaslicer-worker"
-    "printer-discovery:printer-discovery"
+# Service aliases (user-facing alias : docker compose service)
+SERVICE_ALIASES=(
     "nginx:nginx-proxy"
 )
 
@@ -71,18 +67,61 @@ DOCKERFILES=(
     "nginx:Dockerfile.nginx-proxy"
 )
 
+list_compose_services() {
+    if [[ ! -f "$COMPOSE_FILE" ]]; then
+        return 1
+    fi
+
+    (
+        cd "$REPO_ROOT"
+        docker compose config --services 2>/dev/null
+    )
+}
+
+compose_service_exists() {
+    local requested_service=$1
+    local compose_service
+
+    while IFS= read -r compose_service; do
+        if [[ "$compose_service" == "$requested_service" ]]; then
+            return 0
+        fi
+    done < <(list_compose_services)
+
+    return 1
+}
+
+service_has_build() {
+    local compose_service=$1
+
+    awk -v svc="$compose_service" '
+        BEGIN { in_services = 0; in_target = 0; found = 0 }
+        /^services:$/ { in_services = 1; next }
+        in_services && /^[^[:space:]]/ { in_services = 0 }
+        in_services && $0 ~ ("^  " svc ":$") { in_target = 1; next }
+        in_target && /^  [[:alnum:]_-]+:$/ { in_target = 0; exit 1 }
+        in_target && /^    build:$/ { found = 1; exit 0 }
+        END { exit(found ? 0 : 1) }
+    ' "$COMPOSE_FILE"
+}
+
 resolve_service() {
     local requested_service=$1
     local service_entry
     local service_alias
 
-    for service_entry in "${SERVICES[@]}"; do
+    for service_entry in "${SERVICE_ALIASES[@]}"; do
         service_alias=${service_entry%%:*}
         if [[ "$service_alias" == "$requested_service" ]]; then
             echo "${service_entry#*:}"
             return 0
         fi
     done
+
+    if compose_service_exists "$requested_service"; then
+        echo "$requested_service"
+        return 0
+    fi
 
     return 1
 }
@@ -195,6 +234,8 @@ ensure_tls_certificates() {
 }
 
 print_usage() {
+    local compose_service
+
     cat << EOF
 PrintFarmer Development CLI
 
@@ -209,15 +250,27 @@ Commands:
   help                   Show this help message
 
 Available Services:
-  • api
-  • frontend
-  • orcaslicer-worker
-  • printer-discovery
-  • nginx
+  • Any current docker compose service from docker-compose.yml
+  • Alias: nginx -> nginx-proxy
+
+Current Compose Services:
+EOF
+
+    if list_compose_services >/dev/null 2>&1; then
+        while IFS= read -r compose_service; do
+            echo "  • $compose_service"
+        done < <(list_compose_services)
+    else
+        echo "  • docker-compose.yml not generated yet"
+    fi
+
+    cat << EOF
 
 Examples:
   pfdev redeploy api
   pfdev redeploy api frontend
+  pfdev redeploy slicer-host
+  pfdev redeploy database prometheus
   pfdev build frontend orcaslicer-worker
   pfdev deploy api nginx
 EOF
@@ -231,14 +284,20 @@ build_image() {
     check_required_files
     ensure_tls_certificates "$service"
     compose_service=$(resolve_service "$service")
-    
+
     echo "📦 Building $service... [$(date '+%H:%M:%S')]"
     cd "$REPO_ROOT"
-    # Force cache invalidation by removing the image first
-    docker rmi "printfarmer-$compose_service:latest" 2>/dev/null || true
-    # Don't use --pull since we use local upgraded base images
-    DOCKER_BUILDKIT=1 docker compose build --no-cache "$compose_service"
-    
+
+    if service_has_build "$compose_service"; then
+        # Force cache invalidation by removing the image first
+        docker rmi "printfarmer-$compose_service:latest" 2>/dev/null || true
+        # Don't use --pull since we use local upgraded base images
+        DOCKER_BUILDKIT=1 docker compose build --no-cache "$compose_service"
+    else
+        echo "ℹ️  $compose_service uses a prebuilt image; pulling latest image instead"
+        docker compose pull "$compose_service"
+    fi
+
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
     echo "✅ Successfully built $service [$(date '+%H:%M:%S')] (${elapsed}s)"
@@ -249,15 +308,20 @@ deploy_service() {
     local compose_service
     local start_time=$(date +%s)
     local compose_args=(-d --remove-orphans)
+    local force_recreate=false
 
     check_required_files
     ensure_tls_certificates "$service"
     compose_service=$(resolve_service "$service")
 
-    if [[ "$service" == "nginx" ]]; then
+    if [[ "$service" == "nginx" ]] || ! service_has_build "$compose_service"; then
+        force_recreate=true
+    fi
+
+    if [[ "$force_recreate" == "true" ]]; then
         compose_args+=(--force-recreate)
     fi
-    
+
     echo "🚀 Deploying $service... [$(date '+%H:%M:%S')]"
     cd "$REPO_ROOT"
     docker compose up "${compose_args[@]}" "$compose_service"
@@ -266,7 +330,7 @@ deploy_service() {
         echo "🔄 Reloading nginx TLS/config after deploy... [$(date '+%H:%M:%S')]"
         docker exec printfarmer-nginx-proxy nginx -s reload >/dev/null 2>&1 || true
     fi
-    
+
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
     echo "✅ Successfully deployed $service [$(date '+%H:%M:%S')] (${elapsed}s)"
@@ -307,6 +371,7 @@ case "$COMMAND" in
             print_usage
             exit 1
         fi
+        check_required_files
         shift  # Remove command from args
         for SERVICE in "$@"; do
             if ! resolve_service "$SERVICE" >/dev/null; then
@@ -324,6 +389,7 @@ case "$COMMAND" in
             print_usage
             exit 1
         fi
+        check_required_files
         shift  # Remove command from args
         for SERVICE in "$@"; do
             if ! resolve_service "$SERVICE" >/dev/null; then
@@ -341,6 +407,7 @@ case "$COMMAND" in
             print_usage
             exit 1
         fi
+        check_required_files
         shift  # Remove command from args
         for SERVICE in "$@"; do
             if ! resolve_service "$SERVICE" >/dev/null; then

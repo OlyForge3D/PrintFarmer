@@ -53,6 +53,8 @@ public class GcodeHarvestController(
         [FromBody] StartGcodeHarvestDto request,
         CancellationToken ct)
     {
+        _ = ct;
+
         if (request is null)
         {
             return BadRequest("Request body is required");
@@ -463,6 +465,8 @@ public class GcodeHarvestController(
         [FromQuery] GcodeHarvestQueueItemStatus? status = null,
         CancellationToken ct = default)
     {
+        _ = ct;
+
         try
         {
             IReadOnlyList<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> items = await _harvestQueue.GetQueuedItemsAsync(status);
@@ -507,6 +511,8 @@ public class GcodeHarvestController(
         Guid printerId,
         CancellationToken ct = default)
     {
+        _ = ct;
+
         try
         {
             IReadOnlyList<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> items = await _harvestQueue.GetPendingForPrinterAsync(printerId);
@@ -596,6 +602,8 @@ public class GcodeHarvestController(
         Guid queueItemId,
         CancellationToken ct = default)
     {
+        _ = ct;
+
         try
         {
             bool cancelled = await _harvestQueue.CancelAsync(queueItemId);

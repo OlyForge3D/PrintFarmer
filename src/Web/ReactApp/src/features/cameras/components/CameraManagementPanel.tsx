@@ -1,4 +1,4 @@
-import React, { useEffect, useOptimistic, useState, useTransition } from 'react';
+import React, { useEffect, useMemo, useOptimistic, useState, useTransition } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { Button, Textarea } from '@/common/components/ui';
@@ -12,9 +12,11 @@ import {
   PlusIcon,
   PrinterIcon
 } from '@/common/components/icons/MdiIcons';
+import { usePrinters } from '@/common/hooks/useApi';
 import { cameraService } from '@/services/cameraService';
 import { apiClient } from '@/services/api';
-import type { CameraDto, CreateCameraDto, Printer, UpdateCameraDto } from '@/types/api';
+import type { CameraDto, CreateCameraDto, Printer } from '@/types/api';
+import { EditCameraModal } from '@/features/cameras/components/EditCameraModal';
 
 interface CameraManagementPanelProps {
   onCamerasChanged?: () => void;
@@ -26,11 +28,16 @@ interface CameraManagementPanelProps {
  * Intended to be embedded inside the unified Cameras page.
  */
 export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPanelProps) {
+  const { data: printers = [] } = usePrinters();
+  const printersById = useMemo(
+    () => new Map(printers.map((printer) => [printer.id, printer.name])),
+    [printers]
+  );
   const [cameras, setCameras] = useState<CameraDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [cameraToEdit, setCameraToEdit] = useState<CameraDto | null>(null);
   const [formData, setFormData] = useState<CreateCameraDto>({
     name: '',
     description: '',
@@ -38,7 +45,8 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
     snapshotUrl: '',
     location: '',
     sortOrder: 0,
-    isEnabled: true
+    isEnabled: true,
+    printerId: undefined
   });
 
   // State for "Add from Printer" modal
@@ -56,7 +64,7 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
   );
 
   // State for delete confirmation modal
-  const [cameraToDelete, setCameraToDelete] = useState<string | null>(null);
+  const [cameraToDelete, setCameraToDelete] = useState<CameraDto | null>(null);
 
   useEffect(() => {
     loadCameras();
@@ -90,11 +98,7 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
       setLoading(true);
       setError(null);
 
-      if (editingId) {
-        await cameraService.updateCamera(editingId, formData as UpdateCameraDto);
-      } else {
-        await cameraService.createCamera(formData);
-      }
+      await cameraService.createCamera(formData);
 
       setFormData({
         name: '',
@@ -103,9 +107,9 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
         snapshotUrl: '',
         location: '',
         sortOrder: 0,
-        isEnabled: true
+        isEnabled: true,
+        printerId: undefined
       });
-      setEditingId(null);
       setShowForm(false);
       await loadCameras();
       onCamerasChanged?.();
@@ -117,27 +121,17 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
   };
 
   const handleEdit = (camera: CameraDto) => {
-    setEditingId(camera.id);
-    setFormData({
-      name: camera.name,
-      description: camera.description || '',
-      streamUrl: camera.streamUrl || '',
-      snapshotUrl: camera.snapshotUrl || '',
-      location: camera.location || '',
-      sortOrder: camera.sortOrder,
-      isEnabled: camera.isEnabled
-    });
-    setShowForm(true);
+    setCameraToEdit(camera);
   };
 
-  const handleDelete = (id: string) => {
-    setCameraToDelete(id);
+  const handleDelete = (camera: CameraDto) => {
+    setCameraToDelete(camera);
   };
 
   const confirmDelete = () => {
     if (!cameraToDelete) return;
 
-    const id = cameraToDelete;
+    const id = cameraToDelete.id;
     setCameraToDelete(null);
 
     startTransition(async () => {
@@ -166,7 +160,6 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
 
   const handleCancel = () => {
     setShowForm(false);
-    setEditingId(null);
     setFormData({
       name: '',
       description: '',
@@ -174,7 +167,8 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
       snapshotUrl: '',
       location: '',
       sortOrder: 0,
-      isEnabled: true
+      isEnabled: true,
+      printerId: undefined
     });
   };
 
@@ -206,7 +200,8 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
       snapshotUrl: printer.cameraSnapshotUrl || '',
       location: '',
       sortOrder: cameras.length,
-      isEnabled: true
+      isEnabled: true,
+      printerId: printer.id
     });
     setShowPrinterModal(false);
     setShowForm(true);
@@ -241,7 +236,7 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
       {showForm && (
         <div className="shadow-sm rounded-lg p-6 bg-pf-bg-1 border border-pf-border max-w-4xl">
           <h3 className="text-lg font-semibold mb-4 text-pf-text-primary">
-            {editingId ? 'Edit Camera' : 'Add New Camera'}
+            Add New Camera
           </h3>
           <form onSubmit={handleCreateOrUpdate} className="space-y-4">
             <div>
@@ -339,7 +334,7 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
                 Cancel
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Saving...' : editingId ? 'Update Camera' : 'Add Camera'}
+                {loading ? 'Saving...' : 'Add Camera'}
               </Button>
             </div>
           </form>
@@ -371,6 +366,9 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
                   Location
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
+                  Printer
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
@@ -399,6 +397,9 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-pf-text-secondary">{camera.location || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-pf-text-secondary">
+                    {camera.printerId ? printersById.get(camera.printerId) ?? 'Linked printer' : '-'}
+                  </td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
@@ -437,7 +438,7 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
                       <Button
                         variant="subtle"
                         size="sm"
-                        onClick={() => handleDelete(camera.id)}
+                        onClick={() => handleDelete(camera)}
                         title="Delete"
                         aria-label="Delete camera"
                         iconCenter={<DeleteIcon className="w-4 h-4 text-pf-error" />}
@@ -451,12 +452,22 @@ export function CameraManagementPanel({ onCamerasChanged }: CameraManagementPane
         </div>
       )}
 
+      <EditCameraModal
+        camera={cameraToEdit}
+        isOpen={Boolean(cameraToEdit)}
+        onClose={() => setCameraToEdit(null)}
+        onSuccess={async () => {
+          await loadCameras();
+          onCamerasChanged?.();
+        }}
+      />
+
       <ConfirmationModal
         isOpen={!!cameraToDelete}
         onCancel={() => setCameraToDelete(null)}
         onConfirm={confirmDelete}
         title="Delete Camera"
-        message="Are you sure you want to delete this camera? This action cannot be undone."
+        message={cameraToDelete ? `Delete "${cameraToDelete.name}"? This action cannot be undone.` : ''}
         confirmButtonText="Delete"
         isDangerous
       />

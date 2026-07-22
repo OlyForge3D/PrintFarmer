@@ -6,6 +6,7 @@ export interface LocationStatsData {
   totalPrinters: number;
   online: number;
   offline: number;
+  attention?: number;
   printing: number;
   idle: number;
   activeJobs: number;

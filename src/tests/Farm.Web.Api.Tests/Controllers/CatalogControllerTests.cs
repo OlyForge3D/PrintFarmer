@@ -7,6 +7,7 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -23,7 +24,13 @@ public class CatalogControllerTests
     {
         _loggerMock = new Mock<ILogger<CatalogController>>();
         _catalogServiceMock = new Mock<ICatalogService>();
-        _controller = new CatalogController(_loggerMock.Object, _catalogServiceMock.Object);
+
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+            .UseInMemoryDatabase(databaseName: $"CatalogControllerTestDb_{Guid.NewGuid()}")
+            .Options;
+        var db = new Farm.Infrastructure.Data.AppDbContext(options);
+
+        _controller = new CatalogController(_loggerMock.Object, _catalogServiceMock.Object, db);
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext()

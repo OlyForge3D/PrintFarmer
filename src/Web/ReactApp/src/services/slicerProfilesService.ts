@@ -236,6 +236,17 @@ export interface CloneSingleProfileRequest {
   sourceProfileId: string;
   profileType: 'machine' | 'filament' | 'process';
   name?: string;
+  /**
+   * Optional override of the catalog PrinterModel association for the cloned profile.
+   * When omitted the cloned profile inherits the source's PrinterModelId.
+   * Filament profiles ignore this field.
+   */
+  printerModelId?: string;
+  /**
+   * Optional override of compatible printer names (filament only). When omitted the
+   * clone inherits the source's compatible-printers list.
+   */
+  compatiblePrinters?: string[];
 }
 
 /**
@@ -255,6 +266,17 @@ export interface UploadProfileRequest {
   rawJson: string;
   profileType: 'machine' | 'filament' | 'process';
   name?: string;
+  /**
+   * Optional explicit catalog PrinterModel association. When omitted the backend
+   * attempts to resolve it from the raw JSON via the printer-model alias service.
+   * Filament profiles ignore this field.
+   */
+  printerModelId?: string;
+  /**
+   * Optional explicit compatible-printer names (filament only). When omitted the
+   * backend extracts them from the raw JSON's compatible_printers array.
+   */
+  compatiblePrinters?: string[];
 }
 
 /**
@@ -269,6 +291,16 @@ export interface CustomProfile {
   updatedAt?: string;
   description?: string;
   rawJson?: string;
+  /**
+   * Catalog PrinterModel association (machine and process only). Always null for
+   * filament profiles, which use compatible-printer strings instead.
+   */
+  printerModelId?: string | null;
+  /**
+   * Compatible printer names (filament only). Null/undefined for machine/process
+   * profiles, which use printerModelId instead.
+   */
+  compatiblePrinters?: string[] | null;
 }
 
 /**
@@ -278,6 +310,27 @@ export interface UpdateCustomProfileRequest {
   rawJson?: string;
   name?: string;
   description?: string;
+  /**
+   * New catalog PrinterModel association (machine/process only). When omitted the
+   * existing association is left unchanged. Filament profiles ignore this field.
+   */
+  printerModelId?: string;
+  /**
+   * When true, clears any existing PrinterModel association on the profile.
+   * Takes precedence over printerModelId when both are supplied.
+   */
+  clearPrinterModelId?: boolean;
+  /**
+   * New compatible-printer names (filament only). When omitted the existing list
+   * is left unchanged. Send an empty array together with clearCompatiblePrinters
+   * to detach all associations.
+   */
+  compatiblePrinters?: string[];
+  /**
+   * When true, clears the compatible-printers list on the profile. Takes precedence
+   * over compatiblePrinters when both are supplied.
+   */
+  clearCompatiblePrinters?: boolean;
 }
 
 /**
@@ -452,6 +505,17 @@ export const slicerProfilesService = {
    */
   async getWorkerHierarchy(): Promise<WorkerHierarchyResponse> {
     const res = await apiClient.get<WorkerHierarchyResponse>('/slicer/profiles/worker-hierarchy');
+    return res.data;
+  },
+
+  /**
+   * Fetch the profile hierarchy from OrcaSlicer worker filtered to only include
+   * manufacturers present in the PrintFarmer catalog.
+   * Used by the Slicer Profiles management page for parity with the Slicer page.
+   * @returns Worker hierarchy filtered to catalog manufacturers
+   */
+  async getCatalogFilteredHierarchy(): Promise<WorkerHierarchyResponse> {
+    const res = await apiClient.get<WorkerHierarchyResponse>('/slicer/profiles/catalog-hierarchy');
     return res.data;
   },
 

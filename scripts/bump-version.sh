@@ -2,19 +2,56 @@
 set -euo pipefail
 
 # Bump a semantic version stored in the repository `VERSION` file.
-# Usage: bump-version.sh <major|minor|patch>
+# Usage: bump-version.sh <major|minor|patch> [--prerelease <beta|rc>] [--sequence <N>]
 
 ROOT=$(git rev-parse --show-toplevel)
 VERSION_FILE="$ROOT/VERSION"
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <major|minor|patch>" >&2
+  echo "Usage: $0 <major|minor|patch> [--prerelease <beta|rc>] [--sequence <N>]" >&2
   exit 2
 fi
 BUMP="$1"
+shift
+
+PRERELEASE_KIND=""
+PRERELEASE_SEQUENCE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prerelease)
+      PRERELEASE_KIND="${2:-}"
+      shift 2
+      ;;
+    --sequence)
+      PRERELEASE_SEQUENCE="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -n "$PRERELEASE_KIND" && ! "$PRERELEASE_KIND" =~ ^(beta|rc)$ ]]; then
+  echo "--prerelease must be 'beta' or 'rc'." >&2
+  exit 2
+fi
+
+if [[ -n "$PRERELEASE_SEQUENCE" && ! "$PRERELEASE_SEQUENCE" =~ ^[0-9]+$ ]]; then
+  echo "--sequence must be a positive integer." >&2
+  exit 2
+fi
 
 if [ ! -f "$VERSION_FILE" ]; then
   echo "v0.0.0" > "$VERSION_FILE"
+fi
+
+# Require a clean working tree to avoid accidental commits of unrelated files
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Working tree is not clean. Please commit or stash changes before running this script." >&2
+  exit 5
 fi
 
 CURRENT_RAW=$(cat "$VERSION_FILE" | tr -d ' \n\r\t')
@@ -48,19 +85,32 @@ case "$BUMP" in
 esac
 
 NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+NEW_TAG="$NEW_VERSION"
+
+if [[ -n "$PRERELEASE_KIND" ]]; then
+  if [[ -z "$PRERELEASE_SEQUENCE" ]]; then
+    MAX_SEQ=$(
+      git tag --list "${NEW_VERSION}-${PRERELEASE_KIND}.*" \
+        | sed -E "s/^${NEW_VERSION}-${PRERELEASE_KIND}\.([0-9]+)$/\1/" \
+        | sort -n \
+        | tail -1
+    )
+    if [[ -z "$MAX_SEQ" ]]; then
+      PRERELEASE_SEQUENCE=1
+    else
+      PRERELEASE_SEQUENCE=$((MAX_SEQ + 1))
+    fi
+  fi
+  NEW_TAG="${NEW_VERSION}-${PRERELEASE_KIND}.${PRERELEASE_SEQUENCE}"
+fi
 
 echo "Bumping version: ${CURRENT_RAW} -> ${NEW_VERSION}"
+echo "Tag to create: ${NEW_TAG}"
 
 printf "%s\n" "$NEW_VERSION" > "$VERSION_FILE"
 
 # Ensure we have tags and full history (works even if checkout was shallow)
 git fetch --prune --unshallow --tags || true
-
-# Require a clean working tree to avoid accidental commits of unrelated files
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Working tree is not clean. Please commit or stash changes before running this script." >&2
-  exit 5
-fi
 
 # Commit only if VERSION changed
 git add "$VERSION_FILE"
@@ -71,13 +121,13 @@ else
 fi
 
 # Check for existing tag locally or on origin to avoid overwriting
-if git rev-parse "$NEW_VERSION" >/dev/null 2>&1; then
-  echo "Tag $NEW_VERSION already exists locally; aborting to avoid overwrite." >&2
+if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+  echo "Tag $NEW_TAG already exists locally; aborting to avoid overwrite." >&2
   exit 6
 fi
 
-if git ls-remote --tags origin | grep -q "refs/tags/${NEW_VERSION}$"; then
-  echo "Tag $NEW_VERSION already exists on remote 'origin'; aborting to avoid overwrite." >&2
+if git ls-remote --tags origin | grep -q "refs/tags/${NEW_TAG}$"; then
+  echo "Tag $NEW_TAG already exists on remote 'origin'; aborting to avoid overwrite." >&2
   exit 7
 fi
 
@@ -93,7 +143,7 @@ fi
 
 # Push commit and tag
 git push origin HEAD
-git tag -a "$NEW_VERSION" -m "Release ${NEW_VERSION}"
-git push origin "$NEW_VERSION"
+git tag -a "$NEW_TAG" -m "Release ${NEW_TAG}"
+git push origin "$NEW_TAG"
 
-echo "New version ${NEW_VERSION} written, committed, tagged and pushed."
+echo "New version ${NEW_VERSION} written, committed, tagged and pushed (${NEW_TAG})."

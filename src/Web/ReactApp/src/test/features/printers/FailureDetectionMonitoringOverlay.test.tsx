@@ -166,7 +166,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
       screen.getAllByText('No enabled camera snapshot URL is configured.').length
     ).toBeGreaterThan(0);
     expect(
-      screen.getByText(/Add or enable a usable camera snapshot feed/i)
+      screen.getByText(/Add and enable a usable linked camera snapshot feed/i)
     ).toBeInTheDocument();
   });
 
@@ -286,7 +286,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
     expect(screen.getAllByText(/private to the printer lan/i).length).toBeGreaterThan(0);
     expect(screen.getByText('North Bay pooled Obico')).toBeInTheDocument();
     expect(
-      screen.getByText(/Make the saved snapshot URL reachable/i)
+      screen.getByText(/Make the linked camera snapshot feed reachable/i)
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /open latest snapshot/i })).toHaveAttribute(
       'href',

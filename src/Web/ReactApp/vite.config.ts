@@ -4,14 +4,41 @@ import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
-let gitHash = 'dev';
+const buildTime = new Date().toISOString();
+
+// Prefer the live git short SHA. In container builds the .git directory is absent, so
+// fall back to the VITE_GIT_SHA/GIT_SHA build arg injected by the Docker frontend stage.
+let gitHash = process.env.VITE_GIT_SHA || process.env.GIT_SHA || 'dev';
 try {
   gitHash = execSync('git rev-parse --short HEAD').toString().trim();
-} catch { /* ignore: git not available */ }
+} catch { /* ignore: git not available (e.g. Docker build) — keep injected VITE_GIT_SHA */ }
+
+// Emit dist/version.json at build time so the deployed frontend commit is queryable
+// (served by nginx at /version.json), mirroring the backend /api/system/version endpoints.
+function emitVersionJson() {
+  let outDir = 'dist';
+  return {
+    name: 'printfarmer-version-json',
+    apply: 'build' as const,
+    configResolved(config: { build: { outDir: string } }) {
+      outDir = config.build.outDir;
+    },
+    closeBundle() {
+      try {
+        mkdirSync(outDir, { recursive: true });
+        writeFileSync(
+          resolve(outDir, 'version.json'),
+          JSON.stringify({ service: 'frontend', commit: gitHash, buildTime }, null, 2),
+        );
+      } catch { /* non-fatal: version.json is best-effort */ }
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  plugins: [react(), tsconfigPaths(), emitVersionJson()],
   logLevel: 'info', // Only show info and above; suppress debug/warnings
   resolve: {
     // Keep an explicit fallback alias mapping for environments where
@@ -89,7 +116,7 @@ export default defineConfig({
     }
   },
   define: {
-    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __BUILD_TIME__: JSON.stringify(buildTime),
     __GIT_HASH__: JSON.stringify(gitHash),
   },
   test: {
