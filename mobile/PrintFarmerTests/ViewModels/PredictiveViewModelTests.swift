@@ -607,9 +607,9 @@ final class PredictiveViewModelTests: XCTestCase {
                        "cancel must not relatch into completedWaiters")
         XCTAssertEqual(snap.completedObserverCount, 0,
                        "cancel must not relatch into completedObservers")
-        XCTAssertEqual(snap.waiterFates[waiterToken.id], .cancelledWhileParked,
-                       "cancel from parked must seal fate cancelledWhileParked")
-        XCTAssertEqual(snap.observerFates[observerToken.id], .cancelledWhileParked)
+        XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked] ?? 0, 1,
+                       "cancel from parked must record aggregate cancelledWhileParked")
+        XCTAssertEqual(snap.observerFateCounts[.cancelledWhileParked] ?? 0, 1)
         XCTAssertEqual(snap.observerCancelIgnoredCount, 0,
                        "cancel from parked is not an ignored no-op")
         XCTAssertEqual(snap.waiterCancelIgnoredCount, 0)
@@ -1141,8 +1141,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.parkedObserverCount, 0)
         XCTAssertEqual(snap.observerOrder, [])
         XCTAssertEqual(snap.completedObserverCount, 0)
-        XCTAssertEqual(snap.observerFates[token.id], .signaledWhileParked)
-        XCTAssertEqual(snap.observerFateCounts[.signaledWhileParked], 1,
+        XCTAssertEqual(snap.observerFateCounts[.signaledWhileParked] ?? 0, 1,
                        "exactly one signaledWhileParked resume for this token")
         XCTAssertEqual(snap.observerDuplicateAwaitCount, 1,
                        "duplicate await counter never rewinds")
@@ -1177,8 +1176,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.waiterOrder, [])
         XCTAssertEqual(snap.completedWaiterCount, 0)
-        XCTAssertEqual(snap.waiterFates[token.id], .openedWhileParked)
-        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked], 1)
+        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, 1)
         XCTAssertEqual(snap.waiterDuplicateAwaitCount, 1)
 
         // Post-open, post-resume: another late cancel is a bounded no-op.
@@ -1186,8 +1184,8 @@ final class PredictiveViewModelTests: XCTestCase {
         let final = await gate.snapshot()
         XCTAssertEqual(final.waiterCancelIgnoredCount, 0,
                        "cancel of an already-completed Task fires no handler")
-        XCTAssertEqual(final.waiterFates[token.id], .openedWhileParked,
-                       "fate must not be overwritten by late cancel")
+        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1,
+                       "aggregate count must not grow from a late no-op cancel")
         await gate.close()
     }
 
@@ -1262,9 +1260,8 @@ final class PredictiveViewModelTests: XCTestCase {
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
         XCTAssertEqual(final.observerOrder, [])
-        XCTAssertEqual(final.observerFates[token.id], .signaledWhileParked,
+        XCTAssertEqual(final.observerFateCounts[.signaledWhileParked] ?? 0, 1,
                        "original must resume via signal, not cross-owned cancel")
-        XCTAssertEqual(final.observerFateCounts[.signaledWhileParked], 1)
         XCTAssertEqual(final.observerFateCounts[.cancelledWhileParked] ?? 0, 0,
                        "no cancelledWhileParked fate must have been sealed for this token")
         XCTAssertEqual(final.observerDuplicateAwaitCount, 1)
@@ -1326,9 +1323,8 @@ final class PredictiveViewModelTests: XCTestCase {
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
         XCTAssertEqual(final.waiterOrder, [])
-        XCTAssertEqual(final.waiterFates[token.id], .openedWhileParked,
+        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1,
                        "original must resume via open, not cross-owned cancel")
-        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked], 1)
         XCTAssertEqual(final.waiterFateCounts[.cancelledWhileParked] ?? 0, 0)
         XCTAssertEqual(final.waiterDuplicateAwaitCount, 1)
         XCTAssertEqual(final.waiterCancelIgnoredCount, 1)
@@ -1459,7 +1455,9 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.awaitObserver(token3)
         let final = await gate.snapshot()
         XCTAssertEqual(final.completedObserverCount, 0)
-        XCTAssertEqual(final.observerFates[token3.id], .signaledBeforePark)
+        XCTAssertEqual(final.observerFateCounts[.signaledBeforePark] ?? 0, 1)
+        XCTAssertEqual(final.observerResumeCounts[.latchConsumed] ?? 0, 1,
+                       "await consumed the latch")
         await gate.close()
     }
 
@@ -1480,8 +1478,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.waiterOrder, [])
         XCTAssertEqual(snap.completedWaiterCount, 0)
-        XCTAssertEqual(snap.waiterFates[token.id], .openedWhileParked)
-        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked], 1)
+        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, 1)
         XCTAssertEqual(snap.waiterCancelIgnoredCount, 0,
                        "cancel on a completed Task does not fire the handler")
         await gate.close()
@@ -1505,8 +1502,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.waiterOrder, [])
         XCTAssertEqual(snap.completedWaiterCount, 0,
                        "open after cancel must not relatch a cancelled id")
-        XCTAssertEqual(snap.waiterFates[token.id], .cancelledWhileParked)
-        XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked], 1)
+        XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked] ?? 0, 1)
         XCTAssertTrue(snap.opened)
         await gate.close()
     }
@@ -1551,10 +1547,10 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.observerOrder, [])
         XCTAssertEqual(snap.completedWaiterCount, 0)
         XCTAssertEqual(snap.completedObserverCount, 0)
-        XCTAssertEqual(snap.waiterFates[waiterToken.id], .closedWhileParked)
-        XCTAssertEqual(snap.observerFates[parkedObserverToken.id], .closedWhileParked)
-        XCTAssertEqual(snap.observerFates[observerToken.id], .signaledBeforePark,
-                       "already-latched observer keeps its prior fate through close")
+        XCTAssertEqual(snap.waiterFateCounts[.closedWhileParked] ?? 0, 1)
+        XCTAssertEqual(snap.observerFateCounts[.closedWhileParked] ?? 0, 1)
+        XCTAssertEqual(snap.observerFateCounts[.signaledBeforePark] ?? 0, 1,
+                       "aggregate must preserve the prior latch even after close pruning")
         XCTAssertTrue(snap.closed)
         XCTAssertEqual(snap.pendingEntrySignals, 0)
     }
@@ -1582,7 +1578,7 @@ final class PredictiveViewModelTests: XCTestCase {
         let final = await gate.snapshot()
         XCTAssertEqual(final.pendingEntrySignals, 0)
         XCTAssertEqual(final.parkedWaiterCount, 0)
-        XCTAssertEqual(final.waiterFates[waiterToken.id], .openedWhileParked)
+        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1)
         await gate.close()
     }
 
@@ -1607,7 +1603,7 @@ final class PredictiveViewModelTests: XCTestCase {
         await waiterTask.value
 
         let final = await gate.snapshot()
-        XCTAssertEqual(final.observerFates[observerToken.id], .signaledWhileParked)
+        XCTAssertEqual(final.observerFateCounts[.signaledWhileParked] ?? 0, 1)
         XCTAssertEqual(final.parkedObserverCount, 0)
         XCTAssertEqual(final.pendingEntrySignals, 0)
         await gate.close()
@@ -1665,17 +1661,18 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
     }
 
-    /// Hicks A: after close(), a post-close registered token yields
-    /// `.unknown` from park-ACK (no map insertion, no queueing).
-    func testAsyncGateParkAckPostCloseTokenIsUnknown() async {
+    /// Bishop F1: after close(), a post-close registered token yields
+    /// `.closedOrConsumed` from park-ACK (no map insertion, no queueing).
+    /// Only `id >= nextID` (fabricated / never-issued) yields `.unknown`.
+    func testAsyncGateParkAckPostCloseTokenIsClosedOrConsumed() async {
         let gate = AsyncGate()
         await gate.close()
         let obs = await gate.registerObserver()
         let wat = await gate.registerWaiter()
         let obsAck = await gate.waitForObserverParked(obs)
         let watAck = await gate.waitForWaiterParked(wat)
-        XCTAssertEqual(obsAck, .unknown)
-        XCTAssertEqual(watAck, .unknown)
+        XCTAssertEqual(obsAck, .closedOrConsumed)
+        XCTAssertEqual(watAck, .closedOrConsumed)
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.observerParkAckQueueTotal, 0)
         XCTAssertEqual(snap.waiterParkAckQueueTotal, 0)
@@ -1735,9 +1732,12 @@ final class PredictiveViewModelTests: XCTestCase {
 
     // MARK: - Hicks B: bounded post-close state
 
-    /// Hicks B: high-count repeated post-close register/await/ACK proves
+    /// Bishop F1: high-count repeated post-close register/await/ACK proves
     /// active per-token maps/sets/order/park/ACK state return to zero
-    /// and only aggregate counters change. NO per-token growth.
+    /// and only aggregate counters change. NO per-token growth. Post-
+    /// close registered tokens (id < nextID, not in observerOrder) are
+    /// classified as `.duplicateAfterFated` (previously-issued / never-
+    /// tracked); fabricated tokens (id >= nextID) would be `.unknown`.
     func testAsyncGateHighCountPostCloseIsBounded() async {
         let gate = AsyncGate()
         await gate.close()
@@ -1745,10 +1745,12 @@ final class PredictiveViewModelTests: XCTestCase {
         for _ in 0..<iterations {
             let obs = await gate.registerObserver()
             let wat = await gate.registerWaiter()
-            await gate.awaitObserver(obs)   // branch 3 unknown, bounded
-            await gate.awaitWaiter(wat)     // branch 3 unknown, bounded
-            _ = await gate.waitForObserverParked(obs)   // .unknown immediate
-            _ = await gate.waitForWaiterParked(wat)     // .unknown immediate
+            await gate.awaitObserver(obs)   // branch 5 duplicateAfterFated
+            await gate.awaitWaiter(wat)     // branch 5 duplicateAfterFated
+            let obsAck = await gate.waitForObserverParked(obs)   // .closedOrConsumed
+            let watAck = await gate.waitForWaiterParked(wat)     // .closedOrConsumed
+            XCTAssertEqual(obsAck, .closedOrConsumed)
+            XCTAssertEqual(watAck, .closedOrConsumed)
         }
         let snap = await gate.snapshot()
         // Active per-token state is empty.
@@ -1767,10 +1769,10 @@ final class PredictiveViewModelTests: XCTestCase {
         // Aggregate counters reflect exactly the traffic.
         XCTAssertEqual(snap.observerPostCloseRegistrationCount, iterations)
         XCTAssertEqual(snap.waiterPostCloseRegistrationCount, iterations)
-        XCTAssertEqual(snap.observerUnknownAwaitCount, iterations)
-        XCTAssertEqual(snap.waiterUnknownAwaitCount, iterations)
-        XCTAssertEqual(snap.observerResumeCounts[.unknownToken] ?? 0, iterations)
-        XCTAssertEqual(snap.waiterResumeCounts[.unknownToken] ?? 0, iterations)
+        XCTAssertEqual(snap.observerDuplicateAwaitCount, iterations)
+        XCTAssertEqual(snap.waiterDuplicateAwaitCount, iterations)
+        XCTAssertEqual(snap.observerResumeCounts[.duplicateAfterFated] ?? 0, iterations)
+        XCTAssertEqual(snap.waiterResumeCounts[.duplicateAfterFated] ?? 0, iterations)
     }
 
     // MARK: - Hicks C: actual-resume counters (distinct from seals)
@@ -1875,7 +1877,7 @@ final class PredictiveViewModelTests: XCTestCase {
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
-        XCTAssertEqual(final.observerFates[token.id], .signaledWhileParked,
+        XCTAssertEqual(final.observerFateCounts[.signaledWhileParked] ?? 0, 1,
                        "original resumed via signal, not cancel")
         XCTAssertEqual(final.observerResumeCounts[.parkedResumedBySignal] ?? 0, 1)
         XCTAssertEqual(final.observerResumeCounts[.parkedResumedByCancel] ?? 0, 0)
@@ -1922,11 +1924,228 @@ final class PredictiveViewModelTests: XCTestCase {
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
-        XCTAssertEqual(final.waiterFates[token.id], .openedWhileParked)
+        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1)
         XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1)
         XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 0)
         await gate.close()
         await holdGate.close()
+    }
+
+    // MARK: - Bishop F1: pre-close per-token boundedness
+
+    /// LONG-LIVED NOT-CLOSED observer gate: run many sequential
+    /// register→park→signal→await cycles on a gate that is NEVER
+    /// closed. After each iteration every per-token map/set is empty
+    /// and only aggregate counters grow. Proves the pre-close fate
+    /// history is bounded — Bishop F1's central invariant.
+    func testAsyncGateLongLivedSequentialObserversAreBounded() async {
+        let gate = AsyncGate()
+        let iterations = 200
+        for _ in 0..<iterations {
+            let token = await gate.registerObserver()
+            let t = Task { await gate.awaitObserver(token) }
+            _ = await gate.waitForObserverParked(token)   // structural park ACK
+            await gate.signal()                            // resumes parked observer
+            await t.value                                  // fully drained
+            let mid = await gate.snapshot()
+            XCTAssertEqual(mid.parkedObserverCount, 0)
+            XCTAssertEqual(mid.observerOrder, [])
+            XCTAssertEqual(mid.completedObserverCount, 0,
+                           "no per-token completedObservers may accumulate")
+            XCTAssertTrue(mid.observerFates.isEmpty,
+                          "per-token observerFates must not accumulate")
+            XCTAssertEqual(mid.observerParkAckQueueTotal, 0)
+        }
+        let snap = await gate.snapshot()
+        XCTAssertFalse(snap.closed, "gate must remain open — this is the pre-close proof")
+        XCTAssertTrue(snap.observerFates.isEmpty)
+        XCTAssertTrue(snap.waiterFates.isEmpty)
+        XCTAssertEqual(snap.completedObserverCount, 0)
+        XCTAssertEqual(snap.completedWaiterCount, 0)
+        XCTAssertEqual(snap.observerFateCounts[.signaledWhileParked] ?? 0, iterations,
+                       "aggregate: every iteration resumed via signal")
+        XCTAssertEqual(snap.observerResumeCounts[.parkedResumedBySignal] ?? 0, iterations,
+                       "actual continuation resumed exactly \(iterations) times")
+        await gate.close()
+    }
+
+    /// LONG-LIVED opened-waiter gate: after `open()`, subsequent
+    /// waiter register→await cycles each latch openedBeforePark and
+    /// are consumed by the immediate follow-up await. Prove no per-
+    /// token maps accumulate, only aggregate counters.
+    func testAsyncGateLongLivedSequentialOpenedWaitersAreBounded() async {
+        let gate = AsyncGate()
+        await gate.open()
+        let iterations = 200
+        for _ in 0..<iterations {
+            let token = await gate.registerWaiter()   // latch openedBeforePark
+            await gate.awaitWaiter(token)              // consume latch
+            let mid = await gate.snapshot()
+            XCTAssertEqual(mid.parkedWaiterCount, 0)
+            XCTAssertEqual(mid.waiterOrder, [])
+            XCTAssertEqual(mid.completedWaiterCount, 0,
+                           "consumed latch must remove waiter from completedWaiters")
+            XCTAssertTrue(mid.waiterFates.isEmpty,
+                          "per-token waiterFates must not accumulate")
+        }
+        let snap = await gate.snapshot()
+        XCTAssertFalse(snap.closed)
+        XCTAssertTrue(snap.waiterFates.isEmpty)
+        XCTAssertEqual(snap.waiterFateCounts[.openedBeforePark] ?? 0, iterations)
+        XCTAssertEqual(snap.waiterResumeCounts[.latchConsumed] ?? 0, iterations)
+        await gate.close()
+    }
+
+    /// Many actually-parked waiters drained by a single `open()`: all
+    /// per-token maps must return to zero.
+    func testAsyncGateManyParkedWaitersDrainedByOpenClearsMaps() async {
+        let gate = AsyncGate()
+        let n = 50
+        var tokens: [AsyncGate.WaiterToken] = []
+        var tasks: [Task<Void, Never>] = []
+        tokens.reserveCapacity(n)
+        tasks.reserveCapacity(n)
+        for _ in 0..<n {
+            let token = await gate.registerWaiter()
+            tokens.append(token)
+            tasks.append(Task { await gate.awaitWaiter(token) })
+            _ = await gate.waitForWaiterParked(token)
+        }
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.parkedWaiterCount, n)
+
+        await gate.open()
+        for t in tasks { await t.value }
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0)
+        XCTAssertTrue(snap.waiterFates.isEmpty,
+                      "open-drained waiters must not retain per-token fates")
+        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, n)
+        XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByOpen] ?? 0, n)
+        await gate.close()
+    }
+
+    /// Latch consumption prunes per-token fate atomically.
+    /// After a signal-before-park latch is consumed by awaitObserver,
+    /// (a) the token has no fate entry, (b) the token has no
+    /// completedObservers entry, (c) waitForObserverParked returns
+    /// `.closedOrConsumed` (previously issued, no longer active),
+    /// (d) aggregate signaledBeforePark + latchConsumed both == 1.
+    func testAsyncGateLatchConsumedPrunesFatePerToken() async {
+        let gate = AsyncGate()
+        _ = await gate.registerWaiter()            // seed pendingEntrySignals=1
+        let token = await gate.registerObserver()  // latch .signaledBeforePark
+
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.completedObserverCount, 1)
+        XCTAssertEqual(mid.observerFates[token.id], .signaledBeforePark)
+
+        await gate.awaitObserver(token)             // consume the latch
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.completedObserverCount, 0,
+                       "consumed latch must not remain in completedObservers")
+        XCTAssertNil(snap.observerFates[token.id],
+                     "consumed latch must remove per-token fate")
+        XCTAssertTrue(snap.observerFates.isEmpty)
+        XCTAssertEqual(snap.observerFateCounts[.signaledBeforePark] ?? 0, 1)
+        XCTAssertEqual(snap.observerResumeCounts[.latchConsumed] ?? 0, 1)
+
+        // Post-consumption waitForXParked is bounded closedOrConsumed
+        // (id < nextID but not active).
+        let ack = await gate.waitForObserverParked(token)
+        XCTAssertEqual(ack, .closedOrConsumed)
+        await gate.close()
+    }
+
+    /// close() with a mix of actually-parked and unconsumed-latched
+    /// tokens clears ALL per-token maps. Second close() is idempotent —
+    /// no aggregate counter growth.
+    func testAsyncGateCloseWithParkedAndLatchedClearsAllMaps() async {
+        let gate = AsyncGate()
+        // Step 1: register a waiter first. observerOrder is empty, so
+        // its signal accumulates into pendingEntrySignals=1 and the
+        // waiter itself lands in waiterOrder.
+        let wat = await gate.registerWaiter()
+
+        // Step 2: register an observer while a pending signal exists →
+        // it latches as .signaledBeforePark and is NOT parked. This is
+        // the "unconsumed latched" token the F1 spec calls out.
+        let obsLatched = await gate.registerObserver()
+
+        // Step 3: register another observer with no pending signal →
+        // goes into observerOrder and will actually park when awaited.
+        let obsParked = await gate.registerObserver()
+
+        // Step 4: spawn awaiting tasks for the two that should park
+        // (waiter + obsParked). Do NOT spawn one for obsLatched — the
+        // whole point is to leave that latch UNCONSUMED at close().
+        let watTask = Task { await gate.awaitWaiter(wat) }
+        let obsTask = Task { await gate.awaitObserver(obsParked) }
+
+        _ = await gate.waitForWaiterParked(wat)
+        _ = await gate.waitForObserverParked(obsParked)
+
+        // Snapshot before close proves the mixed state.
+        let midBeforeClose = await gate.snapshot()
+        XCTAssertEqual(midBeforeClose.parkedWaiterCount, 1)
+        XCTAssertEqual(midBeforeClose.parkedObserverCount, 1)
+        XCTAssertEqual(midBeforeClose.completedObserverCount, 1,
+                       "obsLatched has an unconsumed latch")
+        XCTAssertEqual(midBeforeClose.observerFates[obsLatched.id], .signaledBeforePark)
+
+        let aggBefore = (
+            closedWhileParkedObs: midBeforeClose.observerFateCounts[.closedWhileParked] ?? 0,
+            closedWhileParkedWat: midBeforeClose.waiterFateCounts[.closedWhileParked] ?? 0,
+            signaledBeforeParkObs: midBeforeClose.observerFateCounts[.signaledBeforePark] ?? 0
+        )
+
+        await gate.close()
+        await watTask.value
+        await obsTask.value
+
+        let snap = await gate.snapshot()
+        XCTAssertTrue(snap.closed)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedObserverCount, 0,
+                       "close must clear completedObservers (even unconsumed latches)")
+        XCTAssertEqual(snap.completedWaiterCount, 0)
+        XCTAssertTrue(snap.observerFates.isEmpty,
+                      "close must clear ALL per-token observerFates")
+        XCTAssertTrue(snap.waiterFates.isEmpty,
+                      "close must clear ALL per-token waiterFates")
+        // Aggregate reflects one parked drain per token type.
+        XCTAssertEqual(
+            snap.observerFateCounts[.closedWhileParked] ?? 0,
+            aggBefore.closedWhileParkedObs + 1
+        )
+        XCTAssertEqual(
+            snap.waiterFateCounts[.closedWhileParked] ?? 0,
+            aggBefore.closedWhileParkedWat + 1
+        )
+        // Prior latch aggregate is preserved (not double-counted).
+        XCTAssertEqual(
+            snap.observerFateCounts[.signaledBeforePark] ?? 0,
+            aggBefore.signaledBeforeParkObs
+        )
+
+        // Second close is idempotent — aggregate counters unchanged.
+        let before2 = snap
+        await gate.close()
+        let after2 = await gate.snapshot()
+        XCTAssertEqual(after2.observerFateCounts, before2.observerFateCounts,
+                       "second close must not change aggregate counters")
+        XCTAssertEqual(after2.waiterFateCounts, before2.waiterFateCounts)
+        XCTAssertEqual(after2.observerResumeCounts, before2.observerResumeCounts)
+        XCTAssertEqual(after2.waiterResumeCounts, before2.waiterResumeCounts)
+        XCTAssertTrue(after2.observerFates.isEmpty)
+        XCTAssertTrue(after2.waiterFates.isEmpty)
     }
 
     // MARK: - Load Alerts
@@ -2381,8 +2600,7 @@ private actor AsyncGate {
             observerPostCloseRegistrationCount += 1
         } else if pendingEntrySignals > 0 {
             pendingEntrySignals -= 1
-            completedObservers.insert(id)
-            sealObserverFate(id: id, reason: .signaledBeforePark)
+            latchObserverBeforePark(id: id, reason: .signaledBeforePark)
         } else {
             observerOrder.append(id)
         }
@@ -2409,19 +2627,14 @@ private actor AsyncGate {
         let awaitID = makeAwaitID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
-                // (1) Token already has a terminal fate — this is the
-                //     normal latched path OR a duplicate await. Consume
-                //     the completed latch if present, resume immediately.
-                if observerFates[token.id] != nil {
-                    if completedObservers.remove(token.id) != nil {
-                        observerResumeCounts[.latchConsumed, default: 0] += 1
-                    } else {
-                        // No latch to consume — either already resumed
-                        // OR the fate was cancelled/close-drained. This
-                        // is duplicate-await territory.
-                        observerDuplicateAwaitCount += 1
-                        observerResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
+                // (1) Before-park latch present → consume it and
+                //     prune per-token state atomically. Bishop F1:
+                //     both `completedObservers` and `observerFates`
+                //     entries removed together so the token leaves
+                //     no residual per-token history.
+                if completedObservers.remove(token.id) != nil {
+                    observerFates.removeValue(forKey: token.id)
+                    observerResumeCounts[.latchConsumed, default: 0] += 1
                     c.resume()
                     return
                 }
@@ -2434,29 +2647,36 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                // (3) Token not in the registered set at all — unknown
-                //     token. Bounded no-op. Post-close registrations
-                //     land here (Hicks B).
-                if !observerOrder.contains(token.id) {
+                // (3) Currently registered (in observerOrder).
+                if observerOrder.contains(token.id) {
+                    if closed {
+                        // Registered before close, being drained now.
+                        // Aggregate-only seal (Bishop F1): no per-token
+                        // state kept.
+                        observerOrder.removeAll { $0 == token.id }
+                        sealObserverOutcome(id: token.id, reason: .closedBeforePark)
+                        observerResumeCounts[.closedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    // Normal park. Tag with this invocation's awaitID
+                    // so ONLY this invocation's cancellation can drain it.
+                    parkedObservers[token.id] = (awaitID: awaitID, c: c)
+                    flushObserverParkAcks(id: token.id, result: .parked)
+                    return
+                }
+                // (4) Not active. Distinguish fabricated (never issued)
+                //     from previously-issued-and-consumed (or post-close
+                //     registered). Both are bounded no-ops but labeled
+                //     for evidence.
+                if token.id >= nextID {
                     observerUnknownAwaitCount += 1
                     observerResumeCounts[.unknownToken, default: 0] += 1
-                    c.resume()
-                    return
+                } else {
+                    observerDuplicateAwaitCount += 1
+                    observerResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                // (4) Registered, not yet fated, not yet parked, but the
-                //     gate has been closed since registration. Drain
-                //     from the registration queue and seal fate.
-                if closed {
-                    observerOrder.removeAll { $0 == token.id }
-                    sealObserverFate(id: token.id, reason: .closedBeforePark)
-                    observerResumeCounts[.closedImmediate, default: 0] += 1
-                    c.resume()
-                    return
-                }
-                // (5) Normal park. Tag with this invocation's awaitID so
-                //     ONLY this invocation's cancellation can drain it.
-                parkedObservers[token.id] = (awaitID: awaitID, c: c)
-                flushObserverParkAcks(id: token.id, result: .parked)
+                c.resume()
             }
         } onCancel: {
             Task { await self.cancelObserver(id: token.id, awaitID: awaitID) }
@@ -2482,7 +2702,9 @@ private actor AsyncGate {
         }
         parkedObservers.removeValue(forKey: id)
         observerOrder.removeAll { $0 == id }
-        sealObserverFate(id: id, reason: .cancelledWhileParked)
+        // Bishop F1: cancelled tokens resume the parked continuation now,
+        // so aggregate-only accounting (no per-token fate stored).
+        sealObserverOutcome(id: id, reason: .cancelledWhileParked)
         observerResumeCounts[.parkedResumedByCancel, default: 0] += 1
         entry.c.resume()
     }
@@ -2512,11 +2734,15 @@ private actor AsyncGate {
     func waitForObserverParked(_ token: ObserverToken) async -> ParkAckResult {
         if parkedObservers[token.id] != nil { return .parked }
         if let reason = observerFates[token.id] { return .terminal(reason) }
-        if !observerOrder.contains(token.id) { return .unknown }
-        if closed { return .closedOrConsumed }
-        return await withCheckedContinuation { c in
-            observerParkAcks[token.id, default: []].append(c)
+        if observerOrder.contains(token.id) {
+            if closed { return .closedOrConsumed }
+            return await withCheckedContinuation { c in
+                observerParkAcks[token.id, default: []].append(c)
+            }
         }
+        // Not active: fabricated (never issued) vs previously-issued.
+        if token.id >= nextID { return .unknown }
+        return .closedOrConsumed
     }
 
     private func flushObserverParkAcks(id: UInt64, result: ParkAckResult) {
@@ -2540,8 +2766,7 @@ private actor AsyncGate {
         if closed {
             waiterPostCloseRegistrationCount += 1
         } else if opened {
-            completedWaiters.insert(id)
-            sealWaiterFate(id: id, reason: .openedBeforePark)
+            latchWaiterBeforePark(id: id, reason: .openedBeforePark)
         } else {
             waiterOrder.append(id)
         }
@@ -2558,13 +2783,9 @@ private actor AsyncGate {
         let awaitID = makeAwaitID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
-                if waiterFates[token.id] != nil {
-                    if completedWaiters.remove(token.id) != nil {
-                        waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    } else {
-                        waiterDuplicateAwaitCount += 1
-                        waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
+                if completedWaiters.remove(token.id) != nil {
+                    waiterFates.removeValue(forKey: token.id)
+                    waiterResumeCounts[.latchConsumed, default: 0] += 1
                     c.resume()
                     return
                 }
@@ -2574,28 +2795,33 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                if !waiterOrder.contains(token.id) {
+                if waiterOrder.contains(token.id) {
+                    if closed {
+                        waiterOrder.removeAll { $0 == token.id }
+                        sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
+                        waiterResumeCounts[.closedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    if opened {
+                        waiterOrder.removeAll { $0 == token.id }
+                        sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
+                        waiterResumeCounts[.openedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    parkedWaiters[token.id] = (awaitID: awaitID, c: c)
+                    flushWaiterParkAcks(id: token.id, result: .parked)
+                    return
+                }
+                if token.id >= nextID {
                     waiterUnknownAwaitCount += 1
                     waiterResumeCounts[.unknownToken, default: 0] += 1
-                    c.resume()
-                    return
+                } else {
+                    waiterDuplicateAwaitCount += 1
+                    waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                if closed {
-                    waiterOrder.removeAll { $0 == token.id }
-                    sealWaiterFate(id: token.id, reason: .closedBeforePark)
-                    waiterResumeCounts[.closedImmediate, default: 0] += 1
-                    c.resume()
-                    return
-                }
-                if opened {
-                    waiterOrder.removeAll { $0 == token.id }
-                    sealWaiterFate(id: token.id, reason: .openedBeforePark)
-                    waiterResumeCounts[.openedImmediate, default: 0] += 1
-                    c.resume()
-                    return
-                }
-                parkedWaiters[token.id] = (awaitID: awaitID, c: c)
-                flushWaiterParkAcks(id: token.id, result: .parked)
+                c.resume()
             }
         } onCancel: {
             Task { await self.cancelWaiter(id: token.id, awaitID: awaitID) }
@@ -2615,7 +2841,7 @@ private actor AsyncGate {
         }
         parkedWaiters.removeValue(forKey: id)
         waiterOrder.removeAll { $0 == id }
-        sealWaiterFate(id: id, reason: .cancelledWhileParked)
+        sealWaiterOutcome(id: id, reason: .cancelledWhileParked)
         waiterResumeCounts[.parkedResumedByCancel, default: 0] += 1
         entry.c.resume()
     }
@@ -2631,11 +2857,14 @@ private actor AsyncGate {
     func waitForWaiterParked(_ token: WaiterToken) async -> ParkAckResult {
         if parkedWaiters[token.id] != nil { return .parked }
         if let reason = waiterFates[token.id] { return .terminal(reason) }
-        if !waiterOrder.contains(token.id) { return .unknown }
-        if closed { return .closedOrConsumed }
-        return await withCheckedContinuation { c in
-            waiterParkAcks[token.id, default: []].append(c)
+        if waiterOrder.contains(token.id) {
+            if closed { return .closedOrConsumed }
+            return await withCheckedContinuation { c in
+                waiterParkAcks[token.id, default: []].append(c)
+            }
         }
+        if token.id >= nextID { return .unknown }
+        return .closedOrConsumed
     }
 
     private func flushWaiterParkAcks(id: UInt64, result: ParkAckResult) {
@@ -2703,13 +2932,9 @@ private actor AsyncGate {
         let awaitID = makeAwaitID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
-                if observerFates[token.id] != nil {
-                    if completedObservers.remove(token.id) != nil {
-                        observerResumeCounts[.latchConsumed, default: 0] += 1
-                    } else {
-                        observerDuplicateAwaitCount += 1
-                        observerResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
+                if completedObservers.remove(token.id) != nil {
+                    observerFates.removeValue(forKey: token.id)
+                    observerResumeCounts[.latchConsumed, default: 0] += 1
                     c.resume()
                     return
                 }
@@ -2719,21 +2944,26 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                if !observerOrder.contains(token.id) {
+                if observerOrder.contains(token.id) {
+                    if closed {
+                        observerOrder.removeAll { $0 == token.id }
+                        sealObserverOutcome(id: token.id, reason: .closedBeforePark)
+                        observerResumeCounts[.closedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    parkedObservers[token.id] = (awaitID: awaitID, c: c)
+                    flushObserverParkAcks(id: token.id, result: .parked)
+                    return
+                }
+                if token.id >= nextID {
                     observerUnknownAwaitCount += 1
                     observerResumeCounts[.unknownToken, default: 0] += 1
-                    c.resume()
-                    return
+                } else {
+                    observerDuplicateAwaitCount += 1
+                    observerResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                if closed {
-                    observerOrder.removeAll { $0 == token.id }
-                    sealObserverFate(id: token.id, reason: .closedBeforePark)
-                    observerResumeCounts[.closedImmediate, default: 0] += 1
-                    c.resume()
-                    return
-                }
-                parkedObservers[token.id] = (awaitID: awaitID, c: c)
-                flushObserverParkAcks(id: token.id, result: .parked)
+                c.resume()
             }
             // Structurally hold inside the cancellation handler scope
             // so mismatched late cancels can be observed while the
@@ -2753,13 +2983,9 @@ private actor AsyncGate {
         let awaitID = makeAwaitID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
-                if waiterFates[token.id] != nil {
-                    if completedWaiters.remove(token.id) != nil {
-                        waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    } else {
-                        waiterDuplicateAwaitCount += 1
-                        waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
+                if completedWaiters.remove(token.id) != nil {
+                    waiterFates.removeValue(forKey: token.id)
+                    waiterResumeCounts[.latchConsumed, default: 0] += 1
                     c.resume()
                     return
                 }
@@ -2769,28 +2995,33 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                if !waiterOrder.contains(token.id) {
+                if waiterOrder.contains(token.id) {
+                    if closed {
+                        waiterOrder.removeAll { $0 == token.id }
+                        sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
+                        waiterResumeCounts[.closedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    if opened {
+                        waiterOrder.removeAll { $0 == token.id }
+                        sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
+                        waiterResumeCounts[.openedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    parkedWaiters[token.id] = (awaitID: awaitID, c: c)
+                    flushWaiterParkAcks(id: token.id, result: .parked)
+                    return
+                }
+                if token.id >= nextID {
                     waiterUnknownAwaitCount += 1
                     waiterResumeCounts[.unknownToken, default: 0] += 1
-                    c.resume()
-                    return
+                } else {
+                    waiterDuplicateAwaitCount += 1
+                    waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                if closed {
-                    waiterOrder.removeAll { $0 == token.id }
-                    sealWaiterFate(id: token.id, reason: .closedBeforePark)
-                    waiterResumeCounts[.closedImmediate, default: 0] += 1
-                    c.resume()
-                    return
-                }
-                if opened {
-                    waiterOrder.removeAll { $0 == token.id }
-                    sealWaiterFate(id: token.id, reason: .openedBeforePark)
-                    waiterResumeCounts[.openedImmediate, default: 0] += 1
-                    c.resume()
-                    return
-                }
-                parkedWaiters[token.id] = (awaitID: awaitID, c: c)
-                flushWaiterParkAcks(id: token.id, result: .parked)
+                c.resume()
             }
             await holdGate.awaitWaiter(holdToken)
         } onCancel: {
@@ -2801,6 +3032,9 @@ private actor AsyncGate {
     // MARK: Terminal transitions
 
     /// Open: drain all pending waiters exactly once. Idempotent.
+    /// Bishop F1: parked-resume path is aggregate-only (no per-token
+    /// fate stored). Registered-but-not-parked path latches so the
+    /// upcoming `awaitWaiter` can consume it and prune both entries.
     /// Hicks C: each parked-drain bumps `waiterResumeCounts[.parkedResumedByOpen]`.
     func open() {
         opened = true
@@ -2808,52 +3042,66 @@ private actor AsyncGate {
         waiterOrder.removeAll()
         for id in ids {
             if let entry = parkedWaiters.removeValue(forKey: id) {
-                sealWaiterFate(id: id, reason: .openedWhileParked)
+                sealWaiterOutcome(id: id, reason: .openedWhileParked)
                 waiterResumeCounts[.parkedResumedByOpen, default: 0] += 1
                 entry.c.resume()
             } else {
-                completedWaiters.insert(id)
-                sealWaiterFate(id: id, reason: .openedBeforePark)
+                latchWaiterBeforePark(id: id, reason: .openedBeforePark)
             }
         }
     }
 
     /// Terminal teardown.
     ///
+    /// Bishop F1: close leaves ALL per-token maps/sets empty. Parked
+    /// continuations are resumed via aggregate-only seal (no fate
+    /// stored). Registered-but-not-parked tokens are aggregate-sealed
+    /// as `.closedBeforePark` (also no per-token latch — the gate is
+    /// terminal and a future awaitX of that token falls into the
+    /// bounded not-active branch). Any residual latches from prior
+    /// `signaledBeforePark`/`openedBeforePark` are cleared here too.
     /// H2: also clears `pendingEntrySignals` and drains any stranded
     /// park-ACK waiters so a helper regression can't hang the test.
-    /// H1: seals fates for every drained token so subsequent
-    /// register/await against those ids is deterministic.
-    /// Hicks C: bumps `xResumeCounts[.parkedResumedByClose]` per drained park.
     /// Hicks D: also drains any queued cancel-count ACK waiters so test
     /// teardown never hangs on a threshold that will never be reached.
+    ///
+    /// Idempotent: a second `close()` is a no-op on aggregate counters.
     func close() {
+        if closed {
+            // Already terminal; the invariant already holds.
+            return
+        }
         closed = true
         pendingEntrySignals = 0
         let wIds = waiterOrder
         waiterOrder.removeAll()
         for id in wIds {
             if let entry = parkedWaiters.removeValue(forKey: id) {
-                sealWaiterFate(id: id, reason: .closedWhileParked)
+                sealWaiterOutcome(id: id, reason: .closedWhileParked)
                 waiterResumeCounts[.parkedResumedByClose, default: 0] += 1
                 entry.c.resume()
             } else {
-                completedWaiters.insert(id)
-                sealWaiterFate(id: id, reason: .closedBeforePark)
+                sealWaiterOutcome(id: id, reason: .closedBeforePark)
             }
         }
         let oIds = observerOrder
         observerOrder.removeAll()
         for id in oIds {
             if let entry = parkedObservers.removeValue(forKey: id) {
-                sealObserverFate(id: id, reason: .closedWhileParked)
+                sealObserverOutcome(id: id, reason: .closedWhileParked)
                 observerResumeCounts[.parkedResumedByClose, default: 0] += 1
                 entry.c.resume()
             } else {
-                completedObservers.insert(id)
-                sealObserverFate(id: id, reason: .closedBeforePark)
+                sealObserverOutcome(id: id, reason: .closedBeforePark)
             }
         }
+        // Bishop F1: clear any residual before-park latches. Their
+        // fates and completed sets accumulated per-token entries;
+        // close is terminal, so no future awaitX can consume them.
+        observerFates.removeAll()
+        waiterFates.removeAll()
+        completedObservers.removeAll()
+        completedWaiters.removeAll()
         // Drain stranded park-ACK waiters with `.closedOrConsumed` so
         // callers get a bounded, explicit outcome (Hicks A).
         let obsAcks = observerParkAcks
@@ -2913,12 +3161,11 @@ private actor AsyncGate {
         if let id = observerOrder.first {
             observerOrder.removeFirst()
             if let entry = parkedObservers.removeValue(forKey: id) {
-                sealObserverFate(id: id, reason: .signaledWhileParked)
+                sealObserverOutcome(id: id, reason: .signaledWhileParked)
                 observerResumeCounts[.parkedResumedBySignal, default: 0] += 1
                 entry.c.resume()
             } else {
-                completedObservers.insert(id)
-                sealObserverFate(id: id, reason: .signaledBeforePark)
+                latchObserverBeforePark(id: id, reason: .signaledBeforePark)
             }
         } else {
             pendingEntrySignals += 1
@@ -2936,21 +3183,51 @@ private actor AsyncGate {
         return nextAwaitID
     }
 
-    private func sealObserverFate(id: UInt64, reason: ResumeReason) {
-        guard observerFates[id] == nil else { return }  // exactly-once
-        observerFates[id] = reason
+    /// Bishop F1: aggregate-only outcome accounting. Bumps
+    /// `observerFateCounts` and flushes any queued park-ACKs, but does
+    /// NOT store per-token state. Used when the outcome resumes a real
+    /// continuation right now (no before-park latch left behind), so
+    /// long-lived gates do not accumulate O(N) per-token history.
+    private func sealObserverOutcome(id: UInt64, reason: ResumeReason) {
         observerFateCounts[reason, default: 0] += 1
-        // A fate seals the outcome — flush any park-ACK waiters that
-        // were waiting to observe this token park; a fate reaches them
-        // as "you'll never see a park" so they can proceed instead of
-        // hanging.
         flushObserverParkAcks(id: id, result: .terminal(reason))
     }
 
-    private func sealWaiterFate(id: UInt64, reason: ResumeReason) {
+    /// Waiter analogue of `sealObserverOutcome`.
+    private func sealWaiterOutcome(id: UInt64, reason: ResumeReason) {
+        waiterFateCounts[reason, default: 0] += 1
+        flushWaiterParkAcks(id: id, result: .terminal(reason))
+    }
+
+    /// Bishop F1: before-park latch. Keeps a bounded per-token entry in
+    /// `observerFates` + `completedObservers` that the NEXT
+    /// `awaitObserver` consumes atomically (both entries pruned).
+    /// `waitForObserverParked` may return `.terminal(reason)` during
+    /// this interval. Used only for signal/open sequences where a
+    /// resume must wait for a not-yet-scheduled `awaitObserver` call.
+    private func latchObserverBeforePark(id: UInt64, reason: ResumeReason) {
+        guard observerFates[id] == nil else { return }  // exactly-once
+        completedObservers.insert(id)
+        observerFates[id] = reason
+        observerFateCounts[reason, default: 0] += 1
+        flushObserverParkAcks(id: id, result: .terminal(reason))
+    }
+
+    /// Waiter analogue of `latchObserverBeforePark`.
+    private func latchWaiterBeforePark(id: UInt64, reason: ResumeReason) {
         guard waiterFates[id] == nil else { return }
+        completedWaiters.insert(id)
         waiterFates[id] = reason
         waiterFateCounts[reason, default: 0] += 1
         flushWaiterParkAcks(id: id, result: .terminal(reason))
+    }
+
+    /// Bishop F1 test helper: emit a single entry signal without going
+    /// through `registerWaiter` (which would also leave a waiter in
+    /// `waiterOrder`). Used by long-lived non-closed sequential
+    /// register→park→signal→await proofs so per-token state can return
+    /// to zero after each cycle.
+    func signal() {
+        if !closed { signalEntryLocked() }
     }
 }
