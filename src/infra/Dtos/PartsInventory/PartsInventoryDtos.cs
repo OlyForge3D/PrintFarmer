@@ -196,4 +196,7 @@ public record ReorderCandidateResponse(
     string Name,
     int OnHand,
     int ReorderPoint,
-    int Deficit);
+    int Deficit,
+    Guid? DefaultBinId = null,
+    string? DefaultBinCode = null,
+    string? DefaultBinName = null);
