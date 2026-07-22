@@ -52,6 +52,14 @@ jobs:
         working-directory: src
         run: dotnet format --verify-no-changes --no-restore ./farm-web.sln
 
+      - name: Install frontend deps
+        working-directory: src/Web/ReactApp
+        run: npm ci
+
+      - name: Lint frontend (fail-fast)
+        working-directory: src/Web/ReactApp
+        run: npm run lint
+
       - name: Install dotnet-ef
         run: |
           dotnet tool install -g dotnet-ef
@@ -84,10 +92,6 @@ jobs:
           check_migration_drift "SlicerDbContext SQL Server (Farm.Slicer.Migrations.SqlServer)" "sqlserver" "./migrations/Farm.Slicer.Migrations.SqlServer" "SlicerDbContext"
 
           exit "$status"
-
-      - name: Install frontend deps
-        working-directory: src/Web/ReactApp
-        run: npm ci
 
       - name: Build .NET
         working-directory: src
@@ -122,10 +126,6 @@ jobs:
         with:
           name: dotnet-test-results
           path: src/TestResults
-
-      - name: Lint frontend
-        working-directory: src/Web/ReactApp
-        run: npm run lint
 
       - name: Upload test results summary
         if: always()
