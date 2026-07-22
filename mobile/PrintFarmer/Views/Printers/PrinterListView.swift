@@ -5,6 +5,7 @@ struct PrinterListView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var viewModel = PrinterListViewModel()
+    @State private var coverageViewModel = FarmFilamentCoverageViewModel()
     @State private var retryTask: Task<Void, Never>?
 
     private var iPadColumns: [GridItem] {
@@ -62,7 +63,14 @@ struct PrinterListView: View {
         .task {
             viewModel.configure(printerService: services.printerService, autoPrintService: services.autoPrintService)
             viewModel.configureSignalR(services.signalRService)
+            coverageViewModel.configure(coverageService: services.filamentCoverageService)
+            coverageViewModel.configureSignalR(services.signalRService)
             await viewModel.loadPrinters()
+            await coverageViewModel.load()
+        }
+        .onDisappear {
+            retryTask?.cancel()
+            coverageViewModel.tearDownSignalR()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await viewModel.loadAutoDispatchStatuses() }
@@ -72,7 +80,6 @@ struct PrinterListView: View {
                 Task { await viewModel.loadAutoDispatchStatuses() }
             }
         }
-        .onDisappear { retryTask?.cancel() }
     }
 
     // MARK: - Printer List
@@ -93,7 +100,11 @@ struct PrinterListView: View {
                     LazyVGrid(columns: iPadColumns, spacing: 12) {
                         ForEach(viewModel.filteredPrinters) { printer in
                             NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                                iPadPrinterCardView(printer: printer, isPendingReady: viewModel.isPendingReady(printer))
+                                iPadPrinterCardView(
+                                    printer: printer,
+                                    isPendingReady: viewModel.isPendingReady(printer),
+                                    coverage: coverageViewModel.coverage(for: printer.id)
+                                )
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(
@@ -105,7 +116,11 @@ struct PrinterListView: View {
                 } else {
                     ForEach(viewModel.filteredPrinters) { printer in
                         NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                            PrinterCardView(printer: printer, isPendingReady: viewModel.isPendingReady(printer))
+                            PrinterCardView(
+                                printer: printer,
+                                isPendingReady: viewModel.isPendingReady(printer),
+                                coverage: coverageViewModel.coverage(for: printer.id)
+                            )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(printer.name), \(printer.state ?? "unknown") status\(printer.isOnline ? ", online" : ", offline")")

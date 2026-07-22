@@ -150,6 +150,19 @@
 		A70A710000000000A0000002 /* AttentionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000002 /* AttentionServiceProtocol.swift */; };
 		A70A710000000000A0000003 /* AttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000003 /* AttentionService.swift */; };
 		A70A710000000000A0000004 /* DemoAttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000004 /* DemoAttentionService.swift */; };
+		F7778AA1000000000000A001 /* FilamentCoverageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB1000000000000A001 /* FilamentCoverageModels.swift */; };
+		F7778AA2000000000000A002 /* FilamentCoverageServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB2000000000000A002 /* FilamentCoverageServiceProtocol.swift */; };
+		F7778AA3000000000000A003 /* FilamentCoverageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB3000000000000A003 /* FilamentCoverageService.swift */; };
+		F7778AA4000000000000A004 /* DemoFilamentCoverageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB4000000000000A004 /* DemoFilamentCoverageService.swift */; };
+		F7778AA5000000000000A005 /* FarmFilamentCoverageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB5000000000000A005 /* FarmFilamentCoverageViewModel.swift */; };
+		F7778AA6000000000000A006 /* PrinterFilamentCoverageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB6000000000000A006 /* PrinterFilamentCoverageViewModel.swift */; };
+		F7778AA7000000000000A007 /* FilamentCoverageBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB7000000000000A007 /* FilamentCoverageBadge.swift */; };
+		F7778AA8000000000000A008 /* FilamentCoverageDetailSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB8000000000000A008 /* FilamentCoverageDetailSection.swift */; };
+		F7778AC1000000000000B001 /* FilamentCoverageModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD1000000000000B001 /* FilamentCoverageModelsTests.swift */; };
+		F7778AC2000000000000B002 /* FilamentCoverageServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD2000000000000B002 /* FilamentCoverageServiceTests.swift */; };
+		F7778AC3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */; };
+		F7778AC4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift */; };
+		F7778AC5000000000000B005 /* ControlledFilamentCoverageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD5000000000000B005 /* ControlledFilamentCoverageService.swift */; };
 		A70A710000000000A0000101 /* AttentionModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */; };
 		A70A710000000000A0000102 /* AttentionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000102 /* AttentionServiceTests.swift */; };
 		A70A710000000000A0000201 /* PrinterBackendCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */; };
@@ -576,6 +589,19 @@
 		A70A710000000000B0000002 /* AttentionServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionServiceProtocol.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000003 /* AttentionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionService.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000004 /* DemoAttentionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAttentionService.swift; sourceTree = "<group>"; };
+		F7778BB1000000000000A001 /* FilamentCoverageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageModels.swift; sourceTree = "<group>"; };
+		F7778BB2000000000000A002 /* FilamentCoverageServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageServiceProtocol.swift; sourceTree = "<group>"; };
+		F7778BB3000000000000A003 /* FilamentCoverageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageService.swift; sourceTree = "<group>"; };
+		F7778BB4000000000000A004 /* DemoFilamentCoverageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoFilamentCoverageService.swift; sourceTree = "<group>"; };
+		F7778BB5000000000000A005 /* FarmFilamentCoverageViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmFilamentCoverageViewModel.swift; sourceTree = "<group>"; };
+		F7778BB6000000000000A006 /* PrinterFilamentCoverageViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentCoverageViewModel.swift; sourceTree = "<group>"; };
+		F7778BB7000000000000A007 /* FilamentCoverageBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageBadge.swift; sourceTree = "<group>"; };
+		F7778BB8000000000000A008 /* FilamentCoverageDetailSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageDetailSection.swift; sourceTree = "<group>"; };
+		F7778BD1000000000000B001 /* FilamentCoverageModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageModelsTests.swift; sourceTree = "<group>"; };
+		F7778BD2000000000000B002 /* FilamentCoverageServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageServiceTests.swift; sourceTree = "<group>"; };
+		F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmFilamentCoverageViewModelTests.swift; sourceTree = "<group>"; };
+		F7778BD4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentCoverageViewModelTests.swift; sourceTree = "<group>"; };
+		F7778BD5000000000000B005 /* ControlledFilamentCoverageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlledFilamentCoverageService.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionModelDecodingTests.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000102 /* AttentionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionServiceTests.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilitiesTests.swift; sourceTree = "<group>"; };
@@ -838,6 +864,7 @@
 				0B45A5C9AA17194A8ED47D1F /* MockURLProtocol.swift */,
 				1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */,
 				A78220000000000000000001 /* ShiftTaskProofSupport.swift */,
+				F7778BD5000000000000B005 /* ControlledFilamentCoverageService.swift */,
 			);
 			path = Helpers;
 			sourceTree = "<group>";
@@ -878,6 +905,7 @@
 				A78200000000000000000002 /* ShiftTaskService.swift */,
 				A78200000000000000000003 /* SignalRFrameParser.swift */,
 				20B4984F61F17DE19373B1F8 /* PartsInventoryService.swift */,
+				F7778BB3000000000000A003 /* FilamentCoverageService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -921,6 +949,7 @@
 				F711A0001000000000000001 /* FilamentFallbackGroupModels.swift */,
 				F711A0002000000000000001 /* ToolheadModels.swift */,
 				D4718F7B97636A2B4E526F17 /* PartsInventoryModels.swift */,
+				F7778BB1000000000000A001 /* FilamentCoverageModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -948,6 +977,7 @@
 				D72FDFB20E2DDD6F54AA2A3C /* FailureDetectionServiceProtocol.swift */,
 				A70A710000000000B0000002 /* AttentionServiceProtocol.swift */,
 				E60AC155142282A961B64B91 /* PartsInventoryServiceProtocol.swift */,
+				F7778BB2000000000000A002 /* FilamentCoverageServiceProtocol.swift */,
 			);
 			path = Protocols;
 			sourceTree = "<group>";
@@ -992,6 +1022,8 @@
 				976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */,
 				1BB420C7D1448757457238B5 /* BinPartLoggingViewModelTests.swift */,
 				A78220000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift */,
+				F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */,
+				F7778BD4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1102,6 +1134,7 @@
 				A70A710000000000B0000004 /* DemoAttentionService.swift */,
 				A78200000000000000000006 /* DemoShiftTaskService.swift */,
 				A1F86EC31E3607F0FA8768E5 /* DemoPartsInventoryService.swift */,
+				F7778BB4000000000000A004 /* DemoFilamentCoverageService.swift */,
 			);
 			path = Demo;
 			sourceTree = "<group>";
@@ -1228,6 +1261,8 @@
 				3F15146257C59F44A210F002 /* CustomIcons.swift */,
 				97DEEFD9852661DAA2637C25 /* TemperatureView.swift */,
 				DAFD389576B18CC0E5ADBB63 /* MJPEGStreamView.swift */,
+				F7778BB7000000000000A007 /* FilamentCoverageBadge.swift */,
+				F7778BB8000000000000A008 /* FilamentCoverageDetailSection.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -1250,6 +1285,7 @@
 				F7060001000000000000B011 /* SystemCapabilitiesTests.swift */,
 				F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */,
 				A78220000000000000000004 /* ShiftTaskSignalRTests.swift */,
+				F7778BD2000000000000B002 /* FilamentCoverageServiceTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1307,6 +1343,8 @@
 				7624589C7329A2C995FAE40D /* PartAdjustmentViewModel.swift */,
 				6FC5DA3A29833B7C3CCD9C38 /* BinPartLoggingViewModel.swift */,
 				A78200000000000000000004 /* ShiftTasksViewModel.swift */,
+				F7778BB5000000000000A005 /* FarmFilamentCoverageViewModel.swift */,
+				F7778BB6000000000000A006 /* PrinterFilamentCoverageViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1322,6 +1360,7 @@
 				F07AA8A2045A2F85558A9FC5 /* PartsInventoryConflictTests.swift */,
 				A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */,
 				A78220000000000000000002 /* ShiftTaskModelsServiceTests.swift */,
+				F7778BD1000000000000B001 /* FilamentCoverageModelsTests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1587,6 +1626,11 @@
 				C168511ECD1BDBD8B1E68370 /* PartAdjustmentViewModelTests.swift in Sources */,
 				D03264A0F5F62252FDBA4E5B /* BinPartLoggingViewModelTests.swift in Sources */,
 				11EA70B52D6840FD78BC4D21 /* DeepLinkHandlerTests.swift in Sources */,
+				F7778AC1000000000000B001 /* FilamentCoverageModelsTests.swift in Sources */,
+				F7778AC2000000000000B002 /* FilamentCoverageServiceTests.swift in Sources */,
+				F7778AC3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift in Sources */,
+				F7778AC4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift in Sources */,
+				F7778AC5000000000000B005 /* ControlledFilamentCoverageService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1787,6 +1831,14 @@
 				8132EE7A42B14BE4C6AF7527 /* InventoryView.swift in Sources */,
 				60F61ECE0CCE4FD024E2A99C /* PartAdjustmentViewModel.swift in Sources */,
 				E55D8957A384592EA598761B /* BinPartLoggingViewModel.swift in Sources */,
+				F7778AA1000000000000A001 /* FilamentCoverageModels.swift in Sources */,
+				F7778AA2000000000000A002 /* FilamentCoverageServiceProtocol.swift in Sources */,
+				F7778AA3000000000000A003 /* FilamentCoverageService.swift in Sources */,
+				F7778AA4000000000000A004 /* DemoFilamentCoverageService.swift in Sources */,
+				F7778AA5000000000000A005 /* FarmFilamentCoverageViewModel.swift in Sources */,
+				F7778AA6000000000000A006 /* PrinterFilamentCoverageViewModel.swift in Sources */,
+				F7778AA7000000000000A007 /* FilamentCoverageBadge.swift in Sources */,
+				F7778AA8000000000000A008 /* FilamentCoverageDetailSection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

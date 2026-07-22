@@ -508,6 +508,13 @@ final class ServerRegistryTests: XCTestCase {
         }
 
         @discardableResult
+        func onFilamentCoverageChanged(
+            _ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void
+        ) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
+        @discardableResult
         func onTaskInvalidated(
             _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
         ) -> SignalRSubscription {

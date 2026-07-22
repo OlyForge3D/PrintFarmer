@@ -7,10 +7,12 @@ struct PrinterDetailView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: PrinterDetailViewModel
+    @State private var coverageViewModel: PrinterFilamentCoverageViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
 
     init(printerId: UUID) {
         _viewModel = State(initialValue: PrinterDetailViewModel(printerId: printerId))
+        _coverageViewModel = State(initialValue: PrinterFilamentCoverageViewModel(printerId: printerId))
     }
 
     var body: some View {
@@ -75,7 +77,10 @@ struct PrinterDetailView: View {
             viewModel.configureSignalR(services.signalRService)
             viewModel.configurePredictive(services.predictiveService)
             viewModel.configureFailureDetection(services.failureDetectionService)
+            coverageViewModel.configure(coverageService: services.filamentCoverageService)
+            coverageViewModel.configureSignalR(services.signalRService)
             await viewModel.loadPrinter()
+            await coverageViewModel.load()
             viewModel.setSnapshotPollingAllowed(scenePhase == .active)
 
             // Handle NFC "mark ready" deep link
@@ -89,6 +94,7 @@ struct PrinterDetailView: View {
             activeTasks.removeAll()
             viewModel.isViewActive = false
             viewModel.stopSnapshotPolling()
+            coverageViewModel.tearDownSignalR()
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
@@ -302,6 +308,9 @@ struct PrinterDetailView: View {
                         failureDetectionSummary(printer)
                     }
                     filamentSection(printer)
+                    if let coverage = coverageViewModel.coverage {
+                        FilamentCoverageDetailSection(coverage: coverage)
+                    }
                     AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
 
                     NavigationLink(value: AppDestination.predictiveInsights(printerId: printer.id)) {
@@ -339,6 +348,9 @@ struct PrinterDetailView: View {
                 temperatureSection(printer)
                 advancedControlsLink(for: printer)
                 filamentSection(printer)
+                if let coverage = coverageViewModel.coverage {
+                    FilamentCoverageDetailSection(coverage: coverage)
+                }
                 AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
 
                 NavigationLink(value: AppDestination.predictiveInsights(printerId: printer.id)) {

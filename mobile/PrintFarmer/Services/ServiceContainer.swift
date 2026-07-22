@@ -21,6 +21,7 @@ final class ServiceContainer: @unchecked Sendable {
     var barcodeIntakeService: any BarcodeIntakeServiceProtocol
     var maintenanceService: any MaintenanceServiceProtocol
     var attentionService: any AttentionServiceProtocol
+    var filamentCoverageService: any FilamentCoverageServiceProtocol
     var shiftTaskService: any ShiftTaskServiceProtocol
     var partsInventoryService: any PartsInventoryServiceProtocol
     var autoPrintService: any AutoDispatchServiceProtocol
@@ -100,6 +101,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
         self.attentionService = AttentionService(apiClient: client)
+        self.filamentCoverageService = FilamentCoverageService(apiClient: client)
         self.shiftTaskService = ShiftTaskService(apiClient: client)
         self.partsInventoryService = PartsInventoryService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
@@ -142,6 +144,7 @@ final class ServiceContainer: @unchecked Sendable {
             barcodeIntakeService: DemoBarcodeIntakeService(),
             maintenanceService: DemoMaintenanceService(),
             attentionService: DemoAttentionService(),
+            filamentCoverageService: DemoFilamentCoverageService(),
             shiftTaskService: DemoShiftTaskService(),
             partsInventoryService: DemoPartsInventoryService(),
             autoPrintService: DemoAutoDispatchService(),
@@ -167,6 +170,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeIntakeService = DemoBarcodeIntakeService()
         self.maintenanceService = DemoMaintenanceService()
         self.attentionService = DemoAttentionService()
+        self.filamentCoverageService = DemoFilamentCoverageService()
         self.shiftTaskService = DemoShiftTaskService()
         self.partsInventoryService = DemoPartsInventoryService()
         self.autoPrintService = DemoAutoDispatchService()
@@ -295,6 +299,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.spoolService = SpoolService(apiClient: client)
         self.maintenanceService = MaintenanceService(apiClient: client)
         self.attentionService = AttentionService(apiClient: client)
+        self.filamentCoverageService = FilamentCoverageService(apiClient: client)
         self.shiftTaskService = ShiftTaskService(apiClient: client)
         self.partsInventoryService = PartsInventoryService(apiClient: client)
         self.autoPrintService = AutoDispatchService(apiClient: client)
@@ -346,6 +351,7 @@ final class ServiceContainer: @unchecked Sendable {
         barcodeIntakeService: any BarcodeIntakeServiceProtocol,
         maintenanceService: any MaintenanceServiceProtocol,
         attentionService: any AttentionServiceProtocol,
+        filamentCoverageService: any FilamentCoverageServiceProtocol,
         shiftTaskService: any ShiftTaskServiceProtocol,
         partsInventoryService: any PartsInventoryServiceProtocol,
         autoPrintService: any AutoDispatchServiceProtocol,
@@ -384,6 +390,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeIntakeService = barcodeIntakeService
         self.maintenanceService = maintenanceService
         self.attentionService = attentionService
+        self.filamentCoverageService = filamentCoverageService
         self.shiftTaskService = shiftTaskService
         self.partsInventoryService = partsInventoryService
         self.autoPrintService = autoPrintService

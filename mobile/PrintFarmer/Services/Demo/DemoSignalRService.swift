@@ -11,6 +11,7 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
+    private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
     private var simulationTask: Task<Void, Never>?
 
     init() {
@@ -19,6 +20,7 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
+        self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
     }
 
     var connectionState: SignalRConnectionState { connectionStateHub.snapshot() }
@@ -54,6 +56,13 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     @discardableResult
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
         attentionChangedHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onFilamentCoverageChanged(
+        _ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void
+    ) -> SignalRSubscription {
+        filamentCoverageChangedHub.subscribe(handler)
     }
 
     @discardableResult
