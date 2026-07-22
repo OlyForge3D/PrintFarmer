@@ -164,4 +164,27 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     await waitFor(() => expect(screen.queryByDisplayValue(/extra text/)).not.toBeInTheDocument());
     expect(apiClient.updateTag).not.toHaveBeenCalled();
   });
+
+  it('blocks saving and shows an actionable error instead of guessing expectedRevision when the tag has no revision baseline', async () => {
+    // A tag without a revision (e.g. loaded from a legacy source) must never be saved
+    // with a guessed expectedRevision (like 0), since that could spuriously conflict on
+    // every save or silently match an unrelated revision. The user must be told to refresh.
+    const noRevisionTag: TagOption = { id: 'tag-2', name: 'Unversioned', color: '#00ff00' };
+    vi.mocked(apiClient.getTags).mockResolvedValue([noRevisionTag]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findAllByText('Unversioned');
+    const row = screen.getAllByText('Unversioned')[0].closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /^edit$/i }));
+
+    const nameInput = screen.getByDisplayValue('Unversioned');
+    const editRow = nameInput.closest('tr') as HTMLElement;
+    await user.click(within(editRow).getByRole('button', { name: /^check$/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/refresh the page/i);
+    expect(apiClient.updateTag).not.toHaveBeenCalled();
+    // The edit form must remain open/preserved rather than silently discarding the attempt.
+    expect(screen.getByDisplayValue('Unversioned')).toBeInTheDocument();
+  });
 });

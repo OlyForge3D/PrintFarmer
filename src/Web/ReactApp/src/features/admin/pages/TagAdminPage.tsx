@@ -258,6 +258,14 @@ export const TagAdminPage: React.FC = () => {
         if (!editingTag || !editingTag.name.trim() || !editingTag.id) {
             return;
         }
+        if (editingTag.revision == null) {
+            // No revision baseline to send as expectedRevision - guessing 0 would either
+            // spuriously conflict on every save (trapping the user in a reload loop) or,
+            // worse, silently match an unrelated revision 0. Block the save and ask the
+            // user to refresh instead of sending an unsafe guess.
+            setSaveError('This tag is missing its revision info. Please refresh the page and try again.');
+            return;
+        }
 
         setSaveError(null);
         try {
@@ -267,7 +275,7 @@ export const TagAdminPage: React.FC = () => {
                     name: editingTag.name.trim(),
                     color: editingTag.color,
                     description: editingTag.description,
-                    expectedRevision: editingTag.revision ?? 0
+                    expectedRevision: editingTag.revision
                 }
             });
             setEditingTagId(null);

@@ -289,7 +289,7 @@ export class ApiClient {
           : (responseData as { error?: string })?.error ?? undefined;
 
         const apiError: ApiError = {
-          message: error.message,
+          message: detailMessage || error.message,
           statusCode: error.response?.status || 500,
           details: detailMessage,
           data: responseData,
