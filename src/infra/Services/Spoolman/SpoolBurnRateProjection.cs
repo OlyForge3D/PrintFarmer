@@ -90,7 +90,14 @@ public sealed class SpoolBurnRateProjectionService(
             .ConfigureAwait(false);
 
         double consumedGrams = samples.Sum();
-        double? burnRate = samples.Count >= settings.SpoolBurnRateMinimumSamples
+        bool hasFiniteConsumption = double.IsFinite(consumedGrams);
+        if (!hasFiniteConsumption)
+        {
+            consumedGrams = double.MaxValue;
+        }
+
+        double? burnRate = hasFiniteConsumption
+            && samples.Count >= settings.SpoolBurnRateMinimumSamples
             ? consumedGrams / settings.SpoolBurnRateLookbackDays
             : null;
         if (burnRate is not > 0 || !double.IsFinite(burnRate.Value))

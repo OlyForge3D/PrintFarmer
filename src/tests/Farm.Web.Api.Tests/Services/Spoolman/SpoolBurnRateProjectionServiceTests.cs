@@ -1,11 +1,16 @@
-﻿using Farm.Infrastructure;
+﻿using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Startup;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace Farm.Web.Api.Tests.Services.Spoolman;
@@ -289,6 +294,42 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime
         result.State.Should().Be(SpoolBurnRateProjectionState.SourceUnavailable);
         result.RemainingGrams.Should().BeNull();
         result.ProjectedThresholdCrossingUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProjectAsync_OverflowingConsumption_ReturnsSerializableNonReadyResult()
+    {
+        CanonicalSpoolIdentity identity = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local");
+        await SeedCompletedSampleAsync(identity, double.MaxValue, Now.AddDays(-1));
+        await SeedCompletedSampleAsync(identity, double.MaxValue, Now.AddDays(-2));
+        SetupRemaining(identity, 1000);
+        SetMinimumSamples(2);
+
+        await using AppDbContext projectionContext = CreateContext();
+        SpoolBurnRateProjectionDto result =
+            await CreateService(projectionContext).ProjectAsync(identity);
+
+        result.State.Should().Be(SpoolBurnRateProjectionState.InsufficientData);
+        result.AuthoritativeGramsConsumed.Should().Be(double.MaxValue);
+        result.BurnRateGramsPerDay.Should().BeNull();
+
+        ServiceCollection services = new();
+        _ = services.AddLogging();
+        _ = services.AddPrintFarmerControllers();
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        JsonOptions jsonOptions =
+            provider.GetRequiredService<IOptions<JsonOptions>>().Value;
+
+        string json = JsonSerializer.Serialize(
+            result,
+            jsonOptions.JsonSerializerOptions);
+        using JsonDocument document = JsonDocument.Parse(json);
+        double serializedConsumption = document.RootElement
+            .GetProperty("authoritativeGramsConsumed")
+            .GetDouble();
+        double.IsFinite(serializedConsumption).Should().BeTrue();
     }
 
     private AppDbContext CreateContext() => new(_options);
