@@ -1169,6 +1169,145 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
     }
 
+    // MARK: - Vasquez remediation: duplicate-await cancellation must not
+    // cross-own the original parked continuation (per-invocation awaitID).
+
+    /// OBSERVER: original await parks and is structurally acknowledged.
+    /// A duplicate observer await runs from a Task that is DETERMINISTICALLY
+    /// already-cancelled when it enters `awaitObserver` (guaranteed by a
+    /// separate barrier gate — no scheduler race). The duplicate hits the
+    /// `parkedObservers[id] != nil` branch and is rejected; its onCancel
+    /// spawns `cancelObserver(id: token.id, awaitID: <dupAwaitID>)`. The
+    /// awaitID mismatch check in `cancelObserver` MUST short-circuit as a
+    /// bounded no-op (`observerCancelIgnoredCount += 1`), leaving the
+    /// original parked continuation intact with NO fate sealed. A later
+    /// signal then resumes the original exactly once as `.signaledWhileParked`.
+    ///
+    /// Regression proof: without the awaitID tuple, `cancelObserver` would
+    /// find `parkedObservers[id]` and drain the ORIGINAL — sealing fate
+    /// `.cancelledWhileParked` and resuming the wrong continuation.
+    func testAsyncGateDuplicateAwaitCancelDoesNotCrossOwnOriginalObserver() async {
+        let gate = AsyncGate()
+        let barrier = AsyncGate()
+        let token = await gate.registerObserver()
+
+        // Original parks and is confirmed parked before any duplicate runs.
+        let original = Task { await gate.awaitObserver(token) }
+        await gate.waitForObserverParked(token)
+
+        // Duplicate parks in the BARRIER first, gets cancelled while parked
+        // there, and then enters `gate.awaitObserver` in an already-cancelled
+        // state. No Task.yield/sleep — the parking + cancellation ordering
+        // is proven by `waitForWaiterParked` on the barrier.
+        let barrierToken = await barrier.registerWaiter()
+        let dup = Task {
+            await barrier.awaitWaiter(barrierToken)   // parks; cancelled here
+            await gate.awaitObserver(token)            // enters cancelled
+        }
+        await barrier.waitForWaiterParked(barrierToken)
+        dup.cancel()
+        await dup.value
+
+        // After duplicate has finished, evaluate cross-ownership invariant.
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.parkedObserverCount, 1,
+                       "ORIGINAL must remain parked — duplicate cancel must not cross-own token id")
+        XCTAssertEqual(mid.observerDuplicateAwaitCount, 1,
+                       "duplicate await hit branch (2) exactly once")
+        XCTAssertEqual(mid.observerCancelIgnoredCount, 1,
+                       "duplicate cancel with mismatched awaitID must be bounded no-op")
+        XCTAssertNil(mid.observerFates[token.id],
+                     "original must have NO fate — no .cancelledWhileParked leaked")
+        XCTAssertEqual(mid.observerFateCounts[.cancelledWhileParked] ?? 0, 0,
+                       "no cross-owned cancellation fate for any observer")
+        XCTAssertEqual(mid.observerOrder, [token.id],
+                       "original still in registration order")
+        XCTAssertEqual(mid.completedObserverCount, 0,
+                       "no relatch into completedObservers")
+
+        // Signal → original resumes exactly once via .signaledWhileParked.
+        _ = await gate.registerWaiter()
+        await original.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        XCTAssertEqual(final.observerOrder, [])
+        XCTAssertEqual(final.observerFates[token.id], .signaledWhileParked,
+                       "original must resume via signal, not cross-owned cancel")
+        XCTAssertEqual(final.observerFateCounts[.signaledWhileParked], 1)
+        XCTAssertEqual(final.observerFateCounts[.cancelledWhileParked] ?? 0, 0,
+                       "no cancelledWhileParked fate must have been sealed for this token")
+        XCTAssertEqual(final.observerDuplicateAwaitCount, 1)
+        XCTAssertEqual(final.observerCancelIgnoredCount, 1,
+                       "cancel-ignored counter never rewinds")
+
+        // Safety close on both gates so any residual state surfaces as a
+        // completed-but-different assertion, not a hang.
+        await gate.close()
+        await barrier.close()
+
+        let after = await gate.snapshot()
+        XCTAssertEqual(after.parkedObserverCount, 0)
+        XCTAssertEqual(after.observerOrder, [])
+        XCTAssertEqual(after.observerUnknownAwaitCount, 0)
+    }
+
+    /// WAITER analogue: identical structure, mirrored types. Original
+    /// waiter parks; duplicate barrier-gated + already-cancelled at entry
+    /// hits the `parkedWaiters[id] != nil` branch, its cancel fires with
+    /// mismatched awaitID → `waiterCancelIgnoredCount += 1`. Original
+    /// stays parked and later resumes via `open()` as `.openedWhileParked`.
+    func testAsyncGateDuplicateAwaitCancelDoesNotCrossOwnOriginalWaiter() async {
+        let gate = AsyncGate()
+        let barrier = AsyncGate()
+        let token = await gate.registerWaiter()
+
+        let original = Task { await gate.awaitWaiter(token) }
+        await gate.waitForWaiterParked(token)
+
+        let barrierToken = await barrier.registerWaiter()
+        let dup = Task {
+            await barrier.awaitWaiter(barrierToken)
+            await gate.awaitWaiter(token)
+        }
+        await barrier.waitForWaiterParked(barrierToken)
+        dup.cancel()
+        await dup.value
+
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.parkedWaiterCount, 1,
+                       "ORIGINAL waiter must remain parked")
+        XCTAssertEqual(mid.waiterDuplicateAwaitCount, 1)
+        XCTAssertEqual(mid.waiterCancelIgnoredCount, 1,
+                       "mismatched-awaitID duplicate cancel must be bounded no-op")
+        XCTAssertNil(mid.waiterFates[token.id],
+                     "original must have NO fate")
+        XCTAssertEqual(mid.waiterFateCounts[.cancelledWhileParked] ?? 0, 0)
+        XCTAssertEqual(mid.waiterOrder, [token.id])
+        XCTAssertEqual(mid.completedWaiterCount, 0)
+
+        await gate.open()
+        await original.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedWaiterCount, 0)
+        XCTAssertEqual(final.waiterOrder, [])
+        XCTAssertEqual(final.waiterFates[token.id], .openedWhileParked,
+                       "original must resume via open, not cross-owned cancel")
+        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked], 1)
+        XCTAssertEqual(final.waiterFateCounts[.cancelledWhileParked] ?? 0, 0)
+        XCTAssertEqual(final.waiterDuplicateAwaitCount, 1)
+        XCTAssertEqual(final.waiterCancelIgnoredCount, 1)
+
+        await gate.close()
+        await barrier.close()
+
+        let after = await gate.snapshot()
+        XCTAssertEqual(after.parkedWaiterCount, 0)
+        XCTAssertEqual(after.waiterOrder, [])
+        XCTAssertEqual(after.waiterUnknownAwaitCount, 0)
+    }
+
     /// Unknown token: `awaitObserver`/`awaitWaiter` with an id that was
     /// never registered on this gate returns immediately as a bounded
     /// no-op and bumps the unknown-await counter. No state mutation.
@@ -1774,10 +1913,11 @@ private actor AsyncGate {
 
     // MARK: State
     private var nextID: UInt64 = 1
-    private var parkedObservers: [UInt64: CheckedContinuation<Void, Never>] = [:]
+    private var nextAwaitID: UInt64 = 1
+    private var parkedObservers: [UInt64: (awaitID: UInt64, c: CheckedContinuation<Void, Never>)] = [:]
     private var completedObservers: Set<UInt64> = []
     private var observerOrder: [UInt64] = []
-    private var parkedWaiters: [UInt64: CheckedContinuation<Void, Never>] = [:]
+    private var parkedWaiters: [UInt64: (awaitID: UInt64, c: CheckedContinuation<Void, Never>)] = [:]
     private var completedWaiters: Set<UInt64> = []
     private var waiterOrder: [UInt64] = []
     private var pendingEntrySignals: Int = 0
@@ -1827,7 +1967,15 @@ private actor AsyncGate {
     /// current status and produces a deterministic non-hanging outcome
     /// for every case. It NEVER overwrites an already-parked
     /// continuation for the same token.
+    ///
+    /// Vasquez remediation: each invocation gets its own monotonic
+    /// `awaitID` captured by the cancellation handler. `cancelObserver`
+    /// mutates state ONLY when the currently parked entry's `awaitID`
+    /// matches — so a duplicate (or unknown/fated) await whose Task is
+    /// cancelled cannot cross-own and drain the ORIGINAL parked
+    /// continuation for the same token id.
     func awaitObserver(_ token: ObserverToken) async {
+        let awaitID = makeAwaitID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
                 // (1) Token already has a terminal fate — this is the
@@ -1867,31 +2015,31 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                // (5) Normal park. Any concurrently-queued cancelObserver
-                //     Task will only be dispatched on this actor after
-                //     this closure returns and the enclosing `await`
-                //     suspends, so `cancelObserver` always finds the
-                //     parked continuation.
-                parkedObservers[token.id] = c
+                // (5) Normal park. Tag with this invocation's awaitID so
+                //     ONLY this invocation's cancellation can drain it.
+                parkedObservers[token.id] = (awaitID: awaitID, c: c)
                 flushObserverParkAcks(id: token.id)
             }
         } onCancel: {
-            Task { await self.cancelObserver(id: token.id) }
+            Task { await self.cancelObserver(id: token.id, awaitID: awaitID) }
         }
     }
 
     /// Late-cancel-safe. Mutates state ONLY when a continuation is
-    /// currently parked for this id. Every other case is a bounded
-    /// no-op that increments `observerCancelIgnoredCount` and never
-    /// relatches into `completedObservers` or overwrites a fate.
-    private func cancelObserver(id: UInt64) {
-        guard let c = parkedObservers.removeValue(forKey: id) else {
+    /// currently parked for this id AND the parked entry's `awaitID`
+    /// matches this invocation's `awaitID`. Every other case is a
+    /// bounded no-op that increments `observerCancelIgnoredCount` and
+    /// never relatches into `completedObservers`, overwrites a fate,
+    /// or cross-owns another invocation's parked continuation.
+    private func cancelObserver(id: UInt64, awaitID: UInt64) {
+        guard let entry = parkedObservers[id], entry.awaitID == awaitID else {
             observerCancelIgnoredCount += 1
             return
         }
+        parkedObservers.removeValue(forKey: id)
         observerOrder.removeAll { $0 == id }
         sealObserverFate(id: id, reason: .cancelledWhileParked)
-        c.resume()
+        entry.c.resume()
     }
 
     /// Convenience: single-shot observer registration + await.
@@ -1943,8 +2091,11 @@ private actor AsyncGate {
 
     /// Await the previously registered waiter. Mirrors `awaitObserver`'s
     /// H1 handling: duplicate await, unknown token, close-since-register,
-    /// and normal park are each deterministic and non-hanging.
+    /// and normal park are each deterministic and non-hanging. Same
+    /// per-invocation `awaitID` rule as `awaitObserver` — duplicate/
+    /// unknown/fated cancels cannot cross-own the ORIGINAL parked entry.
     func awaitWaiter(_ token: WaiterToken) async {
+        let awaitID = makeAwaitID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
                 if waiterFates[token.id] != nil {
@@ -1983,24 +2134,27 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                parkedWaiters[token.id] = c
+                parkedWaiters[token.id] = (awaitID: awaitID, c: c)
                 flushWaiterParkAcks(id: token.id)
             }
         } onCancel: {
-            Task { await self.cancelWaiter(id: token.id) }
+            Task { await self.cancelWaiter(id: token.id, awaitID: awaitID) }
         }
     }
 
     /// Late-cancel-safe waiter variant. Mutates state ONLY when a
-    /// continuation is currently parked. Bounded no-op otherwise.
-    private func cancelWaiter(id: UInt64) {
-        guard let c = parkedWaiters.removeValue(forKey: id) else {
+    /// continuation is currently parked AND the parked entry's
+    /// `awaitID` matches this invocation's `awaitID`. Bounded no-op
+    /// otherwise — cannot cross-own another invocation's continuation.
+    private func cancelWaiter(id: UInt64, awaitID: UInt64) {
+        guard let entry = parkedWaiters[id], entry.awaitID == awaitID else {
             waiterCancelIgnoredCount += 1
             return
         }
+        parkedWaiters.removeValue(forKey: id)
         waiterOrder.removeAll { $0 == id }
         sealWaiterFate(id: id, reason: .cancelledWhileParked)
-        c.resume()
+        entry.c.resume()
     }
 
     /// Convenience: single-shot waiter registration + await.
@@ -2032,9 +2186,9 @@ private actor AsyncGate {
         let ids = waiterOrder
         waiterOrder.removeAll()
         for id in ids {
-            if let c = parkedWaiters.removeValue(forKey: id) {
+            if let entry = parkedWaiters.removeValue(forKey: id) {
                 sealWaiterFate(id: id, reason: .openedWhileParked)
-                c.resume()
+                entry.c.resume()
             } else {
                 completedWaiters.insert(id)
                 sealWaiterFate(id: id, reason: .openedBeforePark)
@@ -2054,9 +2208,9 @@ private actor AsyncGate {
         let wIds = waiterOrder
         waiterOrder.removeAll()
         for id in wIds {
-            if let c = parkedWaiters.removeValue(forKey: id) {
+            if let entry = parkedWaiters.removeValue(forKey: id) {
                 sealWaiterFate(id: id, reason: .closedWhileParked)
-                c.resume()
+                entry.c.resume()
             } else {
                 completedWaiters.insert(id)
                 sealWaiterFate(id: id, reason: .closedBeforePark)
@@ -2065,9 +2219,9 @@ private actor AsyncGate {
         let oIds = observerOrder
         observerOrder.removeAll()
         for id in oIds {
-            if let c = parkedObservers.removeValue(forKey: id) {
+            if let entry = parkedObservers.removeValue(forKey: id) {
                 sealObserverFate(id: id, reason: .closedWhileParked)
-                c.resume()
+                entry.c.resume()
             } else {
                 completedObservers.insert(id)
                 sealObserverFate(id: id, reason: .closedBeforePark)
@@ -2111,9 +2265,9 @@ private actor AsyncGate {
     private func signalEntryLocked() {
         if let id = observerOrder.first {
             observerOrder.removeFirst()
-            if let c = parkedObservers.removeValue(forKey: id) {
+            if let entry = parkedObservers.removeValue(forKey: id) {
                 sealObserverFate(id: id, reason: .signaledWhileParked)
-                c.resume()
+                entry.c.resume()
             } else {
                 completedObservers.insert(id)
                 sealObserverFate(id: id, reason: .signaledBeforePark)
@@ -2121,6 +2275,17 @@ private actor AsyncGate {
         } else {
             pendingEntrySignals += 1
         }
+    }
+
+    /// Monotonic per-invocation ID used by `awaitObserver`/`awaitWaiter`
+    /// to tag the parked entry so `cancelObserver`/`cancelWaiter` can
+    /// prove the cancel belongs to THIS invocation before mutating any
+    /// state. Prevents a duplicate/unknown/fated await whose Task is
+    /// cancelled from cross-owning and draining the ORIGINAL parked
+    /// continuation for the same token id.
+    private func makeAwaitID() -> UInt64 {
+        defer { nextAwaitID &+= 1 }
+        return nextAwaitID
     }
 
     private func sealObserverFate(id: UInt64, reason: ResumeReason) {
