@@ -16,6 +16,7 @@ public class IAppSettingTests
     [InlineData(typeof(Farm.Slicer.Module.Settings.SlicerSettings))]
     [InlineData(typeof(DatabaseSettings))]
     [InlineData(typeof(Farm.Infrastructure.Settings.OctoPrintSettings))]
+    [InlineData(typeof(ShiftPlanSettings))]
     public void CanSerializeAndDeserializeSettings(Type settingsType)
     {
         object? instance = Activator.CreateInstance(settingsType);
@@ -82,6 +83,7 @@ public class IAppSettingTests
     [InlineData(typeof(GcodeUploadSettings))]
     [InlineData(typeof(SystemLogSettings))]
     [InlineData(typeof(DatabaseSettings))]
+    [InlineData(typeof(ShiftPlanSettings))]
     public void ValidationDoesNotThrowForDefaults(Type settingsType)
     {
         object? instance = Activator.CreateInstance(settingsType);
@@ -89,5 +91,34 @@ public class IAppSettingTests
         {
             validatable.Validate();
         }
+    }
+
+    [Fact]
+    public void ShiftPlanSettings_SpoolRestockLeadMinutes_SerializesDefaultAndBoundaries()
+    {
+        var defaults = new ShiftPlanSettings();
+
+        using JsonDocument defaultJson = JsonDocument.Parse(JsonSerializer.Serialize(defaults));
+        Assert.Equal(0, defaultJson.RootElement.GetProperty("spoolRestockLeadMinutes").GetInt32());
+
+        foreach (int value in new[] { 0, 1440 })
+        {
+            var settings = new ShiftPlanSettings { SpoolRestockLeadMinutes = value };
+            settings.Validate();
+            string json = JsonSerializer.Serialize(settings);
+            ShiftPlanSettings? roundTrip = JsonSerializer.Deserialize<ShiftPlanSettings>(json);
+            Assert.NotNull(roundTrip);
+            Assert.Equal(value, roundTrip.SpoolRestockLeadMinutes);
+        }
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1441)]
+    public void ShiftPlanSettings_SpoolRestockLeadMinutes_OutOfRangeThrows(int value)
+    {
+        var settings = new ShiftPlanSettings { SpoolRestockLeadMinutes = value };
+
+        _ = Assert.Throws<ValidationException>(settings.Validate);
     }
 }

@@ -632,12 +632,13 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
 
         // Shift-plan compiler (issue #713): materializes attention, maintenance,
-        // coverage, and printed-part reorder signals into anchored UserTask rows.
+        // coverage, spool restock, and printed-part reorder signals into anchored UserTask rows.
         // Sources are additive: register additional IShiftPlanTaskSource impls to extend coverage.
         _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IIdleWindowService, Farm.Infrastructure.Services.ShiftPlan.IdleWindowService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.AttentionShiftPlanTaskSource>();
         _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.MaintenanceIdleWindowShiftPlanTaskSource>();
         _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.PrintedPartReorderShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.SpoolRestockShiftPlanTaskSource>();
         _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanCompiler, Farm.Infrastructure.Services.ShiftPlan.ShiftPlanCompiler>();
 
         // SystemLogs service

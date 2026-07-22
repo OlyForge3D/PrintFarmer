@@ -72,12 +72,17 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
     [SettingDisplay(Name = "Spool Burn-Rate Minimum Samples", Description = "Minimum completed authoritative usage samples required for projection (1–1000).", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 1000, Order = 6)]
     public int SpoolBurnRateMinimumSamples { get; set; } = 3;
 
+    /// <summary>Lead time applied before a projected spool reorder-threshold crossing.</summary>
+    [JsonPropertyName("spoolRestockLeadMinutes")]
+    [SettingDisplay(Name = "Spool Restock Lead Time (minutes)", Description = "How far before the projected reorder-threshold crossing a spool-restock task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 7)]
+    public int SpoolRestockLeadMinutes { get; set; }
+
     /// <summary>
     /// Lead time for harvest tasks. Applied when a harvest is anticipated from
     /// an in-progress job's ETA rather than an already-completed plate.
     /// </summary>
     [JsonPropertyName("harvestLeadMinutes")]
-    [SettingDisplay(Name = "Harvest Lead Time (minutes)", Description = "How far ahead of a projected harvest the task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 7)]
+    [SettingDisplay(Name = "Harvest Lead Time (minutes)", Description = "How far ahead of a projected harvest the task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 8)]
     public int HarvestLeadMinutes { get; set; }
 
     /// <inheritdoc />
@@ -111,6 +116,11 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
         if (SpoolBurnRateMinimumSamples is < 1 or > 1000)
         {
             throw new ValidationException("Spool burn-rate minimum samples must be between 1 and 1000.");
+        }
+
+        if (SpoolRestockLeadMinutes is < 0 or > 1440)
+        {
+            throw new ValidationException("Spool restock lead minutes must be between 0 and 1440.");
         }
 
         if (HarvestLeadMinutes is < 0 or > 1440)
