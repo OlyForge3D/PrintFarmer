@@ -25,6 +25,7 @@ public class SpoolmanControllerTests
     private readonly Mock<IBarcodeScanLogService> _barcodeScanLogServiceMock;
     private readonly Mock<ILogger<SpoolmanController>> _loggerMock;
     private readonly Mock<IFilamentCoverageBroadcaster> _coverageBroadcasterMock;
+    private readonly Mock<ISpoolBurnRateProjectionService> _burnRateProjectionMock;
     private readonly SpoolmanController _controller;
 
     public SpoolmanControllerTests()
@@ -34,12 +35,14 @@ public class SpoolmanControllerTests
         _barcodeScanLogServiceMock = new Mock<IBarcodeScanLogService>();
         _loggerMock = new Mock<ILogger<SpoolmanController>>();
         _coverageBroadcasterMock = new Mock<IFilamentCoverageBroadcaster>(MockBehavior.Strict);
+        _burnRateProjectionMock = new Mock<ISpoolBurnRateProjectionService>();
         _controller = new SpoolmanController(
             _spoolmanServiceMock.Object,
             _settingsServiceMock.Object,
             _barcodeScanLogServiceMock.Object,
             _loggerMock.Object,
-            _coverageBroadcasterMock.Object)
+            _coverageBroadcasterMock.Object,
+            _burnRateProjectionMock.Object)
         {
             ControllerContext = new ControllerContext
             {
@@ -51,6 +54,60 @@ public class SpoolmanControllerTests
                 },
             },
         };
+    }
+
+    [Fact]
+    public async Task GetBurnRateAsync_ValidIdentity_ReturnsProjection()
+    {
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "HTTP://CENTRAL.LOCAL:80/",
+            42);
+        SpoolBurnRateProjectionDto projection = new(
+            identity.SourceKind,
+            identity.SourceIdentity,
+            identity.SpoolId,
+            500,
+            90,
+            3,
+            new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 7, 21, 12, 0, 0, DateTimeKind.Utc),
+            3,
+            SpoolBurnRateProjectionState.Ready);
+        _burnRateProjectionMock.Setup(service => service.ProjectAsync(
+                identity,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(projection);
+
+        ActionResult<SpoolBurnRateProjectionDto> result =
+            await _controller.GetBurnRateAsync(
+                42,
+                SpoolSourceKind.Central,
+                "HTTP://CENTRAL.LOCAL:80/",
+                CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(projection, ok.Value);
+    }
+
+    [Theory]
+    [InlineData(0, SpoolSourceKind.Central, "http://central.local")]
+    [InlineData(42, null, "http://central.local")]
+    [InlineData(42, SpoolSourceKind.Central, "")]
+    public async Task GetBurnRateAsync_InvalidIdentity_ReturnsBadRequest(
+        int spoolId,
+        SpoolSourceKind? sourceKind,
+        string sourceIdentity)
+    {
+        ActionResult<SpoolBurnRateProjectionDto> result =
+            await _controller.GetBurnRateAsync(
+                spoolId,
+                sourceKind,
+                sourceIdentity,
+                CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result.Result);
+        _burnRateProjectionMock.VerifyNoOtherCalls();
     }
 
     [Fact]

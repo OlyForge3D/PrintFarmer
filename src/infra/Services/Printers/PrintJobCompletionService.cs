@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -484,8 +485,10 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 {
                     if (existingByIndex.TryGetValue(toolIndex, out var existing))
                     {
-                        // Update the dispatch snapshot row — preserve snapshotted SpoolmanSpoolId
-                        existing.FilamentUsageGrams = grams;
+                        CanonicalSpoolIdentity? identity = CreateSpoolIdentity(
+                            printer,
+                            existing.SpoolmanSpoolId);
+                        _ = existing.RecordAuthoritativeUsage(grams, identity);
                     }
                     else
                     {
@@ -508,6 +511,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                             FilamentName = toolhead?.CurrentMaterial,
                             FilamentColor = toolhead?.CurrentFilamentColor
                         };
+                        _ = usage.RecordAuthoritativeUsage(
+                            grams,
+                            CreateSpoolIdentity(printer, usage.SpoolmanSpoolId));
                         _db.Set<PrintJobToolheadUsage>().Add(usage);
                         existing = usage;
                     }
@@ -534,10 +540,12 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             {
                 // Single-spool path (existing behavior)
                 double? usageGrams = null;
+                bool isAuthoritative = false;
                 if (client is ISupportsFilamentUsageQuery usageQuery)
                 {
                     usageGrams = await usageQuery.GetLastJobFilamentUsageGramsAsync(
                         printer.ServerUrl, credential, ct);
+                    isAuthoritative = usageGrams.HasValue;
                 }
 
                 // Fallback to slicer estimate if no actual data
@@ -553,8 +561,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
                     if (existingSingle is not null)
                     {
-                        // Update the dispatch snapshot row — preserve snapshotted SpoolmanSpoolId
-                        existingSingle.FilamentUsageGrams = usageGrams;
+                        if (isAuthoritative)
+                        {
+                            _ = existingSingle.RecordAuthoritativeUsage(
+                                usageGrams.Value,
+                                CreateSpoolIdentity(printer, existingSingle.SpoolmanSpoolId));
+                        }
+                        else
+                        {
+                            existingSingle.RecordEstimatedUsage(usageGrams.Value);
+                        }
                     }
                     else
                     {
@@ -573,6 +589,17 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                                 FilamentName = primaryToolhead.CurrentMaterial,
                                 FilamentColor = primaryToolhead.CurrentFilamentColor
                             };
+                            if (isAuthoritative)
+                            {
+                                _ = usage.RecordAuthoritativeUsage(
+                                    usageGrams.Value,
+                                    CreateSpoolIdentity(printer, usage.SpoolmanSpoolId));
+                            }
+                            else
+                            {
+                                usage.RecordEstimatedUsage(usageGrams.Value);
+                            }
+
                             _db.Set<PrintJobToolheadUsage>().Add(usage);
                         }
                     }
@@ -606,6 +633,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             return false;
         }
     }
+
+    private CanonicalSpoolIdentity? CreateSpoolIdentity(
+        Printer printer,
+        int? spoolId)
+        => spoolId.HasValue
+            ? CanonicalSpoolIdentity.FromPrinter(
+                printer,
+                spoolId.Value,
+                _spoolmanService?.GetConfig()?.BaseUrl)
+            : null;
 
     /// <summary>
     /// Broadcasts a job queue update via SignalR to notify clients of the status change.

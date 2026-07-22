@@ -420,6 +420,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // collation-mismatch class, so it converges to BIN2 alongside it.
             _ = modelBuilder.Entity<PrintJob>(entity =>
                 entity.Property(pj => pj.HarvestOperationKey).UseCollation(caseSensitiveCollation));
+
+            // Canonical spool identities preserve path case. Keep SQL Server comparisons
+            // aligned with the application's ordinal source-identity semantics.
+            _ = modelBuilder.Entity<PrintJobToolheadUsage>(entity =>
+                entity.Property(usage => usage.SpoolSourceIdentity)
+                    .UseCollation(caseSensitiveCollation));
         }
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)

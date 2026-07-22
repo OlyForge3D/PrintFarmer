@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -19,6 +20,13 @@ public sealed class PrintJobToolheadUsageConfiguration : IEntityTypeConfiguratio
         builder.Property(u => u.ToolheadIndex).IsRequired();
         builder.Property(u => u.FilamentName).HasMaxLength(255);
         builder.Property(u => u.FilamentColor).HasMaxLength(32);
+        builder.Property(u => u.SpoolSourceKind)
+            .HasConversion<string>()
+            .HasMaxLength(32);
+        builder.Property(u => u.SpoolSourceIdentity)
+            .HasMaxLength(CanonicalSpoolIdentity.MaxSourceIdentityLength);
+        builder.Property(u => u.IsFilamentUsageAuthoritative)
+            .HasDefaultValue(false);
 
         builder.HasOne(u => u.PrintJob)
             .WithMany(j => j.ToolheadUsages)
@@ -29,5 +37,14 @@ public sealed class PrintJobToolheadUsageConfiguration : IEntityTypeConfiguratio
         builder.HasIndex(u => new { u.PrintJobId, u.ToolheadIndex })
             .IsUnique()
             .HasDatabaseName("IX_PrintJobToolheadUsages_PrintJobId_ToolheadIndex");
+
+        builder.HasIndex(u => new
+        {
+            u.SpoolSourceKind,
+            u.SpoolSourceIdentity,
+            u.SpoolmanSpoolId,
+            u.IsFilamentUsageAuthoritative,
+        })
+            .HasDatabaseName("IX_PrintJobToolheadUsages_SpoolProjection");
     }
 }

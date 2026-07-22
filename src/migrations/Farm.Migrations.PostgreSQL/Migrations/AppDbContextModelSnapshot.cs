@@ -3987,6 +3987,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<double?>("FilamentUsageGrams")
                         .HasColumnType("double precision");
 
+                    b.Property<bool>("IsFilamentUsageAuthoritative")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<decimal?>("MaterialCostUsd")
                         .HasColumnType("numeric");
 
@@ -3995,6 +4000,14 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<double?>("SlicerEstimateGrams")
                         .HasColumnType("double precision");
+
+                    b.Property<string>("SpoolSourceIdentity")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("SpoolSourceKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<int?>("SpoolmanSpoolId")
                         .HasColumnType("integer");
@@ -4007,6 +4020,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("PrintJobId", "ToolheadIndex")
                         .IsUnique()
                         .HasDatabaseName("IX_PrintJobToolheadUsages_PrintJobId_ToolheadIndex");
+
+                    b.HasIndex("SpoolSourceKind", "SpoolSourceIdentity", "SpoolmanSpoolId", "IsFilamentUsageAuthoritative")
+                        .HasDatabaseName("IX_PrintJobToolheadUsages_SpoolProjection");
 
                     b.ToTable("PrintJobToolheadUsages");
                 });

@@ -1,11 +1,13 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -14,6 +16,100 @@ namespace Farm.Web.Api.Tests.Services;
 
 public class FilamentCoverageSpoolResolverTests
 {
+    [Fact]
+    public async Task ResolveSpoolAsync_CanonicalCentralIdentity_RejectsChangedSource()
+    {
+        Mock<ISpoolmanService> central = new();
+        central.Setup(service => service.GetConfig())
+            .Returns(new SpoolmanConfigDto("http://new-central.local"));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "http://old-central.local",
+            42);
+
+        FilamentCoverageSpoolSnapshot result =
+            await resolver.ResolveSpoolAsync(identity, CancellationToken.None);
+
+        result.Spool.Should().BeNull();
+        result.ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        central.Verify(
+            service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveSpoolAsync_CanonicalNativeIdentity_PreservesConfiguredSubPath()
+    {
+        await using AppDbContext db = CreateContext();
+        db.Printers.Add(PrinterWithSpool(
+            "HTTP://MOON.LOCAL:80/proxy/",
+            PrinterBackend.Moonraker,
+            42));
+        await db.SaveChangesAsync();
+        Mock<IBackendClient> native = NativeClient(
+            JsonSerializer.Serialize(new[]
+            {
+                new { id = 42, remaining_weight = 321, material = "PLA" },
+            }));
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.MoonrakerNative,
+            "http://moon.local/proxy",
+            42);
+
+        FilamentCoverageSpoolSnapshot result =
+            await resolver.ResolveSpoolAsync(identity, CancellationToken.None);
+
+        result.Spool!.RemainingWeightG.Should().Be(321);
+        native.As<ISupportsSpoolman>().Verify(
+            service => service.GetSpoolmanSpoolsAsync(
+                "http://moon.local/proxy/",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveSpoolAsync_UnconfiguredNativeIdentity_RejectsBeforeOutboundCall()
+    {
+        await using AppDbContext db = CreateContext();
+        db.Printers.Add(PrinterWithSpool(
+            "http://known-moon.local",
+            PrinterBackend.Moonraker,
+            42));
+        await db.SaveChangesAsync();
+        Mock<IBackendClientFactory> factory = new(MockBehavior.Strict);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.MoonrakerNative,
+            "http://169.254.169.254/latest/meta-data",
+            42);
+
+        FilamentCoverageSpoolSnapshot result =
+            await resolver.ResolveSpoolAsync(identity, CancellationToken.None);
+
+        result.Spool.Should().BeNull();
+        result.ErrorReason.Should().Be(
+            FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        factory.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task ResolveSpoolAsync_DuplicateNativeAndCentralId_UsesPrinterOwningSource()
     {
@@ -313,6 +409,15 @@ public class FilamentCoverageSpoolResolverTests
             .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(json);
         return client;
+    }
+
+    private static AppDbContext CreateContext()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        return new AppDbContext(options);
     }
 
     private static Printer PrinterWithSpool(string url, PrinterBackend backend, int spoolId)
