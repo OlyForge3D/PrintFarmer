@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -125,6 +126,29 @@ public sealed class PrintedPartReorderShiftPlanTaskSourceTests
         PrintedPartRestockTaskMetadata metadata = DeserializeMetadata(spec);
         Assert.Equal(fullName, metadata.Name);
         Assert.Equal(200, metadata.Name.Length);
+    }
+
+    [Fact]
+    public async Task ProduceAsync_SurrogatePairCrossesTitleBoundary_TitleRemainsValidAndMetadataNameIsUntruncated()
+    {
+        string fullName = new string('X', 191) + "😀";
+        Guid inventoryId = Guid.Parse("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF");
+        var reorder = new ControlledReorderEvaluationService
+        {
+            Candidates = [Candidate(inventoryId, "SKU-SUR", fullName, 0, 5, 5)],
+        };
+        var source = new PrintedPartReorderShiftPlanTaskSource(reorder, ControlledFeatureGate.Enabled());
+
+        ShiftPlanTaskSpec spec = Assert.Single(await source.ProduceAsync(CancellationToken.None));
+
+        Assert.Equal($"Restock {new string('X', 191)}", spec.Title);
+        Assert.True(spec.Title.Length <= 200, $"Title length {spec.Title.Length} exceeds the 200-char persistence maximum.");
+        Exception? encodingException = Record.Exception(
+            () => _ = new UTF8Encoding(false, true).GetByteCount(spec.Title));
+        Assert.Null(encodingException);
+
+        PrintedPartRestockTaskMetadata metadata = DeserializeMetadata(spec);
+        Assert.Equal(fullName, metadata.Name);
     }
 
     [Theory]

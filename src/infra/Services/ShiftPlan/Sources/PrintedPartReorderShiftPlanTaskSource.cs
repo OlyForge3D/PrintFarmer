@@ -111,10 +111,7 @@ public sealed class PrintedPartReorderShiftPlanTaskSource(
             CultureInfo.InvariantCulture,
             $"{candidate.Sku}: {candidate.OnHand} on hand, reorder point {candidate.ReorderPoint}, deficit {candidate.Deficit}.");
 
-        int maxNameLength = TitleMaxLength - TitlePrefix.Length;
-        string title = candidate.Name.Length > maxNameLength
-            ? $"{TitlePrefix}{candidate.Name[..maxNameLength]}"
-            : $"{TitlePrefix}{candidate.Name}";
+        string title = BuildTitle(candidate.Name);
 
         return new ShiftPlanTaskSpec(
             TaskType: UserTaskType.PrintedPartRestock,
@@ -131,5 +128,20 @@ public sealed class PrintedPartReorderShiftPlanTaskSource(
             EntityId: candidate.PartInventoryId,
             DueAt: null,
             MetadataJson: JsonSerializer.Serialize(metadata, JsonSerializerOptions.Web));
+    }
+
+    private static string BuildTitle(string name)
+    {
+        int maxNameLength = TitleMaxLength - TitlePrefix.Length;
+        int truncatedNameLength = Math.Min(name.Length, maxNameLength);
+        if (truncatedNameLength < name.Length &&
+            truncatedNameLength > 0 &&
+            char.IsHighSurrogate(name[truncatedNameLength - 1]) &&
+            char.IsLowSurrogate(name[truncatedNameLength]))
+        {
+            truncatedNameLength--;
+        }
+
+        return $"{TitlePrefix}{name[..truncatedNameLength]}";
     }
 }
