@@ -196,4 +196,52 @@ describe('ApiKeysPage', () => {
     });
     expect(await screen.findByText('legacy-secret')).toBeInTheDocument();
   });
+
+  it('should permanently dismiss the one-time key display when Done is clicked, never re-showing the secret', async () => {
+    vi.mocked(apiKeysService.createApiKey).mockResolvedValue({ key: 'one-time-secret', id: 'new-id' });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+    fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Desktop client' } });
+    fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+    fireEvent.click(screen.getByLabelText(/Model Read/));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByText('one-time-secret')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    // The one-time secret must be gone from the DOM entirely, not merely masked, since the
+    // component holds no other reference to the raw key after dismissal.
+    expect(screen.queryByText('one-time-secret')).not.toBeInTheDocument();
+  });
+
+  it('should show the newly rotated key as a fresh one-time secret, replacing any prior display', async () => {
+    vi.mocked(apiKeysService.listApiKeys).mockResolvedValue([
+      {
+        id: 'key-1',
+        name: 'Slicer Key',
+        isActive: true,
+        createdAt: '2024-01-01T00:00:00Z',
+        purpose: 'OctoPrint',
+        scopes: 'None',
+        isExpired: false,
+      },
+    ]);
+    vi.mocked(apiKeysService.rotateApiKey).mockResolvedValue({ key: 'rotated-secret', id: 'key-1' });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotate API key Slicer Key' }));
+
+    await waitFor(() => {
+      expect(apiKeysService.rotateApiKey).toHaveBeenCalledWith('user-1', 'key-1');
+    });
+    expect(await screen.findByText('rotated-secret')).toBeInTheDocument();
+    expect(screen.getByText(/won't be able to see it again/i)).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
 });

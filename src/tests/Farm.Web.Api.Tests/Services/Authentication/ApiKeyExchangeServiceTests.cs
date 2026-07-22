@@ -295,4 +295,105 @@ public class ApiKeyExchangeServiceTests
     }
 
     #endregion
+
+    #region Redaction (issue #839)
+
+    /// <summary>
+    /// The raw API key must never appear in application logs or audit records on the success
+    /// path - only its SHA-256 hash is used internally for lookup. This guards against secret
+    /// leakage via log aggregation, telemetry, or the audit trail.
+    /// </summary>
+    [Fact]
+    public async Task ExchangeApiKeyAsync_OnSuccess_NeverLogsOrAuditsRawKeyMaterial()
+    {
+        const string rawKey = "raw-desktop-key-REDACTION-CANARY-98213";
+        Guid userId = Guid.NewGuid();
+        ApiKey key = CreateDesktopKey(ApiKeyScope.ModelRead, userId);
+        User owner = CreateActiveOwner(userId);
+
+        _mockApiKeyRepository.Setup(r => r.GetByKeyHashAsync(It.IsAny<string>())).ReturnsAsync(key);
+        _mockUsersRepository.Setup(r => r.GetUserEntityAsync(userId, It.IsAny<CancellationToken>())).ReturnsAsync(owner);
+
+        ApiKeyExchangeResult result = await _service.ExchangeApiKeyAsync(rawKey, "127.0.0.1", "test-agent");
+
+        result.Success.Should().BeTrue();
+        AssertNoInvocationContainsRawKey(_mockLogger.Invocations, rawKey);
+        AssertNoInvocationContainsRawKey(_mockAuditService.Invocations, rawKey);
+    }
+
+    /// <summary>
+    /// Same guarantee on every rejection path (unknown/revoked/expired all surface identically
+    /// as "not found" from the repository) - the raw key supplied by the caller must never leak
+    /// into logs or the generic-failure audit record.
+    /// </summary>
+    [Theory]
+    [InlineData("does-not-exist-CANARY-11")]
+    [InlineData("expired-key-CANARY-22")]
+    [InlineData("revoked-key-CANARY-33")]
+    public async Task ExchangeApiKeyAsync_OnLookupFailure_NeverLogsOrAuditsRawKeyMaterial(string rawKey)
+    {
+        _mockApiKeyRepository.Setup(r => r.GetByKeyHashAsync(It.IsAny<string>())).ReturnsAsync((ApiKey?)null);
+
+        ApiKeyExchangeResult result = await _service.ExchangeApiKeyAsync(rawKey, "9.9.9.9", "curl/CANARY-agent");
+
+        result.Success.Should().BeFalse();
+        AssertNoInvocationContainsRawKey(_mockLogger.Invocations, rawKey);
+        AssertNoInvocationContainsRawKey(_mockAuditService.Invocations, rawKey);
+    }
+
+    /// <summary>
+    /// Wrong-purpose and under-scoped keys are resolved from the repository (unlike the
+    /// "not found" cases above) and therefore run further inside the service before failing -
+    /// the raw key must still never leak into logs or audit calls.
+    /// </summary>
+    [Fact]
+    public async Task ExchangeApiKeyAsync_WithWrongPurposeOrUnderScopedKey_NeverLogsOrAuditsRawKeyMaterial()
+    {
+        const string rawKey = "octoprint-key-CANARY-44";
+        ApiKey octoPrintKey = CreateDesktopKey();
+        octoPrintKey.Purpose = ApiKeyPurpose.OctoPrint;
+        _mockApiKeyRepository.Setup(r => r.GetByKeyHashAsync(It.IsAny<string>())).ReturnsAsync(octoPrintKey);
+
+        ApiKeyExchangeResult result = await _service.ExchangeApiKeyAsync(rawKey, null, null);
+
+        result.Success.Should().BeFalse();
+        AssertNoInvocationContainsRawKey(_mockLogger.Invocations, rawKey);
+        AssertNoInvocationContainsRawKey(_mockAuditService.Invocations, rawKey);
+    }
+
+    /// <summary>
+    /// Even when the server is misconfigured (missing/short Jwt:Key) and the service logs a
+    /// diagnostic error, that log message must remain generic and never echo the caller-supplied
+    /// raw key.
+    /// </summary>
+    [Fact]
+    public async Task ExchangeApiKeyAsync_WithMissingJwtKeyConfiguration_NeverLogsRawKeyMaterial()
+    {
+        const string rawKey = "valid-key-server-misconfigured-CANARY-55";
+        _mockConfiguration.Setup(c => c["Jwt:Key"]).Returns(string.Empty);
+        Guid userId = Guid.NewGuid();
+        ApiKey key = CreateDesktopKey(ApiKeyScope.ModelRead, userId);
+        User owner = CreateActiveOwner(userId);
+
+        _mockApiKeyRepository.Setup(r => r.GetByKeyHashAsync(It.IsAny<string>())).ReturnsAsync(key);
+        _mockUsersRepository.Setup(r => r.GetUserEntityAsync(userId, It.IsAny<CancellationToken>())).ReturnsAsync(owner);
+
+        await _service.ExchangeApiKeyAsync(rawKey, null, null);
+
+        AssertNoInvocationContainsRawKey(_mockLogger.Invocations, rawKey);
+    }
+
+    private static void AssertNoInvocationContainsRawKey(IEnumerable<Moq.IInvocation> invocations, string rawKey)
+    {
+        foreach (Moq.IInvocation invocation in invocations)
+        {
+            foreach (object? argument in invocation.Arguments)
+            {
+                argument?.ToString().Should().NotContain(rawKey,
+                    "raw API key material must never reach logs or audit records - only its SHA-256 hash is used internally for lookup");
+            }
+        }
+    }
+
+    #endregion
 }
