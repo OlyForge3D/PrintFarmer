@@ -546,34 +546,41 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
     }
 
-    /// Cancellation before registering the continuation: create a Task,
-    /// cancel it, then await its completion. The task must complete via
-    /// the structural cancellation handler, not hang.
+    /// Cancellation before the awaiter has parked: create a Task, cancel
+    /// it, then await its completion. Actor serialisation guarantees the
+    /// park in `awaitWaiter`'s continuation closure completes before the
+    /// `cancelWaiter` Task hops onto the actor, so the drain happens via
+    /// the parked-only path. Post-drain snapshot must show zero
+    /// order/parked/completed state for the cancelled id.
     func testAsyncGateCancelBeforeRegister() async {
         let gate = AsyncGate()
         let task = Task { await gate.wait() }
         task.cancel()
 
         // `await task.value` proves the task completed. If cancellation
-        // handling regressed, this would hang and the test would time out
-        // rather than deadlock.
+        // regressed this would hang instead of deadlocking silently.
         await task.value
 
-        // Drain via close() to release any residual state — must complete.
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0,
+                       "cancel must not relatch into completedWaiters")
+        XCTAssertEqual(snap.completedObserverCount, 0)
         await gate.close()
     }
 
-    /// Cancellation after the continuation has been parked: register
-    /// synchronously, park in an unstructured Task, then cancel that Task.
-    /// The parked continuation is drained exactly once via
-    /// `cancelWaiter`/`cancelObserver`.
+    /// Cancellation after the awaiter has parked: register synchronously,
+    /// park in an unstructured Task, cancel. cancelX drains via
+    /// parkedX exactly once. Post-drain: zero state.
     func testAsyncGateCancelAfterRegister() async {
         let gate = AsyncGate()
 
         // Waiter path.
         let waiterToken = await gate.registerWaiter()
         let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
-        // Drain via cancellation.
         waiterTask.cancel()
         await waiterTask.value
 
@@ -583,34 +590,218 @@ final class PredictiveViewModelTests: XCTestCase {
         observerTask.cancel()
         await observerTask.value
 
-        // Neither path may have left a parked continuation behind.
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0,
+                       "cancel must not relatch into completedWaiters")
+        XCTAssertEqual(snap.completedObserverCount, 0,
+                       "cancel must not relatch into completedObservers")
         await gate.close()
     }
 
-    /// Open/cancel race: start a waiter Task and simultaneously request
-    /// both `open()` and `task.cancel()`. Actor serialisation means
-    /// whichever operation reaches the actor first drains the
-    /// continuation; the other finds it gone and is a no-op. No double
-    /// resume, no hang.
-    func testAsyncGateOpenAndCancelRace() async {
+    /// Open drains the waiter first via `completedWaiters.insert`; the
+    /// subsequently invoked `awaitWaiter` consumes that latch. A late
+    /// `cancelWaiter` (from a cancellation that arrives after the
+    /// continuation has been resumed and the awaitWaiter has returned)
+    /// finds no parked continuation and is a zero-mutation no-op — no
+    /// relatch into `completedWaiters`.
+    func testAsyncGateOpenBeforeCancel_lateCancelIsNoOp() async {
+        let gate = AsyncGate()
+        let waiterToken = await gate.registerWaiter()
+
+        // Drain via open() BEFORE the awaitWaiter task is created.
+        await gate.open()
+        let afterOpen = await gate.snapshot()
+        XCTAssertEqual(afterOpen.completedWaiterCount, 1,
+                       "open must latch not-yet-parked waiter as completed")
+        XCTAssertTrue(afterOpen.opened)
+
+        // Await + cancel. awaitWaiter picks up the latched completion
+        // via `completedWaiters.remove(id)` and resumes. cancelWaiter
+        // that runs afterwards must be a no-op.
+        let task = Task { await gate.awaitWaiter(waiterToken) }
+        await task.value
+        task.cancel()
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedWaiterCount, 0)
+        XCTAssertEqual(final.waiterOrder, [])
+        XCTAssertEqual(final.completedWaiterCount, 0,
+                       "the awaitWaiter must have removed the latch AND the late cancel must not relatch")
+        await gate.close()
+    }
+
+    /// Symmetric case for observer path: signalEntry latches the observer
+    /// as completed; awaitObserver drains the latch; a late cancel is a
+    /// zero-mutation no-op.
+    func testAsyncGateSignalBeforeAwait_lateCancelIsNoOp() async {
+        let gate = AsyncGate()
+        let observerToken = await gate.registerObserver()
+
+        // Signal via a waiter — observer is latched completed because
+        // there is no parked continuation yet.
+        _ = await gate.registerWaiter()
+        let afterSignal = await gate.snapshot()
+        XCTAssertEqual(afterSignal.completedObserverCount, 1)
+        XCTAssertEqual(afterSignal.observerOrder, [])
+
+        let task = Task { await gate.awaitObserver(observerToken) }
+        await task.value
+        task.cancel()
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        XCTAssertEqual(final.observerOrder, [])
+        XCTAssertEqual(final.completedObserverCount, 0,
+                       "awaitObserver must consume the latch AND the late cancel must not relatch")
+        await gate.close()
+    }
+
+    /// Open/cancel race — cancel mailboxed BEFORE open. Ordering forced
+    /// by first parking the awaiter synchronously through the actor
+    /// (register + Task { awaitWaiter } + immediate cancel), then
+    /// requesting `open()` on the actor after the cancel Task has already
+    /// been queued. cancelWaiter drains via parkedX; open runs later on
+    /// an already-empty queue.
+    func testAsyncGateCancelBeforeOpen_bothCleanState() async {
         let gate = AsyncGate()
         let waiterToken = await gate.registerWaiter()
         let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
 
-        // Kick off both terminations. `open()` is an actor call; cancel is
-        // a synchronous request that schedules `cancelWaiter` on the
-        // actor. Actor mailbox FIFO serialises them.
-        async let openCall: Void = gate.open()
+        // Cancel first — schedules cancelWaiter Task on the actor mailbox
+        // AFTER awaitWaiter's park (park runs synchronously in the
+        // current actor turn).
         waiterTask.cancel()
-        await openCall
+        await waiterTask.value
+
+        // Then open — waiterOrder is already empty because cancelWaiter
+        // drained the id; open finds nothing to drain.
+        await gate.open()
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0,
+                       "cancel-then-open must not leave any completedWaiters latched")
+        XCTAssertTrue(snap.opened)
+        await gate.close()
+    }
+
+    /// Open/cancel race — open mailboxed BEFORE cancel. Ordering forced
+    /// by explicitly `await`ing `open()` before creating the awaiter
+    /// task; open latches the not-yet-awaited token, awaitWaiter picks
+    /// up the latch on entry, cancelWaiter runs afterwards on a parked-
+    /// empty gate and is a no-op.
+    func testAsyncGateOpenBeforeCancel_bothCleanState() async {
+        let gate = AsyncGate()
+        let waiterToken = await gate.registerWaiter()
+
+        await gate.open()   // drains waiterOrder → completedWaiters=[id]
+        let afterOpen = await gate.snapshot()
+        XCTAssertEqual(afterOpen.completedWaiterCount, 1)
+
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        waiterTask.cancel()
         await waiterTask.value
 
         let snap = await gate.snapshot()
-        XCTAssertEqual(snap.parkedWaiterCount, 0, "no parked continuation may remain")
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0,
+                       "awaitWaiter must remove the latch AND late cancel must not relatch")
         XCTAssertTrue(snap.opened)
+        await gate.close()
+    }
+
+    /// Close/cancel race — cancel mailboxed BEFORE close.
+    func testAsyncGateCancelBeforeClose_bothCleanState() async {
+        let gate = AsyncGate()
+        let waiterToken = await gate.registerWaiter()
+        let observerToken = await gate.registerObserver()
+        // registerObserver captured the pending signal emitted by
+        // registerWaiter, so observer is already completed. Register
+        // another observer that has no matching signal.
+        let strandedObserver = await gate.registerObserver()
+
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        let observerTask = Task { await gate.awaitObserver(observerToken) }
+        let strandedTask = Task { await gate.awaitObserver(strandedObserver) }
+
+        waiterTask.cancel()
+        strandedTask.cancel()
+        await waiterTask.value
+        await strandedTask.value
+        // The other observer completed via the pending signal on register.
+        await observerTask.value
+
+        await gate.close()
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0,
+                       "no completedWaiters may remain after cancel-then-close")
+        XCTAssertEqual(snap.completedObserverCount, 0,
+                       "no completedObservers may remain after cancel-then-close")
+        XCTAssertTrue(snap.closed)
+    }
+
+    /// Close/cancel race — close mailboxed BEFORE cancel. close() drains
+    /// parked continuations; a later cancel finds nothing parked and is
+    /// a no-op.
+    func testAsyncGateCloseBeforeCancel_bothCleanState() async {
+        let gate = AsyncGate()
+        let waiterToken = await gate.registerWaiter()
+        let observerToken = await gate.registerObserver()   // consumes pending signal
+        let strandedObserver = await gate.registerObserver()
+
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        let strandedTask = Task { await gate.awaitObserver(strandedObserver) }
+        let observerTask = Task { await gate.awaitObserver(observerToken) }
+
+        // Force close to actor first.
+        await gate.close()
+        // Then cancel — everything is already drained; cancel is a no-op.
+        waiterTask.cancel()
+        strandedTask.cancel()
+        observerTask.cancel()
+        await waiterTask.value
+        await strandedTask.value
+        await observerTask.value
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0,
+                       "close-then-late-cancel must not relatch waiter")
+        XCTAssertEqual(snap.completedObserverCount, 0,
+                       "close-then-late-cancel must not relatch observer")
+        XCTAssertTrue(snap.closed)
+    }
+
+    /// Late cancel after resume — a Task that has already completed
+    /// awaitX and been resumed via `signalEntry`/`open` receives a
+    /// `.cancel()` afterwards. onCancel does not fire (handler scope
+    /// exited); no state mutation occurs.
+    func testAsyncGateLateCancelAfterResumeIsNoOp() async {
+        let gate = AsyncGate()
+        let observerToken = await gate.registerObserver()
+        _ = await gate.registerWaiter()  // signals observer → completed latch
+        let task = Task { await gate.awaitObserver(observerToken) }
+        await task.value        // task completed, handler scope exited
+        task.cancel()           // no-op — no handler installed anymore
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedObserverCount, 0)
         await gate.close()
     }
 
@@ -1092,10 +1283,13 @@ private actor AsyncGate {
         return ObserverToken(id: id)
     }
 
-    /// Await the previously registered observer. Structurally
-    /// cancellation-safe: if the enclosing Task is cancelled before or
-    /// after the continuation is parked, the observer is drained exactly
-    /// once via `cancelObserver`.
+    /// Await the previously registered observer. Parks unconditionally
+    /// unless the token has already terminated (completed via a prior
+    /// entry signal, or drained by close). Cancellation is routed
+    /// through `cancelObserver` via the structural `onCancel` handler;
+    /// the actor's serial executor guarantees the park completes before
+    /// `cancelObserver` runs, so the continuation is always drained via
+    /// the `parkedObservers` path exactly once.
     func awaitObserver(_ token: ObserverToken) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
@@ -1108,11 +1302,14 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                if Task.isCancelled {
-                    observerOrder.removeAll { $0 == token.id }
-                    c.resume()
-                    return
-                }
+                // No inline Task.isCancelled fast path. If the task was
+                // cancelled, `withTaskCancellationHandler` has already
+                // (or will imminently) spawn a `cancelObserver` Task that
+                // hops onto this actor strictly after this park because
+                // the actor turn does not release until this closure
+                // returns and the enclosing `await` suspends. Routing
+                // cancellation through the parked-only path is what makes
+                // late cancellation a bounded no-op.
                 parkedObservers[token.id] = c
             }
         } onCancel: {
@@ -1120,15 +1317,17 @@ private actor AsyncGate {
         }
     }
 
+    /// Late-cancel-safe. Mutates state ONLY when the continuation is
+    /// currently parked. If the id was already terminated by another
+    /// path (signalEntry drain, open/close drain, or completed-latch
+    /// short-circuit) this is a bounded no-op with zero state mutation
+    /// and never relatches into `completedObservers`.
     private func cancelObserver(id: UInt64) {
-        observerOrder.removeAll { $0 == id }
-        if let c = parkedObservers.removeValue(forKey: id) {
-            c.resume()
-        } else if completedObservers.contains(id) == false {
-            // Continuation not yet parked. Latch completion so a later
-            // `awaitObserver` returns immediately.
-            completedObservers.insert(id)
+        guard let c = parkedObservers.removeValue(forKey: id) else {
+            return
         }
+        observerOrder.removeAll { $0 == id }
+        c.resume()
     }
 
     /// Convenience: single-shot observer registration + await.
@@ -1165,11 +1364,8 @@ private actor AsyncGate {
                     c.resume()
                     return
                 }
-                if Task.isCancelled {
-                    waiterOrder.removeAll { $0 == token.id }
-                    c.resume()
-                    return
-                }
+                // No inline Task.isCancelled fast path — see the note on
+                // `awaitObserver` for the actor-serialisation argument.
                 parkedWaiters[token.id] = c
             }
         } onCancel: {
@@ -1177,13 +1373,14 @@ private actor AsyncGate {
         }
     }
 
+    /// Late-cancel-safe. Mutates state ONLY when the continuation is
+    /// currently parked. Never relatches into `completedWaiters`.
     private func cancelWaiter(id: UInt64) {
-        waiterOrder.removeAll { $0 == id }
-        if let c = parkedWaiters.removeValue(forKey: id) {
-            c.resume()
-        } else if completedWaiters.contains(id) == false {
-            completedWaiters.insert(id)
+        guard let c = parkedWaiters.removeValue(forKey: id) else {
+            return
         }
+        waiterOrder.removeAll { $0 == id }
+        c.resume()
     }
 
     /// Convenience: single-shot waiter registration + await.
