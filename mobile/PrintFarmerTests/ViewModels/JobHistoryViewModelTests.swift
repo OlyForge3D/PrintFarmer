@@ -319,7 +319,7 @@ final class JobHistoryViewModelTests: XCTestCase {
             stats: nil
         )
 
-        let gated = GatedJobAnalyticsService()
+        let gated = GatedJobAnalyticsService(maxGatedCalls: 1)
         gated.historyPageToReturn = QueueHistoryPage(
             entries: [],
             totalCount: 100,
@@ -331,15 +331,22 @@ final class JobHistoryViewModelTests: XCTestCase {
 
         let task = Task { await viewModel.loadMore() }
 
-        // Deterministic barrier: wait until getHistory has been entered on the
-        // background task before mutating view state. No sleeps, polling, or
-        // Task.yield passes are used.
-        _ = await gated.awaitEntered()
+        // Deterministic barrier: `awaitEntered()` unblocks only after the
+        // gate has installed the per-call release continuation, so the
+        // subsequent `release(callIndex:)` cannot race installation and be
+        // dropped. No sleeps, polling, Task.yield, or elapsed-time gates.
+        guard let callIndex = await gated.awaitEntered() else {
+            return XCTFail("expected gate entry signal")
+        }
 
         viewModel.isViewActive = false
-        gated.release()
+        await gated.release(callIndex: callIndex)
         await task.value
 
+        let callCount = await gated.callCount
+        XCTAssertEqual(callCount, 1)
+        let recorded = await gated.recordedCalls
+        XCTAssertEqual(recorded.map(\.offset), [30])
         XCTAssertEqual(viewModel.currentOffset, 0)
         // Cursor stayed at 0, and the historyPage was not overwritten.
         XCTAssertEqual(viewModel.historyPage?.entries.count, 0)
@@ -349,6 +356,12 @@ final class JobHistoryViewModelTests: XCTestCase {
     /// Regression for #810. Concurrent duplicate `loadMore()` calls must be
     /// suppressed by the `!isLoadingMore` guard so the service is invoked
     /// exactly once and the cursor cannot drift by more than one page.
+    ///
+    /// `maxGatedCalls: 1` bounds the gate so a regression that lets the
+    /// second call reach the service records a second entry and returns
+    /// immediately (without gating). The subsequent `callCount == 1`
+    /// assertion then fails deterministically — the test cannot hang
+    /// waiting on an un-released continuation.
     func testLoadMoreConcurrentCallsAreSuppressed() async {
         viewModel.historyPage = QueueHistoryPage(
             entries: [],
@@ -358,7 +371,7 @@ final class JobHistoryViewModelTests: XCTestCase {
             stats: nil
         )
 
-        let gated = GatedJobAnalyticsService()
+        let gated = GatedJobAnalyticsService(maxGatedCalls: 1)
         gated.historyPageToReturn = QueueHistoryPage(
             entries: [],
             totalCount: 100,
@@ -370,17 +383,82 @@ final class JobHistoryViewModelTests: XCTestCase {
 
         // First call suspends inside getHistory on the gate.
         let first = Task { await viewModel.loadMore() }
-        _ = await gated.awaitEntered()
+        guard let firstIndex = await gated.awaitEntered() else {
+            return XCTFail("expected gate entry signal for first call")
+        }
+        XCTAssertEqual(firstIndex, 0)
 
         // Second call runs while the first is in flight. The synchronous
-        // `!isLoadingMore` guard must reject it before any suspension.
+        // `!isLoadingMore` guard must reject it before any suspension so
+        // the service is never re-invoked.
         await viewModel.loadMore()
 
-        gated.release()
+        // Deterministic regression check: performed BEFORE releasing the
+        // first call so a regressed guard fails via assertion, not by
+        // hanging on an ungated request.
+        let midCallCount = await gated.callCount
+        XCTAssertEqual(midCallCount, 1)
+        let recorded = await gated.recordedCalls
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertEqual(recorded.first?.offset, 30)
+        XCTAssertEqual(recorded.first?.limit, 30)
+
+        await gated.release(callIndex: firstIndex)
         await first.value
 
-        XCTAssertEqual(gated.callCount, 1)
+        let finalCallCount = await gated.callCount
+        XCTAssertEqual(finalCallCount, 1)
         XCTAssertEqual(viewModel.currentOffset, 30)
+    }
+
+    /// Direct proof that the gate's install-then-signal ordering rules out
+    /// dropped or overwritten release continuations. Two calls are gated in
+    /// order; each `release(callIndex:)` targets a specific call, and the
+    /// gate cannot leak or resume the wrong continuation because state is
+    /// keyed by unique per-call indices under actor isolation.
+    func testGatedFakeInstallsReleaseBeforeSignalingEntry() async {
+        let gated = GatedJobAnalyticsService(maxGatedCalls: 2)
+        gated.historyPageToReturn = QueueHistoryPage(
+            entries: [],
+            totalCount: 0,
+            currentPage: 1,
+            pageSize: 30,
+            stats: nil
+        )
+
+        // Two concurrent gated getHistory calls.
+        let taskA = Task {
+            _ = try? await gated.getHistory(
+                limit: 30, offset: 30,
+                sortBy: nil, statuses: nil, dateStart: nil, dateEnd: nil
+            )
+        }
+        guard let indexA = await gated.awaitEntered() else {
+            return XCTFail("expected entry signal for call A")
+        }
+
+        let taskB = Task {
+            _ = try? await gated.getHistory(
+                limit: 30, offset: 60,
+                sortBy: nil, statuses: nil, dateStart: nil, dateEnd: nil
+            )
+        }
+        guard let indexB = await gated.awaitEntered() else {
+            return XCTFail("expected entry signal for call B")
+        }
+
+        XCTAssertEqual(indexA, 0)
+        XCTAssertEqual(indexB, 1)
+
+        // Release out of order to prove per-call keying works.
+        await gated.release(callIndex: indexB)
+        await taskB.value
+        await gated.release(callIndex: indexA)
+        await taskA.value
+
+        let recorded = await gated.recordedCalls
+        XCTAssertEqual(recorded.count, 2)
+        XCTAssertEqual(recorded.map(\.offset), [30, 60])
     }
     
     // MARK: - Load Timeline
@@ -583,50 +661,65 @@ final class JobHistoryViewModelTests: XCTestCase {
 // MARK: - Test Helpers
 
 /// Deterministic gated fake used by the #810 concurrency and cancellation
-/// tests. `getHistory` suspends until `release()` is called, and emits a
-/// signal on entry so the test can await the exact moment the request
-/// begins without polling, sleeping, or `Task.yield`ing.
+/// tests. State is serialized through an actor, per-call state is keyed by
+/// unique call index, and each request installs its release continuation
+/// **before** signaling entry — so a `release(callIndex:)` arriving from the
+/// test task in the window between "gate entered" and "continuation
+/// installed" cannot be dropped, and a duplicate call cannot overwrite a
+/// prior continuation. Releases that arrive before their matching call are
+/// buffered by call index, never lost. `maxGatedCalls` bounds the number of
+/// gated calls: excess calls are recorded and returned immediately without
+/// gating, so a regression in duplicate-load suppression fails via a
+/// `callCount` assertion instead of hanging on an un-released continuation.
+///
+/// No sleep, polling, `Task.yield`, or elapsed-time gates are used.
 private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sendable {
+    struct RecordedCall: Sendable {
+        let index: Int
+        let limit: Int?
+        let offset: Int?
+        let sortBy: String?
+        let statuses: String?
+        let dateStart: Date?
+        let dateEnd: Date?
+    }
+
     var historyPageToReturn: QueueHistoryPage?
     var errorToThrow: Error?
-    private(set) var callCount = 0
 
-    private let entered: AsyncStream<Int>
-    private let enteredContinuation: AsyncStream<Int>.Continuation
-    private var iterator: AsyncStream<Int>.AsyncIterator
+    private let gate: Gate
 
-    private var releaseContinuation: CheckedContinuation<Void, Never>?
-    private let releaseLock = NSLock()
-
-    init() {
-        let stream = AsyncStream<Int>.makeStream()
-        self.entered = stream.stream
-        self.enteredContinuation = stream.continuation
-        self.iterator = stream.stream.makeAsyncIterator()
+    init(maxGatedCalls: Int = .max) {
+        self.gate = Gate(maxGatedCalls: maxGatedCalls)
     }
 
-    /// Awaits the next entry into `getHistory` (returns the offset requested).
+    /// Awaits the entry of the next `getHistory` invocation and returns its
+    /// call index. Unblocks only after the gate has recorded the call AND
+    /// installed the release continuation, so `release(callIndex:)` from the
+    /// caller cannot race installation.
     func awaitEntered() async -> Int? {
-        await iterator.next()
+        await gate.awaitEntered()
     }
 
-    /// Resumes the currently gated `getHistory` call.
-    func release() {
-        releaseLock.lock()
-        let continuation = releaseContinuation
-        releaseContinuation = nil
-        releaseLock.unlock()
-        continuation?.resume()
+    /// Resumes the specified gated call, or buffers the release for the
+    /// call at that index if the request has not reached the gate yet.
+    func release(callIndex: Int) async {
+        await gate.release(callIndex: callIndex)
+    }
+
+    var callCount: Int {
+        get async { await gate.callCount }
+    }
+
+    var recordedCalls: [RecordedCall] {
+        get async { await gate.recordedCalls }
     }
 
     func getHistory(limit: Int?, offset: Int?, sortBy: String?, statuses: String?, dateStart: Date?, dateEnd: Date?) async throws -> QueueHistoryPage {
-        callCount += 1
-        enteredContinuation.yield(offset ?? -1)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            releaseLock.lock()
-            releaseContinuation = continuation
-            releaseLock.unlock()
-        }
+        _ = await gate.recordAndWait(
+            limit: limit, offset: offset, sortBy: sortBy,
+            statuses: statuses, dateStart: dateStart, dateEnd: dateEnd
+        )
         if let error = errorToThrow { throw error }
         return historyPageToReturn!
     }
@@ -643,5 +736,87 @@ private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unch
     }
     func getDurationAnalytics(printerId: UUID?, dateFrom: Date?, dateTo: Date?) async throws -> DurationAnalytics {
         throw TestError.generic
+    }
+
+    private actor Gate {
+        private var recorded: [RecordedCall] = []
+        private var pendingReleases: [Int: CheckedContinuation<Void, Never>] = [:]
+        private var bufferedReleases: Set<Int> = []
+        private var enteredQueue: [Int] = []
+        private var enteredWaiter: CheckedContinuation<Int?, Never>?
+        private let maxGatedCalls: Int
+
+        init(maxGatedCalls: Int) {
+            self.maxGatedCalls = maxGatedCalls
+        }
+
+        var recordedCalls: [RecordedCall] { recorded }
+        var callCount: Int { recorded.count }
+
+        /// Awaits the next entry signal. If entries have already been
+        /// recorded but not yet consumed, returns immediately from the
+        /// FIFO queue. Otherwise installs a single waiter continuation
+        /// resumed by the next `signalEntered(_:)` call. At most one
+        /// `awaitEntered()` may be pending at a time; the precondition
+        /// surfaces any test-side misuse as a failure rather than a hang.
+        func awaitEntered() async -> Int? {
+            if !enteredQueue.isEmpty {
+                return enteredQueue.removeFirst()
+            }
+            return await withCheckedContinuation { (continuation: CheckedContinuation<Int?, Never>) in
+                precondition(enteredWaiter == nil, "only one awaitEntered() may be pending at a time")
+                enteredWaiter = continuation
+            }
+        }
+
+        private func signalEntered(_ index: Int) {
+            if let waiter = enteredWaiter {
+                enteredWaiter = nil
+                waiter.resume(returning: index)
+            } else {
+                enteredQueue.append(index)
+            }
+        }
+
+        func recordAndWait(limit: Int?, offset: Int?, sortBy: String?, statuses: String?, dateStart: Date?, dateEnd: Date?) async -> Int {
+            let index = recorded.count
+            recorded.append(RecordedCall(
+                index: index, limit: limit, offset: offset,
+                sortBy: sortBy, statuses: statuses,
+                dateStart: dateStart, dateEnd: dateEnd
+            ))
+
+            guard index < maxGatedCalls else {
+                // Excess call — signal entry so the test can observe it and
+                // return immediately without gating so the test cannot hang.
+                signalEntered(index)
+                return index
+            }
+
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                // Install-then-signal. `signalEntered` is invoked here,
+                // AFTER `pendingReleases[index]` is populated (or a matching
+                // buffered release is consumed), so any concurrent
+                // `release(callIndex:)` reaching the actor after entry is
+                // observed by the test cannot race installation.
+                if bufferedReleases.remove(index) != nil {
+                    continuation.resume()
+                } else {
+                    precondition(pendingReleases[index] == nil, "duplicate continuation slot for call index \(index)")
+                    pendingReleases[index] = continuation
+                }
+                signalEntered(index)
+            }
+            return index
+        }
+
+        func release(callIndex: Int) {
+            if let continuation = pendingReleases.removeValue(forKey: callIndex) {
+                continuation.resume()
+            } else {
+                let inserted = bufferedReleases.insert(callIndex).inserted
+                precondition(inserted, "duplicate buffered release for call index \(callIndex)")
+            }
+        }
     }
 }
