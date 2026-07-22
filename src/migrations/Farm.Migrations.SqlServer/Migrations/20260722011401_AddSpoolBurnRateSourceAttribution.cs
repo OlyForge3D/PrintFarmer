@@ -22,7 +22,8 @@ public partial class AddSpoolBurnRateSourceAttribution : Migration
             table: "PrintJobToolheadUsages",
             type: "nvarchar(256)",
             maxLength: 256,
-            nullable: true);
+            nullable: true,
+            collation: "Latin1_General_100_BIN2");
 
         migrationBuilder.AddColumn<string>(
             name: "SpoolSourceKind",

@@ -83,6 +83,35 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ProjectAsync_PathCaseDifference_ProducesIndependentHistories()
+    {
+        CanonicalSpoolIdentity upperPath = Identity(
+            SpoolSourceKind.MoonrakerNative,
+            "http://moon.local/App");
+        CanonicalSpoolIdentity lowerPath = Identity(
+            SpoolSourceKind.MoonrakerNative,
+            "http://moon.local/app");
+        await SeedCompletedSampleAsync(upperPath, 30, Now.AddDays(-1));
+        await SeedCompletedSampleAsync(lowerPath, 90, Now.AddDays(-1));
+        SetupRemaining(upperPath, 100);
+        SetupRemaining(lowerPath, 200);
+        SetMinimumSamples(1);
+
+        await using AppDbContext projectionContext = CreateContext();
+        SpoolBurnRateProjectionService service = CreateService(projectionContext);
+
+        SpoolBurnRateProjectionDto upperResult =
+            await service.ProjectAsync(upperPath);
+        SpoolBurnRateProjectionDto lowerResult =
+            await service.ProjectAsync(lowerPath);
+
+        upperResult.AuthoritativeGramsConsumed.Should().Be(30);
+        lowerResult.AuthoritativeGramsConsumed.Should().Be(90);
+        upperResult.SampleCount.Should().Be(1);
+        lowerResult.SampleCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task ProjectAsync_ExactBoundaries_ComputesRateAndThresholdCrossing()
     {
         CanonicalSpoolIdentity identity = Identity(

@@ -93,8 +93,11 @@ public sealed class FilamentCoverageSpoolResolver(
                         ReasonSourceUnavailable);
                 }
 
+                string nativeBaseUrl = identity.SourceIdentity.EndsWith('/')
+                    ? identity.SourceIdentity
+                    : identity.SourceIdentity + "/";
                 resolved = await ResolveNativeAsync(
-                    new SourceRequest(native, identity.SourceIdentity)
+                    new SourceRequest(native, nativeBaseUrl)
                     {
                         SpoolIds = { identity.SpoolId },
                     },

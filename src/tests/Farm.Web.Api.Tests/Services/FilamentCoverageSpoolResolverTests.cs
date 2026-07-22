@@ -44,11 +44,11 @@ public class FilamentCoverageSpoolResolverTests
     }
 
     [Fact]
-    public async Task ResolveSpoolAsync_CanonicalNativeIdentity_UsesHistoricalSource()
+    public async Task ResolveSpoolAsync_CanonicalNativeIdentity_PreservesConfiguredSubPath()
     {
         await using AppDbContext db = CreateContext();
         db.Printers.Add(PrinterWithSpool(
-            "http://moon.local",
+            "HTTP://MOON.LOCAL:80/proxy/",
             PrinterBackend.Moonraker,
             42));
         await db.SaveChangesAsync();
@@ -67,7 +67,7 @@ public class FilamentCoverageSpoolResolverTests
             db);
         CanonicalSpoolIdentity identity = new(
             SpoolSourceKind.MoonrakerNative,
-            "HTTP://MOON.LOCAL:80/",
+            "http://moon.local/proxy",
             42);
 
         FilamentCoverageSpoolSnapshot result =
@@ -76,7 +76,7 @@ public class FilamentCoverageSpoolResolverTests
         result.Spool!.RemainingWeightG.Should().Be(321);
         native.As<ISupportsSpoolman>().Verify(
             service => service.GetSpoolmanSpoolsAsync(
-                "http://moon.local",
+                "http://moon.local/proxy/",
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

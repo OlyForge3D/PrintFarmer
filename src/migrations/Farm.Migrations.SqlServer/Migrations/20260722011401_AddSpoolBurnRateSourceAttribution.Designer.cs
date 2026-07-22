@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260721234112_AddSpoolBurnRateSourceAttribution")]
+    [Migration("20260722011401_AddSpoolBurnRateSourceAttribution")]
     partial class AddSpoolBurnRateSourceAttribution
     {
         /// <inheritdoc />
@@ -4020,7 +4020,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("SpoolSourceIdentity")
                         .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
+                        .HasColumnType("nvarchar(256)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<string>("SpoolSourceKind")
                         .HasMaxLength(32)

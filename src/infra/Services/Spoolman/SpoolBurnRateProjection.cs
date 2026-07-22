@@ -129,7 +129,7 @@ public sealed class SpoolBurnRateProjectionService(
                 thresholdCrossingUtc = evaluatedAtUtc;
             }
             else if (!double.IsFinite(projectedDays)
-                || projectedDays > maximumProjectedDays)
+                || projectedDays >= maximumProjectedDays)
             {
                 state = SpoolBurnRateProjectionState.InsufficientData;
             }

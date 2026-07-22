@@ -4017,7 +4017,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("SpoolSourceIdentity")
                         .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
+                        .HasColumnType("nvarchar(256)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<string>("SpoolSourceKind")
                         .HasMaxLength(32)

@@ -17,7 +17,8 @@ public sealed class SpoolBurnRateSourceAttributionMigrationTests
             new Farm.Migrations.PostgreSQL.Migrations.AddSpoolBurnRateSourceAttribution(),
             "character varying(256)",
             "character varying(32)",
-            "boolean");
+            "boolean",
+            null);
     }
 
     [Fact]
@@ -27,7 +28,8 @@ public sealed class SpoolBurnRateSourceAttributionMigrationTests
             new Farm.Migrations.SqlServer.Migrations.AddSpoolBurnRateSourceAttribution(),
             "nvarchar(256)",
             "nvarchar(32)",
-            "bit");
+            "bit",
+            "Latin1_General_100_BIN2");
     }
 
     [Fact]
@@ -79,7 +81,8 @@ public sealed class SpoolBurnRateSourceAttributionMigrationTests
         Migration migration,
         string sourceIdentityType,
         string sourceKindType,
-        string authoritativeType)
+        string authoritativeType,
+        string? sourceIdentityCollation)
     {
         IReadOnlyList<MigrationOperation> up = migration.UpOperations;
         List<AddColumnOperation> columns = up.OfType<AddColumnOperation>().ToList();
@@ -93,6 +96,7 @@ public sealed class SpoolBurnRateSourceAttributionMigrationTests
             CanonicalSpoolIdentity.MaxSourceIdentityLength,
             sourceIdentity.MaxLength);
         Assert.Equal(sourceIdentityType, sourceIdentity.ColumnType);
+        Assert.Equal(sourceIdentityCollation, sourceIdentity.Collation);
         Assert.True(sourceIdentity.IsNullable);
 
         AddColumnOperation sourceKind = Assert.Single(
