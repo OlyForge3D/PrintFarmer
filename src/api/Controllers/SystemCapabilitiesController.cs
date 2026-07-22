@@ -43,6 +43,8 @@ public class SystemCapabilitiesController(
             ModelFilesEnabled = modelFilesEnabled,
             ThumbnailGenerationEnabled = thumbnailEnabled,
             GcodeUploadEnabled = true,
+            ClientThumbnailUploadEnabled = modelFilesEnabled,
+            IdempotentModelUploadEnabled = modelFilesEnabled,
             PlatformNote = platformNote,
         };
 

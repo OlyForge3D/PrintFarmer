@@ -24,6 +24,12 @@ public interface IModel3DFileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<Model3D?> GetByHashAsync(string fileHash, CancellationToken ct);
 
+    /// <summary>Retrieves an idempotent upload for a specific user.</summary>
+    /// <param name="userId">The upload owner.</param>
+    /// <param name="clientUploadId">The caller-provided idempotency identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3D?> GetByClientUploadIdAsync(Guid userId, Guid clientUploadId, CancellationToken ct);
+
     /// <summary>Retrieves all valid models ordered by upload date descending.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct);

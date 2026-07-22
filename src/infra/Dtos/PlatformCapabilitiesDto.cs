@@ -21,6 +21,12 @@ public record PlatformCapabilitiesDto
     /// <summary>Gets whether G-code upload is available. Always true (no native deps).</summary>
     public bool GcodeUploadEnabled { get; init; } = true;
 
+    /// <summary>Gets whether model uploads accept client-generated PNG thumbnails.</summary>
+    public bool ClientThumbnailUploadEnabled { get; init; } = true;
+
+    /// <summary>Gets whether model uploads support caller-provided idempotency identifiers.</summary>
+    public bool IdempotentModelUploadEnabled { get; init; } = true;
+
     /// <summary>Gets an optional note explaining platform limitations.</summary>
     public string? PlatformNote { get; init; }
 }

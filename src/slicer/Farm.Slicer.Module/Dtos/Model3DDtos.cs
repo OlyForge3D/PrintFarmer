@@ -109,6 +109,15 @@ public class Model3DUploadResultDto
 
     /// <summary>Gets or sets the download URL.</summary>
     public string Url { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the thumbnail URL.</summary>
+    public string? ThumbnailUrl { get; set; }
+
+    /// <summary>Gets or sets whether this response represents an existing upload.</summary>
+    public bool WasExisting { get; set; }
+
+    /// <summary>Gets or sets the caller-provided upload idempotency identifier.</summary>
+    public Guid? ClientUploadId { get; set; }
 }
 
 /// <summary>

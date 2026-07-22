@@ -381,17 +381,51 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
     /// <inheritdoc />
     public Task<Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct)
-        => UploadModelAsync(modelFile, thumbnailFile: null, ct);
+        => UploadModelCoreAsync(modelFile, thumbnailFile: null, userId: null, clientUploadId: null, ct);
 
     /// <inheritdoc />
-    public async Task<Model3DUploadResultDto> UploadModelAsync(
+    public Task<Model3DUploadResultDto> UploadModelAsync(
         IFormFile modelFile,
         IFormFile? thumbnailFile,
+        CancellationToken ct)
+        => UploadModelCoreAsync(modelFile, thumbnailFile, userId: null, clientUploadId: null, ct);
+
+    /// <inheritdoc />
+    public Task<Model3DUploadResultDto> UploadModelAsync(
+        IFormFile modelFile,
+        IFormFile? thumbnailFile,
+        Guid userId,
+        Guid? clientUploadId,
+        CancellationToken ct)
+    {
+        if (userId == Guid.Empty)
+        {
+            throw new ArgumentException("Upload owner is required", nameof(userId));
+        }
+
+        if (clientUploadId == Guid.Empty)
+        {
+            throw new ArgumentException("clientUploadId must be a non-empty GUID", nameof(clientUploadId));
+        }
+
+        return UploadModelCoreAsync(modelFile, thumbnailFile, userId, clientUploadId, ct);
+    }
+
+    private async Task<Model3DUploadResultDto> UploadModelCoreAsync(
+        IFormFile modelFile,
+        IFormFile? thumbnailFile,
+        Guid? userId,
+        Guid? clientUploadId,
         CancellationToken ct)
     {
         if (modelFile == null || modelFile.Length == 0)
         {
             throw new ArgumentException("Model file is required", nameof(modelFile));
+        }
+
+        if (clientUploadId.HasValue && !userId.HasValue)
+        {
+            throw new ArgumentException("An upload owner is required when clientUploadId is provided", nameof(userId));
         }
 
         string originalName = modelFile.FileName ?? string.Empty;
@@ -423,6 +457,20 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         try
         {
             string fileHash = await StreamModelToTempAndHashAsync(modelFile, tempFilePath, ct);
+            string clientUploadHash = fileHash;
+
+            if (userId.HasValue && clientUploadId.HasValue)
+            {
+                Model3D? existingUpload = await _model3dFiles.GetByClientUploadIdAsync(
+                    userId.Value,
+                    clientUploadId.Value,
+                    ct);
+                if (existingUpload is not null)
+                {
+                    DeleteUploadArtifact(tempFilePath);
+                    return CreateIdempotentRetryResult(existingUpload, clientUploadHash);
+                }
+            }
 
             if (thumbnailFile is not null)
             {
@@ -458,7 +506,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             // Step 3: Check for duplicates
             Model3D? existingModel = await _model3dFiles.GetByHashAsync(fileHash, ct);
             string baseName = Path.GetFileNameWithoutExtension(originalName);
-            if (existingModel != null)
+            if (existingModel != null && !clientUploadId.HasValue)
             {
                 string existingBaseName = Path.GetFileNameWithoutExtension(existingModel.FileName);
                 string existingExt = Path.GetExtension(existingModel.FileName);
@@ -473,18 +521,17 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                     DeleteUploadArtifact(tempFilePath);
                     DeleteUploadArtifact(thumbnailTempPath);
 
-                    return new Model3DUploadResultDto
-                    {
-                        Id = existingModel.Id,
-                        FileName = existingModel.FileName,
-                        FileSize = existingModel.FileSizeBytes,
-                        FileType = _fileManagementService.GetModelFileFormatString(existingModel.FileFormat),
-                        UploadedAt = existingModel.UploadedAt,
-                        Url = _fileOperations.BuildModel3DFileUrl(existingModel.Id, existingModel.FileFormat)
-                    };
+                    return CreateUploadResult(existingModel, wasExisting: true);
                 }
 
                 byte[] composite = System.Text.Encoding.UTF8.GetBytes(fileHash + "|" + originalName);
+                byte[] newHashBytes = SHA256.HashData(composite);
+                fileHash = _fileManagementService.ToHex(newHashBytes);
+            }
+            else if (existingModel is not null)
+            {
+                byte[] composite = System.Text.Encoding.UTF8.GetBytes(
+                    $"{fileHash}|{userId:D}|{clientUploadId:D}");
                 byte[] newHashBytes = SHA256.HashData(composite);
                 fileHash = _fileManagementService.ToHex(newHashBytes);
             }
@@ -548,11 +595,38 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 DimensionY = analysis?.DimensionY,
                 DimensionZ = analysis?.DimensionZ,
                 TriangleCount = analysis?.TriangleCount,
-                ThumbnailFileName = thumbnailFileName
+                ThumbnailFileName = thumbnailFileName,
+                UploadedByUserId = userId,
+                ClientUploadId = clientUploadId,
+                ClientUploadHash = clientUploadId.HasValue ? clientUploadHash : null
             };
 
             await _model3dFiles.AddAsync(model, ct);
-            await _model3dFiles.SaveChangesAsync(ct);
+            try
+            {
+                await _model3dFiles.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException) when (userId.HasValue && clientUploadId.HasValue)
+            {
+                await _model3dFiles.RemoveAsync(model, CancellationToken.None);
+                Model3D? winningUpload = await _model3dFiles.GetByClientUploadIdAsync(
+                    userId.Value,
+                    clientUploadId.Value,
+                    ct);
+                if (winningUpload is null)
+                {
+                    throw;
+                }
+
+                Model3DUploadResultDto retryResult = CreateIdempotentRetryResult(
+                    winningUpload,
+                    clientUploadHash);
+                DeleteUploadArtifact(tempFilePath);
+                DeleteUploadArtifact(finalFilePath);
+                DeleteUploadArtifact(thumbnailTempPath);
+                DeleteUploadArtifact(thumbnailFinalPath);
+                return retryResult;
+            }
 
             // Step 6: Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
             try
@@ -592,20 +666,13 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             {
                 DeleteUploadArtifact(thumbnailFinalPath);
                 thumbnailFinalPath = null;
+                model.ThumbnailFileName = null;
                 _logger.LogWarning("Failed to generate thumbnail for model {ModelId}: {ThumbnailExMessage}. Continuing without thumbnail.", modelId, thumbnailEx.Message);
 
                 // Don't rethrow - upload should succeed even if thumbnail generation fails
             }
 
-            return new Model3DUploadResultDto
-            {
-                Id = modelId,
-                FileName = model.FileName,
-                FileSize = modelFile.Length,
-                FileType = fileExtension.TrimStart('.'),
-                UploadedAt = model.UploadedAt,
-                Url = _fileOperations.BuildModel3DFileUrl(modelId, model.FileFormat)
-            };
+            return CreateUploadResult(model, wasExisting: false);
         }
         catch
         {
@@ -616,6 +683,38 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
             throw;
         }
+    }
+
+    private Model3DUploadResultDto CreateIdempotentRetryResult(Model3D existingModel, string clientUploadHash)
+    {
+        if (!string.Equals(existingModel.ClientUploadHash, clientUploadHash, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "clientUploadId has already been used for a different model payload.",
+                nameof(clientUploadHash));
+        }
+
+        return CreateUploadResult(existingModel, wasExisting: true);
+    }
+
+    private Model3DUploadResultDto CreateUploadResult(Model3D model, bool wasExisting)
+    {
+        return new Model3DUploadResultDto
+        {
+            Id = model.Id,
+            Name = model.Name ?? model.FileName,
+            FileName = model.FileName,
+            FileSize = model.FileSizeBytes,
+            FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat)
+                ?? Path.GetExtension(model.FileName).TrimStart('.'),
+            UploadedAt = model.UploadedAt,
+            Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
+            ThumbnailUrl = model.ThumbnailFileName is null
+                ? null
+                : _fileOperations.BuildModel3DThumbnailUrl(model.Id),
+            WasExisting = wasExisting,
+            ClientUploadId = model.ClientUploadId
+        };
     }
 
     private async Task<string> StreamModelToTempAndHashAsync(

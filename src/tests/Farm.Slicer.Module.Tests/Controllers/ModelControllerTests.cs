@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,10 +24,21 @@ public class ModelControllerTests
         Mock<ILogger<Model3DFilesController>> mockLogger = new Mock<ILogger<Model3DFilesController>>();
         mockConverter ??= new Mock<I3MfToStlConversionService>();
 
-        return new Model3DFilesController(
+        Model3DFilesController controller = new(
             mockLogger.Object,
             mockService.Object,
             mockConverter.Object);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())],
+                    "Test"))
+            }
+        };
+
+        return controller;
     }
 
     [Fact]
@@ -69,6 +81,8 @@ public class ModelControllerTests
         _ = mockService.Setup(s => s.UploadModelAsync(
             It.IsAny<IFormFile>(),
             It.IsAny<IFormFile?>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid?>(),
             It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
         Model3DFilesController controller = CreateController(mockService);
@@ -77,13 +91,57 @@ public class ModelControllerTests
         FormFile thumbnailFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("png")), 0, 3, "thumbnailFile", "thumbnail.png");
         using CancellationTokenSource cancellation = new();
 
-        IActionResult result = await controller.UploadModelAsync(fakeFile, thumbnailFile, cancellation.Token);
+        Guid clientUploadId = Guid.NewGuid();
+        IActionResult result = await controller.UploadModelAsync(
+            fakeFile,
+            thumbnailFile,
+            clientUploadId.ToString(),
+            cancellation.Token);
 
         CreatedResult created = Assert.IsType<CreatedResult>(result);
         Model3DUploadResultDto value = Assert.IsType<Model3DUploadResultDto>(created.Value);
         Assert.Equal(uploadResult.Id, value.Id);
 
-        mockService.Verify(s => s.UploadModelAsync(fakeFile, thumbnailFile, cancellation.Token), Times.Once);
+        mockService.Verify(s => s.UploadModelAsync(
+            fakeFile,
+            thumbnailFile,
+            It.IsAny<Guid>(),
+            clientUploadId,
+            cancellation.Token), Times.Once);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithInvalidClientUploadId_ReturnsBadRequest()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Model3DFilesController controller = CreateController(mockService);
+        FormFile fakeFile = new(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+
+        IActionResult result = await controller.UploadModelAsync(
+            fakeFile,
+            thumbnailFile: null,
+            clientUploadId: "not-a-guid",
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("clientUploadId must be a non-empty GUID.", badRequest.Value);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithClientUploadIdAndNoUserId_ReturnsUnauthorized()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Model3DFilesController controller = CreateController(mockService);
+        controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity());
+        FormFile fakeFile = new(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+
+        IActionResult result = await controller.UploadModelAsync(
+            fakeFile,
+            thumbnailFile: null,
+            clientUploadId: Guid.NewGuid().ToString(),
+            ct: CancellationToken.None);
+
+        _ = Assert.IsType<UnauthorizedResult>(result);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -28,6 +29,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="modelFile">The file to upload.</param>
     /// <param name="thumbnailFile">Optional client-generated PNG thumbnail.</param>
+    /// <param name="clientUploadId">Optional caller-generated idempotency identifier.</param>
     /// <param name="ct">Cancellation token for the request.</param>
     [HttpPost("upload")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
@@ -37,6 +39,7 @@ public class Model3DFilesController(
     public async Task<IActionResult> UploadModelAsync(
         [FromForm] IFormFile modelFile,
         [FromForm] IFormFile? thumbnailFile = null,
+        [FromForm] string? clientUploadId = null,
         CancellationToken ct = default)
     {
         if (modelFile is null || modelFile.Length == 0)
@@ -44,9 +47,35 @@ public class Model3DFilesController(
             return BadRequest("No file uploaded or file is empty.");
         }
 
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        bool hasUserId = Guid.TryParse(userIdClaim, out Guid userId) && userId != Guid.Empty;
+
+        Guid? parsedClientUploadId = null;
+        if (clientUploadId is not null)
+        {
+            if (!Guid.TryParse(clientUploadId, out Guid value) || value == Guid.Empty)
+            {
+                return BadRequest("clientUploadId must be a non-empty GUID.");
+            }
+
+            parsedClientUploadId = value;
+        }
+
+        if (parsedClientUploadId.HasValue && !hasUserId)
+        {
+            return Unauthorized();
+        }
+
         try
         {
-            Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, thumbnailFile, ct);
+            Model3DUploadResultDto result = hasUserId
+                ? await _modelService.UploadModelAsync(
+                    modelFile,
+                    thumbnailFile,
+                    userId,
+                    parsedClientUploadId,
+                    ct)
+                : await _modelService.UploadModelAsync(modelFile, thumbnailFile, ct);
             return Created($"/api/models/{result.Id}", result);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

@@ -442,6 +442,37 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UploadModelAsync_WithClientUploadId_PersistsSingleModelAndReturnsExistingRetry()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Guid userId = Guid.NewGuid();
+        Guid clientUploadId = Guid.NewGuid();
+
+        Model3DUploadResultDto initial = await service.UploadModelAsync(
+            CreateMockFormFile("idempotent.stl", "idempotent-content"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+        Model3DUploadResultDto retry = await service.UploadModelAsync(
+            CreateMockFormFile("idempotent.stl", "idempotent-content"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+
+        initial.WasExisting.Should().BeFalse();
+        retry.WasExisting.Should().BeTrue();
+        retry.Id.Should().Be(initial.Id);
+        retry.ClientUploadId.Should().Be(clientUploadId);
+        (await context.Models3D.CountAsync(
+            model => model.UploadedByUserId == userId && model.ClientUploadId == clientUploadId))
+            .Should().Be(1);
+    }
+
+    [Fact]
     public async Task UploadModelAsync_WithSTLFile_Succeeds()
     {
         // Arrange

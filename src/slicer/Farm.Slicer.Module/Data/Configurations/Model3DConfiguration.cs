@@ -33,10 +33,12 @@ public class Model3DConfiguration : IEntityTypeConfiguration<Model3D>
         // Model3D-specific properties
         _ = builder.Property(m => m.FileFormat).HasConversion<int>();
         _ = builder.Property(m => m.ValidationErrors).HasColumnType("TEXT");
+        _ = builder.Property(m => m.ClientUploadHash).HasMaxLength(64);
 
         // Soft-reference indexes (no FK constraints — FolderNode, User live in core)
         _ = builder.HasIndex(m => m.FolderId);
         _ = builder.HasIndex(m => m.UploadedByUserId);
+        _ = builder.HasIndex(m => new { m.UploadedByUserId, m.ClientUploadId }).IsUnique();
 
         // Indexes
         _ = builder.HasIndex(m => m.FileHash).IsUnique();
