@@ -762,6 +762,160 @@ GET /api/catalog/models?manufacturerId=mfg-uuid
 ]
 ```
 
+## Model Collections API
+
+User-owned, shareable collections of 3D models. Model identifiers are cross-context references
+(no foreign key); a model's existence is validated through the model query abstraction when the
+slicer module is loaded. All mutating operations require the caller to be the collection **owner**
+or an **administrator**. Collections with `Shared` visibility are readable by any authenticated user.
+
+`visibility` is serialized as a string enum: `Private` (default) or `Shared`.
+
+### List Collections
+
+```http
+GET /api/model-collections
+Authorization: ******
+```
+
+**Authentication:** Required  
+**Response:** 200 OK — collections owned by the caller plus any `Shared` collection. Administrators
+receive every collection.
+```json
+[
+  {
+    "id": "collection-uuid",
+    "ownerUserId": "user-uuid",
+    "name": "Benchy Variants",
+    "description": "Calibration prints",
+    "visibility": "Private",
+    "memberCount": 3,
+    "createdAt": "2026-07-22T10:30:00Z",
+    "updatedAt": "2026-07-22T10:35:00Z"
+  }
+]
+```
+
+### Get Collection
+
+```http
+GET /api/model-collections/{id}
+Authorization: ******
+```
+
+**Status Codes:** `200` OK · `403` Forbidden (private, not owner/admin) · `404` Not Found
+
+### Create Collection
+
+```http
+POST /api/model-collections
+Content-Type: application/json
+Authorization: ******
+
+{
+  "name": "Benchy Variants",
+  "description": "Calibration prints",
+  "visibility": "Private"
+}
+```
+
+**Request Body:**
+- `name` (string, required)
+- `description` (string, optional)
+- `visibility` (string, optional) — `Private` (default) or `Shared`
+
+**Response:** `201` Created (owner is the authenticated caller) · `400` Bad Request (missing name)
+
+### Update Collection
+
+```http
+PUT /api/model-collections/{id}
+Content-Type: application/json
+Authorization: ******
+
+{
+  "name": "Renamed",
+  "description": "Updated notes"
+}
+```
+
+**Status Codes:** `200` OK · `400` Bad Request · `403` Forbidden · `404` Not Found
+
+### Delete Collection
+
+```http
+DELETE /api/model-collections/{id}
+Authorization: ******
+```
+
+Cascade-deletes the collection's membership rows. **Status Codes:** `204` No Content · `403` · `404`
+
+### Share / Unshare Collection
+
+```http
+POST /api/model-collections/{id}/share
+POST /api/model-collections/{id}/unshare
+Authorization: ******
+```
+
+`share` sets visibility to `Shared`; `unshare` sets it back to `Private`. Owner/admin only.
+**Status Codes:** `200` OK (returns the collection) · `403` · `404`
+
+### List Members
+
+```http
+GET /api/model-collections/{id}/members
+Authorization: ******
+```
+
+**Response:** 200 OK
+```json
+[
+  {
+    "id": "membership-uuid",
+    "collectionId": "collection-uuid",
+    "modelId": "model-uuid",
+    "addedAt": "2026-07-22T10:32:00Z"
+  }
+]
+```
+
+### Add Member
+
+```http
+POST /api/model-collections/{id}/members
+Content-Type: application/json
+Authorization: ******
+
+{ "modelId": "model-uuid" }
+```
+
+Idempotent — adding an existing member returns the current membership unchanged.
+**Status Codes:** `200` OK · `400` Bad Request (missing `modelId`) · `403` · `404` (collection or model)
+
+### Remove Member
+
+```http
+DELETE /api/model-collections/{id}/members/{modelId}
+Authorization: ******
+```
+
+Idempotent — removing an absent member succeeds. **Status Codes:** `204` No Content · `403` · `404`
+
+### Replace Members
+
+```http
+PUT /api/model-collections/{id}/members
+Content-Type: application/json
+Authorization: ******
+
+{ "modelIds": ["model-uuid-1", "model-uuid-2"] }
+```
+
+Replaces the full membership with the supplied set (adds/removes computed as a diff; existing
+members are preserved). **Status Codes:** `200` OK (returns resulting members) · `400` · `403` ·
+`404` (collection or any model)
+
 ## Health Check API
 
 ### System Health

@@ -284,6 +284,9 @@ public static class ServiceCollectionExtensions
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
 
+        // Model collection repository (library sync)
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Collections.IModelCollectionRepository, Farm.Infrastructure.Repositories.Collections.EfModelCollectionRepository>();
+
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 
@@ -553,6 +556,9 @@ public static class ServiceCollectionExtensions
     {
         // Tag services
         _ = services.AddScoped<Farm.Infrastructure.Services.Tags.ITagService, Farm.Infrastructure.Services.Tags.TagService>();
+
+        // Model collection service (library sync)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Collections.IModelCollectionService, Farm.Infrastructure.Services.Collections.ModelCollectionService>();
 
         // Task services (user task management)
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();

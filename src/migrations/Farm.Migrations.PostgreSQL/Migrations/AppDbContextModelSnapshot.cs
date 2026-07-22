@@ -1852,6 +1852,69 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Model3DTag", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("Visibility");
+
+                    b.ToTable("ModelCollections");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollectionMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ModelId");
+
+                    b.HasIndex("CollectionId", "ModelId")
+                        .IsUnique();
+
+                    b.ToTable("ModelCollectionMemberships");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4561,6 +4624,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Tag");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollectionMembership", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.ModelCollection", "Collection")
+                        .WithMany("Memberships")
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Collection");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
@@ -5165,6 +5239,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.Manufacturer", b =>
                 {
                     b.Navigation("Models");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
+                {
+                    b.Navigation("Memberships");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>

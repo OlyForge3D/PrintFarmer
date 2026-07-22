@@ -20,6 +20,7 @@ public static class ControllerStartup
         return services.AddControllers(options =>
             {
                 _ = options.Filters.Add<DuplicateConflictExceptionFilter>();
+                _ = options.Filters.Add<CollectionExceptionFilter>();
             })
             .AddJsonOptions(options =>
             {
