@@ -80,9 +80,8 @@ public class UserApiKeysController : ControllerBase
             return BadRequest(new { error = validationError });
         }
 
-        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
         string rawKey = GenerateKey();
-        string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
+        string storedValue = GetValueForStorage(rawKey, purpose);
 
         var key = new Farm.Infrastructure.Domain.ApiKey
         {
@@ -162,10 +161,8 @@ public class UserApiKeysController : ControllerBase
             return NotFound();
         }
 
-        // Generate new key
-        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
         string rawKey = GenerateKey();
-        string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
+        string storedValue = GetValueForStorage(rawKey, oldKey.Purpose);
 
         oldKey.KeyHash = storedValue;
         await _repo.UpdateAsync(oldKey);
@@ -174,7 +171,8 @@ public class UserApiKeysController : ControllerBase
     }
 
     /// <summary>
-    /// Reveal the raw API key. Only works when HashStoredApiKeys is disabled.
+    /// Reveal a legacy OctoPrint API key when HashStoredApiKeys is disabled.
+    /// Desktop API keys are always one-time secrets and cannot be revealed.
     /// </summary>
     [HttpGet("{keyId:guid}/reveal")]
     [Authorize]
@@ -185,16 +183,21 @@ public class UserApiKeysController : ControllerBase
             return Forbid();
         }
 
-        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
-        if (settings.HashStoredApiKeys)
-        {
-            return BadRequest(new { error = "Cannot reveal API key when hashing is enabled. Keys are stored as one-way hashes." });
-        }
-
         ApiKey? key = await _repo.GetByIdAsync(keyId);
         if (key == null || key.UserId != userId)
         {
             return NotFound();
+        }
+
+        if (key.Purpose == ApiKeyPurpose.Desktop)
+        {
+            return BadRequest(new { error = "Desktop API keys are one-time secrets and cannot be revealed. Rotate the key to generate a new secret." });
+        }
+
+        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+        if (settings.HashStoredApiKeys)
+        {
+            return BadRequest(new { error = "Cannot reveal API key when hashing is enabled. Keys are stored as one-way hashes." });
         }
 
         // When hashing is disabled, KeyHash contains the raw key
@@ -317,6 +320,14 @@ public class UserApiKeysController : ControllerBase
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(data);
         return Convert.ToHexString(data);
+    }
+
+    private string GetValueForStorage(string rawKey, ApiKeyPurpose purpose)
+    {
+        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+        return purpose == ApiKeyPurpose.Desktop || settings.HashStoredApiKeys
+            ? ComputeSha256Hash(rawKey)
+            : rawKey;
     }
 
     private static string ComputeSha256Hash(string rawData)

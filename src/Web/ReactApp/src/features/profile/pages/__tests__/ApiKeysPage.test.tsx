@@ -158,4 +158,42 @@ describe('ApiKeysPage', () => {
       );
     });
   });
+
+  it('should offer legacy reveal only for OctoPrint keys when hashing is disabled', async () => {
+    vi.mocked(apiKeysService.getApiKeySettings).mockResolvedValue({ hashingEnabled: false });
+    vi.mocked(apiKeysService.listApiKeys).mockResolvedValue([
+      {
+        id: 'octoprint-key',
+        name: 'Slicer Key',
+        isActive: true,
+        createdAt: '2024-01-01T00:00:00Z',
+        purpose: 'OctoPrint',
+        scopes: 'None',
+        isExpired: false,
+      },
+      {
+        id: 'desktop-key',
+        name: 'Desktop Key',
+        isActive: true,
+        createdAt: '2024-01-01T00:00:00Z',
+        expiresAt: '2026-01-01T00:00:00Z',
+        purpose: 'Desktop',
+        scopes: 'ModelRead',
+        isExpired: false,
+      },
+    ]);
+    vi.mocked(apiKeysService.revealApiKey).mockResolvedValue({ key: 'legacy-secret' });
+
+    renderPage();
+
+    const octoPrintReveal = await screen.findByRole('button', { name: 'Reveal API key Slicer Key' });
+    expect(screen.queryByRole('button', { name: 'Reveal API key Desktop Key' })).not.toBeInTheDocument();
+
+    fireEvent.click(octoPrintReveal);
+
+    await waitFor(() => {
+      expect(apiKeysService.revealApiKey).toHaveBeenCalledWith('user-1', 'octoprint-key');
+    });
+    expect(await screen.findByText('legacy-secret')).toBeInTheDocument();
+  });
 });

@@ -417,7 +417,7 @@ export function ApiKeysPage() {
                         size="sm"
                         aria-label={`${apiKey.isActive ? 'Disable' : 'Enable'} API key ${apiKey.name}`}
                       />
-                      {canRevealKeys && (
+                      {canRevealKeys && apiKey.purpose === 'OctoPrint' && (
                         <Button
                           variant="secondary"
                           onClick={() => handleReveal(apiKey.id)}

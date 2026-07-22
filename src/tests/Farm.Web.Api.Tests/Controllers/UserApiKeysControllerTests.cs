@@ -71,9 +71,13 @@ public class UserApiKeysControllerTests
         ok.Value.Should().NotBeNull();
     }
 
-    [Fact]
-    public async Task CreateApiKeyAsync_WithHashingEnabled_ReturnsSecretButPersistsOnlyHash()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CreateApiKeyAsync_DesktopPurposeWithAnyHashingSetting_ReturnsSecretButPersistsOnlyHash(
+        bool hashStoredApiKeys)
     {
+        SetHashStoredApiKeys(hashStoredApiKeys);
         var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop, ApiKeyScope.ModelRead);
 
         IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
@@ -84,6 +88,75 @@ public class UserApiKeysControllerTests
         string rawKey = Assert.IsType<string>(response.GetType().GetProperty("key")?.GetValue(response));
         ApiKey created = _store.Should().ContainSingle().Subject;
         created.KeyHash.Should().NotBe(rawKey).And.HaveLength(64);
+    }
+
+    [Fact]
+    public async Task RevealApiKeyAsync_DesktopPurposeWithHashingDisabled_IsRejected()
+    {
+        SetHashStoredApiKeys(false);
+        ApiKey desktopKey = new()
+        {
+            UserId = _userId,
+            Name = "desktop",
+            KeyHash = "stored-hash",
+            Purpose = ApiKeyPurpose.Desktop,
+            Scopes = ApiKeyScope.ModelRead,
+            ExpiresAt = DateTime.UtcNow.AddDays(30),
+        };
+        _store.Add(desktopKey);
+
+        IActionResult result = await _controller.RevealApiKeyAsync(_userId, desktopKey.Id);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        badRequest.Value.Should().NotBeNull();
+        badRequest.Value!.ToString().Should().Contain("one-time");
+    }
+
+    [Fact]
+    public async Task RevealApiKeyAsync_OctoPrintPurposeWithHashingDisabled_ReturnsLegacyStoredSecret()
+    {
+        SetHashStoredApiKeys(false);
+        const string rawKey = "legacy-octoprint-secret";
+        ApiKey octoPrintKey = new()
+        {
+            UserId = _userId,
+            Name = "slicer",
+            KeyHash = rawKey,
+            Purpose = ApiKeyPurpose.OctoPrint,
+        };
+        _store.Add(octoPrintKey);
+
+        IActionResult result = await _controller.RevealApiKeyAsync(_userId, octoPrintKey.Id);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        ok.Value.Should().NotBeNull();
+        object response = ok.Value;
+        string revealedKey = Assert.IsType<string>(response.GetType().GetProperty("key")?.GetValue(response));
+        revealedKey.Should().Be(rawKey);
+    }
+
+    [Fact]
+    public async Task RotateApiKeyAsync_DesktopPurposeWithHashingDisabled_ReturnsSecretButPersistsOnlyHash()
+    {
+        SetHashStoredApiKeys(false);
+        ApiKey desktopKey = new()
+        {
+            UserId = _userId,
+            Name = "desktop",
+            KeyHash = "old-hash",
+            Purpose = ApiKeyPurpose.Desktop,
+            Scopes = ApiKeyScope.LibrarySync,
+            ExpiresAt = DateTime.UtcNow.AddDays(30),
+        };
+        _store.Add(desktopKey);
+
+        IActionResult result = await _controller.RotateApiKeyAsync(_userId, desktopKey.Id);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(ok.Value);
+        object response = ok.Value;
+        string rawKey = Assert.IsType<string>(response.GetType().GetProperty("key")?.GetValue(response));
+        desktopKey.KeyHash.Should().NotBe(rawKey).And.HaveLength(64);
     }
 
     [Fact]
@@ -256,5 +329,11 @@ public class UserApiKeysControllerTests
         list.Single(d => d.Id == octoPrintKey.Id).IsExpired.Should().BeFalse();
         list.Single(d => d.Id == expiredDesktopKey.Id).IsExpired.Should().BeTrue();
         list.Single(d => d.Id == expiredDesktopKey.Id).Scopes.Should().Be(ApiKeyScope.ModelRead);
+    }
+
+    private void SetHashStoredApiKeys(bool enabled)
+    {
+        _settingsServiceMock.Setup(s => s.Get<OctoPrintSettings>())
+            .Returns(new OctoPrintSettings { HashStoredApiKeys = enabled });
     }
 }
