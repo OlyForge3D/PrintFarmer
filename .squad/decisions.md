@@ -92,3 +92,33 @@ It also keeps existing bookmarks working while the sidebar, command palette, and
 - Legacy `tab=users&sub=api-keys` now resolves to User Settings → Profile → API Keys.
 - Legacy operational tabs such as `system`, `users`, and `data` continue to resolve into Admin categories.
 
+
+---
+## Decision: Lockout Policy Dropped for #785/#816/#817
+
+**Date:** 2026-07-21
+**Author:** coordinator (via owner directive from jpapiez)
+**Status:** ACTIVE — supersedes all prior clean-room / author-lockout guidance on the mobile snapshot line
+
+**Ruling:**
+Owner (jpapiez) has rescinded the #785/#816/#817 clean-room lockout policy. The #816 and #817 GitHub issue bodies have been amended at source to remove the hardcoded lockout rosters; those issue bodies are now authoritative.
+
+**New governing rules:**
+1. **No agent lockouts** on #785/#816/#817. No one is barred from implementing, revising, advising, contributing, or producing evidence.
+2. **Author owns all revisions, including post-REJECT.** On a trio REJECT, the SAME author revises their own branch (standard iterate-on-feedback). No forced handoff, no reviewer-authored-fix routing.
+3. **Clean-room isolation rescinded.** Prior-attempt learnings (Dietrich, Apone, Crowe, Morse, or any other source) may be shared and consulted freely if useful. Deriving criteria from acceptance criteria + iOS Review Rubric remains good hygiene, but is not a rule.
+4. **Findings-hygiene "describe properties not mechanisms" cancelled.** Reviewers may give direct, specific, actionable findings including concrete mechanism suggestions and fixes. Standard code-review posture.
+
+**Gates that STAND:**
+- 3-way adversarial trio review (Bishop / Hicks / Vasquez must converge on unanimous APPROVE) before any PR opens. Owner dropped lockout, not the review gate.
+
+**Ownership per owner decision:**
+- #816: Clemens is sole owner. Iterates own branch on REJECT. Under review at HEAD `6c57ec067010626f631c933550db475eb7e9d317`.
+- #817: Drake is owner. Parked on #816-merge data dependency (not a lockout). Session `bfb226f0-4d0a-49ce-bb65-3e7cb61338b1`.
+- Kane: unblocked.
+
+**Prior orders now VOID:** all "no standby-author content relays," "clean-room isolation halts," "no locked-author-attributed review lenses," "no Apone intel to Drake," "reviewer-authored-fix workflow," and "describe properties not mechanisms" guidance issued earlier in the mobile snapshot coordination session.
+
+**Coordinator handoff:** feature/705 session (this coordinator, `10d59103`) now owns the mobile snapshot coordination end-to-end. Prior coordinator session (`7188e04c`) stood down after handing over.
+
+**References:** #785, #816, #817
