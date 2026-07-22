@@ -105,6 +105,28 @@ public sealed class PrintedPartReorderShiftPlanTaskSourceTests
         Assert.Equal("BIN-B", DeserializeMetadata(refreshed).DefaultBinCode);
     }
 
+    [Fact]
+    public async Task ProduceAsync_TwoHundredCharName_TitleFitsAndMetadataNameIsUntruncated()
+    {
+        // "Restock " (8 chars) + 200-char name = 208, which overflows UserTask.Title [MaxLength(200)].
+        // The fix must cap the title at 200 while preserving the full name in metadata.
+        string fullName = new string('X', 200);
+        Guid inventoryId = Guid.Parse("EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE");
+        var reorder = new ControlledReorderEvaluationService
+        {
+            Candidates = [Candidate(inventoryId, "SKU-200", fullName, 0, 5, 5)],
+        };
+        var source = new PrintedPartReorderShiftPlanTaskSource(reorder, ControlledFeatureGate.Enabled());
+
+        ShiftPlanTaskSpec spec = Assert.Single(await source.ProduceAsync(CancellationToken.None));
+
+        Assert.True(spec.Title.Length <= 200, $"Title length {spec.Title.Length} exceeds the 200-char persistence maximum.");
+        Assert.Equal(200, spec.Title.Length);
+        PrintedPartRestockTaskMetadata metadata = DeserializeMetadata(spec);
+        Assert.Equal(fullName, metadata.Name);
+        Assert.Equal(200, metadata.Name.Length);
+    }
+
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, false)]

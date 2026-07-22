@@ -33,6 +33,11 @@ public sealed class PrintedPartReorderShiftPlanTaskSource(
 {
     private const string SourceIdPrefix = "partinventory:";
 
+    // Mirrors UserTask.Title [MaxLength(200)] so a part name at the 200-char database limit
+    // never overflows the Title column after the "Restock " prefix is prepended.
+    private const int TitleMaxLength = 200;
+    private const string TitlePrefix = "Restock ";
+
     /// <inheritdoc />
     public string SourceName => "printed-part-reorder";
 
@@ -106,11 +111,16 @@ public sealed class PrintedPartReorderShiftPlanTaskSource(
             CultureInfo.InvariantCulture,
             $"{candidate.Sku}: {candidate.OnHand} on hand, reorder point {candidate.ReorderPoint}, deficit {candidate.Deficit}.");
 
+        int maxNameLength = TitleMaxLength - TitlePrefix.Length;
+        string title = candidate.Name.Length > maxNameLength
+            ? $"{TitlePrefix}{candidate.Name[..maxNameLength]}"
+            : $"{TitlePrefix}{candidate.Name}";
+
         return new ShiftPlanTaskSpec(
             TaskType: UserTaskType.PrintedPartRestock,
             SourceKind: UserTaskSourceKind.PrintedPartStock,
             SourceId: $"{SourceIdPrefix}{candidate.PartInventoryId:N}",
-            Title: $"Restock {candidate.Name}",
+            Title: title,
             Description: description,
             Priority: UserTaskPriority.Normal,
             AnchorKind: UserTaskAnchorKind.AnytimeToday,
