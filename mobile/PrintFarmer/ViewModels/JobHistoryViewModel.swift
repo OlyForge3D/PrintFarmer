@@ -49,17 +49,27 @@ final class JobHistoryViewModel {
         isLoading = false
     }
 
+    /// Loads the next page of history and appends it to `historyPage`.
+    ///
+    /// Pagination invariant (issue #810): `currentOffset` is the offset of the
+    /// most recently *committed* page. It is advanced only after the
+    /// corresponding page has been successfully appended to `historyPage`.
+    /// On failure, cancellation, or view deactivation mid-request the offset
+    /// is left untouched, so the next `loadMore()` call retries the same
+    /// offset exactly once and no page is skipped. Concurrent duplicate
+    /// invocations are suppressed by the synchronous `!isLoadingMore` guard
+    /// before the first suspension point.
     func loadMore() async {
         guard let jobAnalyticsService, !isLoadingMore, isViewActive else { return }
         guard let page = historyPage, page.entries.count < page.totalCount else { return }
 
         isLoadingMore = true
-        currentOffset += pageSize
+        let nextOffset = currentOffset + pageSize
 
         do {
             let nextPage = try await jobAnalyticsService.getHistory(
                 limit: pageSize,
-                offset: currentOffset,
+                offset: nextOffset,
                 sortBy: nil,
                 statuses: nil,
                 dateStart: dateFrom,
@@ -73,6 +83,7 @@ final class JobHistoryViewModel {
                 pageSize: nextPage.pageSize,
                 stats: nextPage.stats
             )
+            currentOffset = nextOffset
         } catch {
             guard isViewActive else { return }
             logger.warning("Failed to load more history: \(error.localizedDescription)")
