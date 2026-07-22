@@ -91,8 +91,14 @@ final class JobHistoryViewModel {
     }
 
     func loadHistory() async {
-        guard let jobAnalyticsService,
-              let operation = beginReload() else {
+        guard let activationToken = activeViewToken else { return }
+        await loadHistory(activationToken: activationToken)
+    }
+
+    func loadHistory(activationToken: UUID) async {
+        guard !Task.isCancelled,
+              let jobAnalyticsService,
+              let operation = beginReload(activationToken: activationToken) else {
             return
         }
 
@@ -132,8 +138,14 @@ final class JobHistoryViewModel {
     /// A page completion may append only while it still owns the captured
     /// operation token under the same active generation.
     func loadMore() async {
-        guard let jobAnalyticsService,
-              let operation = beginPagination(),
+        guard let activationToken = activeViewToken else { return }
+        await loadMore(activationToken: activationToken)
+    }
+
+    func loadMore(activationToken: UUID) async {
+        guard !Task.isCancelled,
+              let jobAnalyticsService,
+              let operation = beginPagination(activationToken: activationToken),
               let basePage = operation.basePage else {
             return
         }
@@ -175,9 +187,22 @@ final class JobHistoryViewModel {
     }
 
     func loadTimeline(dateFrom: Date?, dateTo: Date?) async {
-        guard let jobAnalyticsService,
-              let activationToken = activeViewToken,
-              isViewActive else {
+        guard let activationToken = activeViewToken else { return }
+        await loadTimeline(
+            dateFrom: dateFrom,
+            dateTo: dateTo,
+            activationToken: activationToken
+        )
+    }
+
+    func loadTimeline(
+        dateFrom: Date?,
+        dateTo: Date?,
+        activationToken: UUID
+    ) async {
+        guard !Task.isCancelled,
+              let jobAnalyticsService,
+              matchesActiveView(activationToken) else {
             return
         }
         do {
@@ -212,8 +237,8 @@ final class JobHistoryViewModel {
         }
     }
 
-    private func beginReload() -> HistoryOperation? {
-        guard let activationToken = activeViewToken, isViewActive else { return nil }
+    private func beginReload(activationToken: UUID) -> HistoryOperation? {
+        guard !Task.isCancelled, matchesActiveView(activationToken) else { return nil }
 
         invalidateHistoryAuthority()
         let operation = HistoryOperation(
@@ -232,9 +257,9 @@ final class JobHistoryViewModel {
         return operation
     }
 
-    private func beginPagination() -> HistoryOperation? {
-        guard let activationToken = activeViewToken,
-              isViewActive,
+    private func beginPagination(activationToken: UUID) -> HistoryOperation? {
+        guard !Task.isCancelled,
+              matchesActiveView(activationToken),
               activeHistoryOperation == nil,
               !isLoadingMore,
               let page = committedHistory.page,

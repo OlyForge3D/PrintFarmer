@@ -314,6 +314,54 @@ final class JobHistoryViewModelTests: XCTestCase {
             }
         }
     }
+
+    private actor TaskStartGate {
+        enum ReleaseOutcome: Equatable {
+            case released
+            case buffered
+            case rejected
+        }
+
+        private var parkedContinuation: CheckedContinuation<Void, Never>?
+        private var enteredWaiter: CheckedContinuation<Void, Never>?
+        private var hasEntered = false
+        private var releaseBuffered = false
+        private var releaseConsumed = false
+
+        func park() async {
+            precondition(!hasEntered, "TaskStartGate supports exactly one parked task")
+            await withCheckedContinuation { continuation in
+                hasEntered = true
+                if releaseBuffered {
+                    continuation.resume()
+                } else {
+                    parkedContinuation = continuation
+                }
+                enteredWaiter?.resume()
+                enteredWaiter = nil
+            }
+        }
+
+        func awaitEntered() async {
+            if hasEntered { return }
+            await withCheckedContinuation { continuation in
+                precondition(enteredWaiter == nil, "only one entry waiter is allowed")
+                enteredWaiter = continuation
+            }
+        }
+
+        func release() -> ReleaseOutcome {
+            guard !releaseConsumed else { return .rejected }
+            releaseConsumed = true
+            if let continuation = parkedContinuation {
+                parkedContinuation = nil
+                continuation.resume()
+                return .released
+            }
+            releaseBuffered = true
+            return .buffered
+        }
+    }
     
     // MARK: - Initial State
     
@@ -848,6 +896,108 @@ final class JobHistoryViewModelTests: XCTestCase {
 
     // MARK: - History Authority (Issue #853)
 
+    func testCancelledAppearanceHistoryTaskCannotIssueRequestAfterDisappear() async {
+        let activationToken = viewModel.activate()
+        let startGate = TaskStartGate()
+        let delayedTask = Task { @MainActor in
+            await startGate.park()
+            await viewModel.loadHistory(activationToken: activationToken)
+        }
+        await startGate.awaitEntered()
+
+        delayedTask.cancel()
+        viewModel.deactivate(activationToken: activationToken)
+
+        let release = await startGate.release()
+        XCTAssertEqual(release, .released)
+        await delayedTask.value
+
+        XCTAssertNil(mockJobAnalyticsService.getHistoryCalledWith)
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testRapidReappearanceRejectsDelayedPriorActivationWithoutRevokingCurrentLoad() async {
+        let firstActivation = viewModel.activate()
+        let startGate = TaskStartGate()
+        let delayedFirstTask = Task { @MainActor in
+            await startGate.park()
+            await viewModel.loadHistory(activationToken: firstActivation)
+        }
+        await startGate.awaitEntered()
+
+        delayedFirstTask.cancel()
+        viewModel.deactivate(activationToken: firstActivation)
+        let secondActivation = viewModel.activate()
+
+        let service = ScriptedJobAnalyticsService()
+        let currentRegistration = await service.register(
+            .success(historyPage(["current"], totalCount: 1, currentPage: 1))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+        let currentTask = Task { @MainActor in
+            await viewModel.loadHistory(activationToken: secondActivation)
+            await service.operationFinished(registration: currentRegistration)
+        }
+        guard await requireEntry(
+            service,
+            registration: currentRegistration
+        ) != nil else {
+            _ = await startGate.release()
+            await delayedFirstTask.value
+            return
+        }
+        XCTAssertTrue(viewModel.isLoading)
+
+        let delayedRelease = await startGate.release()
+        XCTAssertEqual(delayedRelease, .released)
+        await delayedFirstTask.value
+
+        let calls = await service.recordedCalls
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.first?.offset, 0)
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertTrue(viewModel.isLoading)
+
+        viewModel.deactivate(activationToken: firstActivation)
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertTrue(viewModel.isLoading)
+
+        let currentRelease = await service.release(registration: currentRegistration)
+        XCTAssertEqual(currentRelease, .released)
+        await currentTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["current"])
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testCancelledAppearanceTimelineTaskCannotIssueRequestAfterDisappear() async {
+        let activationToken = viewModel.activate()
+        let startGate = TaskStartGate()
+        let delayedTask = Task { @MainActor in
+            await startGate.park()
+            await viewModel.loadTimeline(
+                dateFrom: nil,
+                dateTo: nil,
+                activationToken: activationToken
+            )
+        }
+        await startGate.awaitEntered()
+
+        delayedTask.cancel()
+        viewModel.deactivate(activationToken: activationToken)
+
+        let release = await startGate.release()
+        XCTAssertEqual(release, .released)
+        await delayedTask.value
+
+        XCTAssertNil(mockJobAnalyticsService.getTimelineCalledWith)
+        XCTAssertTrue(viewModel.timeline.isEmpty)
+        XCTAssertFalse(viewModel.isViewActive)
+    }
+
     func testReloadSupersedesLoadMoreWhenPaginationCompletesFirst() async {
         await commitHistory(historyPage(["old-1"], currentPage: 1))
 
@@ -1089,7 +1239,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         viewModel.configure(jobAnalyticsService: service)
 
         let staleTask = Task { @MainActor in
-            await viewModel.loadMore()
+            await viewModel.loadMore(activationToken: firstActivation)
             await service.operationFinished(registration: staleRegistration)
         }
         guard let staleCall = await requireEntry(
@@ -1107,7 +1257,7 @@ final class JobHistoryViewModelTests: XCTestCase {
 
         let secondActivation = viewModel.activate()
         let retryTask = Task { @MainActor in
-            await viewModel.loadMore()
+            await viewModel.loadMore(activationToken: secondActivation)
             await service.operationFinished(registration: retryRegistration)
         }
         guard let retryCall = await requireEntry(

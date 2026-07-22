@@ -25,18 +25,31 @@ struct JobTimelineView: View {
         .navigationBarTitleDisplayMode(.large)
         #endif
         .refreshable {
-            await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
+            guard let activationToken else { return }
+            await viewModel.loadTimeline(
+                dateFrom: nil,
+                dateTo: nil,
+                activationToken: activationToken
+            )
         }
-        .task {
-            activationToken = viewModel.activate()
+        .onAppear {
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
-            await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
+            activationToken = viewModel.activate()
         }
-        .onDisappear {
-            if let activationToken {
-                viewModel.deactivate(activationToken: activationToken)
+        .task(id: activationToken) { [activationToken] in
+            guard let activationToken else { return }
+            await viewModel.loadTimeline(
+                dateFrom: nil,
+                dateTo: nil,
+                activationToken: activationToken
+            )
+        }
+        .onDisappear { [departingToken = activationToken] in
+            guard let departingToken else { return }
+            viewModel.deactivate(activationToken: departingToken)
+            if activationToken == departingToken {
+                activationToken = nil
             }
-            activationToken = nil
         }
     }
 

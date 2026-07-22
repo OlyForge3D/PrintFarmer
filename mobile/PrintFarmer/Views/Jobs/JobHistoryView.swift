@@ -2,10 +2,15 @@ import Foundation
 import SwiftUI
 
 struct JobHistoryView: View {
+    private struct ActiveTask {
+        let activationToken: UUID
+        let task: Task<Void, Never>
+    }
+
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = JobHistoryViewModel()
     @State private var showDateFilter = false
-    @State private var activeTasks: [Task<Void, Never>] = []
+    @State private var activeTasks: [ActiveTask] = []
     @State private var activationToken: UUID?
 
     var body: some View {
@@ -19,10 +24,7 @@ struct JobHistoryView: View {
                 } description: {
                     Text(error)
                 } actions: {
-                    Button("Retry") {
-                        let task = Task { await viewModel.loadHistory() }
-                        activeTasks.append(task)
-                    }
+                    Button("Retry", action: startHistoryLoad)
                 }
             } else if viewModel.historyItems.isEmpty {
                 EmptyStateView(
@@ -57,20 +59,27 @@ struct JobHistoryView: View {
             dateFilterSheet
         }
         .refreshable {
-            await viewModel.loadHistory()
+            guard let activationToken else { return }
+            await viewModel.loadHistory(activationToken: activationToken)
         }
-        .task {
-            activationToken = viewModel.activate()
+        .onAppear {
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
-            await viewModel.loadHistory()
+            activationToken = viewModel.activate()
         }
-        .onDisappear {
-            if let activationToken {
-                viewModel.deactivate(activationToken: activationToken)
+        .task(id: activationToken) { [activationToken] in
+            guard let activationToken else { return }
+            await viewModel.loadHistory(activationToken: activationToken)
+        }
+        .onDisappear { [departingToken = activationToken] in
+            guard let departingToken else { return }
+            activeTasks
+                .filter { $0.activationToken == departingToken }
+                .forEach { $0.task.cancel() }
+            activeTasks.removeAll { $0.activationToken == departingToken }
+            viewModel.deactivate(activationToken: departingToken)
+            if activationToken == departingToken {
+                activationToken = nil
             }
-            activationToken = nil
-            activeTasks.forEach { $0.cancel() }
-            activeTasks.removeAll()
         }
     }
 
@@ -88,10 +97,7 @@ struct JobHistoryView: View {
                     if viewModel.isLoadingMore {
                         ProgressView()
                     } else {
-                        Button("Load More") {
-                            let task = Task { await viewModel.loadMore() }
-                            activeTasks.append(task)
-                        }
+                        Button("Load More", action: startLoadMore)
                     }
                     Spacer()
                 }
@@ -218,16 +224,14 @@ struct JobHistoryView: View {
                 Section {
                     Button("Apply") {
                         showDateFilter = false
-                        let task = Task { await viewModel.loadHistory() }
-                        activeTasks.append(task)
+                        startHistoryLoad()
                     }
 
                     Button("Clear Dates") {
                         viewModel.dateFrom = nil
                         viewModel.dateTo = nil
                         showDateFilter = false
-                        let task = Task { await viewModel.loadHistory() }
-                        activeTasks.append(task)
+                        startHistoryLoad()
                     }
                 }
             }
@@ -242,6 +246,22 @@ struct JobHistoryView: View {
             }
         }
         .presentationDetents([.medium])
+    }
+
+    private func startHistoryLoad() {
+        guard let activationToken else { return }
+        let task = Task {
+            await viewModel.loadHistory(activationToken: activationToken)
+        }
+        activeTasks.append(ActiveTask(activationToken: activationToken, task: task))
+    }
+
+    private func startLoadMore() {
+        guard let activationToken else { return }
+        let task = Task {
+            await viewModel.loadMore(activationToken: activationToken)
+        }
+        activeTasks.append(ActiveTask(activationToken: activationToken, task: task))
     }
 
     // MARK: - Helpers
