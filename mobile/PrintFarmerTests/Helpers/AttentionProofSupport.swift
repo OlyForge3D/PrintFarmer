@@ -68,6 +68,10 @@ enum AttentionLoadStep: Sendable {
     case featureDisabled
     /// Hold the call open until the gate resolves.
     case gated(AttentionResultGate<AttentionFeed>)
+    /// Hold the call open until the gate resolves, then throw
+    /// `NetworkError.featureDisabled`. Used to prove that a stale
+    /// gated-disabled completion cannot overwrite a newer success.
+    case gatedFeatureDisabled(AttentionResultGate<Void>)
 }
 
 /// One recorded call for later assertion.
@@ -130,6 +134,18 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
             )
         case .gated(let gate):
             return try await gate.wait()
+        case .gatedFeatureDisabled(let gate):
+            _ = try await gate.wait()
+            throw NetworkError.featureDisabled(
+                APIError(
+                    title: "Feature disabled",
+                    status: 404,
+                    detail: "Attention is disabled on this server.",
+                    errors: nil,
+                    message: nil,
+                    code: "featureDisabled"
+                )
+            )
         }
     }
 

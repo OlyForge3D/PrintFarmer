@@ -233,10 +233,14 @@ final class AttentionFeedViewModelTests: XCTestCase {
     }
 
     func testStaleDisabledCannotOverwriteNewerSuccess() async {
-        let firstGate = AttentionResultGate<AttentionFeed>()
+        // Uses a real `NetworkError.featureDisabled` completion (the
+        // shape produced by APIClient's #728/#725 gated-404 mapping) so
+        // the assertion covers the actual disabled code path, not a
+        // generic-error stand-in.
+        let disabledGate = AttentionResultGate<Void>()
         let service = ScriptedAttentionService(
             steps: [
-                .gated(firstGate),
+                .gatedFeatureDisabled(disabledGate),
                 .value(makeAttentionFeed(healthyPrinterCount: 2)),
             ]
         )
@@ -244,17 +248,338 @@ final class AttentionFeedViewModelTests: XCTestCase {
 
         let first = Task { await vm.refresh() }
         await service.waitForLoadCount(1)
-        _ = await vm.refresh() // newer
+        _ = await vm.refresh() // newer generation
 
-        // Older call now decides to "disable" — resolve it after the
-        // second success has landed. `AttentionResultGate` cannot itself
-        // raise a `featureDisabled`, so we simulate by failing with a
-        // sentinel and asserting the newer state is untouched.
-        await firstGate.fail(.forced("gate-flip"))
+        // Older call now resolves as a real featureDisabled 404 after
+        // the newer success has already applied. Must be dropped: the
+        // shell must stay on the newer `.loaded` snapshot, not flip to
+        // `.disabled`.
+        await disabledGate.succeed(())
         _ = await first.value
 
-        XCTAssertEqual(vm.phase, .loaded)
+        XCTAssertEqual(vm.phase, .loaded, "Stale featureDisabled must not flip newer success to disabled")
         XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 2)
+    }
+
+    // MARK: - Activation-epoch fence
+
+    func testActivationEpochFencesLoadAcrossDeactivateReactivate() async {
+        // Activation A starts a refresh. View deactivates, then
+        // reactivates (activation B). Activation-A's completion arrives
+        // after the reactivation; it must not apply into B's state.
+        let gateA = AttentionResultGate<AttentionFeed>()
+        let feedB = makeAttentionFeed(
+            items: [makeAttentionItem(id: "runout:B", title: "B")],
+            healthyPrinterCount: 3
+        )
+        let service = ScriptedAttentionService(
+            steps: [.gated(gateA), .value(feedB)]
+        )
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let activationATask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        vm.deactivate()
+        vm.activate() // activation B
+
+        // Activation B issues its own refresh through the normal path.
+        let activationBTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(2)
+
+        // Now let activation-A finally return with a "poison" payload
+        // that would look like a success if applied. It must drop.
+        await gateA.succeed(
+            makeAttentionFeed(
+                items: [makeAttentionItem(id: "failure:poison", title: "Poison")],
+                healthyPrinterCount: 999
+            )
+        )
+        let aResult = await activationATask.value
+        let bResult = await activationBTask.value
+
+        XCTAssertFalse(aResult, "Activation A must not report success across the epoch fence")
+        XCTAssertTrue(bResult)
+        XCTAssertEqual(vm.snapshot?.items.first?.title, "B")
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 3)
+        XCTAssertEqual(vm.phase, .loaded)
+    }
+
+    func testActivationEpochFencesErrorAcrossDeactivateReactivate() async {
+        // Same fence but the deferred activation-A completion is a
+        // failure. It must not apply into activation-B's `.loaded`.
+        let gateA = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(
+            steps: [
+                .gated(gateA),
+                .value(makeAttentionFeed(healthyPrinterCount: 5)),
+            ]
+        )
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let activationATask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        vm.deactivate()
+        vm.activate()
+
+        _ = await vm.refresh()
+
+        await gateA.fail(.forced("stale error"))
+        _ = await activationATask.value
+
+        XCTAssertEqual(vm.phase, .loaded)
+        XCTAssertNil(vm.loadFailure, "Stale failure across an activation boundary must not surface")
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 5)
+    }
+
+    // MARK: - Inactive pagination must not wedge
+
+    func testLoadMoreCompletingWhileInactiveClearsFlagAndAllowsFutureLoad() async {
+        // Regression: reviewers flagged that an inactive-completion
+        // never cleared `isLoadingMore`, so pagination stayed wedged
+        // after reactivation.
+        let firstPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:1")],
+            nextCursor: "cursor-1"
+        )
+        let appendGate = AttentionResultGate<AttentionFeed>()
+        let recoveryPage = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:2")],
+            nextCursor: "cursor-2"
+        )
+        let secondAttempt = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:3")],
+            nextCursor: nil
+        )
+        let service = ScriptedAttentionService(steps: [
+            .value(firstPage),
+            .gated(appendGate),
+            .value(recoveryPage),
+            .value(secondAttempt),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        _ = await vm.refresh()
+        XCTAssertTrue(vm.canLoadMore)
+
+        let loadMoreTask = Task { await vm.loadMore() }
+        await service.waitForLoadCount(2)
+        XCTAssertTrue(vm.isLoadingMore)
+
+        // Deactivate mid-flight.
+        vm.deactivate()
+
+        // Resolve the append after deactivate. The completion must
+        // release its owned `isLoadingMore` even though the view is
+        // inactive; otherwise the flag would wedge pagination forever.
+        await appendGate.succeed(
+            makeAttentionFeed(
+                items: [makeAttentionItem(id: "failure:stale")],
+                nextCursor: "cursor-stale"
+            )
+        )
+        _ = await loadMoreTask.value
+
+        XCTAssertFalse(
+            vm.isLoadingMore,
+            "Inactive completion must release isLoadingMore (no wedge)"
+        )
+
+        // Reactivate + refresh to re-establish a valid cursor.
+        vm.activate()
+        _ = await vm.refresh()
+        XCTAssertTrue(vm.canLoadMore, "canLoadMore recovers on reactivation")
+
+        // Pagination must now proceed exactly once.
+        _ = await vm.loadMore()
+        let ids = vm.snapshot?.items.map(\.id) ?? []
+        XCTAssertEqual(ids, ["failure:2", "failure:3"])
+        XCTAssertNil(vm.snapshot?.nextCursor)
+        XCTAssertFalse(vm.isLoadingMore)
+    }
+
+    // MARK: - Inactive error queue drain
+
+    func testFailureFinishingWhileInactiveQueuesOneReloadAndDoesNotSurfaceError() async {
+        let gate = AttentionResultGate<AttentionFeed>()
+        let recoveryFeed = makeAttentionFeed(healthyPrinterCount: 4)
+        let service = ScriptedAttentionService(steps: [
+            .gated(gate),
+            .value(recoveryFeed),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let refreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+        XCTAssertEqual(vm.phase, .loading)
+
+        vm.deactivate()
+
+        // Failure lands while inactive: outcome dropped, loading flag
+        // cleared, and exactly one queued reload flagged.
+        await gate.fail(.forced("inactive failure"))
+        let dropped = await refreshTask.value
+        XCTAssertFalse(dropped)
+        XCTAssertFalse(vm.isRefreshing)
+        XCTAssertEqual(vm.phase, .idle)
+        XCTAssertNil(
+            vm.loadFailure,
+            "Inactive failure must not surface as a load failure"
+        )
+
+        vm.activate()
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        let calls = await service.loadCallCount
+        XCTAssertEqual(calls, 2, "Exactly one queued reload drains on re-entry")
+        XCTAssertEqual(vm.phase, .loaded)
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 4)
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
+    // MARK: - Bootstrap and disabled recovery
+
+    func testBootstrapIssuesExactlyOneCanonicalFetchOnFreshEntry() async {
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 1)),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+
+        _ = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let calls = await service.loadCallCount
+        XCTAssertEqual(calls, 1, "Fresh bootstrap → exactly one canonical GET")
+        XCTAssertEqual(vm.phase, .loaded)
+    }
+
+    func testBootstrapCoalescesQueuedDrainIntoASingleFetch() async {
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 1)),
+            .value(makeAttentionFeed(healthyPrinterCount: 7)),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+
+        // First bootstrap does the initial load.
+        _ = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let baseline = await service.loadCallCount
+        XCTAssertEqual(baseline, 1)
+
+        // Deactivate; simulate a signalR event while off-screen that
+        // sets pendingReloadOnActivate=true.
+        vm.deactivate()
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:1",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        // The handler saw inactive and set the pending flag; no fetch
+        // ran while off-screen.
+        let stillBaseline = await service.loadCallCount
+        XCTAssertEqual(stillBaseline, baseline)
+
+        // Re-entering with the same authority: bootstrap must issue
+        // exactly ONE canonical GET, not two (drain + refresh).
+        _ = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let after = await service.loadCallCount
+        XCTAssertEqual(
+            after, baseline + 1,
+            "Bootstrap must coalesce a queued drain and its own refresh into ONE fetch"
+        )
+        XCTAssertEqual(callbackQueue.count, 0)
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 7)
+    }
+
+    func testDisabledRecoveryRecomputesGateAndRefetches() async {
+        // Server initially responds with featureDisabled, then the
+        // gate is flipped back on and the recovery button on the view
+        // path (VM: retryDisabledRecovery + refresh) picks up fresh
+        // canonical content. Without the VM-side latch clear, the VM
+        // would stay `.disabled` forever after the server response.
+        let service = ScriptedAttentionService(steps: [
+            .featureDisabled,
+            .value(makeAttentionFeed(healthyPrinterCount: 6)),
+        ])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        _ = await vm.refresh()
+        XCTAssertEqual(vm.phase, .disabled)
+
+        // Without recovery: a naive re-refresh returns immediately
+        // because the internal gate latched false. Prove that first.
+        _ = await vm.refresh()
+        let afterNaive = await service.loadCallCount
+        XCTAssertEqual(
+            afterNaive, 1,
+            "Naive refresh after latched disabled must not hit the network"
+        )
+        XCTAssertEqual(vm.phase, .disabled)
+
+        // Recovery entry: the view has re-resolved capabilities and
+        // now reports enabled=true. VM clears its latch and the next
+        // refresh actually fires.
+        vm.retryDisabledRecovery(attentionEnabled: true)
+        XCTAssertNotEqual(vm.phase, .disabled)
+
+        _ = await vm.refresh()
+        let afterRecovery = await service.loadCallCount
+        XCTAssertEqual(
+            afterRecovery, 2,
+            "Recovery entry must permit exactly one fresh canonical GET"
+        )
+        XCTAssertEqual(vm.phase, .loaded)
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 6)
     }
 
     // MARK: - Inactive-mid-load

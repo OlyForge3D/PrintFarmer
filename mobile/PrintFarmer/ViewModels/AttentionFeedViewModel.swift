@@ -144,11 +144,22 @@ final class AttentionFeedViewModel {
     /// with the same identities does NOT bump the epoch — the early
     /// return above short-circuits before we get here.
     @ObservationIgnored private var authorityEpoch: UInt64 = 0
+    /// Bumped on every `deactivate` and `activate` (and every service
+    /// replacement, transitively). Loads capture it at start and drop
+    /// on completion if the epoch has moved — this closes the window
+    /// where an activation-A load could apply into a fresh activation-B
+    /// state after a deactivate/reactivate cycle.
+    @ObservationIgnored private var activationEpoch: UInt64 = 0
     /// Bumped on every fetch (`refresh`, `loadMore`). Each in-flight
     /// operation captures the stamp at start and drops its outcome if
     /// the stamp has moved by application time. This is what makes
     /// reverse-order completions safe even within a single authority.
     @ObservationIgnored private var loadStamp: UInt64 = 0
+    /// The load stamp that currently owns the `isLoadingMore` flag. A
+    /// completion clears the flag only when its captured stamp still
+    /// matches this owner — protects the flag from being cleared by an
+    /// older completion that fires after a newer request has taken over.
+    @ObservationIgnored private var loadMoreOwnerStamp: UInt64 = 0
     @ObservationIgnored private var attentionSubscription: SignalRSubscription?
 
     /// Deduplicated ID set for `loadMore` appends. Rebuilt atomically on
@@ -202,6 +213,11 @@ final class AttentionFeedViewModel {
            attentionSubscription != nil {
             if !isActive {
                 isActive = true
+                // Reactivation via configure is a new activation epoch
+                // for the same reason `activate()` bumps: any in-flight
+                // load from before the last deactivate must drop, not
+                // apply into fresh reactivation state.
+                activationEpoch &+= 1
                 if pendingReloadOnActivate {
                     pendingReloadOnActivate = false
                     let enqueue = callbackEnqueuer
@@ -261,6 +277,10 @@ final class AttentionFeedViewModel {
         // rendered content until the queued refresh completes; but drop
         // any in-flight authority so completions can't mutate state.
         isActive = false
+        // Bumping the activation epoch fences off any in-flight refresh
+        // or loadMore whose outcome would otherwise land into a fresh
+        // reactivation. See `matchesActive`.
+        activationEpoch &+= 1
         // Any load finishing while inactive will notice the mismatched
         // active state and clear loading without applying its result.
         // See applySnapshot / applyFailure / applyDisabled below.
@@ -271,12 +291,75 @@ final class AttentionFeedViewModel {
     /// tab was in the background), exactly one canonical refresh drains.
     func activate() {
         guard attentionService != nil else { return }
+        let wasActive = isActive
         isActive = true
+        // Every reactivation is a new activation epoch so the queued
+        // drain runs against a fresh fence, and any straggler from a
+        // prior activation whose completion is still queued cannot
+        // apply.
+        if !wasActive {
+            activationEpoch &+= 1
+        }
         guard pendingReloadOnActivate else { return }
         pendingReloadOnActivate = false
         let enqueue = callbackEnqueuer
         enqueue { [weak self] in
             await self?.refresh()
+        }
+    }
+
+    /// Bind + activate + issue exactly one canonical refresh in a way
+    /// that coalesces any pending drain. Called from the view's
+    /// `.task(id:)` so re-entry produces exactly one canonical GET,
+    /// regardless of whether an invalidation arrived while off-screen.
+    ///
+    /// Contract:
+    /// * Bootstrap consumes any queued drain flag before configuring
+    ///   so `configure`'s re-entry path does not enqueue a duplicate
+    ///   fetch through the callback path.
+    /// * Bootstrap then awaits a single `refresh()` — that is the one
+    ///   canonical GET per bootstrap invocation.
+    ///
+    /// The service, signalR, and gate arguments must match the shell's
+    /// current authority; a mismatch triggers a full reconfigure inside
+    /// `configure()`.
+    @discardableResult
+    func bootstrap(
+        attentionService: any AttentionServiceProtocol,
+        signalRService: any SignalRServiceProtocol,
+        attentionEnabled: Bool
+    ) async -> Bool {
+        // Consume any queued drain before configure so its re-entry
+        // path does not enqueue a duplicate refresh through the
+        // callback enqueuer. Bootstrap owns the fetch below.
+        pendingReloadOnActivate = false
+        configure(
+            attentionService: attentionService,
+            signalRService: signalRService,
+            attentionEnabled: attentionEnabled
+        )
+        return await refresh()
+    }
+
+    /// User-driven recovery from the feature-disabled surface. Clears
+    /// the internal disabled gate and phase so the next canonical
+    /// refresh actually hits the network again. The view calls this
+    /// after re-resolving `SystemCapabilities` so `attentionEnabled`
+    /// reflects the latest server truth.
+    func retryDisabledRecovery(attentionEnabled newAttentionEnabled: Bool) {
+        self.attentionEnabled = newAttentionEnabled
+        // Bump the load stamp so any in-flight load (from before the
+        // gate flip) drops on completion instead of re-applying
+        // disabled state after the user asked to recover.
+        _ = advanceLoadStamp()
+        if newAttentionEnabled {
+            if snapshot == nil {
+                phase = .idle
+            } else {
+                phase = .loaded
+            }
+        } else {
+            phase = .disabled
         }
     }
 
@@ -300,10 +383,13 @@ final class AttentionFeedViewModel {
             return false
         }
 
-        // Drop any prior in-flight load's authority. This is what makes
-        // reverse-order completions safe: an older fetch that resolves
-        // after we bump the stamp cannot apply.
+        // Capture BOTH the load stamp (prevents reverse-order applies
+        // within a single activation) and the activation epoch (fences
+        // off applies across a deactivate/reactivate boundary). An
+        // older load whose activation is no longer current cannot
+        // mutate visible state.
         let stampedLoad = advanceLoadStamp()
+        let stampedActivation = activationEpoch
 
         if snapshot == nil {
             phase = .loading
@@ -313,12 +399,19 @@ final class AttentionFeedViewModel {
 
         let outcome = await Self.fetchFirstPage(service: service)
 
-        guard matchesActive(loadStamp: stampedLoad) else {
-            // Stale generation OR view went inactive: never overwrite.
-            // If we went inactive mid-flight, clear the loading flag so
-            // reactivation doesn't observe a permanently spinning shell,
-            // and queue exactly one canonical refresh to drain on
-            // re-entry (#779 acceptance criterion).
+        guard matchesActive(loadStamp: stampedLoad, activation: stampedActivation) else {
+            // Stale generation OR view went inactive OR reactivated
+            // under a fresh activation epoch: never overwrite.
+            //
+            // If we went inactive AND this call still owns the load
+            // stamp (no newer refresh took over), clear the loading
+            // flag so a subsequent reactivation doesn't observe a
+            // permanently spinning shell, and queue exactly one
+            // canonical refresh to drain on re-entry. The
+            // activationEpoch check is intentionally omitted here: a
+            // deactivate bumps activationEpoch, so requiring epoch
+            // equality would prevent the stale-inactive path from
+            // ever clearing — the very case #779 requires.
             if !isActive && loadStamp == stampedLoad {
                 isRefreshing = false
                 if phase == .loading { phase = .idle }
@@ -356,6 +449,12 @@ final class AttentionFeedViewModel {
     /// * A `nextCursor` must be present.
     /// * No canonical refresh may be in flight (`isRefreshing == false`).
     /// * No prior `loadMore` may still be pending (`isLoadingMore == false`).
+    ///
+    /// The completion path uses an owner-token pattern: only the request
+    /// that set `isLoadingMore` may clear it, and it does so on every
+    /// terminal path (including when the view has since deactivated).
+    /// This prevents an inactive-completion from permanently wedging
+    /// `isLoadingMore = true` and killing further pagination on re-entry.
     @discardableResult
     func loadMore() async -> Bool {
         guard isActive, attentionEnabled, let service = attentionService else {
@@ -367,18 +466,28 @@ final class AttentionFeedViewModel {
         guard !isRefreshing, !isLoadingMore else { return false }
 
         let stampedLoad = advanceLoadStamp()
+        let stampedActivation = activationEpoch
+        loadMoreOwnerStamp = stampedLoad
         isLoadingMore = true
 
         let outcome = await Self.fetchNextPage(service: service, cursor: cursor)
 
-        guard matchesActive(loadStamp: stampedLoad) else {
-            // A refresh interleaved: drop the page silently. The refresh
-            // owns the visible state.
-            if isActive { isLoadingMore = false }
-            return false
+        // Release ownership of `isLoadingMore` regardless of whether the
+        // outcome is applied — but only when *this* request still owns
+        // it. An older completion that races a newer request must NOT
+        // clear a flag it no longer owns.
+        let stillOwnsLoadMore = (loadMoreOwnerStamp == stampedLoad)
+        if stillOwnsLoadMore {
+            isLoadingMore = false
         }
 
-        isLoadingMore = false
+        guard matchesActive(loadStamp: stampedLoad, activation: stampedActivation) else {
+            // Stale generation, view inactive, or activation epoch
+            // moved: drop this page. `isLoadingMore` has already been
+            // released above (if we still owned it) so pagination is
+            // not wedged for the next activation.
+            return false
+        }
 
         switch outcome {
         case .success(let feed):
@@ -556,8 +665,10 @@ final class AttentionFeedViewModel {
 
     // MARK: - Authority helpers
 
-    private func matchesActive(loadStamp stamped: UInt64) -> Bool {
-        isActive && loadStamp == stamped
+    private func matchesActive(loadStamp stamped: UInt64, activation: UInt64) -> Bool {
+        isActive
+            && loadStamp == stamped
+            && activationEpoch == activation
     }
 
     private func matchesAuthorityIgnoringActive(
@@ -580,7 +691,9 @@ final class AttentionFeedViewModel {
 
     private func invalidateAuthority(resetState: Bool) {
         authorityEpoch &+= 1
+        activationEpoch &+= 1
         loadStamp &+= 1
+        loadMoreOwnerStamp = loadStamp
         attentionSubscription?.cancel()
         attentionSubscription = nil
         isRefreshing = false

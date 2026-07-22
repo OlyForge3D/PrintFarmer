@@ -47,21 +47,7 @@ struct AttentionView: View {
             .navigationTitle("Attention")
             .toolbar { toolbarContent }
             .refreshable {
-                await services.capabilitiesService.refresh()
-                let previouslyEnabled = attentionEnabled
-                attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
-                // Rebind the view model if the gate flipped so the
-                // disabled fallback is authoritative for the session.
-                if previouslyEnabled != attentionEnabled {
-                    feedViewModel.configure(
-                        attentionService: services.attentionService,
-                        signalRService: services.signalRService,
-                        attentionEnabled: attentionEnabled
-                    )
-                }
-                if attentionEnabled {
-                    await feedViewModel.refresh()
-                }
+                await performRecoveryRefresh()
             }
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
@@ -74,15 +60,14 @@ struct AttentionView: View {
             await services.capabilitiesService.refresh()
             attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
 
-            feedViewModel.configure(
+            // Single canonical GET per re-entry: bootstrap consumes any
+            // queued drain (from a signalR event while off-screen) and
+            // owns the refresh below — no duplicate dispatch.
+            await feedViewModel.bootstrap(
                 attentionService: services.attentionService,
                 signalRService: services.signalRService,
                 attentionEnabled: attentionEnabled
             )
-
-            if attentionEnabled {
-                await feedViewModel.refresh()
-            }
         }
         .onChange(of: feedItemCount) { _, newValue in
             // #779 replaces the notifications-count-driven badge with a
@@ -123,6 +108,46 @@ struct AttentionView: View {
         feedViewModel.snapshot?.items.count ?? 0
     }
 
+    /// Shared recovery entry point used by:
+    /// * the root pull-to-refresh gesture,
+    /// * the explicit Refresh button on the empty surface,
+    /// * the explicit Refresh button on the disabled fallback.
+    ///
+    /// Re-runs capability resolution, flips the shell's local gate,
+    /// and — critically for the disabled surface — clears the view
+    /// model's internal disabled gate so the next canonical GET
+    /// actually reaches the network. Without this, once the VM had
+    /// latched `phase = .disabled` (either from the gate or from a
+    /// featureDisabled server response), pull-to-refresh returned
+    /// immediately with the cached disabled state and the operator was
+    /// trapped until they navigated away and back.
+    private func performRecoveryRefresh() async {
+        await services.capabilitiesService.refresh()
+        let previouslyEnabled = attentionEnabled
+        attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
+
+        // If the gate flipped (either direction) reconfigure so the
+        // VM's own gate aligns with the fresh capability truth.
+        if previouslyEnabled != attentionEnabled {
+            feedViewModel.configure(
+                attentionService: services.attentionService,
+                signalRService: services.signalRService,
+                attentionEnabled: attentionEnabled
+            )
+        }
+
+        // Independently clear any VM-side disabled latch — the gate may
+        // still be true locally but a previous featureDisabled response
+        // could have set the VM's internal flag. This is the fence that
+        // makes the disabled-surface Refresh button recoverable in
+        // place, without a tab round-trip.
+        feedViewModel.retryDisabledRecovery(attentionEnabled: attentionEnabled)
+
+        if attentionEnabled {
+            await feedViewModel.refresh()
+        }
+    }
+
     // MARK: - Feed content
 
     @ViewBuilder
@@ -135,18 +160,47 @@ struct AttentionView: View {
         case .error where feedViewModel.snapshot == nil:
             errorPlaceholder
         case .loaded where feedViewModel.shouldShowEmpty:
-            EmptyStateView(
-                icon: "checkmark.seal",
-                title: "Nothing needs attention",
-                message: "All monitored printers are running normally."
-            )
-            .accessibilityIdentifier("attention.empty")
+            emptyStateSurface
         case .loaded, .error:
             attentionList
         case .disabled:
             // Guarded above; fall through as a defensive no-op.
             EmptyView()
         }
+    }
+
+    /// Empty-state surface wrapped in a scroll container so pull-to-
+    /// refresh reliably fires even when there is no list content. The
+    /// explicit Refresh button gives operators a discoverable recovery
+    /// affordance that does not depend on a gesture — matches the
+    /// `ShiftTasksView` precedent for empty/failed shells.
+    private var emptyStateSurface: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Spacer(minLength: 60)
+                EmptyStateView(
+                    icon: "checkmark.seal",
+                    title: "Nothing needs attention",
+                    message: "All monitored printers are running normally."
+                )
+                .accessibilityIdentifier("attention.empty")
+
+                Button {
+                    Task { await performRecoveryRefresh() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .accessibilityIdentifier("attention.empty.refresh")
+
+                Spacer(minLength: 40)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+        }
+        .scrollBounceBehavior(.always)
+        .accessibilityIdentifier("attention.empty.scroll")
     }
 
     private var errorPlaceholder: some View {
@@ -276,57 +330,80 @@ struct AttentionView: View {
     }
 
     // MARK: - Feature-disabled fallback (#725)
+    //
+    // Wrapped in a ScrollView with `.scrollBounceBehavior(.always)` so
+    // pull-to-refresh fires reliably even though the fallback has no
+    // list content. The explicit "Try again" button re-runs capability
+    // resolution AND clears the view model's internal disabled latch —
+    // without that latch clear, a `featureDisabled` server response
+    // would have wedged the surface until the operator navigated away
+    // and back.
 
     private var disabledFallback: some View {
-        VStack(spacing: 24) {
-            VStack(spacing: 12) {
-                Image(systemName: "bell.slash.circle")
-                    .font(.system(size: 44, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+        ScrollView {
+            VStack(spacing: 24) {
+                Spacer(minLength: 40)
+                VStack(spacing: 12) {
+                    Image(systemName: "bell.slash.circle")
+                        .font(.system(size: 44, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
 
-                Text("Operator feed disabled")
-                    .font(.title3.weight(.semibold))
-                    .multilineTextAlignment(.center)
+                    Text("Operator feed disabled")
+                        .font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
 
-                Text("The operator attention feed is turned off on this server. Use the legacy screens below while it's disabled.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text("The operator attention feed is turned off on this server. Use the legacy screens below while it's disabled, or check for a re-enable with Try again.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 24)
+                .accessibilityElement(children: .combine)
+
+                Button {
+                    Task { await performRecoveryRefresh() }
+                } label: {
+                    Label("Try again", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .accessibilityIdentifier("attention.disabled.retry")
+
+                VStack(spacing: 12) {
+                    fallbackButton(
+                        title: "Notifications",
+                        systemImage: "bell",
+                        hint: "Opens the classic notifications list.",
+                        identifier: "attention.fallback.notifications"
+                    ) {
+                        showingNotifications = true
+                    }
+                    fallbackButton(
+                        title: "Dashboard",
+                        systemImage: "square.grid.2x2",
+                        hint: "Opens the printer dashboard summary.",
+                        identifier: "attention.fallback.dashboard"
+                    ) {
+                        showingDashboard = true
+                    }
+                    fallbackButton(
+                        title: "Maintenance",
+                        systemImage: "wrench.adjustable",
+                        hint: "Opens the maintenance tasks screen.",
+                        identifier: "attention.fallback.maintenance"
+                    ) {
+                        showingMaintenance = true
+                    }
+                }
+                .padding(.horizontal, 24)
+
+                Spacer(minLength: 40)
             }
-            .padding(.horizontal, 24)
-            .accessibilityElement(children: .combine)
-
-            VStack(spacing: 12) {
-                fallbackButton(
-                    title: "Notifications",
-                    systemImage: "bell",
-                    hint: "Opens the classic notifications list.",
-                    identifier: "attention.fallback.notifications"
-                ) {
-                    showingNotifications = true
-                }
-                fallbackButton(
-                    title: "Dashboard",
-                    systemImage: "square.grid.2x2",
-                    hint: "Opens the printer dashboard summary.",
-                    identifier: "attention.fallback.dashboard"
-                ) {
-                    showingDashboard = true
-                }
-                fallbackButton(
-                    title: "Maintenance",
-                    systemImage: "wrench.adjustable",
-                    hint: "Opens the maintenance tasks screen.",
-                    identifier: "attention.fallback.maintenance"
-                ) {
-                    showingMaintenance = true
-                }
-            }
-            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scrollBounceBehavior(.always)
         .accessibilityIdentifier("attention.disabled.fallback")
     }
 
