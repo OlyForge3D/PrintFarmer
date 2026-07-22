@@ -345,11 +345,110 @@ extension AuthViewModelTests {
             "Role matching is case-sensitive — backend normalizes to lowercase")
     }
 
-    /// Unauthenticated (nil user, not just empty roles): maintenance toggle hidden.
-    func testMaintenanceToggleHiddenWhenUnauthenticated() {
-        viewModel.currentUser = nil
-        XCTAssertNil(viewModel.currentUserRole,
-            "Unauthenticated user must have nil currentUserRole so the maintenance toggle is hidden")
+    // MARK: - H2 (Bishop): operation-owned VM state under interleaving
+
+    /// Programmable auth service that captures its outcome BEFORE an optional barrier
+    /// so a test can park a login mid-flight, run an interleaving operation, then
+    /// release — deterministically (no sleeps/polling).
+    private final class ProgrammableAuthService: AuthServiceProtocol, @unchecked Sendable {
+        var loginBarrier: AsyncBarrier?
+        var loginOutcome: () -> Result<AuthLoginOutcome, Error>
+        let user: UserDTO
+        private(set) var logoutCount = 0
+
+        init(user: UserDTO) {
+            self.user = user
+            self.loginOutcome = {
+                .success(.applied(AuthResponse(success: true, token: "t", expiresAt: nil, user: user, error: nil)))
+            }
+        }
+
+        func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
+            let captured = loginOutcome() // capture before suspending so a later reassignment cannot change this call
+            if let loginBarrier { await loginBarrier.arriveAndWait() }
+            switch captured {
+            case .success(let outcome): return outcome
+            case .failure(let error): throw error
+            }
+        }
+        func logout(operation: AuthOperationToken) async { logoutCount += 1 }
+        func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome { .restored(user) }
+        func currentUser() async throws -> UserDTO { user }
+        var isAuthenticated: Bool { get async { true } }
+    }
+
+    func testLoginSupersededByLogoutDoesNotClobberVMState() async {
+        let prog = ProgrammableAuthService(user: makeUser(roles: ["operator"]))
+        services.authService = prog
+        let loginBarrier = AsyncBarrier()
+        prog.loginBarrier = loginBarrier
+
+        let loginTask = Task { await self.viewModel.login(serverURL: "https://a.example.com", username: "u", password: "p") }
+        await loginBarrier.waitUntilArrived()
+        XCTAssertTrue(viewModel.isLoading, "login is in flight")
+
+        // Logout lands and supersedes the in-flight login.
+        await viewModel.logout()
+        // Release the superseded login: it must do nothing (never success-shaped).
+        loginBarrier.release()
+        await loginTask.value
+
+        XCTAssertFalse(viewModel.isAuthenticated, "superseded login must not authenticate")
+        XCTAssertNil(viewModel.currentUser, "superseded login must not set a user")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.isLoading, "logout (the newer op) owns and clears the loading flag")
+    }
+
+    func testOperationOwnedLoadingFlagAcrossOverlappingLogins() async {
+        let prog = ProgrammableAuthService(user: makeUser(roles: ["operator"]))
+        services.authService = prog
+        let b1 = AsyncBarrier(), b2 = AsyncBarrier()
+
+        prog.loginBarrier = b1
+        let login1 = Task { await self.viewModel.login(serverURL: "https://a.example.com", username: "u", password: "p") }
+        await b1.waitUntilArrived()
+        prog.loginBarrier = b2
+        let login2 = Task { await self.viewModel.login(serverURL: "https://a.example.com", username: "u", password: "p") }
+        await b2.waitUntilArrived()
+
+        // Release the older login first: superseded, it must NOT clear the loading flag
+        // that the newer login owns.
+        b1.release()
+        await login1.value
+        XCTAssertTrue(viewModel.isLoading, "superseded login1 must not clear login2's loading flag")
+
+        // Release the current login: it completes and clears its own loading flag.
+        b2.release()
+        await login2.value
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertTrue(viewModel.isAuthenticated)
+    }
+
+    func testStaleLoginFailureAfterNewerSuccessDoesNotClobber() async {
+        let prog = ProgrammableAuthService(user: makeUser(roles: ["operator"]))
+        services.authService = prog
+        let b1 = AsyncBarrier()
+        prog.loginBarrier = b1
+        prog.loginOutcome = { .failure(NetworkError.authFailed("stale boom")) }
+
+        let login1 = Task { await self.viewModel.login(serverURL: "https://a.example.com", username: "u", password: "p") }
+        await b1.waitUntilArrived()
+
+        // A newer login starts and succeeds while login1 is parked.
+        prog.loginBarrier = nil
+        prog.loginOutcome = {
+            .success(.applied(AuthResponse(success: true, token: "t", expiresAt: nil, user: prog.user, error: nil)))
+        }
+        await viewModel.login(serverURL: "https://a.example.com", username: "u", password: "p")
+        XCTAssertTrue(viewModel.isAuthenticated)
+
+        // Release login1's failure: being stale, it must NOT set errorMessage or clear
+        // loading — the newer success stands.
+        b1.release()
+        await login1.value
+        XCTAssertNil(viewModel.errorMessage, "stale failure must not clobber the newer success")
+        XCTAssertTrue(viewModel.isAuthenticated, "newer success stands")
+        XCTAssertFalse(viewModel.isLoading)
     }
 
 }

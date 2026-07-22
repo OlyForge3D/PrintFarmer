@@ -134,6 +134,10 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     var postWriteCandidateBarrier: AsyncBarrier?
     var readDataBarrier: AsyncBarrier?
     var createDirectoryBarrier: AsyncBarrier?
+    /// Fires on the first `removeItem` (e.g. the startup tombstone sweep inside
+    /// `store.activate`). Lets a test park an activation mid-await and advance the
+    /// auth epoch to prove the final snapshot-publication CAS (issue #816 H2, Bishop).
+    var removeItemBarrier: AsyncBarrier?
 
     // Exact counts.
     private(set) var readCount = 0
@@ -180,6 +184,10 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
 
     func removeItem(at url: URL) async throws {
         bump(\.removeCount)
+        if let barrier = removeItemBarrier {
+            removeItemBarrier = nil
+            await barrier.arriveAndWait()
+        }
         if failRemove { throw IOFailure() }
         try await backing.removeItem(at: url)
     }

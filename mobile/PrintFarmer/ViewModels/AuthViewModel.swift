@@ -62,17 +62,30 @@ final class AuthViewModel {
             return
         }
 
+        // H2 (Bishop): mint one operation token and revalidate before EVERY VM
+        // mutation (loading/user/auth). A superseded restore does nothing — it never
+        // clears loading (the newer op owns it) and never resurrects auth after a
+        // logout landed. The token is threaded into activation so a logout landing
+        // during the activation await cannot rebind.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         isLoading = true
         if case .restored(let user) = await services.authService.restoreSession(operation: token) {
             guard services.authOperationEpoch.isCurrent(token.value) else {
-                isLoading = false
                 hasCheckedAuth = true
                 return
             }
             currentUser = user
             isAuthenticated = true
-            await services.activateFarmSnapshotForActiveServer()
+            await services.activateFarmSnapshotForActiveServer(authToken: token.value)
+            guard services.authOperationEpoch.isCurrent(token.value) else {
+                hasCheckedAuth = true
+                return
+            }
+        } else {
+            guard services.authOperationEpoch.isCurrent(token.value) else {
+                hasCheckedAuth = true
+                return
+            }
         }
         isLoading = false
         hasCheckedAuth = true
@@ -96,9 +109,12 @@ final class AuthViewModel {
     // MARK: - Login / Logout
 
     func login(serverURL: String, username: String, password: String) async {
-        // H2: mint a unique operation token and thread it end-to-end. Every durable
-        // side effect (in the service) and the view-state/activation (here) are
-        // gated on exactly this token.
+        // H2 (Bishop): mint a unique operation token and thread it end-to-end.
+        // Revalidate before EVERY VM mutation (loading/error/user/auth). A superseded
+        // login returns and does nothing — never success-shaped, never clears a newer
+        // operation's loading flag, never resurrects auth after a logout. The token is
+        // also passed into activation so a logout landing DURING the activation await
+        // fails the final snapshot-publication CAS.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         isLoading = true
         errorMessage = nil
@@ -110,36 +126,44 @@ final class AuthViewModel {
                 password: password,
                 operation: token
             )
+            // Superseded during the login await: the newer operation owns all VM state.
+            guard services.authOperationEpoch.isCurrent(token.value) else { return }
             switch outcome {
             case .applied(let response):
-                guard services.authOperationEpoch.isCurrent(token.value) else {
-                    isLoading = false
-                    return
-                }
                 currentUser = response.user // VERIFIED user
                 isAuthenticated = true
-                await services.activateFarmSnapshotForActiveServer()
+                await services.activateFarmSnapshotForActiveServer(authToken: token.value)
+                // Logout / newer login may have landed during the activation awaits.
+                guard services.authOperationEpoch.isCurrent(token.value) else { return }
+                isLoading = false
             case .superseded:
-                break // no view-state change for superseded work
+                return // no view-state change, no loading clobber, for superseded work
             }
         } catch let error as NetworkError {
+            // Stale failure after a newer operation must not clobber its error/loading.
+            guard services.authOperationEpoch.isCurrent(token.value) else { return }
             errorMessage = friendlyMessage(for: error)
+            isLoading = false
         } catch {
+            guard services.authOperationEpoch.isCurrent(token.value) else { return }
             errorMessage = error.localizedDescription
+            isLoading = false
         }
-
-        isLoading = false
     }
 
     func logout() async {
         // Supersede any in-flight login/restore (H2), then revoke snapshot
         // authority (synchronous) and await store deactivation before the auth
-        // service tears down the session.
+        // service tears down the session. The VM clears are operation-owned: a newer
+        // login starting during logout's awaits supersedes this logout, so its clears
+        // (including the loading flag) are skipped and never clobber the newer op.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         await services.revokeFarmSnapshot()
         await services.authService.logout(operation: token)
+        guard services.authOperationEpoch.isCurrent(token.value) else { return }
         isAuthenticated = false
         currentUser = nil
+        isLoading = false
     }
 
     func logoutIfServerRegistryUnavailable(_ registry: ServerRegistry) async {

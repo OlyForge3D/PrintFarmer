@@ -282,9 +282,9 @@ final class ServiceContainer: @unchecked Sendable {
     /// server, then resolves that server's OWN verified owner. A user verified on
     /// one server can never activate under another — `(serverB, userA)` is
     /// structurally impossible because the owner is read by the settled server id.
-    func activateFarmSnapshotForActiveServer() async {
+    func activateFarmSnapshotForActiveServer(authToken: Int? = nil) async {
         await activeServerSwitchTask?.value
-        await bindSnapshotToActiveServer()
+        await bindSnapshotToActiveServer(authToken: authToken)
     }
 
     /// Synchronously revoke authority, then await the store's deactivation.
@@ -297,7 +297,14 @@ final class ServiceContainer: @unchecked Sendable {
     /// server's persisted owner identity. Uses conditional deactivation only — it
     /// never globally revokes, so a concurrent newer switch's binding is never
     /// cleared (H1).
-    private func bindSnapshotToActiveServer() async {
+    ///
+    /// When called from an authenticated login/restore, `authToken` carries that
+    /// operation's auth epoch. A logout/session-expiry/newer login advances the auth
+    /// epoch and revokes authority; this binding then fails its final exact-token CAS
+    /// at the publication point — even if the logout lands DURING the activation await
+    /// (H2, Bishop). Switch-driven binds pass `nil` and rely on the transition epoch.
+    private func bindSnapshotToActiveServer(authToken: Int? = nil) async {
+        func authStillCurrent() -> Bool { authToken.map { authOperationEpoch.isCurrent($0) } ?? true }
         guard let serverRegistry, let active = serverRegistry.activeServer else {
             // No active server: conditionally clear the current session if any.
             if let session = farmSnapshotAuthority.currentSession() {
@@ -313,15 +320,20 @@ final class ServiceContainer: @unchecked Sendable {
             }
             return
         }
+        // Fail closed early if this login/restore was already superseded.
+        guard authStillCurrent() else { return }
         let namespace = FarmSnapshotNamespace(serverID: active.id, userID: ownerID)
         guard let session = farmSnapshotAuthority.mint(namespace: namespace, generation: activeGeneration.current) else {
             // Tombstoned (purged) server — do not resurrect.
             return
         }
         await farmSnapshotStore.activate(session: session)
-        // Revalidate that the active server did not change under us during the
-        // await; if it did, the newer switch owns activation.
-        guard serverRegistry.activeServerID == active.id, farmSnapshotAuthority.isCurrent(session) else {
+        // Final exact-token CAS at publication: the active server did not change, the
+        // session is still authority-current, AND the auth operation is still current
+        // (no logout/newer login landed during the activate await).
+        guard serverRegistry.activeServerID == active.id,
+              farmSnapshotAuthority.isCurrent(session),
+              authStillCurrent() else {
             farmSnapshotAuthority.deactivate(session) // conditional; never clobbers newer
             return
         }

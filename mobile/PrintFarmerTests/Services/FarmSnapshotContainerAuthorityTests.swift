@@ -397,6 +397,74 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
                        "superseded B switch must never build B services")
     }
 
+    // MARK: H2 (Bishop) — auth-token CAS at snapshot publication
+
+    func testActivationBindsWhenAuthTokenStaysCurrent() async throws {
+        let (container, store, a, userA) = try makeSingleServerContainer(tombstonedDummy: false)
+        let token = container.authOperationEpoch.advance()
+        await container.activateFarmSnapshotForActiveServer(authToken: token)
+        let session = await store.currentSession()
+        XCTAssertEqual(session?.serverID, a)
+        XCTAssertEqual(session?.userID, userA)
+    }
+
+    func testActivationWithStaleAuthTokenDoesNotBind() async throws {
+        let (container, store, _, _) = try makeSingleServerContainer(tombstonedDummy: false)
+        let stale = container.authOperationEpoch.advance()
+        _ = container.authOperationEpoch.advance() // a newer auth op supersedes `stale`
+        await container.activateFarmSnapshotForActiveServer(authToken: stale)
+        let session = await store.currentSession()
+        XCTAssertNil(session, "a superseded login must not publish a snapshot binding")
+    }
+
+    func testAuthEpochAdvanceDuringActivationFailsFinalPublicationCAS() async throws {
+        // Park the activation inside `store.activate`'s startup tombstone sweep, then
+        // advance the auth epoch (models a logout/newer login landing DURING the
+        // activation await). The final exact-token CAS at publication must fail — no
+        // binding is published for the superseded operation (issue #816 H2, Bishop).
+        let io = ControlledFarmSnapshotFileIO()
+        let (container, store, _, _) = try makeSingleServerContainer(tombstonedDummy: true, io: io)
+        let token = container.authOperationEpoch.advance()
+
+        let barrier = AsyncBarrier()
+        io.removeItemBarrier = barrier
+        let task = Task { await container.activateFarmSnapshotForActiveServer(authToken: token) }
+        await barrier.waitUntilArrived()
+        _ = container.authOperationEpoch.advance() // newer auth op lands during activation
+        barrier.release()
+        await task.value
+
+        let session = await store.currentSession()
+        XCTAssertNil(session, "auth-token CAS must block publication when the epoch advanced during activation")
+    }
+
+    /// Builds an `observeRegistry:false` container with one active server (A) whose
+    /// owner is persisted. When `tombstonedDummy` is set, a dummy tombstone forces the
+    /// startup sweep inside `store.activate` to call `removeItem` (a gate-able await).
+    private func makeSingleServerContainer(
+        tombstonedDummy: Bool,
+        io: ControlledFarmSnapshotFileIO? = nil
+    ) throws -> (ServiceContainer, FarmSnapshotStore, UUID, UUID) {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let userA = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        try reg.setActive(id: a.id)
+
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        if tombstonedDummy { authority.tombstone(UUID()) }
+        let root = newRoot()
+        let store: FarmSnapshotStore = io.map {
+            FarmSnapshotStore(authority: authority, fileIO: $0, rootURL: root, ownerStore: owners)
+        } ?? FarmSnapshotStore(authority: authority, rootURL: root, ownerStore: owners)
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners
+        )
+        return (container, store, a.id, userA)
+    }
+
     // MARK: Structural helper — records factory-created services + a first-disconnect barrier
 
     final class SignalRFactoryRecorder: @unchecked Sendable {
