@@ -139,15 +139,17 @@ public interface IUserTaskRepository
         CancellationToken ct = default);
 
     /// <summary>
-    /// Atomically completes the task with <paramref name="taskId"/> only if its
-    /// current database status is still <see cref="UserTaskStatus.Pending"/> or
-    /// <see cref="UserTaskStatus.InProgress"/>. Returns <c>false</c> (without making
-    /// any change) if a concurrent user action already moved the task to a terminal
-    /// state (Skipped/Dismissed/Completed) — that state wins the race instead of
-    /// being silently overwritten by the shift-plan compiler's auto-complete pass
-    /// (issue #713 Fix R3-5).
+    /// Atomically completes the task with <paramref name="taskId"/> only if it is open,
+    /// still has <paramref name="expectedLastMutationSequence"/>, and that positive
+    /// sequence is no newer than <paramref name="originWatermark"/>. Returns
+    /// <c>false</c> without changing the row when a concurrent writer wins.
     /// </summary>
-    Task<bool> TryAutoCompleteAsync(Guid taskId, DateTime completedAtUtc, CancellationToken ct = default);
+    Task<bool> TryAutoCompleteAsync(
+        Guid taskId,
+        long expectedLastMutationSequence,
+        long originWatermark,
+        DateTime completedAtUtc,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Detaches the given tasks from the change tracker without saving. Used after a

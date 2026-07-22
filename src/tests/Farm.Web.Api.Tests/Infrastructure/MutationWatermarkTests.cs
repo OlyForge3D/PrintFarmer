@@ -43,7 +43,11 @@ public sealed class MutationWatermarkTests
             .Should().BeTrue();
         await AssertSequenceAsync(db, first.Id, expected: 4);
 
-        (await repository.TryAutoCompleteAsync(first.Id, DateTime.UtcNow)).Should().BeTrue();
+        (await repository.TryAutoCompleteAsync(
+            first.Id,
+            expectedLastMutationSequence: 4,
+            originWatermark: 4,
+            DateTime.UtcNow)).Should().BeTrue();
         await AssertSequenceAsync(db, first.Id, expected: 5);
 
         db.ChangeTracker.Clear();
@@ -95,9 +99,102 @@ public sealed class MutationWatermarkTests
         await using AppDbContext db = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true);
         EfUserTaskRepository repository = new(db);
 
-        (await repository.TryAutoCompleteAsync(Guid.NewGuid(), DateTime.UtcNow)).Should().BeFalse();
+        (await repository.TryAutoCompleteAsync(
+            Guid.NewGuid(),
+            expectedLastMutationSequence: 1,
+            originWatermark: 1,
+            DateTime.UtcNow)).Should().BeFalse();
 
         (await ReadCounterAsync(db)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task TryAutoCompleteAsync_StaleOriginCannotCompleteNewerTask()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        Guid taskId = Guid.NewGuid();
+        long sourceOrigin;
+        long loadedSequence;
+
+        await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
+        {
+            EfUserTaskRepository repository = new(seed);
+            UserTask task = NewTask("observed", "failure:stale", taskId);
+            await repository.AddAsync(task);
+            sourceOrigin = task.LastMutationSequence;
+            loadedSequence = task.LastMutationSequence;
+        }
+
+        await using (AppDbContext newer = TestInfrastructure.TestHelpers.CreateContext(connection))
+        {
+            EfUserTaskRepository repository = new(newer);
+            UserTask task = await newer.UserTasks.SingleAsync(row => row.Id == taskId);
+            task.Title = "newer source refresh";
+            await repository.UpdateAsync(task);
+        }
+
+        await using (AppDbContext stale = TestInfrastructure.TestHelpers.CreateContext(connection))
+        {
+            EfUserTaskRepository repository = new(stale);
+            bool completed = await repository.TryAutoCompleteAsync(
+                taskId,
+                loadedSequence,
+                sourceOrigin,
+                DateTime.UtcNow);
+            completed.Should().BeFalse();
+        }
+
+        await using AppDbContext verify = TestInfrastructure.TestHelpers.CreateContext(connection);
+        UserTask persisted = await verify.UserTasks.AsNoTracking().SingleAsync(row => row.Id == taskId);
+        persisted.Status.Should().Be(UserTaskStatus.Pending);
+        persisted.LastMutationSequence.Should().Be(2);
+        (await ReadCounterAsync(verify)).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task TryAutoCompleteAsync_AuthoritativeOriginCompletesInFenceTask()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        await using AppDbContext db = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true);
+        EfUserTaskRepository repository = new(db);
+        UserTask task = NewTask("observed", "failure:clear");
+        await repository.AddAsync(task);
+
+        bool completed = await repository.TryAutoCompleteAsync(
+            task.Id,
+            task.LastMutationSequence,
+            task.LastMutationSequence,
+            DateTime.UtcNow);
+
+        completed.Should().BeTrue();
+        db.ChangeTracker.Clear();
+        UserTask persisted = await db.UserTasks.AsNoTracking().SingleAsync(row => row.Id == task.Id);
+        persisted.Status.Should().Be(UserTaskStatus.Completed);
+        persisted.LastMutationSequence.Should().Be(2);
+        (await ReadCounterAsync(db)).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task TryAutoCompleteAsync_RolloutZeroSequenceFailsClosedWithoutReservation()
+    {
+        using SqliteConnection connection = TestInfrastructure.TestHelpers.CreateOpenSqliteConnection();
+        Guid taskId = Guid.NewGuid();
+        await using (AppDbContext seed = TestInfrastructure.TestHelpers.CreateContext(connection, ensureCreated: true))
+        {
+            _ = seed.UserTasks.Add(NewTask("rollout", "failure:rollout", taskId));
+            _ = await seed.SaveChangesAsync();
+        }
+
+        await using AppDbContext write = TestInfrastructure.TestHelpers.CreateContext(connection);
+        EfUserTaskRepository repository = new(write);
+        bool completed = await repository.TryAutoCompleteAsync(
+            taskId,
+            expectedLastMutationSequence: 0,
+            originWatermark: 100,
+            DateTime.UtcNow);
+
+        completed.Should().BeFalse();
+        (await ReadCounterAsync(write)).Should().Be(0);
     }
 
     [Fact]

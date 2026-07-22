@@ -506,7 +506,10 @@ public sealed class PrintedPartReorderShiftPlanTaskSourceTests
         IOperatorFeatureGate gate,
         TimeProvider clock)
     {
-        var source = new PrintedPartReorderShiftPlanTaskSource(reorder, gate);
+        var source = new PrintedPartReorderShiftPlanTaskSource(
+            reorder,
+            gate,
+            watermarkReader: new DbMutationWatermarkReader(context));
         return new ShiftPlanCompiler(
             [source],
             new EfUserTaskRepository(context),
@@ -591,6 +594,16 @@ public sealed class PrintedPartReorderShiftPlanTaskSourceTests
             onRead();
             return Task.FromResult(value);
         }
+    }
+
+    private sealed class DbMutationWatermarkReader(AppDbContext context) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default)
+            => context.MutationCounters
+                .AsNoTracking()
+                .Where(counter => counter.Id == MutationCounter.GlobalId)
+                .Select(counter => counter.Value)
+                .SingleAsync(ct);
     }
 
     private sealed class ControlledFeatureGate(

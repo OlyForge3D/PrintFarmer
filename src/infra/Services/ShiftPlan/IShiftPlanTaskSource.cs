@@ -31,14 +31,43 @@ public sealed record ShiftPlanTaskSpec(
     string? RelatedEntityIdsJson = null);
 
 /// <summary>
+/// Per-kind evidence that absence may resolve tasks produced by a shift-plan source.
+/// </summary>
+/// <param name="SourceKind">The owned source kind covered by this evidence.</param>
+/// <param name="IsAuthoritativeComplete">
+/// Whether the source completely observed the kind for this evaluation.
+/// </param>
+/// <param name="PreservedSourceIds">
+/// Specific absent source ids that remain indeterminate even when the rest of the kind is complete.
+/// </param>
+/// <param name="IncompleteReasons">Stable diagnostic reasons when the kind is incomplete.</param>
+public sealed record ShiftPlanKindAuthority(
+    UserTaskSourceKind SourceKind,
+    bool IsAuthoritativeComplete,
+    IReadOnlySet<string> PreservedSourceIds,
+    IReadOnlyList<string> IncompleteReasons);
+
+/// <summary>
+/// Optional authoritative-absence evidence produced alongside a source result.
+/// </summary>
+/// <param name="Kinds">Per-kind evidence for kinds owned by the producing source.</param>
+public sealed record ShiftPlanSourceAuthority(IReadOnlyList<ShiftPlanKindAuthority> Kinds);
+
+/// <summary>
 /// Complete output from one shift-plan source evaluation.
 /// </summary>
-/// <param name="Specs">The authoritative specs observed by the source.</param>
+/// <param name="Specs">Known positive specs observed by the source.</param>
 /// <param name="OriginWatermark">Oldest proven mutation watermark captured before the required observations.</param>
 public sealed record ShiftPlanSourceResult(
     IReadOnlyList<ShiftPlanTaskSpec> Specs,
     long? OriginWatermark) : IReadOnlyList<ShiftPlanTaskSpec>
 {
+    /// <summary>
+    /// Optional negative-inference evidence. Missing evidence is positive-only and cannot
+    /// authorize completion from an absent spec.
+    /// </summary>
+    public ShiftPlanSourceAuthority? Authority { get; init; }
+
     public int Count => Specs.Count;
 
     public ShiftPlanTaskSpec this[int index] => Specs[index];
@@ -59,9 +88,8 @@ public sealed record ShiftPlanSourceResult(
 /// <remarks>
 /// Sources SHOULD:
 /// - Be safe to invoke concurrently with the rest of the system.
-/// - Fail closed: on error, let the exception propagate — the compiler
-///   catches it, increments its failure counter, and suppresses auto-complete
-///   for this source's <see cref="OwnedKinds"/> in the current pass.
+/// - Fail closed: on error, let the exception propagate. The compiler catches it,
+///   increments its failure counter, and applies no absence authority for the source.
 /// - Emit stable <see cref="ShiftPlanTaskSpec.SourceId"/> values; changing the
 ///   id for the same condition will cause a spurious complete + recreate.
 /// </remarks>
@@ -72,8 +100,8 @@ public interface IShiftPlanTaskSource
 
     /// <summary>
     /// The set of <see cref="UserTaskSourceKind"/> values this source owns.
-    /// The compiler uses this to restrict auto-complete to tasks whose source
-    /// kind belongs to a source that completed successfully in the current pass.
+    /// The compiler uses ownership together with <see cref="ShiftPlanSourceResult.Authority"/>
+    /// to restrict auto-complete to uniquely owned, authoritatively observed tasks.
     /// Every source must declare at least one owned kind (excluding
     /// <see cref="UserTaskSourceKind.Unspecified"/>).
     /// </summary>

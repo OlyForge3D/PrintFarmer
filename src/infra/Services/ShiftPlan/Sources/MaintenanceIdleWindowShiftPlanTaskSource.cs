@@ -69,53 +69,59 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
         TimeSpan minWindow = TimeSpan.FromMinutes(Math.Max(1, settings.MinIdleWindowMinutes));
         TimeSpan lead = TimeSpan.FromMinutes(Math.Max(0, settings.MaintenanceLeadMinutes));
 
-        // Fix A: fail closed. Let a repository failure propagate — the compiler's
-        // per-source isolation (ShiftPlanCompiler.CompileAsync) catches it, increments
-        // its failure counter, and crucially does NOT add Maintenance to the successful
-        // kinds, so open maintenance tasks are preserved instead of mass auto-completed.
-        // Swallowing the exception here would masquerade a repo outage as "no active
-        // alerts" and auto-complete every open maintenance task (IShiftPlanTaskSource
-        // contract, "fail closed").
+        // Let repository failures propagate so the compiler records the source failure
+        // and receives no authoritative absence evidence for Maintenance.
         List<MaintenanceAlert> active = await _alerts.GetAllActiveAlertsAsync(ct).ConfigureAwait(false);
 
         if (active.Count == 0)
         {
-            return BuildResult([], rootOrigin, settingsSnapshot.OriginWatermark);
+            return BuildResult(
+                [],
+                new HashSet<string>(StringComparer.Ordinal),
+                rootOrigin,
+                settingsSnapshot.OriginWatermark);
         }
 
         // Finding H5 (issue #711): when the multi-slot fallback feature is off,
         // per-toolhead maintenance must not leak into the shift plan. Drop any
         // alert scoped to a specific toolhead so only printer-wide maintenance is
         // projected. Printer-wide alerts (ToolheadId == null) always flow through.
-        bool perToolEnabled = await _featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
+        bool perToolEnabled = await _featureGate
+            .IsEnabledStrictAsync(OperatorFeature.MultiSlotFallback, ct)
+            .ConfigureAwait(false);
         if (!perToolEnabled)
         {
             active = active.Where(a => !a.ToolheadId.HasValue).ToList();
-            if (active.Count == 0)
-            {
-                return BuildResult([], rootOrigin, settingsSnapshot.OriginWatermark);
-            }
+        }
+
+        bool perToolEnabledAfterFilter = await _featureGate
+            .IsEnabledStrictAsync(OperatorFeature.MultiSlotFallback, ct)
+            .ConfigureAwait(false);
+        if (perToolEnabledAfterFilter != perToolEnabled)
+        {
+            throw new InvalidOperationException(
+                "Multi-slot fallback feature changed during maintenance observation.");
+        }
+
+        if (active.Count == 0)
+        {
+            return BuildResult(
+                [],
+                new HashSet<string>(StringComparer.Ordinal),
+                rootOrigin,
+                settingsSnapshot.OriginWatermark);
         }
 
         IdleWindowResult idleResult = await _idleWindows
             .GetIdleWindowsWithIndeterminateAsync(minWindow, ct)
             .ConfigureAwait(false);
 
-        // Fix R4-1: fail closed when dispatch eligibility is indeterminate for a
-        // printer that has an active maintenance alert. A scorer outage makes
-        // IdleWindowService exclude that printer from the window set; if we returned
-        // successfully with the printer merely absent, the compiler would treat
-        // Maintenance as a successful (but now spec-less) source and auto-complete the
-        // still-active maintenance task — then recreate a duplicate once scoring
-        // recovers (task flapping, lost InProgress state). Throwing routes through the
-        // compiler's per-source isolation, which preserves existing maintenance tasks
-        // for this pass instead of sweeping them into auto-complete.
-        if (idleResult.IndeterminatePrinterIds.Count > 0
-            && active.Any(a => idleResult.IndeterminatePrinterIds.Contains(a.PrinterId)))
-        {
-            throw new InvalidOperationException(
-                "Dispatch eligibility indeterminate for maintenance-alerted printer; failing closed to preserve tasks.");
-        }
+        HashSet<string> preservedSourceIds =
+        [
+            .. active
+                .Where(alert => idleResult.IndeterminatePrinterIds.Contains(alert.PrinterId))
+                .Select(alert => $"maintenancealert:{alert.Id}"),
+        ];
 
         Dictionary<Guid, IdleWindow> byPrinter = idleResult.Windows.ToDictionary(w => w.PrinterId);
 
@@ -174,6 +180,7 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
 
         return BuildResult(
             specs,
+            preservedSourceIds,
             rootOrigin,
             settingsSnapshot.OriginWatermark,
             idleResult.OriginWatermark);
@@ -181,6 +188,21 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
 
     private static ShiftPlanSourceResult BuildResult(
         IReadOnlyList<ShiftPlanTaskSpec> specs,
+        IReadOnlySet<string> preservedSourceIds,
         params long?[] origins)
-        => new(specs, OriginWatermark.Combine(origins));
+    {
+        long? originWatermark = OriginWatermark.Combine(origins);
+        bool isComplete = originWatermark is not null;
+        return new ShiftPlanSourceResult(specs, originWatermark)
+        {
+            Authority = new ShiftPlanSourceAuthority(
+            [
+                new ShiftPlanKindAuthority(
+                    UserTaskSourceKind.Maintenance,
+                    isComplete,
+                    preservedSourceIds,
+                    isComplete ? [] : ["maintenance-origin-unproven"]),
+            ]),
+        };
+    }
 }

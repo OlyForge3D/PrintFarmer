@@ -4,7 +4,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.FailureDetection;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Queue;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure.Services.Attention.Sources;
 
@@ -32,7 +35,9 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 public sealed class FailureAttentionSource(
     IFailureDetectionIncidentHistoryService history,
     IQueueDataService queueData,
-    TimeProvider? timeProvider = null) : IAttentionSource
+    TimeProvider? timeProvider = null,
+    IMutationWatermarkReader? watermarkReader = null,
+    ILogger<FailureAttentionSource>? logger = null) : IAttentionSource, IAttentionSourceWithOrigin
 {
     /// <summary>Only surface incidents newer than this window.</summary>
     public static readonly TimeSpan StaleWindow = TimeSpan.FromHours(24);
@@ -47,6 +52,8 @@ public sealed class FailureAttentionSource(
         queueData ?? throw new ArgumentNullException(nameof(queueData));
 
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
+    private readonly ILogger<FailureAttentionSource> _logger =
+        logger ?? NullLogger<FailureAttentionSource>.Instance;
 
     /// <inheritdoc />
     public string SourceName => "failure";
@@ -54,13 +61,39 @@ public sealed class FailureAttentionSource(
     /// <inheritdoc />
     public async Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken)
     {
+        (IReadOnlyList<AttentionItemDto> items, _) =
+            await EvaluateAsync(MaxIncidents, cancellationToken).ConfigureAwait(false);
+        return items;
+    }
+
+    /// <inheritdoc />
+    public async Task<AttentionSourceResult> GetItemsWithOriginAsync(CancellationToken cancellationToken)
+    {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(watermarkReader, _logger, "failure attention source", cancellationToken)
+            .ConfigureAwait(false);
+        (IReadOnlyList<AttentionItemDto> items, bool isComplete) =
+            await EvaluateAsync(MaxIncidents + 1, cancellationToken).ConfigureAwait(false);
+        return new AttentionSourceResult(items, originWatermark)
+        {
+            AuthorityKind = AttentionKind.Failure,
+            IsAuthoritativeComplete = isComplete,
+            IncompleteReasons = isComplete ? [] : ["failure-incident-cap"],
+        };
+    }
+
+    private async Task<(IReadOnlyList<AttentionItemDto> Items, bool IsComplete)> EvaluateAsync(
+        int take,
+        CancellationToken cancellationToken)
+    {
         List<FailureDetectionDto> incidents =
-            await _history.GetRecentAsync(printerId: null, take: MaxIncidents, ct: cancellationToken);
+            await _history.GetRecentAsync(printerId: null, take: take, ct: cancellationToken);
+        bool isComplete = incidents.Count <= MaxIncidents;
 
         DateTime cutoff = _clock.GetUtcNow().UtcDateTime - StaleWindow;
-        List<AttentionItemDto> items = new(incidents.Count);
+        List<AttentionItemDto> items = new(Math.Min(incidents.Count, MaxIncidents));
 
-        foreach (FailureDetectionDto incident in incidents)
+        foreach (FailureDetectionDto incident in incidents.Take(MaxIncidents))
         {
             if (incident.DetectedAt < cutoff)
             {
@@ -132,7 +165,7 @@ public sealed class FailureAttentionSource(
                 JobId: incidentJobId));
         }
 
-        return items;
+        return (items, isComplete);
     }
 
     private static bool IsActionable(PrintJobStatus status)

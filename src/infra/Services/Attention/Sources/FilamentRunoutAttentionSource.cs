@@ -61,7 +61,13 @@ public sealed class FilamentRunoutAttentionSource(
             await _coverageSource.GetRunoutWarningsWithOriginAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<AttentionItemDto> items =
             await MapWarningsAsync(coverageResult.Value, cancellationToken).ConfigureAwait(false);
-        return new AttentionSourceResult(items, coverageResult.OriginWatermark);
+        bool isComplete = coverageResult.OriginWatermark is not null;
+        return new AttentionSourceResult(items, coverageResult.OriginWatermark)
+        {
+            AuthorityKind = AttentionKind.Runout,
+            IsAuthoritativeComplete = isComplete,
+            IncompleteReasons = isComplete ? [] : ["filament-coverage-origin-unproven"],
+        };
     }
 
     private async Task<IReadOnlyList<AttentionItemDto>> MapWarningsAsync(

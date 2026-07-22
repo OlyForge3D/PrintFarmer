@@ -1,17 +1,24 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure.Services.Attention.Sources;
 
 /// <summary>Surfaces completed, unharvested print jobs as stable harvest attention items.</summary>
 public sealed class HarvestAttentionSource(
     IDbContextFactory<AppDbContext> dbFactory,
-    IOperatorFeatureGate featureGate) : IAttentionSource
+    IOperatorFeatureGate featureGate,
+    IMutationWatermarkReader? watermarkReader = null,
+    ILogger<HarvestAttentionSource>? logger = null) : IAttentionSource, IAttentionSourceWithOrigin
 {
     private const int MaxItems = 100;
+    private readonly ILogger<HarvestAttentionSource> _logger =
+        logger ?? NullLogger<HarvestAttentionSource>.Instance;
 
     /// <inheritdoc />
     public string SourceName => AttentionIdPrefixes.Harvest;
@@ -24,8 +31,57 @@ public sealed class HarvestAttentionSource(
             return [];
         }
 
+        List<PrintJob> jobs = await GetJobsAsync(MaxItems, cancellationToken).ConfigureAwait(false);
+        return MapItems(jobs);
+    }
+
+    /// <inheritdoc />
+    public async Task<AttentionSourceResult> GetItemsWithOriginAsync(CancellationToken cancellationToken)
+    {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(watermarkReader, _logger, "harvest attention source", cancellationToken)
+            .ConfigureAwait(false);
+        bool enabledBefore = await featureGate
+            .IsEnabledStrictAsync(OperatorFeature.PrintedPartsInventory, cancellationToken)
+            .ConfigureAwait(false);
+        if (!enabledBefore)
+        {
+            bool enabledAfter = await featureGate
+                .IsEnabledStrictAsync(OperatorFeature.PrintedPartsInventory, cancellationToken)
+                .ConfigureAwait(false);
+            if (enabledAfter)
+            {
+                throw new InvalidOperationException(
+                    "Printed-parts inventory feature changed during harvest observation.");
+            }
+
+            return CompleteResult([], originWatermark);
+        }
+
+        List<PrintJob> jobs = await GetJobsAsync(MaxItems + 1, cancellationToken).ConfigureAwait(false);
+        bool enabledAfterQuery = await featureGate
+            .IsEnabledStrictAsync(OperatorFeature.PrintedPartsInventory, cancellationToken)
+            .ConfigureAwait(false);
+        if (!enabledAfterQuery)
+        {
+            throw new InvalidOperationException(
+                "Printed-parts inventory feature changed during harvest observation.");
+        }
+
+        bool isComplete = jobs.Count <= MaxItems;
+        IReadOnlyList<AttentionItemDto> items = MapItems(jobs.Take(MaxItems));
+        return new AttentionSourceResult(items, originWatermark)
+        {
+            AuthorityKind = AttentionKind.Harvest,
+            IsAuthoritativeComplete = isComplete,
+            IncompleteReasons = isComplete ? [] : ["harvest-item-cap"],
+        };
+    }
+
+    private async Task<List<PrintJob>> GetJobsAsync(int take, CancellationToken cancellationToken)
+    {
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        List<PrintJob> jobs = await db.PrintJobs
+        return await db.PrintJobs
             .AsNoTracking()
             .Include(job => job.AssignedPrinter)
             .Where(job => job.Status == PrintJobStatus.Completed
@@ -33,10 +89,12 @@ public sealed class HarvestAttentionSource(
                 && job.AssignedPrinterId != null)
             .OrderBy(job => job.ActualEndTime ?? job.UpdatedAt)
             .ThenBy(job => job.Id)
-            .Take(MaxItems)
+            .Take(take)
             .ToListAsync(cancellationToken);
+    }
 
-        return jobs
+    private static IReadOnlyList<AttentionItemDto> MapItems(IEnumerable<PrintJob> jobs)
+        => jobs
             .Where(job => job.AssignedPrinter is not null)
             .Select(job => new AttentionItemDto(
                 Id: AttentionIdPrefixes.Build(AttentionIdPrefixes.Harvest, job.Id),
@@ -54,5 +112,13 @@ public sealed class HarvestAttentionSource(
                 ],
                 JobId: job.Id))
             .ToList();
-    }
+
+    private static AttentionSourceResult CompleteResult(
+        IReadOnlyList<AttentionItemDto> items,
+        long? originWatermark)
+        => new(items, originWatermark)
+        {
+            AuthorityKind = AttentionKind.Harvest,
+            IsAuthoritativeComplete = true,
+        };
 }

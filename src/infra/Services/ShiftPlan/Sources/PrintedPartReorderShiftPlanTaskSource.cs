@@ -88,7 +88,17 @@ public sealed class PrintedPartReorderShiftPlanTaskSource(
         List<ShiftPlanTaskSpec> orderedSpecs = specs
             .OrderBy(spec => spec.SourceId, StringComparer.Ordinal)
             .ToList();
-        return new ShiftPlanSourceResult(orderedSpecs, originWatermark);
+        return new ShiftPlanSourceResult(orderedSpecs, originWatermark)
+        {
+            Authority = new ShiftPlanSourceAuthority(
+            [
+                new ShiftPlanKindAuthority(
+                    UserTaskSourceKind.PrintedPartStock,
+                    IsAuthoritativeComplete: true,
+                    PreservedSourceIds: new HashSet<string>(StringComparer.Ordinal),
+                    IncompleteReasons: []),
+            ]),
+        };
     }
 
     private async Task EnsureFeaturesEnabledAsync(CancellationToken ct)

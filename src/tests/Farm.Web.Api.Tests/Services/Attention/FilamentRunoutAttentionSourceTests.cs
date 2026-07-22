@@ -215,6 +215,26 @@ public class FilamentRunoutAttentionSourceTests
 
         result.Items.Should().ContainSingle();
         result.OriginWatermark.Should().Be(23);
+        result.IsAuthoritativeComplete.Should().BeTrue();
+        result.AuthorityKind.Should().Be(AttentionKind.Runout);
+    }
+
+    [Fact]
+    public async Task GetItemsWithOriginAsync_NullCoverageOrigin_IsIncomplete()
+    {
+        Mock<IFilamentCoverageAttentionSource> coverage = new(MockBehavior.Strict);
+        coverage
+            .Setup(x => x.GetRunoutWarningsWithOriginAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>>(
+                [],
+                OriginWatermark: null));
+        FilamentRunoutAttentionSource source = new(coverage.Object);
+
+        AttentionSourceResult result =
+            await source.GetItemsWithOriginAsync(CancellationToken.None);
+
+        result.IsAuthoritativeComplete.Should().BeFalse();
+        result.IncompleteReasons.Should().Contain("filament-coverage-origin-unproven");
     }
 
     private static FilamentRunoutWarningDto ActiveRunout()

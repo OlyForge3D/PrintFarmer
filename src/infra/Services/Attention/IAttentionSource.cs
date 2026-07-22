@@ -39,7 +39,20 @@ public interface IAttentionSource
 /// </summary>
 public sealed record AttentionSourceResult(
     IReadOnlyList<AttentionItemDto> Items,
-    long? OriginWatermark);
+    long? OriginWatermark)
+{
+    /// <summary>The single attention kind whose absence this observation can describe.</summary>
+    public AttentionKind? AuthorityKind { get; init; }
+
+    /// <summary>Whether the source completely observed <see cref="AuthorityKind"/>.</summary>
+    public bool IsAuthoritativeComplete { get; init; }
+
+    /// <summary>Absent item ids that remain indeterminate within an otherwise complete kind.</summary>
+    public IReadOnlySet<string> PreservedItemIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>Stable diagnostic reasons when the source observation is incomplete.</summary>
+    public IReadOnlyList<string> IncompleteReasons { get; init; } = [];
+}
 
 /// <summary>
 /// Optional seam for attention sources that compose observations carrying their own provenance.
