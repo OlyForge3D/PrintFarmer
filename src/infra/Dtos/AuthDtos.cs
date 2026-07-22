@@ -135,5 +135,18 @@ public record RolePermissionRequestDto(
 /// </summary>
 public record ConfirmEmailRequest(string Token);
 
+/// <summary>
+/// Outcome of exchanging a Desktop-purpose API key for a short-lived JWT (issue #838).
+/// On failure, <see cref="Error"/> is always the same generic message regardless of the
+/// underlying cause (key not found, revoked, expired, wrong purpose, unscoped, or owner
+/// inactive) so callers cannot enumerate valid keys or distinguish failure reasons.
+/// </summary>
+public record ApiKeyExchangeResult(
+    bool Success,
+    string? Token = null,
+    DateTime? ExpiresAt = null,
+    IReadOnlyList<string>? Scopes = null,
+    string? Error = null);
+
 #pragma warning restore SA1649 // File name should match first type name
 #pragma warning restore SA1402 // File may only contain a single type

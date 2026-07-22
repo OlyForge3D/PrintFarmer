@@ -241,6 +241,46 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         _logging.LogWarning("[AuthAudit] Token revoked for UserId: {UserId} by admin UserId: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, reason);
     }
 
+    public async Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
+    {
+        var metadata = new { ApiKeyId = apiKeyId };
+
+        AuthAuditLog auditLog = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            EventType = AuthEventType.ApiKeyExchange,
+            Timestamp = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            UserAgent = userAgent,
+            Success = true,
+            Metadata = JsonSerializer.Serialize(metadata),
+            CorrelationId = correlationId
+        };
+
+        await SaveAuditAsync(auditLog, cancellationToken);
+        _logging.LogInformation("[AuthAudit] API key exchanged for UserId: {UserId}, ApiKeyId: {ApiKeyId} from IP: {IpAddress}", userId, apiKeyId, ipAddress);
+    }
+
+    public async Task LogApiKeyExchangeFailedAsync(string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
+    {
+        AuthAuditLog auditLog = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = null, // Identity not established for a failed exchange
+            EventType = AuthEventType.ApiKeyExchangeFailed,
+            Timestamp = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            UserAgent = userAgent,
+            Success = false,
+            FailureReason = reason,
+            CorrelationId = correlationId
+        };
+
+        await SaveAuditAsync(auditLog, cancellationToken);
+        _logging.LogWarning("[AuthAudit] API key exchange failed from IP: {IpAddress} - Reason: {Reason}", ipAddress, reason);
+    }
+
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)
     {
         return await _auditRepository.GetByUserIdAsync(userId, pageSize, pageNumber, cancellationToken);

@@ -19,10 +19,11 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/auth")]
 [Tags("Authentication")]
-public class AuthController(IAuthenticationService authService, ILogger<AuthController> logger) : ControllerBase
+public class AuthController(IAuthenticationService authService, ILogger<AuthController> logger, Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService apiKeyExchangeService) : ControllerBase
 {
     private readonly IAuthenticationService _authService = authService;
     private readonly ILogger<AuthController> _logger = logger;
+    private readonly Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService _apiKeyExchangeService = apiKeyExchangeService;
 
     [HttpPost("login")]
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)
@@ -81,6 +82,39 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
         }
 
         return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("api-key/exchange")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiKeyExchangeResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<ApiKeyExchangeResponse>> ExchangeApiKeyAsync([FromBody] ApiKeyExchangeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.ApiKey))
+        {
+            // Same generic response as any other invalid key - never distinguish
+            // "missing" from "wrong"/"expired"/"revoked" to resist enumeration.
+            return Unauthorized(new { error = "Invalid API key" });
+        }
+
+        string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        string? userAgent = Request.Headers.UserAgent.ToString();
+
+        ApiKeyExchangeResult result = await _apiKeyExchangeService.ExchangeApiKeyAsync(request.ApiKey, ipAddress, userAgent, cancellationToken);
+
+        if (!result.Success || result.Token is null)
+        {
+            return Unauthorized(new { error = result.Error ?? "Invalid API key" });
+        }
+
+        return Ok(new ApiKeyExchangeResponse
+        {
+            Token = result.Token,
+            ExpiresAt = result.ExpiresAt ?? DateTime.UtcNow,
+            Scopes = result.Scopes?.ToList() ?? new List<string>()
+        });
     }
 
     [HttpPost("logout")]

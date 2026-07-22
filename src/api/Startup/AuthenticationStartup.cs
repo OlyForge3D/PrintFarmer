@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Farm.Infrastructure.Authorization;
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
@@ -90,11 +91,31 @@ public static class AuthenticationStartup
                 _ = policy.RequireAuthenticatedUser();
                 _ = policy.RequireRole("farm_admin");
             });
+
+            // Desktop API-key exchange scope policies (issue #838). A normal login/session
+            // token is unaffected (DesktopScopeAuthorizationHandler passes it through); only
+            // a Desktop-exchange token must carry the specific scope claim.
+            options.AddPolicy("ModelRead", policy =>
+            {
+                _ = policy.RequireAuthenticatedUser();
+                _ = policy.AddRequirements(new DesktopScopeRequirement("ModelRead"));
+            });
+            options.AddPolicy("ModelWrite", policy =>
+            {
+                _ = policy.RequireAuthenticatedUser();
+                _ = policy.AddRequirements(new DesktopScopeRequirement("ModelWrite"));
+            });
+            options.AddPolicy("LibrarySync", policy =>
+            {
+                _ = policy.RequireAuthenticatedUser();
+                _ = policy.AddRequirements(new DesktopScopeRequirement("LibrarySync"));
+            });
         });
 
         // Register authorization handlers
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, DevModeAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
 
         return services;
     }

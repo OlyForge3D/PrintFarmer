@@ -1,13 +1,17 @@
 ﻿using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Authorization;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -42,17 +46,77 @@ builder.Services.AddUnimplementedSlicerServiceStubs();
 // ── Infrastructure services shared with the main API ──────────────────────────
 // ILogger<T> is automatically provided by the DI container
 
-// ── Authentication (transitional — allow all for standalone mode) ──────────────
-// When the host is deployed behind an API gateway, this will be replaced with
-// proper JWT/API-key authentication forwarded from the gateway.
-builder.Services
-    .AddAuthentication("StandaloneScheme")
-    .AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>(
-        "StandaloneScheme", null);
+// ── Authentication ─────────────────────────────────────────────────────────
+// Standalone mode auto-authenticates every request as admin (transitional; see
+// StandaloneAuthHandler). When Jwt:Key is configured (the host shares JWT
+// signing configuration with the main API, e.g. because Desktop-exchanged
+// tokens from issue #838 may be presented), a JWT bearer scheme is also
+// registered. A policy scheme forwards requests carrying a Bearer
+// Authorization header to the JWT handler and everything else to the
+// standalone admin handler, so existing standalone deployments (no Jwt:Key
+// configured) are completely unaffected.
+string? jwtKey = builder.Configuration["Jwt:Key"];
+bool jwtConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
+
+AuthenticationBuilder authBuilder = builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = "SmartScheme";
+    options.DefaultAuthenticateScheme = "SmartScheme";
+});
+
+authBuilder.AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>("StandaloneScheme", null);
+
+if (jwtConfigured)
+{
+    string issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
+    string audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
+
+    authBuilder.AddJwtBearer("Bearer", options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!)),
+            ValidateIssuer = true,
+            ValidIssuer = issuer,
+            ValidateAudience = true,
+            ValidAudience = audience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+    authBuilder.AddPolicyScheme("SmartScheme", "Bearer token or standalone admin", options =>
+    {
+        options.ForwardDefaultSelector = context =>
+        {
+            string? authHeader = context.Request.Headers.Authorization.ToString();
+            return !string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                ? "Bearer"
+                : "StandaloneScheme";
+        };
+    });
+}
+else
+{
+    authBuilder.AddPolicyScheme("SmartScheme", "Standalone admin (Jwt:Key not configured)", options =>
+    {
+        options.ForwardDefaultSelector = _ => "StandaloneScheme";
+    });
+}
+
 builder.Services.AddAuthorization(opts =>
 {
     opts.AddPolicy("farm_admin", policy => policy.RequireAssertion(_ => true));
+
+    // Desktop API-key exchange scope policies (issue #838). The standalone admin
+    // principal carries no token_use claim, so DesktopScopeAuthorizationHandler
+    // passes it through unchanged - existing standalone deployments are unaffected.
+    opts.AddPolicy("ModelRead", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelRead")));
+    opts.AddPolicy("ModelWrite", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelWrite")));
+    opts.AddPolicy("LibrarySync", policy => policy.AddRequirements(new DesktopScopeRequirement("LibrarySync")));
 });
+builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
 
 // ── JSON serialisation ────────────────────────────────────────────────────────
 Action<JsonSerializerOptions> configureJson = o =>

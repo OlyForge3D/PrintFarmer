@@ -153,6 +153,28 @@ public class ResetPasswordResponse
 }
 
 /// <summary>
+/// Request to exchange a Desktop-purpose API key for a short-lived JWT (issue #838).
+/// </summary>
+public class ApiKeyExchangeRequest
+{
+    [Required]
+    public string ApiKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Response containing a short-lived JWT and the scopes granted to it. Never contains
+/// the raw or hashed API key.
+/// </summary>
+public class ApiKeyExchangeResponse
+{
+    public string Token { get; set; } = string.Empty;
+
+    public DateTime ExpiresAt { get; set; }
+
+    public List<string> Scopes { get; set; } = new();
+}
+
+/// <summary>
 /// User data transfer object
 /// </summary>
 public class UserDto

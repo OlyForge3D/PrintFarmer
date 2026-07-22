@@ -24,6 +24,9 @@ public static class FeatureServicesStartup
         // ApiKey repository
         services.AddScoped<Farm.Infrastructure.Repositories.Api.IApiKeyRepository, Farm.Infrastructure.Repositories.Api.EfApiKeyRepository>();
 
+        // Desktop API-key exchange (issue #838)
+        services.AddScoped<Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService, Farm.Infrastructure.Services.Authentication.ApiKeyExchangeService>();
+
         // Print job approval service
         services.AddScoped<Farm.Infrastructure.Services.PrintJobs.IPrintApprovalService, Farm.Infrastructure.Services.PrintJobs.PrintApprovalService>();
 

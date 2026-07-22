@@ -12,6 +12,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemory
     private readonly ConcurrentDictionary<Guid, List<DateTime>> _sliceJobSubmitAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _loginAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _registerAttempts = new();
+    private readonly ConcurrentDictionary<string, List<DateTime>> _apiKeyExchangeAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _octoPrintUploadAttempts = new();
 
     public Task<RateLimitResult> CheckPasswordResetLimitAsync(string email, CancellationToken ct = default)
@@ -90,6 +91,23 @@ public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemory
     public Task RecordRegisterAttemptAsync(string ipAddress, CancellationToken ct = default)
     {
         RecordAttempt(ipAddress, _registerAttempts);
+        return Task.CompletedTask;
+    }
+
+    public Task<RateLimitResult> CheckApiKeyExchangeLimitAsync(string ipAddress, CancellationToken ct = default)
+    {
+        int maxPerMinute = _options.Authentication?.MaxApiKeyExchangeAttemptsPerMinute ?? 10;
+        return CheckShortTermLimitAsync(
+            ipAddress,
+            _apiKeyExchangeAttempts,
+            maxPerMinute,
+            TimeSpan.FromMinutes(1),
+            "ApiKeyExchange");
+    }
+
+    public Task RecordApiKeyExchangeAttemptAsync(string ipAddress, CancellationToken ct = default)
+    {
+        RecordAttempt(ipAddress, _apiKeyExchangeAttempts);
         return Task.CompletedTask;
     }
 

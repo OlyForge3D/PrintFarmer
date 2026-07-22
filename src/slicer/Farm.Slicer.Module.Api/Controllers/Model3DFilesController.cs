@@ -28,6 +28,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="modelFile">The file to upload.</param>
     [HttpPost("upload")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(500_000_000)] // 500 MB
@@ -59,6 +60,7 @@ public class Model3DFilesController(
     /// Lists all 3D models in a flat list.
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = "LibrarySync")]
     [ProducesResponseType(typeof(IEnumerable<Model3DDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListModelsAsync()
     {
@@ -79,6 +81,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("folders")]
+    [Authorize(Policy = "LibrarySync")]
     [ProducesResponseType(typeof(List<Model3DEntryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListAllFoldersAsync(CancellationToken ct)
     {
@@ -99,6 +102,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="id">The model's unique identifier.</param>
     [HttpGet("{id:guid}", Name = "GetModel")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(Model3DDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelAsync(Guid id)
@@ -113,6 +117,7 @@ public class Model3DFilesController(
     /// <param name="id">The model's unique identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(Model3DDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelDetailsAsync(Guid id, CancellationToken ct)
@@ -344,6 +349,7 @@ public class Model3DFilesController(
     /// <param name="request">Search and filter parameters.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("query")]
+    [Authorize(Policy = "LibrarySync")]
     [ProducesResponseType(typeof(Model3DListResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> QueryModelsAsync(
         [FromBody] Model3DSearchRequestDto request,
@@ -376,6 +382,7 @@ public class Model3DFilesController(
     /// <param name="request">Folder creation request.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("folder")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateFolderAsync(
@@ -410,6 +417,7 @@ public class Model3DFilesController(
     /// <param name="request">Move request with model IDs and target folder.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("move")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> MoveFilesAsync(
