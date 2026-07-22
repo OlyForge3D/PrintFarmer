@@ -6,7 +6,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Input, FormField, Alert, Tabs } from '@/common/components/ui';
 import { RevisionConflictDialog, type RevisionConflictField } from '@/common/components/RevisionConflictDialog';
-import { getRevisionConflict } from '@/common/utils/apiErrors';
+import { getRevisionConflict, getErrorMessage } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
 import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
 import type { TagOption, EditingTag, UpdateTagRequest } from '@/types/admin';
@@ -296,7 +296,7 @@ export const TagAdminPage: React.FC = () => {
                 }
                 return;
             }
-            setSaveError(error instanceof Error ? error.message : 'Failed to update tag');
+            setSaveError(getErrorMessage(error, 'Failed to update tag'));
         }
     };
 
@@ -313,7 +313,7 @@ export const TagAdminPage: React.FC = () => {
             setConflictServerTag(null);
             setSaveError(null);
         } catch (error) {
-            setSaveError(error instanceof Error ? error.message : 'Failed to reload the latest version.');
+            setSaveError(getErrorMessage(error, 'Failed to reload the latest version.'));
         } finally {
             setIsReloadingConflict(false);
         }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isApiError, getRevisionConflict } from '../apiErrors';
+import { isApiError, getRevisionConflict, getErrorMessage } from '../apiErrors';
 import type { ApiError } from '@/types/api';
 
 function makeApiError(overrides: Partial<ApiError> = {}): ApiError {
@@ -69,5 +69,27 @@ describe('getRevisionConflict', () => {
       expectedRevision: 1,
       actualRevision: 2,
     });
+  });
+});
+
+describe('getErrorMessage', () => {
+  it('prefers the ApiError.message over the fallback (apiClient rejects with a plain ApiError, not an Error instance)', () => {
+    const error = makeApiError({ message: 'Tag name is required.' });
+    expect(getErrorMessage(error, 'fallback')).toBe('Tag name is required.');
+  });
+
+  it('falls back to a native Error.message when the value is a real Error', () => {
+    expect(getErrorMessage(new Error('network down'), 'fallback')).toBe('network down');
+  });
+
+  it('returns the fallback for unrecognized error shapes', () => {
+    expect(getErrorMessage('a plain string', 'fallback')).toBe('fallback');
+    expect(getErrorMessage(null, 'fallback')).toBe('fallback');
+    expect(getErrorMessage(undefined, 'fallback')).toBe('fallback');
+  });
+
+  it('returns the fallback when an ApiError has an empty message', () => {
+    const error = makeApiError({ message: '' });
+    expect(getErrorMessage(error, 'fallback')).toBe('fallback');
   });
 });

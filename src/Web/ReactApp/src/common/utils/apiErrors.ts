@@ -21,6 +21,19 @@ export function isApiError(error: unknown): error is ApiError {
 }
 
 /**
+ * Extracts a human-readable message from an unknown thrown value. `apiClient` rejects with a
+ * plain `ApiError` object (built by the Axios response interceptor), not an `Error` instance,
+ * so `error instanceof Error` is *not* sufficient to recover the real server-provided message -
+ * it would silently fall back to a generic string for every real API failure. Prefers the
+ * `ApiError.message` set by the interceptor, then a native `Error.message`, then `fallback`.
+ */
+export function getErrorMessage(error: unknown, fallback: string): string {
+  if (isApiError(error) && error.message) return error.message;
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
+/**
  * Detects a structured revision/optimistic-concurrency conflict (HTTP 409 or 412) carrying
  * `expectedRevision`/`actualRevision` in the response body, and returns the parsed conflict
  * info. Returns `null` for any other error shape so callers can fall back to generic
