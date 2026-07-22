@@ -1229,6 +1229,12 @@ final class PredictiveViewModelTests: XCTestCase {
         await barrier.waitForWaiterParked(barrierToken)
         dup.cancel()
         await dup.value
+        // Causal ACK: `dup.value` returns when the duplicate Task's
+        // operation exits, but its onCancel-spawned unstructured
+        // `Task { await cancelObserver(...) }` runs asynchronously on
+        // the actor. Wait until cancelObserver has actually been
+        // dispatched (bounded, cleared on close) before asserting.
+        await gate.waitForObserverCancelCount(atLeast: 1)
 
         // After duplicate has finished, evaluate cross-ownership invariant.
         let mid = await gate.snapshot()
@@ -1238,6 +1244,8 @@ final class PredictiveViewModelTests: XCTestCase {
                        "duplicate await hit branch (2) exactly once")
         XCTAssertEqual(mid.observerCancelIgnoredCount, 1,
                        "duplicate cancel with mismatched awaitID must be bounded no-op")
+        XCTAssertEqual(mid.observerCancelInvocationCount, 1,
+                       "cancelObserver dispatched exactly once")
         XCTAssertNil(mid.observerFates[token.id],
                      "original must have NO fate — no .cancelledWhileParked leaked")
         XCTAssertEqual(mid.observerFateCounts[.cancelledWhileParked] ?? 0, 0,
@@ -1295,6 +1303,8 @@ final class PredictiveViewModelTests: XCTestCase {
         await barrier.waitForWaiterParked(barrierToken)
         dup.cancel()
         await dup.value
+        // Causal ACK — see observer test comment.
+        await gate.waitForWaiterCancelCount(atLeast: 1)
 
         let mid = await gate.snapshot()
         XCTAssertEqual(mid.parkedWaiterCount, 1,
@@ -1302,6 +1312,8 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(mid.waiterDuplicateAwaitCount, 1)
         XCTAssertEqual(mid.waiterCancelIgnoredCount, 1,
                        "mismatched-awaitID duplicate cancel must be bounded no-op")
+        XCTAssertEqual(mid.waiterCancelInvocationCount, 1,
+                       "cancelWaiter dispatched exactly once")
         XCTAssertNil(mid.waiterFates[token.id],
                      "original must have NO fate")
         XCTAssertEqual(mid.waiterFateCounts[.cancelledWhileParked] ?? 0, 0)
