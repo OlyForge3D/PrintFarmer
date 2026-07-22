@@ -40,7 +40,7 @@ public class SettingsService : ISettingsService
     private readonly ILogger<SettingsService> _logger;
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
     private readonly IMutationWatermarkReader? _watermarkReader;
-    private long? _settingsOriginWatermark;
+    private Dictionary<string, long?> _settingsOriginWatermarks = [];
 
     public void Save<T>(T settings)
         where T : class, IAppSetting
@@ -48,7 +48,7 @@ public class SettingsService : ISettingsService
         ArgumentNullException.ThrowIfNull(settings);
         Type type = typeof(T);
         AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>() ?? throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting]. Only AppSettings can be persisted to DB.");
-        _settingsOriginWatermark = CaptureOriginWatermark();
+        _settingsOriginWatermarks[appAttr.Key] = CaptureOriginWatermark();
         _settings[appAttr.Key] = settings;
 
         // Persist to DB (AppSettings only)
@@ -106,8 +106,9 @@ public class SettingsService : ISettingsService
 
     private void LoadSettings(IConfiguration config)
     {
-        _settingsOriginWatermark = CaptureOriginWatermark();
+        long? originWatermark = CaptureOriginWatermark();
         Dictionary<string, object> newSettings = new Dictionary<string, object>();
+        Dictionary<string, long?> newOriginWatermarks = [];
         using AppDbContext dbContext = _dbContextFactory.CreateDbContext();
 
         foreach (Type type in _settingTypes)
@@ -158,9 +159,11 @@ public class SettingsService : ISettingsService
             }
 
             newSettings[key] = instance;
+            newOriginWatermarks[key] = originWatermark;
         }
 
         _settings = newSettings;
+        _settingsOriginWatermarks = newOriginWatermarks;
     }
 
     /// <summary>
@@ -182,7 +185,13 @@ public class SettingsService : ISettingsService
     public SettingsSnapshot<T> GetSnapshot<T>()
         where T : class
     {
-        return new SettingsSnapshot<T>(Get<T>(), _settingsOriginWatermark);
+        T value = Get<T>();
+        string? key = _settings.FirstOrDefault(pair => ReferenceEquals(pair.Value, value)).Key;
+        long? originWatermark = key is not null
+            && _settingsOriginWatermarks.TryGetValue(key, out long? captured)
+                ? captured
+                : null;
+        return new SettingsSnapshot<T>(value, originWatermark);
     }
 
     private long? CaptureOriginWatermark()

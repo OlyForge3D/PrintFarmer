@@ -392,6 +392,7 @@ public class DispatchScorer(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Dispatch scorer: fleet coverage load failed; per-tool grams checks skipped");
+            requiredOrigins.Add(null);
             return contexts;
         }
 
@@ -412,6 +413,7 @@ public class DispatchScorer(
                 logger.LogWarning(
                     ex,
                     "Dispatch scorer: fallback-chain batch load failed; source usable coverage retained");
+                requiredOrigins.Add(null);
             }
         }
 

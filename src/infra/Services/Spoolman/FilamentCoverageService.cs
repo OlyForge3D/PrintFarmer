@@ -127,9 +127,9 @@ public class FilamentCoverageService(
         // path uses the batched status-cache snapshot instead.
         bool hasActive = jobs.Any(j =>
             j.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused);
-        double? liveProgress = hasActive
+        LiveProgressObservation liveProgress = hasActive
             ? await TryReadLiveProgressAsync(printer.Id, settings.LiveProgressTimeoutMs, ct).ConfigureAwait(false)
-            : null;
+            : new LiveProgressObservation(null, WasObserved: true);
 
         List<long?> requiredOrigins =
         [
@@ -137,8 +137,13 @@ public class FilamentCoverageService(
             settingsSnapshot.OriginWatermark,
             .. spoolLookup.Values.Select(snapshot => snapshot.OriginWatermark),
         ];
+        if (hasActive)
+        {
+            requiredOrigins.Add(liveProgress.WasObserved ? rootOrigin : null);
+        }
+
         return new FilamentCoverageResult<PrinterFilamentCoverageDto?>(
-            ComputeForPrinter(printer, jobs, spoolLookup, liveProgress, settings),
+            ComputeForPrinter(printer, jobs, spoolLookup, liveProgress.Progress, settings),
             OriginWatermark.Combine([.. requiredOrigins]));
     }
 
@@ -996,24 +1001,29 @@ public class FilamentCoverageService(
         return anyUnknown ? FilamentCoverageStatus.Unknown : FilamentCoverageStatus.Covers;
     }
 
-    private async Task<double?> TryReadLiveProgressAsync(Guid printerId, int timeoutMs, CancellationToken ct)
+    private async Task<LiveProgressObservation> TryReadLiveProgressAsync(
+        Guid printerId,
+        int timeoutMs,
+        CancellationToken ct)
     {
         try
         {
             using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
             linked.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(100, timeoutMs)));
             PrintJobStatusDto? status = await _printersService.GetPrintJobStatusAsync(printerId, linked.Token).ConfigureAwait(false);
-            return status?.Progress;
+            return new LiveProgressObservation(status?.Progress, WasObserved: true);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger.LogDebug("[FilamentCoverage] Live progress timed out for printer {PrinterId}", printerId);
-            return null;
+            return new LiveProgressObservation(null, WasObserved: false);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "[FilamentCoverage] Live progress unavailable for printer {PrinterId}", printerId);
-            return null;
+            return new LiveProgressObservation(null, WasObserved: false);
         }
     }
+
+    private readonly record struct LiveProgressObservation(double? Progress, bool WasObserved);
 }

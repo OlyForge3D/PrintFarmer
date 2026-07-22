@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -645,6 +646,26 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         s.Eliminated.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task ScorePrinters_CoverageFailure_NullsOriginProvenance()
+    {
+        _ = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        PrintJob job = CreateJobWithToolRequirements(
+            new PrintJobToolMaterialRequirement(0, "PLA", null, 100.0));
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        DispatchScorer scorer = new(
+            _context,
+            NullLogger<DispatchScorer>.Instance,
+            coverageService: new ThrowingCoverageService(),
+            watermarkReader: new ConstantWatermarkReader(41));
+
+        DispatchScoreResult result = await scorer.ScorePrintersForJobWithOriginAsync(job.Id);
+
+        result.OriginWatermark.Should().BeNull();
+    }
+
     // ---- Finding H4: printer-wide grams allocation ledger (no double-counting) ----
 
     [Fact]
@@ -833,5 +854,23 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
 
         public Task<FleetFilamentCoverageDto> GetForFleetAsync(CancellationToken ct) =>
             Task.FromResult(fleet);
+    }
+
+    private sealed class ThrowingCoverageService : IFilamentCoverageService
+    {
+        public Task<PrinterFilamentCoverageDto?> GetForPrinterAsync(Guid printerId, CancellationToken ct) =>
+            Task.FromResult<PrinterFilamentCoverageDto?>(null);
+
+        public Task<FleetFilamentCoverageDto> GetForFleetAsync(CancellationToken ct) =>
+            throw new InvalidOperationException("coverage unavailable");
+
+        public Task<FilamentCoverageResult<FleetFilamentCoverageDto>> GetForFleetWithOriginAsync(
+            CancellationToken ct) =>
+            throw new InvalidOperationException("coverage unavailable");
+    }
+
+    private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default) => Task.FromResult(value);
     }
 }

@@ -8,6 +8,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
@@ -34,7 +35,8 @@ public class FilamentCoverageServiceTests
             double? liveProgress = null,
             bool coverageEnabled = true,
             bool tracksLiveConsumption = false,
-            IReadOnlyDictionary<Guid, PrinterStatusDto>? cachedStatuses = null)
+            IReadOnlyDictionary<Guid, PrinterStatusDto>? cachedStatuses = null,
+            long? originWatermark = null)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -55,6 +57,11 @@ public class FilamentCoverageServiceTests
 
         Mock<ISettingsService> settingsMock = new(MockBehavior.Loose);
         settingsMock.Setup(s => s.Get<SpoolCoverageSettings>()).Returns(settings ?? new SpoolCoverageSettings());
+        settingsMock
+            .Setup(s => s.GetSnapshot<SpoolCoverageSettings>())
+            .Returns(new SettingsSnapshot<SpoolCoverageSettings>(
+                settings ?? new SpoolCoverageSettings(),
+                originWatermark));
 
         Mock<IOperatorFeatureGate> gateMock = new(MockBehavior.Strict);
         gateMock.Setup(g => g.IsEnabled(OperatorFeature.FilamentCoverage)).Returns(coverageEnabled);
@@ -78,7 +85,7 @@ public class FilamentCoverageServiceTests
                         SpoolmanSpoolDto? spool = await spoolMock.Object.GetSpoolByIdAsync(spoolId, ct);
                         spools[spoolId] = spool is null
                             ? new(null, tracksLiveConsumption, FilamentCoverageSpoolResolver.ReasonSourceUnavailable)
-                            : new(spool, tracksLiveConsumption, null);
+                            : new(spool, tracksLiveConsumption, null, originWatermark);
                     }
 
                     result[printer.Id] = spools;
@@ -94,7 +101,8 @@ public class FilamentCoverageServiceTests
             statusCacheMock.Object,
             settingsMock.Object,
             gateMock.Object,
-            NullLogger<FilamentCoverageService>.Instance);
+            NullLogger<FilamentCoverageService>.Instance,
+            originWatermark.HasValue ? new ConstantWatermarkReader(originWatermark.Value) : null);
 
         return (svc, db, spoolMock, printerMock);
     }
@@ -173,6 +181,11 @@ public class FilamentCoverageServiceTests
     private static SpoolmanSpoolDto Spool(int id, double remainingG, double? initialG = null, string material = "PLA") =>
         new(id, $"Spool {id}", material, remainingG, "#FFFFFF", InUse: true, InitialWeightG: initialG ?? 1000);
 
+    private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default) => Task.FromResult(value);
+    }
+
     // ------------------------------------------------------------------
     // Single-toolhead coverage
     // ------------------------------------------------------------------
@@ -213,6 +226,30 @@ public class FilamentCoverageServiceTests
         slot.TotalDemandGrams.Should().BeApproximately(115, 0.01);
         slot.PredictedRunoutAt.Should().BeNull();
         slot.StatusReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SingleTool_LiveProgressFailure_NullsOriginProvenance()
+    {
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, Mock<IPrintersService> printers) =
+            BuildService(originWatermark: 31);
+
+        Printer p = SeedPrinter(db, "p1", T(0, spoolId: 42, primary: true, material: "PLA"));
+        GcodeFile active = Gcode(estimatedTotalGrams: 100);
+        db.GcodeFiles.Add(active);
+        db.PrintJobs.Add(Job(p.Id, PrintJobStatus.Printing, active));
+        _ = await db.SaveChangesAsync();
+        spool.Setup(s => s.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spool(42, remainingG: 500));
+        printers
+            .Setup(service => service.GetPrintJobStatusAsync(p.Id, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("status unavailable"));
+
+        FilamentCoverageResult<PrinterFilamentCoverageDto?> result =
+            await svc.GetForPrinterWithOriginAsync(p.Id, CancellationToken.None);
+
+        result.Value.Should().NotBeNull();
+        result.OriginWatermark.Should().BeNull();
     }
 
     [Fact]
