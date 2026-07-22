@@ -132,15 +132,36 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_singleFlightDropsConcurrentCommands() async throws {
-        let gate = AsyncGate()
-        mockService.beforeSetTemperatures = { await gate.wait() }
+        // Deterministic single-flight proof — no yields, sleeps, polling, or
+        // elapsed-time criteria. Two gates form an explicit handshake:
+        //   * `entered` — signaled by the mock the moment the first command
+        //     reaches the gated service path. Because `preheat` calls
+        //     `beginCommand` (which sets `pendingCommand`) synchronously before
+        //     awaiting `setTemperatures`, waiting on `entered` proves both
+        //     "first command is in flight" and "pendingCommand is established".
+        //   * `release` — awaited by the mock; the test opens it to let the
+        //     first command complete.
+        let entered = AsyncGate()
+        let release = AsyncGate()
+
+        // Structured cleanup: unconditionally open the release gate so a
+        // failed assertion cannot strand the awaiting `first` task or leave
+        // any subsequent gated call blocked in the mock. `AsyncGate.open()` is
+        // idempotent, so opening it here is safe even on the happy path.
+        addTeardownBlock { await release.open() }
+
+        mockService.beforeSetTemperatures = {
+            await entered.open()
+            await release.wait()
+        }
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
 
         async let first: Void = vm.preheat(.pla)
-        // Yield so first task enters beginCommand and sets pendingCommand.
-        await Task.yield()
-        await Task.yield()
+
+        // Deterministic handshake — resumes only after the mock has entered the
+        // gated service path, so `pendingCommand` is guaranteed to be set.
+        await entered.wait()
         XCTAssertNotNil(vm.pendingCommand)
 
         // Second call while first is in flight must drop silently.
@@ -149,7 +170,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(mockService.setTemperaturesCalledWith, "Concurrent command must be dropped")
         XCTAssertNil(vm.lastError, "Dropped command must not surface as an error")
 
-        await gate.open()
+        await release.open()
         await first
     }
 
