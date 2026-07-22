@@ -573,22 +573,30 @@ final class PredictiveViewModelTests: XCTestCase {
     }
 
     /// Cancellation after the awaiter has parked: register synchronously,
-    /// park in an unstructured Task, cancel. cancelX drains via
-    /// parkedX exactly once. Post-drain: zero state.
+    /// park in an unstructured Task, use `waitForXParked` to structurally
+    /// prove the continuation is parked, then cancel. cancelX drains via
+    /// parkedX exactly once and seals the fate as
+    /// `.cancelledWhileParked`. Post-drain: zero state.
     func testAsyncGateCancelAfterRegister() async {
         let gate = AsyncGate()
 
-        // Waiter path.
-        let waiterToken = await gate.registerWaiter()
-        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
-        waiterTask.cancel()
-        await waiterTask.value
-
-        // Observer path.
+        // Observer path FIRST — no pending signal yet, so the observer
+        // actually parks (rather than being latched by a prior waiter).
         let observerToken = await gate.registerObserver()
         let observerTask = Task { await gate.awaitObserver(observerToken) }
+        await gate.waitForObserverParked(observerToken)
         observerTask.cancel()
         await observerTask.value
+
+        // Waiter path. registerWaiter emits an entry signal, but since
+        // observerOrder is now empty (cancelled observer was drained),
+        // the signal accumulates in pendingEntrySignals and the waiter
+        // itself parks in the usual way.
+        let waiterToken = await gate.registerWaiter()
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        await gate.waitForWaiterParked(waiterToken)
+        waiterTask.cancel()
+        await waiterTask.value
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
@@ -599,6 +607,12 @@ final class PredictiveViewModelTests: XCTestCase {
                        "cancel must not relatch into completedWaiters")
         XCTAssertEqual(snap.completedObserverCount, 0,
                        "cancel must not relatch into completedObservers")
+        XCTAssertEqual(snap.waiterFates[waiterToken.id], .cancelledWhileParked,
+                       "cancel from parked must seal fate cancelledWhileParked")
+        XCTAssertEqual(snap.observerFates[observerToken.id], .cancelledWhileParked)
+        XCTAssertEqual(snap.observerCancelIgnoredCount, 0,
+                       "cancel from parked is not an ignored no-op")
+        XCTAssertEqual(snap.waiterCancelIgnoredCount, 0)
         await gate.close()
     }
 
@@ -937,6 +951,346 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.awaitWaiter(postCloseWaiter)
     }
 
+    // MARK: - H1 duplicate/unknown await evidence
+
+    /// Two concurrent `awaitObserver` calls with the SAME token: the
+    /// second must NOT overwrite the first parked continuation. First
+    /// resumes normally via `signaledWhileParked`; second is rejected
+    /// with an immediate resume and bumps `observerDuplicateAwaitCount`.
+    func testAsyncGateDuplicateAwaitObserverIsRejectedNoOverwrite() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+        let first = Task { await gate.awaitObserver(token) }
+        // Deterministically wait until the first await has parked.
+        await gate.waitForObserverParked(token)
+
+        // Second concurrent await for the same token — must be rejected
+        // without overwriting the parked continuation.
+        await gate.awaitObserver(token)
+
+        let midSnap = await gate.snapshot()
+        XCTAssertEqual(midSnap.parkedObserverCount, 1,
+                       "duplicate await must not evict the parked continuation")
+        XCTAssertEqual(midSnap.observerDuplicateAwaitCount, 1)
+        XCTAssertNil(midSnap.observerFates[token.id],
+                     "first await has not resumed yet")
+
+        // Signal drains the parked continuation via signalEntry (piggybacked
+        // on the waiter registration).
+        _ = await gate.registerWaiter()
+        await first.value
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedObserverCount, 0)
+        XCTAssertEqual(snap.observerFates[token.id], .signaledWhileParked)
+        XCTAssertEqual(snap.observerFateCounts[.signaledWhileParked], 1,
+                       "exactly one signaledWhileParked resume for this token")
+        XCTAssertEqual(snap.observerDuplicateAwaitCount, 1,
+                       "duplicate await counter never rewinds")
+
+        // A THIRD await after the fate is sealed is still rejected.
+        await gate.awaitObserver(token)
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerDuplicateAwaitCount, 2)
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        await gate.close()
+    }
+
+    /// Waiter analogue — second await for the same waiter token is
+    /// rejected without overwriting the parked continuation. Resumed
+    /// via `open()` → `openedWhileParked`.
+    func testAsyncGateDuplicateAwaitWaiterIsRejectedNoOverwrite() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        let first = Task { await gate.awaitWaiter(token) }
+        await gate.waitForWaiterParked(token)
+
+        await gate.awaitWaiter(token)
+        let midSnap = await gate.snapshot()
+        XCTAssertEqual(midSnap.parkedWaiterCount, 1)
+        XCTAssertEqual(midSnap.waiterDuplicateAwaitCount, 1)
+        XCTAssertNil(midSnap.waiterFates[token.id])
+
+        await gate.open()
+        await first.value
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterFates[token.id], .openedWhileParked)
+        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked], 1)
+        XCTAssertEqual(snap.waiterDuplicateAwaitCount, 1)
+
+        // Post-open, post-resume: another late cancel is a bounded no-op.
+        first.cancel()
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.waiterCancelIgnoredCount, 0,
+                       "cancel of an already-completed Task fires no handler")
+        XCTAssertEqual(final.waiterFates[token.id], .openedWhileParked,
+                       "fate must not be overwritten by late cancel")
+        await gate.close()
+    }
+
+    /// Unknown token: `awaitObserver`/`awaitWaiter` with an id that was
+    /// never registered on this gate returns immediately as a bounded
+    /// no-op and bumps the unknown-await counter. No state mutation.
+    func testAsyncGateUnknownAwaitIsBoundedNoOp() async {
+        let gate = AsyncGate()
+        // Fabricate tokens for ids that no register* call ever issued.
+        let bogusObserver = AsyncGate.ObserverToken(id: 9_999)
+        let bogusWaiter = AsyncGate.WaiterToken(id: 10_000)
+
+        await gate.awaitObserver(bogusObserver)
+        await gate.awaitWaiter(bogusWaiter)
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerUnknownAwaitCount, 1)
+        XCTAssertEqual(snap.waiterUnknownAwaitCount, 1)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedObserverCount, 0)
+        XCTAssertEqual(snap.completedWaiterCount, 0)
+        XCTAssertNil(snap.observerFates[bogusObserver.id])
+        XCTAssertNil(snap.waiterFates[bogusWaiter.id])
+        await gate.close()
+    }
+
+    // MARK: - H2 closed-gate signal leak evidence
+
+    /// A waiter registered before any observer accumulates one
+    /// `pendingEntrySignals`. After `close()`, that pending signal must
+    /// be cleared and NEVER re-emerge as an observed side-effect.
+    func testAsyncGateCloseClearsPendingEntrySignals() async {
+        let gate = AsyncGate()
+        _ = await gate.registerWaiter()
+        let before = await gate.snapshot()
+        XCTAssertEqual(before.pendingEntrySignals, 1,
+                       "waiter before observer accumulates a pending signal")
+
+        await gate.close()
+        let after = await gate.snapshot()
+        XCTAssertEqual(after.pendingEntrySignals, 0,
+                       "close() must clear pendingEntrySignals")
+        XCTAssertTrue(after.closed)
+    }
+
+    /// After close, `registerWaiter` must NOT emit an entry signal (H2).
+    /// If it did, `pendingEntrySignals` would grow unboundedly with no
+    /// consumer since every post-close observer latches on registration.
+    func testAsyncGatePostCloseWaitersDoNotEmitEntrySignals() async {
+        let gate = AsyncGate()
+        await gate.close()
+        for _ in 0..<10 { _ = await gate.registerWaiter() }
+        for _ in 0..<10 { _ = await gate.registerObserver() }
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.pendingEntrySignals, 0,
+                       "no post-close waiter may accumulate an entry signal")
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        // Every registration was latched as closed-before-park.
+        XCTAssertEqual(snap.waiterFateCounts[.closedBeforePark], 10)
+        XCTAssertEqual(snap.observerFateCounts[.closedBeforePark], 10)
+    }
+
+    // MARK: - H3 explicit acknowledgment / interleaving evidence
+
+    /// The park-ACK is lost-wakeup-safe: calling `waitForXParked` AFTER
+    /// the token has already parked returns immediately. Calling it
+    /// BEFORE resolves once park happens.
+    func testAsyncGateWaitForParkedIsLostWakeupSafe() async {
+        let gate = AsyncGate()
+
+        // Post-park case — ACK returns immediately.
+        let token1 = await gate.registerObserver()
+        let task1 = Task { await gate.awaitObserver(token1) }
+        await gate.waitForObserverParked(token1)   // waits for park
+        await gate.waitForObserverParked(token1)   // already parked → immediate
+        _ = await gate.registerWaiter()
+        await task1.value
+
+        // Pre-park case — ACK enqueues, resolves after park.
+        let token2 = await gate.registerObserver()
+        async let ack: Void = gate.waitForObserverParked(token2)
+        let task2 = Task { await gate.awaitObserver(token2) }
+        await ack
+        _ = await gate.registerWaiter()
+        await task2.value
+
+        // Fate-resolved-before-ever-parked case — ACK completes.
+        let token3 = await gate.registerObserver()
+        _ = await gate.registerWaiter()             // seals fate signaledBeforePark
+        await gate.waitForObserverParked(token3)   // fate exists → immediate
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedObserverCount, 1,
+                       "token3 latched but never awaited; consumed below")
+        await gate.awaitObserver(token3)
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.completedObserverCount, 0)
+        XCTAssertEqual(final.observerFates[token3.id], .signaledBeforePark)
+        await gate.close()
+    }
+
+    /// Open-wins-then-late-cancel: park a waiter, run open(), then
+    /// cancel — cancel must be a bounded no-op. Fate is
+    /// `openedWhileParked`.
+    func testAsyncGateOpenWinsThenLateCancelIsBoundedNoOp() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        let task = Task { await gate.awaitWaiter(token) }
+        await gate.waitForWaiterParked(token)   // proof: parked
+
+        await gate.open()                        // open wins
+        await task.value                         // task completed
+        task.cancel()                            // late — handler no longer active
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterFates[token.id], .openedWhileParked)
+        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked], 1)
+        XCTAssertEqual(snap.waiterCancelIgnoredCount, 0,
+                       "cancel on a completed Task does not fire the handler")
+        await gate.close()
+    }
+
+    /// Cancel-wins-then-open: park a waiter, cancel first, THEN open.
+    /// cancelWaiter drains parked; subsequent open() finds waiterOrder
+    /// empty and does not relatch. Fate is `cancelledWhileParked`.
+    func testAsyncGateCancelWinsThenOpenIsBoundedNoOp() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        let task = Task { await gate.awaitWaiter(token) }
+        await gate.waitForWaiterParked(token)   // proof: parked
+
+        task.cancel()                            // schedules cancelWaiter
+        await task.value                         // fate sealed cancelledWhileParked
+        await gate.open()                        // no work to do
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0,
+                       "open after cancel must not relatch a cancelled id")
+        XCTAssertEqual(snap.waiterFates[token.id], .cancelledWhileParked)
+        XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked], 1)
+        XCTAssertTrue(snap.opened)
+        await gate.close()
+    }
+
+    /// Close-with-actually-parked continuations for BOTH token types.
+    /// Uses park-ACKs to prove both are parked before close() runs.
+    /// Both fates must be `closedWhileParked`; no completedX remnants.
+    func testAsyncGateCloseDrainsActuallyParkedContinuations() async {
+        let gate = AsyncGate()
+        let waiterToken = await gate.registerWaiter()
+        let observerToken = await gate.registerObserver()
+        // registerObserver above may have consumed pendingEntrySignals=1
+        // from registerWaiter's signal — verify state.
+        let pre = await gate.snapshot()
+        // Actually the observer was registered AFTER the waiter's signal
+        // arrived, so pendingEntrySignals was 1 and the observer latches
+        // as signaledBeforePark. Register a fresh observer that has no
+        // pending signal to consume, and a fresh waiter that will park
+        // (needs an observer that's been signaled or opened=false).
+        _ = pre
+        let parkedObserverToken = await gate.registerObserver()
+
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        let observerTask = Task { await gate.awaitObserver(parkedObserverToken) }
+        let alreadyLatchedObserverTask = Task { await gate.awaitObserver(observerToken) }
+
+        // Explicit park proof for the two that will actually park.
+        await gate.waitForWaiterParked(waiterToken)
+        await gate.waitForObserverParked(parkedObserverToken)
+
+        await gate.close()
+
+        // Every spawned task must complete without hanging.
+        await waiterTask.value
+        await observerTask.value
+        await alreadyLatchedObserverTask.value
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        XCTAssertEqual(snap.waiterOrder, [])
+        XCTAssertEqual(snap.observerOrder, [])
+        XCTAssertEqual(snap.completedWaiterCount, 0)
+        XCTAssertEqual(snap.completedObserverCount, 0)
+        XCTAssertEqual(snap.waiterFates[waiterToken.id], .closedWhileParked)
+        XCTAssertEqual(snap.observerFates[parkedObserverToken.id], .closedWhileParked)
+        XCTAssertEqual(snap.observerFates[observerToken.id], .signaledBeforePark,
+                       "already-latched observer keeps its prior fate through close")
+        XCTAssertTrue(snap.closed)
+        XCTAssertEqual(snap.pendingEntrySignals, 0)
+    }
+
+    /// Convenience API: `wait()` before `waitForEntry()`. Uses the split
+    /// API to obtain a token and prove ordering deterministically via
+    /// `waitForWaiterParked`, then exercises the convenience `waitForEntry`.
+    func testAsyncGateConvenienceWaiterBeforeObserver_deterministic() async {
+        let gate = AsyncGate()
+        let waiterToken = await gate.registerWaiter()
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        await gate.waitForWaiterParked(waiterToken)
+
+        // At this point pendingEntrySignals=1 (waiter emitted a signal
+        // before any observer registered), and the waiter is parked.
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.pendingEntrySignals, 1)
+        XCTAssertEqual(mid.parkedWaiterCount, 1)
+
+        // Convenience observer consumes the pending signal immediately.
+        await gate.waitForEntry()
+        await gate.open()
+        await waiterTask.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.pendingEntrySignals, 0)
+        XCTAssertEqual(final.parkedWaiterCount, 0)
+        XCTAssertEqual(final.waiterFates[waiterToken.id], .openedWhileParked)
+        await gate.close()
+    }
+
+    /// Convenience API: observer parks first via the split API (proof
+    /// via park-ACK), then a `wait()` waiter signals it. Deterministic
+    /// ordering; no snapshot fence needed.
+    func testAsyncGateConvenienceObserverBeforeWaiter_deterministic() async {
+        let gate = AsyncGate()
+        let observerToken = await gate.registerObserver()
+        let observerTask = Task { await gate.awaitObserver(observerToken) }
+        await gate.waitForObserverParked(observerToken)
+
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.parkedObserverCount, 1)
+        XCTAssertEqual(mid.pendingEntrySignals, 0)
+
+        // Convenience waiter signals the parked observer immediately.
+        let waiterTask = Task { await gate.wait() }
+        await observerTask.value
+
+        await gate.open()
+        await waiterTask.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerFates[observerToken.id], .signaledWhileParked)
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        XCTAssertEqual(final.pendingEntrySignals, 0)
+        await gate.close()
+    }
+
     /// Convenience-API integration: the shipping `wait()` / `waitForEntry()`
     /// still exhibit the exact-order behaviour that the production tests
     /// depend on.
@@ -1240,8 +1594,23 @@ private actor AsyncGate {
     struct ObserverToken: Sendable, Hashable { let id: UInt64 }
     struct WaiterToken: Sendable, Hashable { let id: UInt64 }
 
-    /// Test-only introspection snapshot. Purely reads state under the
-    /// actor so tests can assert precise transitions without polling.
+    /// The single terminal outcome for a token. Set exactly once, when
+    /// the token's fate is sealed — either by a signal/open/close event
+    /// or by cancellation. Reported through `Snapshot` so tests can
+    /// assert exact resume reasons instead of inferring from counts.
+    enum ResumeReason: Sendable, Hashable {
+        case signaledBeforePark   // observer latched via signal (registerObserver consumed pending, or signalEntry ran while registered)
+        case signaledWhileParked  // signalEntry resumed a parked observer
+        case openedBeforePark     // waiter latched via open() before await parked, or registered after open
+        case openedWhileParked    // open() resumed a parked waiter
+        case closedBeforePark     // register* after close, or close() latched a registered-but-not-parked token
+        case closedWhileParked    // close() resumed a parked continuation
+        case cancelledWhileParked // cancelX drained a parked continuation
+    }
+
+    /// Snapshot of gate state. All prior fields preserved for existing
+    /// tests; new fields (fates, reason counts, edge counters) expose
+    /// deterministic evidence for cancel/duplicate/unknown handling.
     struct Snapshot: Sendable, Equatable {
         let pendingEntrySignals: Int
         let observerOrder: [UInt64]
@@ -1252,8 +1621,23 @@ private actor AsyncGate {
         let parkedWaiterCount: Int
         let opened: Bool
         let closed: Bool
+
+        // Per-token fates and roll-up counts (H1+H3 evidence).
+        let observerFates: [UInt64: ResumeReason]
+        let waiterFates: [UInt64: ResumeReason]
+        let observerFateCounts: [ResumeReason: Int]
+        let waiterFateCounts: [ResumeReason: Int]
+
+        // Bounded no-op counters — mutations that must NOT alter state.
+        let observerCancelIgnoredCount: Int
+        let waiterCancelIgnoredCount: Int
+        let observerDuplicateAwaitCount: Int
+        let waiterDuplicateAwaitCount: Int
+        let observerUnknownAwaitCount: Int
+        let waiterUnknownAwaitCount: Int
     }
 
+    // MARK: State
     private var nextID: UInt64 = 1
     private var parkedObservers: [UInt64: CheckedContinuation<Void, Never>] = [:]
     private var completedObservers: Set<UInt64> = []
@@ -1265,68 +1649,113 @@ private actor AsyncGate {
     private var opened = false
     private var closed = false
 
+    // H1: per-token status prevents duplicate park; fates carry the reason.
+    private var observerFates: [UInt64: ResumeReason] = [:]
+    private var waiterFates: [UInt64: ResumeReason] = [:]
+    private var observerFateCounts: [ResumeReason: Int] = [:]
+    private var waiterFateCounts: [ResumeReason: Int] = [:]
+
+    // Bounded no-op counters (H1: cancelIgnored/duplicate/unknown).
+    private var observerCancelIgnoredCount = 0
+    private var waiterCancelIgnoredCount = 0
+    private var observerDuplicateAwaitCount = 0
+    private var waiterDuplicateAwaitCount = 0
+    private var observerUnknownAwaitCount = 0
+    private var waiterUnknownAwaitCount = 0
+
+    // H3: park-ACK queues — tests can await proof that a specific token
+    // has parked, without polling or Task.yield.
+    private var observerParkAcks: [UInt64: [CheckedContinuation<Void, Never>]] = [:]
+    private var waiterParkAcks: [UInt64: [CheckedContinuation<Void, Never>]] = [:]
+
     // MARK: Observer (entry-side)
 
-    /// Reserve an observer slot. Synchronous-in-actor: if a pending entry
-    /// signal exists it is consumed and the token is latched as
-    /// completed. Otherwise the token is appended to the FIFO order.
+    /// Reserve an observer slot. Synchronous-in-actor.
     func registerObserver() -> ObserverToken {
         let id = nextID; nextID &+= 1
         if closed {
             completedObservers.insert(id)
+            sealObserverFate(id: id, reason: .closedBeforePark)
         } else if pendingEntrySignals > 0 {
             pendingEntrySignals -= 1
             completedObservers.insert(id)
+            sealObserverFate(id: id, reason: .signaledBeforePark)
         } else {
             observerOrder.append(id)
         }
         return ObserverToken(id: id)
     }
 
-    /// Await the previously registered observer. Parks unconditionally
-    /// unless the token has already terminated (completed via a prior
-    /// entry signal, or drained by close). Cancellation is routed
-    /// through `cancelObserver` via the structural `onCancel` handler;
-    /// the actor's serial executor guarantees the park completes before
-    /// `cancelObserver` runs, so the continuation is always drained via
-    /// the `parkedObservers` path exactly once.
+    /// Await the previously registered observer.
+    ///
+    /// H1 duplicate/unknown guard: this function inspects the token's
+    /// current status and produces a deterministic non-hanging outcome
+    /// for every case. It NEVER overwrites an already-parked
+    /// continuation for the same token.
     func awaitObserver(_ token: ObserverToken) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
-                if completedObservers.remove(token.id) != nil {
+                // (1) Token already has a terminal fate — this is the
+                //     normal latched path OR a duplicate await. Consume
+                //     the completed latch if present, resume immediately.
+                if observerFates[token.id] != nil {
+                    if completedObservers.remove(token.id) == nil {
+                        // No latch to consume — either already resumed
+                        // OR the fate was cancelled/close-drained. This
+                        // is duplicate-await territory.
+                        observerDuplicateAwaitCount += 1
+                    }
                     c.resume()
                     return
                 }
+                // (2) Same token already has a live parked continuation.
+                //     Second concurrent await is a bug; reject the second
+                //     without touching the first parked continuation.
+                if parkedObservers[token.id] != nil {
+                    observerDuplicateAwaitCount += 1
+                    c.resume()
+                    return
+                }
+                // (3) Token not in the registered set at all — unknown
+                //     token. Bounded no-op.
+                if !observerOrder.contains(token.id) {
+                    observerUnknownAwaitCount += 1
+                    c.resume()
+                    return
+                }
+                // (4) Registered, not yet fated, not yet parked, but the
+                //     gate has been closed since registration. Drain
+                //     from the registration queue and seal fate.
                 if closed {
                     observerOrder.removeAll { $0 == token.id }
+                    sealObserverFate(id: token.id, reason: .closedBeforePark)
                     c.resume()
                     return
                 }
-                // No inline Task.isCancelled fast path. If the task was
-                // cancelled, `withTaskCancellationHandler` has already
-                // (or will imminently) spawn a `cancelObserver` Task that
-                // hops onto this actor strictly after this park because
-                // the actor turn does not release until this closure
-                // returns and the enclosing `await` suspends. Routing
-                // cancellation through the parked-only path is what makes
-                // late cancellation a bounded no-op.
+                // (5) Normal park. Any concurrently-queued cancelObserver
+                //     Task will only be dispatched on this actor after
+                //     this closure returns and the enclosing `await`
+                //     suspends, so `cancelObserver` always finds the
+                //     parked continuation.
                 parkedObservers[token.id] = c
+                flushObserverParkAcks(id: token.id)
             }
         } onCancel: {
             Task { await self.cancelObserver(id: token.id) }
         }
     }
 
-    /// Late-cancel-safe. Mutates state ONLY when the continuation is
-    /// currently parked. If the id was already terminated by another
-    /// path (signalEntry drain, open/close drain, or completed-latch
-    /// short-circuit) this is a bounded no-op with zero state mutation
-    /// and never relatches into `completedObservers`.
+    /// Late-cancel-safe. Mutates state ONLY when a continuation is
+    /// currently parked for this id. Every other case is a bounded
+    /// no-op that increments `observerCancelIgnoredCount` and never
+    /// relatches into `completedObservers` or overwrites a fate.
     private func cancelObserver(id: UInt64) {
         guard let c = parkedObservers.removeValue(forKey: id) else {
+            observerCancelIgnoredCount += 1
             return
         }
         observerOrder.removeAll { $0 == id }
+        sealObserverFate(id: id, reason: .cancelledWhileParked)
         c.resume()
     }
 
@@ -1336,50 +1765,106 @@ private actor AsyncGate {
         await awaitObserver(token)
     }
 
+    /// H3 park-ACK: suspend until the given observer token has actually
+    /// parked (or reached a terminal fate). Lost-wakeup-safe: if the
+    /// token is already parked/fated the call returns without
+    /// suspending; otherwise the caller is queued and resumed the
+    /// moment `awaitObserver` parks or the token gets a fate.
+    func waitForObserverParked(_ token: ObserverToken) async {
+        if parkedObservers[token.id] != nil || observerFates[token.id] != nil {
+            return
+        }
+        await withCheckedContinuation { c in
+            observerParkAcks[token.id, default: []].append(c)
+        }
+    }
+
+    private func flushObserverParkAcks(id: UInt64) {
+        guard let cs = observerParkAcks.removeValue(forKey: id) else { return }
+        for c in cs { c.resume() }
+    }
+
     // MARK: Waiter (open-side)
 
-    /// Reserve a waiter slot. Synchronous-in-actor: emits an entry signal
-    /// (observer-facing) first, then decides whether to park or latch
-    /// completion depending on gate state.
+    /// Reserve a waiter slot.
+    ///
+    /// H2: a closed gate must not emit entry signals. Otherwise
+    /// post-close `registerWaiter` would keep incrementing
+    /// `pendingEntrySignals` forever with no consumer.
     func registerWaiter() -> WaiterToken {
-        signalEntryLocked()
+        if !closed { signalEntryLocked() }
         let id = nextID; nextID &+= 1
-        if opened || closed {
+        if closed {
             completedWaiters.insert(id)
+            sealWaiterFate(id: id, reason: .closedBeforePark)
+        } else if opened {
+            completedWaiters.insert(id)
+            sealWaiterFate(id: id, reason: .openedBeforePark)
         } else {
             waiterOrder.append(id)
         }
         return WaiterToken(id: id)
     }
 
+    /// Await the previously registered waiter. Mirrors `awaitObserver`'s
+    /// H1 handling: duplicate await, unknown token, close-since-register,
+    /// and normal park are each deterministic and non-hanging.
     func awaitWaiter(_ token: WaiterToken) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
-                if completedWaiters.remove(token.id) != nil {
+                if waiterFates[token.id] != nil {
+                    if completedWaiters.remove(token.id) == nil {
+                        waiterDuplicateAwaitCount += 1
+                    }
                     c.resume()
                     return
                 }
-                if opened || closed {
+                if parkedWaiters[token.id] != nil {
+                    waiterDuplicateAwaitCount += 1
+                    c.resume()
+                    return
+                }
+                if !waiterOrder.contains(token.id) {
+                    waiterUnknownAwaitCount += 1
+                    c.resume()
+                    return
+                }
+                if closed {
                     waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterFate(id: token.id, reason: .closedBeforePark)
                     c.resume()
                     return
                 }
-                // No inline Task.isCancelled fast path — see the note on
-                // `awaitObserver` for the actor-serialisation argument.
+                if opened {
+                    // Registered before open() ran, but by the time
+                    // await got here open() drained the id via the
+                    // completedWaiters path — the fate check above
+                    // already handles that. This branch handles a race
+                    // where the caller registered, then somebody flipped
+                    // `opened`, and neither open() nor the fate path
+                    // sealed us yet: seal now.
+                    waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterFate(id: token.id, reason: .openedBeforePark)
+                    c.resume()
+                    return
+                }
                 parkedWaiters[token.id] = c
+                flushWaiterParkAcks(id: token.id)
             }
         } onCancel: {
             Task { await self.cancelWaiter(id: token.id) }
         }
     }
 
-    /// Late-cancel-safe. Mutates state ONLY when the continuation is
-    /// currently parked. Never relatches into `completedWaiters`.
+    /// Late-cancel-safe waiter variant. Mutates state ONLY when a
+    /// continuation is currently parked. Bounded no-op otherwise.
     private func cancelWaiter(id: UInt64) {
         guard let c = parkedWaiters.removeValue(forKey: id) else {
+            waiterCancelIgnoredCount += 1
             return
         }
         waiterOrder.removeAll { $0 == id }
+        sealWaiterFate(id: id, reason: .cancelledWhileParked)
         c.resume()
     }
 
@@ -1387,6 +1872,21 @@ private actor AsyncGate {
     func wait() async {
         let token = registerWaiter()
         await awaitWaiter(token)
+    }
+
+    /// H3 park-ACK for waiter tokens.
+    func waitForWaiterParked(_ token: WaiterToken) async {
+        if parkedWaiters[token.id] != nil || waiterFates[token.id] != nil {
+            return
+        }
+        await withCheckedContinuation { c in
+            waiterParkAcks[token.id, default: []].append(c)
+        }
+    }
+
+    private func flushWaiterParkAcks(id: UInt64) {
+        guard let cs = waiterParkAcks.removeValue(forKey: id) else { return }
+        for c in cs { c.resume() }
     }
 
     // MARK: Terminal transitions
@@ -1398,36 +1898,51 @@ private actor AsyncGate {
         waiterOrder.removeAll()
         for id in ids {
             if let c = parkedWaiters.removeValue(forKey: id) {
+                sealWaiterFate(id: id, reason: .openedWhileParked)
                 c.resume()
             } else {
                 completedWaiters.insert(id)
+                sealWaiterFate(id: id, reason: .openedBeforePark)
             }
         }
     }
 
-    /// Terminal teardown. Drains both pending waiters and observers
-    /// exactly once. After `close()`, further register* calls latch as
-    /// completed immediately so tests always converge.
+    /// Terminal teardown.
+    ///
+    /// H2: also clears `pendingEntrySignals` and drains any stranded
+    /// park-ACK waiters so a helper regression can't hang the test.
+    /// H1: seals fates for every drained token so subsequent
+    /// register/await against those ids is deterministic.
     func close() {
         closed = true
+        pendingEntrySignals = 0
         let wIds = waiterOrder
         waiterOrder.removeAll()
         for id in wIds {
             if let c = parkedWaiters.removeValue(forKey: id) {
+                sealWaiterFate(id: id, reason: .closedWhileParked)
                 c.resume()
             } else {
                 completedWaiters.insert(id)
+                sealWaiterFate(id: id, reason: .closedBeforePark)
             }
         }
         let oIds = observerOrder
         observerOrder.removeAll()
         for id in oIds {
             if let c = parkedObservers.removeValue(forKey: id) {
+                sealObserverFate(id: id, reason: .closedWhileParked)
                 c.resume()
             } else {
                 completedObservers.insert(id)
+                sealObserverFate(id: id, reason: .closedBeforePark)
             }
         }
+        // Drain stranded park-ACK waiters — nothing will ever park now.
+        for (_, cs) in observerParkAcks { for c in cs { c.resume() } }
+        observerParkAcks.removeAll()
+        for (_, cs) in waiterParkAcks { for c in cs { c.resume() } }
+        waiterParkAcks.removeAll()
     }
 
     // MARK: Introspection (test-only)
@@ -1442,22 +1957,52 @@ private actor AsyncGate {
             parkedObserverCount: parkedObservers.count,
             parkedWaiterCount: parkedWaiters.count,
             opened: opened,
-            closed: closed
+            closed: closed,
+            observerFates: observerFates,
+            waiterFates: waiterFates,
+            observerFateCounts: observerFateCounts,
+            waiterFateCounts: waiterFateCounts,
+            observerCancelIgnoredCount: observerCancelIgnoredCount,
+            waiterCancelIgnoredCount: waiterCancelIgnoredCount,
+            observerDuplicateAwaitCount: observerDuplicateAwaitCount,
+            waiterDuplicateAwaitCount: waiterDuplicateAwaitCount,
+            observerUnknownAwaitCount: observerUnknownAwaitCount,
+            waiterUnknownAwaitCount: waiterUnknownAwaitCount
         )
     }
 
-    // MARK: Private
+    // MARK: Private helpers
 
     private func signalEntryLocked() {
         if let id = observerOrder.first {
             observerOrder.removeFirst()
             if let c = parkedObservers.removeValue(forKey: id) {
+                sealObserverFate(id: id, reason: .signaledWhileParked)
                 c.resume()
             } else {
                 completedObservers.insert(id)
+                sealObserverFate(id: id, reason: .signaledBeforePark)
             }
         } else {
             pendingEntrySignals += 1
         }
+    }
+
+    private func sealObserverFate(id: UInt64, reason: ResumeReason) {
+        guard observerFates[id] == nil else { return }  // exactly-once
+        observerFates[id] = reason
+        observerFateCounts[reason, default: 0] += 1
+        // A fate seals the outcome — flush any park-ACK waiters that
+        // were waiting to observe this token park; a fate reaches them
+        // as "you'll never see a park" so they can proceed instead of
+        // hanging.
+        flushObserverParkAcks(id: id)
+    }
+
+    private func sealWaiterFate(id: UInt64, reason: ResumeReason) {
+        guard waiterFates[id] == nil else { return }
+        waiterFates[id] = reason
+        waiterFateCounts[reason, default: 0] += 1
+        flushWaiterParkAcks(id: id)
     }
 }
