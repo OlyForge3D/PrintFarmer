@@ -122,18 +122,37 @@ final class PredictiveViewModel {
 
     // MARK: - Computed
 
+    /// True when the model has a `prediction` whose
+    /// `predictedFailureLikelihood` is a real number. A `prediction` with
+    /// nil likelihood previously fell through `Int(nil ?? 0)` = 0 and
+    /// rendered as a green "Low" gauge, which is the same #808 hazard the
+    /// unavailable-prediction fix addressed. Callers must guard the risk
+    /// gauge on this flag rather than on `prediction != nil` alone.
+    var hasKnownLikelihood: Bool {
+        prediction?.predictedFailureLikelihood != nil
+    }
+
+    /// True when a refresh (retry or in-place reload) is in flight while a
+    /// prior successful `prediction` is still visible. The view uses this
+    /// to render the gauge in a visibly stale/refreshing state so the
+    /// operator never mistakes the last-known values for a fresh reading.
+    var isRefreshingStalePrediction: Bool {
+        predictionStatus == .loading && prediction != nil
+    }
+
     var riskPercentage: Int {
         Int(prediction?.predictedFailureLikelihood ?? 0)
     }
 
     var riskLevel: String {
-        // When there is no `prediction`, the previous `switch` fell through
-        // to the `0..<25` bucket and returned "Low", which allowed transport
-        // and decoding failures to render as a benign low-risk result
-        // (issue #808). "Unavailable" makes the missing-data case explicit
-        // to any caller and keeps a stale prior success rendering its real
-        // level.
-        guard prediction != nil else { return "Unavailable" }
+        // When there is no `prediction`, OR the prediction is present but
+        // carries no `predictedFailureLikelihood`, the previous `switch`
+        // fell through to the `0..<25` bucket and returned "Low", which
+        // allowed transport, decoding, and partial-response failures to
+        // render as a benign low-risk result (issue #808). "Unavailable"
+        // makes the missing-data case explicit to any caller and keeps a
+        // stale prior success rendering its real level.
+        guard hasKnownLikelihood else { return "Unavailable" }
         switch riskPercentage {
         case 0..<25: return "Low"
         case 25..<50: return "Moderate"

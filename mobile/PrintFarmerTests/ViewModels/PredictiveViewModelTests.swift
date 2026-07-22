@@ -32,6 +32,9 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.error)
         XCTAssertEqual(viewModel.predictionStatus, .idle)
+        XCTAssertFalse(viewModel.hasKnownLikelihood)
+        XCTAssertFalse(viewModel.isRefreshingStalePrediction)
+        XCTAssertEqual(viewModel.riskLevel, "Unavailable")
     }
     
     // MARK: - Predict Failure Success
@@ -73,8 +76,11 @@ final class PredictiveViewModelTests: XCTestCase {
     func testPredictFailureHandlesErrorWhenNoPriorPrediction() async {
         // No prior success: `prediction` stays nil, but the view model must
         // now surface an explicit failure state and error message instead of
-        // silently rendering as low risk (issue #808).
-        mockPredictiveService.errorToThrow = TestError.generic
+        // silently rendering as low risk (issue #808). Use a representative
+        // real transport error shape (`NetworkError.transportError`) rather
+        // than a generic test double.
+        let urlError = URLError(.notConnectedToInternet)
+        mockPredictiveService.errorToThrow = NetworkError.transportError(urlError)
 
         await viewModel.predictFailure(printerId: testPrinterId, material: "PETG", duration: 7200)
 
@@ -87,13 +93,15 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.error, PredictiveViewModel.failureMessage)
         XCTAssertEqual(viewModel.riskLevel, "Unavailable")
         XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.hasKnownLikelihood)
     }
 
     func testPredictFailurePreservesStalePriorPrediction() async {
         // Stale-data policy: on failure we preserve the last successful
         // prediction so the operator still sees real risk context alongside
         // the failure banner. The alternative — clearing to nil — is what
-        // caused #808 (nil rendered as "Low").
+        // caused #808 (nil rendered as "Low"). Use `NetworkError.serverError`
+        // as a representative real backend failure shape.
         let stalePrediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: "PLA",
@@ -103,7 +111,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         viewModel.prediction = stalePrediction
-        mockPredictiveService.errorToThrow = TestError.generic
+        mockPredictiveService.errorToThrow = NetworkError.serverError(503)
 
         await viewModel.predictFailure(printerId: testPrinterId, material: "PETG", duration: 7200)
 
@@ -112,20 +120,25 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.error, PredictiveViewModel.failureMessage)
         // Stale prediction still renders its real level, never a spurious "Low".
         XCTAssertEqual(viewModel.riskLevel, "Critical")
+        XCTAssertTrue(viewModel.hasKnownLikelihood)
         XCTAssertFalse(viewModel.isLoading)
     }
 
     func testPredictFailureHandlesDecodingError() async {
         // Decoding failures must surface identically to transport failures —
-        // never fall through to a benign low-risk presentation.
+        // never fall through to a benign low-risk presentation. Use the
+        // real `NetworkError.decodingFailed(ResponseDecodingFailure)` shape
+        // produced by APIClient rather than a raw `DecodingError`.
         struct FakeKey: CodingKey { var stringValue = "x"; var intValue: Int? = nil
             init?(stringValue: String) { self.stringValue = stringValue }
             init?(intValue: Int) { self.intValue = intValue; self.stringValue = "\(intValue)" }
         }
-        mockPredictiveService.errorToThrow = DecodingError.keyNotFound(
+        let decodingError = DecodingError.keyNotFound(
             FakeKey(stringValue: "riskLevel")!,
             DecodingError.Context(codingPath: [], debugDescription: "missing riskLevel")
         )
+        let failure = ResponseDecodingFailure(error: decodingError, targetType: JobFailurePrediction.self)
+        mockPredictiveService.errorToThrow = NetworkError.decodingFailed(failure)
 
         await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
 
@@ -133,6 +146,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
         XCTAssertEqual(viewModel.error, PredictiveViewModel.failureMessage)
         XCTAssertEqual(viewModel.riskLevel, "Unavailable")
+        XCTAssertFalse(viewModel.hasKnownLikelihood)
         XCTAssertFalse(viewModel.isLoading)
     }
 
@@ -162,42 +176,49 @@ final class PredictiveViewModelTests: XCTestCase {
     func testRetryPredictionReplaysLastCanonicalRequest() async {
         // First call fails; retry must re-issue exactly the same request
         // (single canonical call) without needing the view to remember the
-        // original arguments.
-        mockPredictiveService.errorToThrow = TestError.generic
+        // original arguments. Scripted outcomes prove the mock actually
+        // received each call with a per-invocation snapshot; `callCount`
+        // proves retry issues exactly one additional invocation.
+        let service = mockPredictiveService!
+        await service.callState.enqueue(.failure(NetworkError.timeout))
+        await service.callState.enqueue(.failure(NetworkError.timeout))
+
         await viewModel.predictFailure(printerId: testPrinterId, material: "PETG", duration: 5400)
-
         XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
-        let initialRequest = mockPredictiveService.predictJobFailureCalledWith
-
-        // Clear tracker to prove retry issues a fresh call with identical params.
-        mockPredictiveService.predictJobFailureCalledWith = nil
-        mockPredictiveService.errorToThrow = TestError.generic
+        let countAfterFirst = await service.callState.callCount
+        XCTAssertEqual(countAfterFirst, 1, "first predictFailure must have invoked the service exactly once")
 
         await viewModel.retryPrediction()
 
-        let retryRequest = mockPredictiveService.predictJobFailureCalledWith
-        XCTAssertEqual(retryRequest?.printerId, initialRequest?.printerId)
-        XCTAssertEqual(retryRequest?.material, initialRequest?.material)
-        XCTAssertEqual(retryRequest?.estimatedDurationSeconds, initialRequest?.estimatedDurationSeconds)
-        XCTAssertEqual(retryRequest?.estimatedDurationSeconds, 5400)
+        let history = await service.callState.callHistory
+        let countAfterRetry = await service.callState.callCount
+        XCTAssertEqual(countAfterRetry, 2, "retry must invoke the service exactly one additional time")
+        XCTAssertEqual(history.count, 2)
+        XCTAssertEqual(history[0].printerId, testPrinterId)
+        XCTAssertEqual(history[0].material, "PETG")
+        XCTAssertEqual(history[0].estimatedDurationSeconds, 5400)
+        // Exact request equality — every field must match the first call.
+        XCTAssertEqual(history[1].printerId, history[0].printerId)
+        XCTAssertEqual(history[1].material, history[0].material)
+        XCTAssertEqual(history[1].estimatedDurationSeconds, history[0].estimatedDurationSeconds)
     }
 
     func testRetryAfterFailureSuccessClearsFailureState() async {
-        mockPredictiveService.errorToThrow = TestError.generic
+        let service = mockPredictiveService!
+        await service.callState.enqueue(.failure(NetworkError.transportError(URLError(.timedOut))))
         await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
         XCTAssertEqual(viewModel.predictionStatus, .failed(PredictiveViewModel.failureMessage))
         XCTAssertNotNil(viewModel.error)
 
         // Retry now succeeds.
-        mockPredictiveService.errorToThrow = nil
-        mockPredictiveService.predictionToReturn = JobFailurePrediction(
+        await service.callState.enqueue(.success(JobFailurePrediction(
             printerId: testPrinterId,
             material: "PLA",
             estimatedDurationMinutes: 60,
             predictedFailureLikelihood: 15.0,
             riskLevel: "low",
             factors: []
-        )
+        )))
 
         await viewModel.retryPrediction()
 
@@ -205,6 +226,8 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.error)
         XCTAssertEqual(viewModel.prediction?.predictedFailureLikelihood, 15.0)
         XCTAssertEqual(viewModel.riskLevel, "Low")
+        let countAfterRetry = await service.callState.callCount
+        XCTAssertEqual(countAfterRetry, 2, "retry must invoke the service exactly once after the original attempt")
     }
 
     func testRetryWithoutPriorPredictionIsNoOp() async {
@@ -214,18 +237,132 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertNil(mockPredictiveService.predictJobFailureCalledWith)
         XCTAssertEqual(viewModel.predictionStatus, .idle)
         XCTAssertNil(viewModel.prediction)
+        let countAfterNoOp = await mockPredictiveService.callState.callCount
+        XCTAssertEqual(countAfterNoOp, 0)
+    }
+
+    // MARK: - Refresh-with-stale (Hicks R1)
+
+    func testRetryWithStalePredictionSurfacesRefreshingState() async {
+        // While a retry is in flight and a prior successful prediction is
+        // still displayed, `isRefreshingStalePrediction` must be true so
+        // the view can render the stale gauge as visibly refreshing (issue
+        // #808 Hicks R1). Uses a real suspension point via AsyncGate — no
+        // sleeps, yields, or elapsed-time gates.
+        let vm = viewModel!
+        let service = mockPredictiveService!
+        let priorSuccess = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 80.0,
+            riskLevel: "critical",
+            factors: []
+        )
+        await service.callState.enqueue(.success(priorSuccess))
+        await vm.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+        XCTAssertEqual(vm.predictionStatus, .success)
+        XCTAssertFalse(vm.isRefreshingStalePrediction, "no refresh in flight yet")
+
+        // Now enqueue a second outcome and gate it so we can observe the
+        // in-flight refresh state deterministically.
+        let refreshGate = AsyncGate()
+        service.beforeReturnHook = { [refreshGate] in await refreshGate.wait() }
+        let refreshedSuccess = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 20.0,
+            riskLevel: "low",
+            factors: []
+        )
+        await service.callState.enqueue(.success(refreshedSuccess))
+
+        async let retryCall: Void = vm.retryPrediction()
+        while await !refreshGate.hasWaiters { await Task.yield() }
+
+        // While blocked at the gate, the view model must expose the
+        // refreshing-with-stale signal so the view renders a refreshing
+        // indicator and de-emphasises the stale gauge.
+        XCTAssertEqual(vm.predictionStatus, .loading)
+        XCTAssertNotNil(vm.prediction, "stale prediction must be preserved during refresh")
+        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, priorSuccess.predictedFailureLikelihood)
+        XCTAssertTrue(vm.isRefreshingStalePrediction,
+                      "the view relies on this flag to render the stale gauge as visibly refreshing")
+
+        service.beforeReturnHook = nil
+        await refreshGate.open()
+        await retryCall
+
+        XCTAssertEqual(vm.predictionStatus, .success)
+        XCTAssertFalse(vm.isRefreshingStalePrediction, "refresh is done; stale marker must clear")
+        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, refreshedSuccess.predictedFailureLikelihood)
+    }
+
+    // MARK: - Unavailable likelihood (Hicks R2)
+
+    func testPredictionWithNilLikelihoodIsTreatedAsUnavailable() async {
+        // A prediction that decodes successfully but carries no
+        // `predictedFailureLikelihood` must NOT render as a green 0% Low
+        // gauge (issue #808 Hicks R2). `hasKnownLikelihood` gates the
+        // gauge; `riskLevel` surfaces "Unavailable" so downstream text
+        // never labels a missing score as low risk.
+        let service = mockPredictiveService!
+        await service.callState.enqueue(.success(JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: nil,
+            riskLevel: "unknown",
+            factors: []
+        )))
+
+        await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+
+        XCTAssertNotNil(viewModel.prediction, "the prediction record itself is still preserved")
+        XCTAssertFalse(viewModel.hasKnownLikelihood,
+                       "nil likelihood must be reported as unknown so the view swaps to the unavailable-risk card")
+        XCTAssertEqual(viewModel.riskLevel, "Unavailable",
+                       "nil likelihood must never render as Low")
+        XCTAssertEqual(viewModel.predictionStatus, .success,
+                       "the request itself succeeded — only the risk score is missing")
+    }
+
+    func testKnownLikelihoodEnablesRiskGauge() async {
+        // Baseline for the R2 flag: a successful prediction with a real
+        // likelihood must set `hasKnownLikelihood = true` so the view
+        // renders the numeric gauge.
+        let service = mockPredictiveService!
+        await service.callState.enqueue(.success(JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 42.0,
+            riskLevel: "moderate",
+            factors: []
+        )))
+
+        await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+
+        XCTAssertTrue(viewModel.hasKnownLikelihood)
+        XCTAssertEqual(viewModel.riskLevel, "Moderate")
+        XCTAssertEqual(viewModel.riskPercentage, 42)
     }
 
     // MARK: - Stale / Late Completion
 
     func testLateCompletingRequestDoesNotOverwriteNewerResult() async {
-        // Gate the first call so we can start a second call while it is
-        // still in flight, then let the (superseded) first call complete
-        // and prove it does not clobber the newer state.
+        // Non-vacuity design: use per-invocation scripted outcomes on the
+        // mock, snapshotted before the gate suspends. That way the first
+        // (stale) call cannot silently re-read a newer `predictionToReturn`
+        // — its return value is fixed to prediction A at call time. If the
+        // view model's generation fence were removed, prediction A would
+        // overwrite prediction B when the first call finally completes.
         let firstGate = AsyncGate()
         let vm = viewModel!
         let service = mockPredictiveService!
-        service.predictionToReturn = JobFailurePrediction(
+
+        let predictionA = JobFailurePrediction(
             printerId: testPrinterId,
             material: "PLA",
             estimatedDurationMinutes: 60,
@@ -233,8 +370,24 @@ final class PredictiveViewModelTests: XCTestCase {
             riskLevel: "critical",
             factors: []
         )
+        let predictionB = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 10.0,
+            riskLevel: "low",
+            factors: []
+        )
+        await service.callState.enqueue(.success(predictionA))
+        await service.callState.enqueue(.success(predictionB))
+
+        // Only the FIRST scripted call is gated. Companion test
+        // `testFirstOutcomeWouldWriteWithoutInterleave` proves that A is
+        // written when there is no newer call to supersede it — together
+        // they prove the fence is what suppresses the late write.
         service.beforeReturnHook = { [firstGate] in
             await firstGate.wait()
+            // Detach hook so the second scripted call is not also gated.
         }
 
         let printerId = testPrinterId
@@ -244,29 +397,67 @@ final class PredictiveViewModelTests: XCTestCase {
         // gate (a real suspension point inside the mock), not a sleep.
         while await !firstGate.hasWaiters { await Task.yield() }
 
-        // Second (newer) call: no hook, no gate — completes normally.
+        // Detach hook so the second scripted call completes normally.
         service.beforeReturnHook = nil
-        service.predictionToReturn = JobFailurePrediction(
-            printerId: testPrinterId,
-            material: "PLA",
-            estimatedDurationMinutes: 60,
-            predictedFailureLikelihood: 10.0,
-            riskLevel: "low",
-            factors: []
-        )
-        await vm.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+        await vm.predictFailure(printerId: printerId, material: "PLA", duration: 3600)
 
-        // Newer call landed.
-        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, 10.0)
+        // Newer call landed with prediction B.
+        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, predictionB.predictedFailureLikelihood)
         XCTAssertEqual(vm.predictionStatus, .success)
 
-        // Now let the stale first call complete. It must NOT overwrite the
-        // newer result.
+        // Release the stale first call. Its snapshotted outcome (A) must
+        // not overwrite the newer result even though `performPrediction`
+        // will reach the success branch with a distinct value.
         await firstGate.open()
         await firstCall
 
-        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, 10.0)
+        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, predictionB.predictedFailureLikelihood,
+                       "generation fence must suppress the late write; prediction B must remain visible")
         XCTAssertEqual(vm.predictionStatus, .success)
+
+        // Non-vacuity evidence: both scripted calls actually ran and each
+        // carried its distinct snapshot.
+        let callCount = await service.callState.callCount
+        let snapshots = await service.callState.recordedSnapshots
+        XCTAssertEqual(callCount, 2)
+        XCTAssertEqual(snapshots.count, 2)
+        if case .success(let s0) = snapshots[0], case .success(let s1) = snapshots[1] {
+            XCTAssertEqual(s0?.predictedFailureLikelihood, predictionA.predictedFailureLikelihood,
+                           "first invocation must have snapshotted prediction A before suspending")
+            XCTAssertEqual(s1?.predictedFailureLikelihood, predictionB.predictedFailureLikelihood,
+                           "second invocation must have snapshotted prediction B")
+            XCTAssertNotEqual(s0?.predictedFailureLikelihood, s1?.predictedFailureLikelihood,
+                              "the two snapshots must be distinct or the test is vacuous")
+        } else {
+            XCTFail("expected two success snapshots recorded by the mock")
+        }
+    }
+
+    func testFirstOutcomeWouldWriteWithoutInterleave() async {
+        // Companion to `testLateCompletingRequestDoesNotOverwriteNewerResult`.
+        // Establishes non-vacuity by showing that when there is no newer
+        // call to supersede it, the same scripted outcome A DOES write to
+        // the view model. Combined with the late-completion test, this
+        // proves the generation fence — not some coincidence — is what
+        // suppresses the late write.
+        let vm = viewModel!
+        let service = mockPredictiveService!
+        let predictionA = JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 90.0,
+            riskLevel: "critical",
+            factors: []
+        )
+        await service.callState.enqueue(.success(predictionA))
+
+        await vm.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
+
+        XCTAssertEqual(vm.prediction?.predictedFailureLikelihood, predictionA.predictedFailureLikelihood)
+        XCTAssertEqual(vm.predictionStatus, .success)
+        let callCount = await service.callState.callCount
+        XCTAssertEqual(callCount, 1)
     }
     
     // MARK: - Load Alerts
