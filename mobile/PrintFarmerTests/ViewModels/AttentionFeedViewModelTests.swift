@@ -1945,6 +1945,332 @@ final class AttentionFeedViewModelTests: XCTestCase {
         XCTAssertEqual(vm.loadFailure?.message, "follow-up failed")
     }
 
+    // MARK: - Cycle 6: authority-scoped ownership + queued follow-up authority token
+
+    func testOldAuthorityCompletionDoesNotCorruptNewAuthorityOwnership() async {
+        // Blocker A: R1 is in flight under authority A when the
+        // service is replaced. R2 starts under authority B. Event E
+        // arrives on B and latches pending. A/R1 completes late.
+        //
+        // Old-authority completion must NOT: (1) release a B token
+        // it doesn't own, (2) mutate B's coverage/pending, (3)
+        // schedule follow-up work against B. B's own R2 must remain
+        // the sole scheduler.
+        let oldGate = AttentionResultGate<AttentionFeed>()
+        let newGate = AttentionResultGate<AttentionFeed>()
+        let newR3Feed = makeAttentionFeed(healthyPrinterCount: 9)
+        let oldService = ScriptedAttentionService(steps: [.gated(oldGate)])
+        let newService = ScriptedAttentionService(steps: [
+            .gated(newGate),
+            .value(newR3Feed),
+        ])
+        let oldSignalR = MockSignalRService()
+        let newSignalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: oldService,
+            signalRService: oldSignalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await oldService.waitForLoadCount(1)
+
+        // Replace authority A → B. invalidateAuthority resets the
+        // token set. A/R1's captured authority is now stale.
+        vm.configure(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+
+        let r2 = Task { await vm.refresh() }
+        await newService.waitForLoadCount(1)
+
+        // Event E under B. Drain: activeRequestTokens contains B/R2's
+        // token → latch pending, no dispatch.
+        newSignalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        let midNewCount = await newService.loadCallCount
+        XCTAssertEqual(
+            midNewCount, 1,
+            "Event drain during B/R2 in-flight must NOT launch concurrent GET on B"
+        )
+
+        // A/R1 completes as old-owner. Must be a total no-op wrt B.
+        await oldGate.succeed(makeAttentionFeed(healthyPrinterCount: 999))
+        _ = await r1.value
+        let afterR1NewCount = await newService.loadCallCount
+        XCTAssertEqual(
+            afterR1NewCount, 1,
+            "Old-authority completion must not trigger a new-authority GET"
+        )
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "Old-authority completion must not schedule follow-up against new authority"
+        )
+
+        // B/R2 succeeds. cover(0) < E(seq=1). Pending remains
+        // uncovered → schedules exactly one B/R3.
+        await newGate.succeed(makeAttentionFeed(healthyPrinterCount: 3))
+        _ = await r2.value
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 3, "B/R2 applied")
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "Exactly one B/R3 scheduled after B/R2 terminal — B's ownership was intact"
+        )
+
+        await callbackQueue.runNext()  // B/R3 drains
+        let finalNewCount = await newService.loadCallCount
+        XCTAssertEqual(
+            finalNewCount, 2,
+            "Total on B: R2 + R3 = 2"
+        )
+        XCTAssertEqual(
+            vm.snapshot?.healthyPrinterCount, 9,
+            "B/R3 covers E"
+        )
+    }
+
+    func testMultipleOldAuthorityCompletionsCannotUnderflowOrDrainNewAuthority() async {
+        // Blocker A defense-in-depth: two concurrent A refreshes
+        // outlive a replacement. If old-authority completions could
+        // decrement a global counter, N old completions after B has
+        // started could underflow (masked by max(0,...)) and make B
+        // look permanently in-flight or make an event dispatch
+        // during an "impossible idle" moment. With authority-scoped
+        // tokens this is impossible — old completions have nothing
+        // to remove from B's set.
+        let a1Gate = AttentionResultGate<AttentionFeed>()
+        let a2Gate = AttentionResultGate<AttentionFeed>()
+        let bFirstFeed = makeAttentionFeed(healthyPrinterCount: 4)
+        let bFollowupFeed = makeAttentionFeed(healthyPrinterCount: 9)
+        let oldService = ScriptedAttentionService(steps: [
+            .gated(a1Gate),
+            .gated(a2Gate),
+        ])
+        let newService = ScriptedAttentionService(steps: [
+            .value(bFirstFeed),
+            .value(bFollowupFeed),
+        ])
+        let oldSignalR = MockSignalRService()
+        let newSignalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: oldService,
+            signalRService: oldSignalR,
+            attentionEnabled: true
+        )
+
+        // Two concurrent A refreshes.
+        let a1 = Task { await vm.refresh() }
+        let a2 = Task { await vm.refresh() }
+        await oldService.waitForLoadCount(2)
+
+        // Replace to B.
+        vm.configure(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+
+        // Complete BOTH old A refreshes while B has nothing in
+        // flight. Neither may touch B's token set or coverage.
+        await a1Gate.succeed(makeAttentionFeed(healthyPrinterCount: 111))
+        _ = await a1.value
+        await a2Gate.succeed(makeAttentionFeed(healthyPrinterCount: 222))
+        _ = await a2.value
+
+        let newAfterAs = await newService.loadCallCount
+        XCTAssertEqual(
+            newAfterAs, 0,
+            "Two sequential old-authority completions must not touch B service"
+        )
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "No follow-up scheduled from old-authority completions"
+        )
+
+        // B is now clean. A normal refresh + event cycle proves B's
+        // ownership accounting is uncorrupted.
+        let bRefreshOK = await vm.refresh()
+        XCTAssertTrue(bRefreshOK)
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 4)
+
+        newSignalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        // Since B has no refresh in flight now, drain dispatches
+        // directly.
+
+        let finalCount = await newService.loadCallCount
+        XCTAssertEqual(
+            finalCount, 2,
+            "Event drain on B dispatches normally: R2 + one drain-dispatched GET"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 9)
+    }
+
+    func testOldAuthorityQueuedFollowUpNoOpsAfterServiceReplacement() async {
+        // Blocker B: A/R1 completes with an uncovered pending event
+        // and schedules a follow-up. Before the follow-up closure
+        // drains, the service is replaced with B. The queued closure
+        // captured authority A; at drain it must see the mismatch
+        // and no-op — no old-owner GET against B's service, no
+        // duplicate B bootstrap.
+        let r1Gate = AttentionResultGate<AttentionFeed>()
+        let r1Feed = makeAttentionFeed(healthyPrinterCount: 1)
+        let bBootstrapFeed = makeAttentionFeed(healthyPrinterCount: 5)
+        let oldService = ScriptedAttentionService(steps: [.gated(r1Gate)])
+        let newService = ScriptedAttentionService(steps: [.value(bBootstrapFeed)])
+        let oldSignalR = MockSignalRService()
+        let newSignalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: oldService,
+            signalRService: oldSignalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await oldService.waitForLoadCount(1)
+
+        // Event during A/R1 flight → latches pending.
+        oldSignalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // A/R1 succeeds. cover(0) < event seq(1) → pending survives
+        // → schedules follow-up (captured authorityEpoch = A).
+        await r1Gate.succeed(r1Feed)
+        _ = await r1.value
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "A/R1 success schedules a follow-up (captured authority = A)"
+        )
+        let oldCountAfterR1 = await oldService.loadCallCount
+        XCTAssertEqual(oldCountAfterR1, 1)
+
+        // Replace to B BEFORE the follow-up drains. invalidateAuthority
+        // bumps authorityEpoch → the queued closure's captured
+        // authority is now stale.
+        vm.configure(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+
+        // Drain the follow-up closure. It must detect authority
+        // mismatch and no-op — no call against old service (which
+        // has been replaced) and no old-owner call against new
+        // service (which would steal B's bootstrap slot).
+        await callbackQueue.runNext()
+        let oldCountAfterDrain = await oldService.loadCallCount
+        XCTAssertEqual(
+            oldCountAfterDrain, 1,
+            "Follow-up must not fire against old service after replacement"
+        )
+        let newCountAfterDrain = await newService.loadCallCount
+        XCTAssertEqual(
+            newCountAfterDrain, 0,
+            "Follow-up must not fire against new service (would be old-owner work)"
+        )
+
+        // Bootstrap B: exactly one canonical GET.
+        _ = await vm.bootstrap(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+        let bCount = await newService.loadCallCount
+        XCTAssertEqual(
+            bCount, 1,
+            "B bootstrap issues exactly one canonical GET, undisturbed by old-owner follow-up"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 5)
+    }
+
+    func testQueuedFollowUpInvalidatedByDeactivateReactivate() async {
+        // Blocker B, activation variant: same authority but the
+        // activation epoch moves (deactivate+reactivate) between
+        // scheduling and drain. Queued closure captured activation
+        // A0; current is A0+2 → mismatch → no-op.
+        let r1Gate = AttentionResultGate<AttentionFeed>()
+        let r1Feed = makeAttentionFeed(healthyPrinterCount: 1)
+        let service = ScriptedAttentionService(steps: [.gated(r1Gate)])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        // Event during flight → latches pending.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // R1 succeeds → schedules follow-up (captured activation = A0).
+        await r1Gate.succeed(r1Feed)
+        _ = await r1.value
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "R1 success schedules follow-up under current activation"
+        )
+
+        // Deactivate + reactivate BEFORE follow-up drains.
+        vm.deactivate()
+        vm.activate()
+        // Activate did NOT enqueue a drain here: pendingReloadOnActivate
+        // was never set (event drain saw activeRequestTokens non-empty,
+        // took the "return" branch without setting the flag).
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "Activate must not enqueue a spurious drain when no pendingReloadOnActivate was set"
+        )
+
+        // Drain the follow-up. Activation mismatch → no-op.
+        await callbackQueue.runNext()
+        let countAfterDrain = await service.loadCallCount
+        XCTAssertEqual(
+            countAfterDrain, 1,
+            "Follow-up must no-op after activation moved (deactivate+reactivate)"
+        )
+    }
+
     // MARK: - Helpers
 
     private func configuredViewModel(

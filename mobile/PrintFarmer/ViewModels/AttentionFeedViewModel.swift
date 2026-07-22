@@ -252,13 +252,22 @@ final class AttentionFeedViewModel {
     /// watermark reaches it. Drives the follow-up decision at refresh
     /// completion and the drain decision at reactivation.
     @ObservationIgnored private var pendingCoverageEventSequence: UInt64?
-    /// Number of canonical refreshes currently in flight (started but
-    /// not yet completed). Event-drain coalescing uses this to avoid
-    /// launching a concurrent duplicate refresh merely because a
-    /// callback drained during an in-flight fetch. Also gates the
-    /// follow-up dispatch on the completion path so only the LAST
-    /// completing refresh may launch a follow-up.
-    @ObservationIgnored private var activeRefreshCount: Int = 0
+    /// Authority-scoped ownership set of currently in-flight canonical
+    /// refreshes. Every refresh generates a unique `UUID` token at
+    /// start and registers it here; only same-authority completions
+    /// remove their token. Old-authority completions (whose captured
+    /// `authorityEpoch` no longer matches) neither insert nor remove
+    /// from this set — so they cannot corrupt the current
+    /// authority's ownership accounting.
+    ///
+    /// Cycle 6 replaces the previous global `activeRefreshCount: Int`
+    /// (which could underflow when an old-authority completion
+    /// decremented after `invalidateAuthority` had already reset it,
+    /// masked by `max(0, ...)`). Set-membership with authority
+    /// tokens makes cross-authority release literally impossible: an
+    /// old completion has nothing to remove because its token was
+    /// discarded when the authority changed.
+    @ObservationIgnored private var activeRequestTokens: Set<UUID> = []
 
     /// Deduplicated ID set for `loadMore` appends. Rebuilt atomically on
     /// canonical refresh so refresh resets are all-or-nothing.
@@ -402,10 +411,11 @@ final class AttentionFeedViewModel {
             return
         }
 
-        if activeRefreshCount > 0 {
-            // A refresh is already in flight. It may or may not cover
-            // this event (depends on its start-cover watermark vs
-            // eventSeq). The completion path will check
+        if !activeRequestTokens.isEmpty {
+            // A refresh is already in flight (under the current
+            // authority). It may or may not cover this event
+            // (depends on its start-cover watermark vs eventSeq).
+            // The completion path will check
             // pendingCoverageEventSequence and launch a follow-up if
             // uncovered. Do NOT dispatch a concurrent refresh here —
             // that would violate the "no duplicate GET merely because
@@ -568,6 +578,13 @@ final class AttentionFeedViewModel {
         // mutate visible state.
         let stampedLoad = advanceLoadStamp()
         let stampedActivation = activationEpoch
+        // Capture the authority epoch so an old-authority completion
+        // (this refresh was started under authority A, but the
+        // service+signalR pair has been replaced with B by the time
+        // we resume) can be detected and made a total no-op — no
+        // token release, no coverage advance, no follow-up. See
+        // cycle-6 blocker A.
+        let stampedAuthority = authorityEpoch
 
         // Snapshot the event-sequence "cover watermark" NOW, before
         // awaiting the fetch. This request covers exactly the events
@@ -576,13 +593,12 @@ final class AttentionFeedViewModel {
         // follow-up refresh for any such pending coverage.
         let startCoverSnapshot = eventSequenceBox.currentValue
 
-        // Track the concurrent-refresh count so:
-        //   (1) event-drain coalescing knows to latch pending instead
-        //       of dispatching a duplicate, and
-        //   (2) only the LAST completing refresh may launch a follow-up
-        //       (avoiding duplicate follow-ups when multiple refreshes
-        //       overlap).
-        activeRefreshCount += 1
+        // Authority-scoped ownership: register this refresh in the
+        // current authority's token set. Cross-authority completions
+        // will neither insert nor remove, so the set can never
+        // underflow or be corrupted by old-owner work.
+        let requestToken = UUID()
+        activeRequestTokens.insert(requestToken)
 
         if snapshot == nil {
             phase = .loading
@@ -592,8 +608,23 @@ final class AttentionFeedViewModel {
 
         let outcome = await Self.fetchFirstPage(service: service)
 
-        // Always release our slot, even on stale drop.
-        activeRefreshCount = max(0, activeRefreshCount - 1)
+        // Cross-authority completion: this refresh started under a
+        // previous authority (invalidateAuthority has since run and
+        // bumped authorityEpoch). Treat as a total no-op:
+        //   * do NOT release a token from the current authority's set
+        //     (our token was discarded when the set was reset),
+        //   * do NOT touch coverage/pending under the current authority,
+        //   * do NOT schedule follow-up work against the new authority.
+        // The current authority owns its own ownership accounting.
+        if stampedAuthority != authorityEpoch {
+            return false
+        }
+
+        // Same-authority: release our token. Follow-up gate below
+        // then observes an authority-scoped, precisely-accurate
+        // "in-flight" view — the empty check is only true when THIS
+        // authority's refreshes have all completed.
+        activeRequestTokens.remove(requestToken)
 
         guard matchesActive(loadStamp: stampedLoad, activation: stampedActivation) else {
             // Stale generation OR view went inactive OR reactivated
@@ -640,23 +671,9 @@ final class AttentionFeedViewModel {
             return true
         case .featureDisabled:
             applyDisabled()
-            // Do NOT advance lastCoveredEventSequence or launch a
-            // follow-up: disabled is a terminal teardown that
-            // requires explicit recovery (retryDisabledRecovery).
-            // tryScheduleFollowupIfPending would be blocked by
-            // `attentionEnabled == false` anyway.
             return false
         case .failure(let error):
             applyFailure(error)
-            // No-auto-loop invariant: a failed refresh does NOT
-            // advance coverage and does NOT launch a follow-up.
-            // Pending coverage persists until either a subsequent
-            // successful refresh clears it (user pull-to-refresh) or
-            // a genuinely later event triggers a new drain cycle.
-            //
-            // Do NOT call tryScheduleFollowupIfPending here — that
-            // would create the exact auto-loop the criterion forbids
-            // when the follow-up itself fails.
             return false
         }
     }
@@ -667,7 +684,7 @@ final class AttentionFeedViewModel {
     /// through `callbackEnqueuer` iff:
     ///
     /// * this completion released the last active refresh
-    ///   (`activeRefreshCount == 0`),
+    ///   (`activeRequestTokens.isEmpty`),
     /// * the completion's captured activation is still current
     ///   (distinguishes generation-stale within a valid authority
     ///   from authority-invalidated old-owner work),
@@ -676,28 +693,58 @@ final class AttentionFeedViewModel {
     /// * there is uncovered pending event coverage
     ///   (`pendingCoverageEventSequence > lastCoveredEventSequence`).
     ///
+    /// Cycle 6: the queued closure ALSO captures the current
+    /// authorityEpoch and activationEpoch, and re-checks them at
+    /// drain time. This prevents an old-owner follow-up (scheduled
+    /// under authority A, drained after A→B replacement) from
+    /// executing a refresh against the wrong authority and stealing
+    /// B's bootstrap slot.
+    ///
     /// Deliberately not called from `.failure` / `.featureDisabled`
     /// completion paths to preserve the no-auto-loop invariant.
     private func tryScheduleFollowupIfPending(capturedActivation: UInt64) {
-        // Only the last active refresh schedules a follow-up. When
-        // concurrent refreshes overlap, only one launches.
-        guard activeRefreshCount == 0 else { return }
+        // Only the last active refresh schedules a follow-up.
+        guard activeRequestTokens.isEmpty else { return }
         // Authority validity: don't schedule for a deactivated view,
         // a disabled feature, or a service that has since been
         // replaced (nil after invalidateAuthority reset).
         guard isActive, attentionEnabled, attentionService != nil else { return }
         // Distinguish generation staleness (same activation, newer
         // loadStamp took over) from authority invalidity (activation
-        // moved via deactivate / invalidateAuthority). The former is
-        // safe to schedule under — the follow-up runs on the current
-        // activation. The latter is NOT — that would be old-owner
-        // work reactivating under a fresh lifecycle.
+        // moved via deactivate / invalidateAuthority).
         guard capturedActivation == activationEpoch else { return }
         guard let pending = pendingCoverageEventSequence,
               pending > lastCoveredEventSequence else { return }
+
+        // Cycle 6 blocker B: capture BOTH the authority and activation
+        // at schedule time. The queued closure re-checks them at drain
+        // time — if either has moved (service replacement bumps
+        // authority; deactivate/activate bumps activation), the
+        // follow-up must no-op instead of firing an old-owner refresh
+        // against a new lifecycle.
+        let capturedAuthority = authorityEpoch
         let enqueue = callbackEnqueuer
         enqueue { [weak self] in
-            await self?.refresh()
+            guard let self else { return }
+            // Authority still current at drain time? Old-owner
+            // follow-up from a superseded authority must not fire
+            // against the new one.
+            if capturedAuthority != self.authorityEpoch { return }
+            // Activation still current? Prevent old-activation
+            // refresh reactivating an off-screen or freshly
+            // reactivated view.
+            if capturedActivation != self.activationEpoch { return }
+            // Authority still valid?
+            guard self.isActive, self.attentionEnabled,
+                  self.attentionService != nil else { return }
+            // Pending still uncovered under CURRENT authority?
+            // (`invalidateAuthority` resets `pendingCoverageEventSequence`
+            // so this is implicit after the authority-epoch check,
+            // but explicit for defensive clarity.)
+            guard let pending = self.pendingCoverageEventSequence,
+                  pending > self.lastCoveredEventSequence else { return }
+            _ = pending
+            await self.refresh()
         }
     }
 
@@ -1020,7 +1067,7 @@ final class AttentionFeedViewModel {
         // service/signalR pair has been replaced.
         pendingCoverageEventSequence = nil
         lastCoveredEventSequence = 0
-        activeRefreshCount = 0
+        activeRequestTokens = []
 
         guard resetState else { return }
         attentionService = nil
