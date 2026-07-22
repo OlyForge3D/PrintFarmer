@@ -6,6 +6,7 @@ import { PrinterBackend } from '@/types/api';
 
 const mockUsePrinterDetails = vi.fn();
 const mockUseUpdatePrinter = vi.fn();
+const mockUsePrinterCameras = vi.fn();
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: (...args: unknown[]) => mockUsePrinterDetails(...args),
@@ -22,6 +23,10 @@ vi.mock('@/common/hooks/useApi', () => ({
 
 vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: false }),
+}));
+
+vi.mock('@/features/cameras/hooks/usePrinterCameras', () => ({
+  usePrinterCameras: (...args: unknown[]) => mockUsePrinterCameras(...args),
 }));
 
 vi.mock('@/common/components/modals/Modal', () => ({
@@ -45,6 +50,17 @@ describe('EditPrinterModal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    mockUsePrinterCameras.mockReturnValue({
+      data: [
+        {
+          id: 'camera-1',
+          streamUrl: 'http://qp4-1.local/cam/stream',
+          snapshotUrl: '',
+          isEnabled: true,
+        },
+      ],
+    });
 
     mockUsePrinterDetails.mockReturnValue({
       data: {
@@ -122,7 +138,11 @@ describe('EditPrinterModal', () => {
     });
   });
 
-  it('disables Obico checkbox when no camera URLs are configured', async () => {
+  it('disables Obico checkbox when no linked cameras are configured', async () => {
+    mockUsePrinterCameras.mockReturnValue({
+      data: [],
+    });
+
     mockUsePrinterDetails.mockReturnValue({
       data: {
         name: 'qp4-1',
@@ -135,8 +155,8 @@ describe('EditPrinterModal', () => {
         apiKey: '',
         username: '',
         password: '',
-        cameraStreamUrl: '', // No camera URL
-        cameraSnapshotUrl: '', // No camera URL
+        cameraStreamUrl: '',
+        cameraSnapshotUrl: '',
         capabilities: {},
         backendPort: 7125,
         frontendPort: 80,
@@ -156,10 +176,10 @@ describe('EditPrinterModal', () => {
 
     const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
     expect(checkbox).toBeDisabled();
-    expect(screen.getByText(/configure a camera url above to enable failure detection/i)).toBeInTheDocument();
+    expect(screen.getByText(/configure and enable a linked camera/i)).toBeInTheDocument();
   });
 
-  it('enables Obico checkbox when at least one camera URL is configured', async () => {
+  it('enables Obico checkbox when at least one enabled linked camera is configured', async () => {
     mockUsePrinterDetails.mockReturnValue({
       data: {
         name: 'qp4-1',
@@ -172,7 +192,7 @@ describe('EditPrinterModal', () => {
         apiKey: '',
         username: '',
         password: '',
-        cameraStreamUrl: 'http://qp4-1.local/webcam/?action=stream', // Camera URL present
+        cameraStreamUrl: 'http://qp4-1.local/webcam/?action=stream',
         cameraSnapshotUrl: '',
         capabilities: {},
         backendPort: 7125,
@@ -195,7 +215,79 @@ describe('EditPrinterModal', () => {
     expect(checkbox).not.toBeDisabled();
   });
 
-  it('enables Obico checkbox when snapshot URL is configured', async () => {
+  it('disables Obico checkbox when only disabled linked cameras exist', async () => {
+    mockUsePrinterCameras.mockReturnValue({
+      data: [
+        {
+          id: 'camera-1',
+          streamUrl: 'http://qp4-1.local/cam/stream',
+          snapshotUrl: '',
+          isEnabled: false,
+        },
+      ],
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
+    expect(checkbox).toBeDisabled();
+  });
+
+  it('enables Obico checkbox when linked camera exists even without populated legacy camera fields', async () => {
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        name: 'arco',
+        serverUrl: 'http://arco.local',
+        originalServerUrl: 'http://arco.local',
+        notes: '',
+        manufacturerId: 'manufacturer-1',
+        modelId: 'model-1',
+        backend: 'Moonraker',
+        apiKey: '',
+        username: '',
+        password: '',
+        cameraStreamUrl: '',
+        cameraSnapshotUrl: '',
+        capabilities: {},
+        backendPort: 7125,
+        frontendPort: 80,
+        obicoEnabled: false,
+        toolheads: [],
+      },
+    });
+
+    mockUsePrinterCameras.mockReturnValue({
+      data: [
+        {
+          id: 'camera-1',
+          streamUrl: 'http://arco.local/cam/stream',
+          snapshotUrl: '',
+          isEnabled: true,
+        },
+      ],
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
+    expect(checkbox).not.toBeDisabled();
+  });
+
+  it('keeps Obico checkbox interactive when already enabled without currently eligible linked cameras', async () => {
     mockUsePrinterDetails.mockReturnValue({
       data: {
         name: 'qp4-1',
@@ -209,11 +301,11 @@ describe('EditPrinterModal', () => {
         username: '',
         password: '',
         cameraStreamUrl: '',
-        cameraSnapshotUrl: 'http://qp4-1.local/webcam/?action=snapshot', // Snapshot URL present
+        cameraSnapshotUrl: '',
         capabilities: {},
         backendPort: 7125,
         frontendPort: 80,
-        obicoEnabled: false,
+        obicoEnabled: true,
         toolheads: [],
       },
     });
@@ -229,5 +321,6 @@ describe('EditPrinterModal', () => {
 
     const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
     expect(checkbox).not.toBeDisabled();
+    expect(checkbox).toBeChecked();
   });
 });

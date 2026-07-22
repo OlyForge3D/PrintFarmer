@@ -2,6 +2,7 @@
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Slicer.Module.Api.Controllers;
@@ -11,7 +12,9 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/slicers")]
-[RequireSlicerApiKey]
+
+// Slicer workers authenticate through the slicer API-key filters, not PrintFarmer bearer tokens.
+[AllowAnonymous]
 public class SlicersController(ISlicersService service) : ControllerBase
 {
     private readonly ISlicersService _service = service ?? throw new ArgumentNullException(nameof(service));
@@ -20,10 +23,11 @@ public class SlicersController(ISlicersService service) : ControllerBase
     /// Lists all registered slicer services.
     /// </summary>
     [HttpGet]
+    [RequireSlicerApiKey]
     public async Task<IActionResult> ListAsync()
     {
         IReadOnlyList<SlicerService> list = await _service.ListAsync(HttpContext.RequestAborted);
-        return Ok(list);
+        return Ok(list.Select(ToResponseDto).ToList());
     }
 
     /// <summary>
@@ -31,6 +35,7 @@ public class SlicersController(ISlicersService service) : ControllerBase
     /// </summary>
     /// <param name="dto">Registration data.</param>
     [HttpPost("register")]
+    [RequireSlicerApiKey]
     public async Task<IActionResult> RegisterAsync([FromBody] RegisterSlicerDto dto)
     {
         CancellationToken ct = HttpContext.RequestAborted;
@@ -48,7 +53,7 @@ public class SlicersController(ISlicersService service) : ControllerBase
     public async Task<IActionResult> GetAsync(Guid id)
     {
         SlicerService? svc = await _service.GetAsync(id, HttpContext.RequestAborted);
-        return svc == null ? NotFound() : Ok(svc);
+        return svc == null ? NotFound() : Ok(ToResponseDto(svc));
     }
 
     /// <summary>
@@ -86,5 +91,27 @@ public class SlicersController(ISlicersService service) : ControllerBase
     {
         string? newApiKey = await _service.RotateApiKeyAsync(id, HttpContext.RequestAborted);
         return newApiKey == null ? NotFound() : Ok(new { id, apiKey = newApiKey });
+    }
+
+    private static SlicerServiceResponseDto ToResponseDto(SlicerService service)
+    {
+        return new SlicerServiceResponseDto
+        {
+            Id = service.Id,
+            Name = service.Name,
+            SlicerType = service.SlicerType,
+            Version = service.Version,
+            Host = service.Host,
+            UiManifestUrl = service.UiManifestUrl,
+            CapabilitiesJson = service.CapabilitiesJson,
+            MaxConcurrentJobs = service.MaxConcurrentJobs,
+            Status = service.Status,
+            LastSeen = service.LastSeen,
+            ApiKeyRotatedAt = service.ApiKeyRotatedAt,
+            CreatedAt = service.CreatedAt,
+            UpdatedAt = service.UpdatedAt,
+            Tags = service.Tags,
+            InstanceId = service.InstanceId,
+        };
     }
 }

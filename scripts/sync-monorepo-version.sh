@@ -1,96 +1,77 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================================
-# Sync Monorepo Version
-# ============================================================================
-# Ensures VERSION file is the single source of truth across the monorepo.
-# Updates mobile Xcode project marketing version and any other version refs.
+# Sync monorepo version consumers to the root VERSION file.
 #
 # Usage:
-#   ./scripts/sync-monorepo-version.sh           # Sync version to all targets
-#   ./scripts/sync-monorepo-version.sh --check   # Verify versions are in sync (no writes)
+#   ./scripts/sync-monorepo-version.sh           # apply updates
+#   ./scripts/sync-monorepo-version.sh --check   # verify only
 
-SCRIPT_NAME="$(basename "$0")"
-readonly SCRIPT_NAME
-ROOT="$(git rev-parse --show-toplevel)"
-readonly ROOT
+readonly ROOT="$(git rev-parse --show-toplevel)"
 readonly VERSION_FILE="$ROOT/VERSION"
-readonly MOBILE_PBXPROJ="$ROOT/mobile/PrintFarmer.xcodeproj/project.pbxproj"
+readonly WEB_PACKAGE_JSON="$ROOT/src/Web/ReactApp/package.json"
 
-CHECK_ONLY=false
+MODE="apply"
+if [[ "${1:-}" == "--check" ]]; then
+  MODE="check"
+fi
 
-usage() {
-    echo "Usage: $SCRIPT_NAME [--check]"
-    echo "  --check   Verify versions are in sync without modifying files"
-    exit 0
-}
+if [[ ! -f "$VERSION_FILE" ]]; then
+  echo "VERSION file not found at $VERSION_FILE" >&2
+  exit 1
+fi
 
-get_version() {
-    if [[ ! -f "$VERSION_FILE" ]]; then
-        echo "Error: VERSION file not found at $VERSION_FILE" >&2
-        exit 1
-    fi
-    local raw
-    raw="$(tr -d '[:space:]' < "$VERSION_FILE")"
-    # Strip leading 'v' if present
-    echo "${raw#v}"
-}
+if [[ ! -f "$WEB_PACKAGE_JSON" ]]; then
+  echo "Web package.json not found at $WEB_PACKAGE_JSON" >&2
+  exit 1
+fi
 
-sync_xcode_version() {
-    local version="$1"
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required for JSON-safe version sync" >&2
+  exit 1
+fi
 
-    if [[ ! -f "$MOBILE_PBXPROJ" ]]; then
-        echo "⚠️  Xcode project not found at $MOBILE_PBXPROJ — skipping mobile sync"
-        return 0
-    fi
+RAW_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+SEMVER="${RAW_VERSION#v}"
 
-    if "$CHECK_ONLY"; then
-        # Check if MARKETING_VERSION matches
-        local current
-        current=$(grep -m1 'MARKETING_VERSION' "$MOBILE_PBXPROJ" | sed 's/.*= *//;s/ *;.*//' | tr -d '[:space:]')
-        if [[ "$current" != "$version" ]]; then
-            echo "❌ Mobile MARKETING_VERSION mismatch: got '$current', expected '$version'"
-            return 1
-        fi
-        echo "✅ Mobile MARKETING_VERSION is in sync: $version"
-        return 0
-    fi
+if [[ ! "$SEMVER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "VERSION must be semantic (vX.Y.Z or X.Y.Z). Found: $RAW_VERSION" >&2
+  exit 1
+fi
 
-    # Update all MARKETING_VERSION entries in pbxproj
-    sed -i.bak "s/MARKETING_VERSION = [^;]*/MARKETING_VERSION = $version/" "$MOBILE_PBXPROJ"
-    rm -f "${MOBILE_PBXPROJ}.bak"
-    echo "✅ Updated mobile MARKETING_VERSION to $version"
-}
+CURRENT_WEB_VERSION="$(python3 - <<'PY' "$WEB_PACKAGE_JSON"
+import json
+import sys
+with open(sys.argv[1], encoding='utf-8') as f:
+    data = json.load(f)
+print(data.get('version', ''))
+PY
+)"
 
-main() {
-    local version
-    version="$(get_version)"
+if [[ "$CURRENT_WEB_VERSION" != "$SEMVER" ]]; then
+  if [[ "$MODE" == "check" ]]; then
+    echo "Version drift: src/Web/ReactApp/package.json has $CURRENT_WEB_VERSION, expected $SEMVER" >&2
+    exit 2
+  fi
 
-    echo "📦 Monorepo version: $version"
+  python3 - <<'PY' "$WEB_PACKAGE_JSON" "$SEMVER"
+import json
+import sys
 
-    sync_xcode_version "$version"
+path, version = sys.argv[1], sys.argv[2]
+with open(path, encoding='utf-8') as f:
+    data = json.load(f)
+data['version'] = version
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+PY
 
-    if ! "$CHECK_ONLY"; then
-        echo "✅ All version targets synced to $version"
-    fi
-}
+  echo "Updated web package version to $SEMVER"
+fi
 
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --check)
-            CHECK_ONLY=true
-            shift
-            ;;
-        -h|--help)
-            usage
-            ;;
-        *)
-            echo "Unknown option: $1" >&2
-            exit 1
-            ;;
-    esac
-done
-
-main
+if [[ "$MODE" == "check" ]]; then
+  echo "Version sync check passed ($SEMVER)"
+else
+  echo "Version sync complete ($SEMVER)"
+fi

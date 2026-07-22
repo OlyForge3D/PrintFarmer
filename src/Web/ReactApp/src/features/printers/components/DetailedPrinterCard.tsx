@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import './DetailedPrinterCard.css';
 import { PanelRightOpen, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -9,13 +9,16 @@ import { PrinterHistoryModal } from '@/features/printers/components/PrinterHisto
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
+import { ZOffsetCalibrationWizard } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
+import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
 import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
@@ -30,12 +33,13 @@ import {
   FilamentChangeIcon,
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
-import { usePrinters, usePrinterDetails } from '@/common/hooks/useApi';
-import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
+import { usePrinterDetails } from '@/common/hooks/useApi';
+import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
+import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -62,37 +66,35 @@ import {
 } from '@/features/printers/constants/temperaturePresets';
 
 interface DetailedPrinterCardProps {
-  printer: Printer;
+  /** Display-ready printer — parents should pass data already merged with SignalR (usePrinterDisplays) */
+  printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
-  onDismiss?: () => void;
+  /** Receives the printer ID so parents can pass one stable callback for all cards */
+  onOpenDetails?: (printerId: string) => void;
 }
 
-export function DetailedPrinterCard({ printer: initialPrinter, backendCapabilities, onEdit, onDismiss }: DetailedPrinterCardProps) {
-  // Fetch from shared usePrinters() cache (same as table view/sidebar) to ensure consistency
-  const { data: allPrinters = [] } = usePrinters();
+// Memoized: with stable callbacks and structural sharing upstream, a card only
+// re-renders when its own printer's data actually changed.
+export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit, onOpenDetails }: DetailedPrinterCardProps) {
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
-  
+  const mmuStatus = (printer as PrinterDisplay).mmuStatus;
+
   // Fetch printer details to check for multi-toolhead configuration
   const { data: printerDetails } = usePrinterDetails(
-    initialPrinter.id,
+    printer.id,
     {
       enabled: spoolmanReady,
       staleTime: 60000,
     }
   );
-  const apiPrinter = useMemo(
-    () => allPrinters.find(p => p.id === initialPrinter.id) ?? initialPrinter,
-    [allPrinters, initialPrinter]
-  );
-  // Merge with realtime SignalR updates
-  const printer = usePrinterDisplay(apiPrinter);
 
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
+  const [showZOffsetWizard, setShowZOffsetWizard] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
   const [movementActionPending, setMovementActionPending] = useState(false);
@@ -106,10 +108,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   const [step, setStep] = useState(1);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
-  const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(initialPrinter.id);
+  const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
   const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
-    initialPrinter.id,
-    !!apiPrinter.obicoEnabled
+    printer.id,
+    !!printer.obicoEnabled
   );
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
@@ -172,9 +174,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
 
   const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
-  // Camera URL handling
-  const cameraSnapshotUrl = apiPrinter.cameraSnapshotUrl ?? null;
-  const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
+  // Camera source handling
+  const cameraSnapshotUrl = printer.cameraSnapshotUrl ?? null;
+  const cameraStreamUrl = printer.cameraStreamUrl ?? null;
   const hasCameraUrls = !!(cameraStreamUrl || cameraSnapshotUrl);
 
   const handleControlAction = async (action: string) => {
@@ -426,7 +428,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
   };
 
   return (
-    <div className="pf-detailed-printer-card relative rounded-xl p-3 shadow-lg bg-pf-card border border-white/10 w-full">
+    <article
+      className="pf-detailed-printer-card relative rounded-xl border border-white/10 bg-pf-card p-3 shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
+      style={{ transform: 'translateZ(0)' }}
+    >
       {/* Colored header — background tinted by printer state */}
       <div className={`px-3 pt-3 pb-2 rounded-t-xl -mx-3 -mt-3 ${headerClassName}`}>
         <div className="flex items-center gap-2">
@@ -439,7 +444,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             </span>
           </div>
           <FailureDetectionMonitoringBadge
-            enabled={!!apiPrinter.obicoEnabled}
+            enabled={!!printer.obicoEnabled}
             status={failureDetectionStatus}
             isPrinting={isPrinting}
             printerId={printer.id}
@@ -475,7 +480,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               disabled={!hasCameraUrls || !isEnabled}
               className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
+              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
             >
             </Button>
@@ -537,15 +542,15 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
               iconCenter={<EditIcon className="h-4 w-4" />}
             >
             </Button>
-            {onDismiss && (
+            {onOpenDetails && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={onDismiss}
+                onClick={() => onOpenDetails(printer.id)}
                 className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-                title="Close details sidebar"
-                aria-label="Close details sidebar"
+                title="Open details sidebar"
+                aria-label="Open details sidebar"
                 iconCenter={<PanelRightOpen className="h-4 w-4" />}
               >
               </Button>
@@ -559,6 +564,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
             printerName={printer.name}
             cameraStreamUrl={cameraStreamUrl}
             cameraSnapshotUrl={cameraSnapshotUrl}
+            cameraAccessMode={printer.cameraAccessMode}
+            cameraStreamFormat={printer.cameraStreamFormat}
+            cameraSnapshotStrategy={printer.cameraSnapshotStrategy}
             isPrinting={isPrinting}
             className="pf-detailed-printer-camera-preview mt-3 w-full"
           />
@@ -576,6 +584,19 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         </div>
       )}
 
+      {/* Offline troubleshooting guide */}
+      {!isOnline && (
+        <div className="mb-4">
+          <OfflineTroubleshootingGuide
+            printerBackend={printer.backend}
+            printerIp={printer.ipAddress}
+            serverUrl={printer.serverUrl ?? printer.backendUrl}
+            frontendUrl={printer.frontendUrl}
+            variant="full"
+          />
+        </div>
+      )}
+
       {/* Progress bar — always visible to prevent layout shift */}
       <div className="mb-4">
         <PrintProgressBar
@@ -588,9 +609,13 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
         />
       </div>
 
+      {(isPrinting || isPaused) && (printer.estimatedCompletionTimeUtc || printer.printTimeLeftSeconds != null) && (
+        <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} className="mb-3" />
+      )}
+
       {(isPrinting || isPaused) && (
         <FailureDetectionMonitoringSummary
-          enabled={!!apiPrinter.obicoEnabled}
+          enabled={!!printer.obicoEnabled}
           status={failureDetectionStatus}
           recentEvents={recentEvents}
           printerName={printer.name}
@@ -668,24 +693,50 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
                     onFilamentAction={handleFilamentAction}
                   />
                 )}
+                {support.supportsMovement && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!isOnline || isPrinting}
+                    onClick={() => setShowZOffsetWizard(true)}
+                  >
+                    Calibrate Z-Offset
+                  </Button>
+                )}
               </div>
             }
           />
       </div>
 
+      {/* AMS/MMU Slot Visualization - Compact view for card */}
+      {(() => {
+        const toolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
+          ? printerDetails.toolheads
+          : mmuStatus?.gates && mmuStatus.gates.length > 0
+            ? mmuGatesToToolheads(mmuStatus.gates)
+            : undefined;
+        if (!toolheads) return null;
+        return (
+          <div className="mb-2">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Material Slots</div>
+            <AmsSlotVisualization toolheads={toolheads} compact printerId={printer.id} />
+          </div>
+        );
+      })()}
+
       {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
       {(spoolmanReady || printer.spoolInfo) && (() => {
         const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
         const hasMmuGates = !hasMultipleToolheads
-          && printer.mmuStatus?.gates
-          && printer.mmuStatus.gates.length > 0;
+          && mmuStatus?.gates
+          && mmuStatus.gates.length > 0;
         const hasMultipleSpoolSources = hasMultipleToolheads || hasMmuGates;
         const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
 
         const effectiveToolheads = hasMultipleToolheads
           ? printerDetails!.toolheads!
           : hasMmuGates
-            ? mmuGatesToToolheads(printer.mmuStatus!.gates)
+            ? mmuGatesToToolheads(mmuStatus!.gates)
             : undefined;
 
         return (
@@ -801,6 +852,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, backendCapabiliti
           }
         }}
       />
-    </div>
+
+      <ZOffsetCalibrationWizard
+        isOpen={showZOffsetWizard}
+        onClose={() => setShowZOffsetWizard(false)}
+        printer={printer}
+        bedSizeX={printerDetails?.capabilities?.maxBuildVolumeX ?? 220}
+        bedSizeY={printerDetails?.capabilities?.maxBuildVolumeY ?? 220}
+      />
+    </article>
   );
-}
+});

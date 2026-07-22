@@ -56,6 +56,7 @@ struct MaintenanceView: View {
             }
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(maintenanceService: services.maintenanceService)
             await viewModel.loadData()
         }

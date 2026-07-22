@@ -19,8 +19,9 @@ interface Props {
   error: Error | null;
 }
 
-export const FilamentByMaterialChart: React.FC<Props> = ({ data, isLoading, error }) => (
-  <Card title="Filament Usage by Material" className="h-96">
+export const FilamentByMaterialChart = React.memo(function FilamentByMaterialChart({ data, isLoading, error }: Props) {
+  return (
+    <Card title="Filament Usage by Material" className="h-96">
     {isLoading ? (
       <ChartSkeleton />
     ) : error ? (
@@ -50,5 +51,6 @@ export const FilamentByMaterialChart: React.FC<Props> = ({ data, isLoading, erro
         </PieChart>
       </ResponsiveContainer>
     )}
-  </Card>
-);
+    </Card>
+  );
+});

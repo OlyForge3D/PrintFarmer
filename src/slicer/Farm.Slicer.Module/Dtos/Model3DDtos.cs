@@ -53,8 +53,28 @@ public class Model3DDto
     /// <summary>Gets or sets validation error details.</summary>
     public string? ValidationErrors { get; set; }
 
+    /// <summary>Gets or sets metadata extracted from 3MF file.</summary>
+    public ThreeMfMetadataDto? ExtractedMetadata { get; set; }
+
+    /// <summary>Gets or sets auto-generated tags from file metadata.</summary>
+    public string[]? AutoTags { get; set; }
+
     /// <summary>Gets or sets the associated tags.</summary>
     public TagDto[]? Tags { get; set; }
+
+    // Attribution fields — populated for imported models, null for locally uploaded models.
+
+    /// <summary>Gets or sets the original source URL (e.g., Printables model page).</summary>
+    public string? SourceUrl { get; set; }
+
+    /// <summary>Gets or sets the license name for the imported model.</summary>
+    public string? SourceLicense { get; set; }
+
+    /// <summary>Gets or sets the creator handle for the imported model.</summary>
+    public string? SourceCreator { get; set; }
+
+    /// <summary>Gets or sets the timestamp when this model was imported from an external source.</summary>
+    public DateTime? ImportedAt { get; set; }
 }
 
 /// <summary>
@@ -76,8 +96,8 @@ public record Model3DEntryDto(
 /// Response envelope for hierarchical model file listing.
 /// </summary>
 public record Model3DListResponse(
-    IReadOnlyList<Model3DEntryDto> Files,
-    int TotalFiles,
+    IReadOnlyList<Model3DEntryDto> Models,
+    int TotalCount,
     long TotalSize,
     int Page,
     int PageSize,
@@ -130,5 +150,25 @@ public class Model3DValidationResultDto
 
     /// <summary>Gets or sets validation issue descriptions.</summary>
     public string[]? Issues { get; set; }
+}
+
+/// <summary>
+/// Result of uploading raw geometry (e.g., from the Cut Model tool).
+/// Lightweight alternative to <see cref="Model3DUploadResultDto"/> that skips
+/// thumbnail generation, model analysis, and deduplication.
+/// </summary>
+public class GeometryUploadResultDto
+{
+    /// <summary>Gets or sets the model identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the storage filename.</summary>
+    public string FileName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the file size in bytes.</summary>
+    public long FileSize { get; set; }
+
+    /// <summary>Gets or sets the server-accessible download URL usable by the slicer worker.</summary>
+    public string FileUrl { get; set; } = string.Empty;
 }
 #pragma warning restore SA1402

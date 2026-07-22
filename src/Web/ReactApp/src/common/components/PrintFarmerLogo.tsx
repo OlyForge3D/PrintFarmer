@@ -1,12 +1,17 @@
-import React from 'react';
+import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 
-export const PrintFarmerLogo: React.FC<{ className?: string; size?: number }> = ({ className, size = 48 }) => (
-  <img
-    src="/printfarmer-logo.svg"
-    alt="PrintFarmer Logo"
-    width={size}
-    height={size}
-    className={`${className ?? ''} align-middle inline-block`}
-    draggable={false}
-  />
-);
+interface PrintFarmerLogoProps {
+  className?: string;
+  size?: number;
+}
+
+export function PrintFarmerLogo({ className, size = 48 }: PrintFarmerLogoProps) {
+  return (
+    <PrintFarmerLogoIcon
+      decorative
+      width={size}
+      height={size}
+      className={`${className ?? ''} inline-block align-middle text-pf-accent`}
+    />
+  );
+}

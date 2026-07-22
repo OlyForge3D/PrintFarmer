@@ -12,9 +12,9 @@ public sealed class RequirePermissionAttribute(string resource, string action) :
     public string Action { get; } = action;
 }
 
-public class PermissionAuthorizationHandler(ILogger<RequirePermissionAttribute> logger) : AuthorizationHandler<RequirePermissionAttribute>
+public class PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandler> logger) : AuthorizationHandler<RequirePermissionAttribute>
 {
-    private readonly ILogger<RequirePermissionAttribute> _logger = logger;
+    private readonly ILogger<PermissionAuthorizationHandler> _logger = logger;
 
     protected override Task HandleRequirementAsync(
         AuthorizationHandlerContext context,

@@ -19,14 +19,14 @@ export function registerOrcaSlicerUI(registry: ISlicerUIRegistry): void {
   try {
     const orcaExports: SlicerUIExports = {
       slicerName: "OrcaSlicer",
-      slicerVersion: "2.3.1",
+      slicerVersion: "2.4.0",
       ImportComponent: OrcaImportWizard,
       profilesService: orcaProfilesService,
       types: {},
     };
 
-    registry.registerUI("OrcaSlicer", "2.3.1", orcaExports);
-    console.info("[registerSlicerUI] Registered OrcaSlicer v2.3.1");
+    registry.registerUI("OrcaSlicer", "2.4.0", orcaExports);
+    console.info("[registerSlicerUI] Registered OrcaSlicer v2.4.0");
   } catch (err) {
     console.error("[registerSlicerUI] Failed to register OrcaSlicer:", err);
   }

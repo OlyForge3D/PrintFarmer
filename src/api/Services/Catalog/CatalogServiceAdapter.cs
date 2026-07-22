@@ -78,6 +78,8 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
             req.DefaultWattage,
             req.DefaultHourlyRate,
             req.Toolheads,
+            req.DefaultAutoDispatchState,
+            req.DefaultStartBehavior,
             ct);
     }
 

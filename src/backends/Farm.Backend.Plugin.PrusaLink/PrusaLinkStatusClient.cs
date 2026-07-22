@@ -67,7 +67,9 @@ public class PrusaLinkStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 HotendTemp: status.HotendTemp,
                 BedTemp: status.BedTemp,
                 HotendTarget: status.HotendTarget,
-                BedTarget: status.BedTarget);
+                BedTarget: status.BedTarget,
+                PrintTimeLeftSeconds: status.TimeRemainingSeconds,
+                SpeedMultiplier: status.SpeedMultiplier);
         }
         catch (OperationCanceledException)
         {

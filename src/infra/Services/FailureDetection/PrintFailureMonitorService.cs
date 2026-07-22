@@ -113,7 +113,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
     {
         if (status is null
             || !status.IsOnline
-            || !string.Equals(status.State, "Printing", StringComparison.OrdinalIgnoreCase))
+            || !PrinterStateClassifier.IsActivePrintingJob(status.State))
         {
             return (false, NotPrintingReason);
         }

@@ -1,5 +1,28 @@
 import type { MachineProfileListItem, PrinterModelProfilesDto } from '@/services/slicerProfilesService';
+import type { ToolheadDto } from '@/types/api';
 import type { PrinterForSlicing } from '../components/job/PrinterSlicerSelector';
+
+/**
+ * Check if a printer has multiple physical toolheads (extruders).
+ * Only counts Physical-type toolheads (not MmuGate virtual slots).
+ */
+export function isMultiToolhead(printer: PrinterForSlicing | null | undefined): boolean {
+  if (!printer?.toolheads || printer.toolheads.length <= 1) return false;
+  return getPhysicalToolheads(printer).length > 1;
+}
+
+/**
+ * Get the physical toolheads from a printer (excludes MmuGate virtual slots).
+ * Returns all toolheads if none have toolheadType set (backward compat).
+ */
+export function getPhysicalToolheads(printer: PrinterForSlicing | null | undefined): ToolheadDto[] {
+  if (!printer?.toolheads || printer.toolheads.length === 0) return [];
+  const physical = printer.toolheads.filter(
+    t => !t.toolheadType || t.toolheadType === 'Physical' || t.toolheadType === 0
+  );
+  // If none are explicitly Physical, return all (backward compat for printers without toolheadType set)
+  return physical.length > 0 ? physical : printer.toolheads;
+}
 
 /**
  * Get primary nozzle diameter from printer.

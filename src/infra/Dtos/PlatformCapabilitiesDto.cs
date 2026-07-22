@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Services.OperatorFeatures;
+
+namespace Farm.Infrastructure.Dtos;
 
 /// <summary>
 /// Exposes platform capabilities so the frontend can hide/show features
@@ -29,4 +31,12 @@ public record PlatformCapabilitiesDto
 
     /// <summary>Gets an optional note explaining platform limitations.</summary>
     public string? PlatformNote { get; init; }
+
+    /// <summary>
+    /// Effective operator feature flags after resolving persisted settings and environment
+    /// hard-disable overrides. See issue #725 and <c>docs/OPERATOR_FEATURE_GATES.md</c>. Clients
+    /// (React and iOS) MUST tolerate this field being absent on older servers and fall back to
+    /// the defaults documented on <see cref="OperatorFeatureFlagsDto"/>.
+    /// </summary>
+    public OperatorFeatureFlagsDto OperatorFeatures { get; init; } = new();
 }

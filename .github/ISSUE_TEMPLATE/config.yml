@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Feature Tracking Convention
+    url: https://github.com/OlyForge3D/PrintFarmer/blob/main/docs/ISSUE_OPERATING_CONVENTION.md
+    about: Read the feature epic/task workflow and canonical label conventions before opening new work.

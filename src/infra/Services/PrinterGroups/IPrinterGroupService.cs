@@ -45,4 +45,21 @@ public interface IPrinterGroupService
     /// </summary>
     /// <exception cref="KeyNotFoundException">Thrown when the group or printer does not exist.</exception>
     Task RemovePrinterAsync(Guid groupId, Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the access rules for a printer group.
+    /// </summary>
+    Task<IReadOnlyList<PrinterGroupAccessDto>> GetAccessRulesAsync(Guid groupId, CancellationToken ct);
+
+    /// <summary>
+    /// Replaces all access rules for a printer group (replace-all pattern).
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">Thrown when the group does not exist.</exception>
+    Task<IReadOnlyList<PrinterGroupAccessDto>> SetAccessRulesAsync(Guid groupId, SetAccessRulesDto dto, CancellationToken ct);
+
+    /// <summary>
+    /// Checks whether a user can submit jobs to a printer group.
+    /// Returns true if no rules exist (backward compatible) or if the user holds a role with Submit-level access.
+    /// </summary>
+    Task<bool> CanUserSubmitToGroupAsync(Guid groupId, Guid userId, CancellationToken ct);
 }

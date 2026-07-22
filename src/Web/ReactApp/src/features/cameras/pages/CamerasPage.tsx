@@ -1,19 +1,30 @@
 import { useMemo, useState, useEffect } from 'react';
 import { RotateCw } from 'lucide-react';
+import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { Alert, Button, Badge } from '@/common/components/ui';
-import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
 import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
 import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
+import { EditCameraModal } from '@/features/cameras/components/EditCameraModal';
 import {
   getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
+import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
 import { getCameraAttentionContent } from '@/features/cameras/utils/cameraAttention';
+import {
+  canUseMjpegStream,
+  isUnsupportedCameraPreview,
+  shouldPollPrinterSnapshot,
+} from '@/features/cameras/utils/cameraPreview';
+
+const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view
@@ -26,6 +37,9 @@ export function CamerasPage() {
   const [cameras, setCameras] = useState<DisplayCameraDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cameraToEdit, setCameraToEdit] = useState<DisplayCameraDto | null>(null);
+  const [cameraToDelete, setCameraToDelete] = useState<DisplayCameraDto | null>(null);
+  const [isDeletingCamera, setIsDeletingCamera] = useState(false);
 
   const [searchParams] = useSearchParams();
   const { tabId } = useParams<{ tabId?: string }>();
@@ -60,6 +74,29 @@ export function CamerasPage() {
 
   const setTab = (nextTab: 'view' | 'manage') => {
     navigate(`/cameras/${nextTab}`, { replace: true });
+  };
+
+  const handleEditSuccess = async () => {
+    await loadCameras();
+  };
+
+  const handleDeleteCamera = async () => {
+    if (!cameraToDelete) return;
+
+    try {
+      setIsDeletingCamera(true);
+      setError(null);
+      await cameraService.deleteCamera(cameraToDelete.id);
+      toast.success(`Camera "${cameraToDelete.name}" deleted`);
+      setCameraToDelete(null);
+      await loadCameras();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete camera';
+      setError(message);
+      toast.error(`Failed to delete camera: ${message}`);
+    } finally {
+      setIsDeletingCamera(false);
+    }
   };
 
   return (
@@ -124,10 +161,34 @@ export function CamerasPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {cameras.map((camera) => (
-                <CameraViewCard key={camera.id} camera={camera} />
+                <CameraViewCard
+                  key={camera.id}
+                  camera={camera}
+                  canManage={canManageCameras}
+                  onEdit={setCameraToEdit}
+                  onDelete={setCameraToDelete}
+                />
               ))}
             </div>
           )}
+
+          <EditCameraModal
+            camera={cameraToEdit}
+            isOpen={Boolean(cameraToEdit)}
+            onClose={() => setCameraToEdit(null)}
+            onSuccess={handleEditSuccess}
+          />
+
+          <ConfirmationModal
+            isOpen={Boolean(cameraToDelete)}
+            title="Delete Camera"
+            message={cameraToDelete ? `Delete "${cameraToDelete.name}"? This action cannot be undone.` : ''}
+            confirmButtonText="Delete"
+            isDangerous
+            isConfirming={isDeletingCamera}
+            onConfirm={handleDeleteCamera}
+            onCancel={() => setCameraToDelete(null)}
+          />
         </div>
       )}
     </PageTemplate>
@@ -136,6 +197,9 @@ export function CamerasPage() {
 
 interface CameraViewCardProps {
   camera: DisplayCameraDto;
+  canManage: boolean;
+  onEdit: (camera: DisplayCameraDto) => void;
+  onDelete: (camera: DisplayCameraDto) => void;
 }
 
 const sourceLabels: Record<CameraSource, string> = {
@@ -158,11 +222,27 @@ const cameraTypeLabels: Record<CameraType, string> = {
 /**
  * CameraViewCard - Individual camera feed card
  */
-function CameraViewCard({ camera }: CameraViewCardProps) {
+function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardProps) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
-  const hasSnapshot = !!camera.snapshotUrl;
-  const hasStream = !!camera.streamUrl;
+  const previewContract = {
+    accessMode: camera.accessMode,
+    streamFormat: camera.streamFormat,
+    snapshotStrategy: camera.snapshotStrategy,
+    snapshotUrl: camera.snapshotUrl,
+  };
+  const pollSnapshotPreview = !!camera.printerId && shouldPollPrinterSnapshot(previewContract);
+  const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
+  const hasStream = !!camera.streamUrl && canUseMjpegStream(previewContract);
+  const directSnapshotUrl = pollSnapshotPreview ? null : camera.snapshotUrl;
+  const { previewContainerRef, snapshotSrc, snapshotFailed } = usePrinterSnapshotPreview(
+    camera.printerId,
+    pollSnapshotPreview,
+    CAMERA_SNAPSHOT_REFRESH_MS,
+    directSnapshotUrl,
+    !!directSnapshotUrl
+  );
+  const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
     cameraMode,
     setCameraMode,
@@ -177,21 +257,27 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
   });
 
   // Determine which URL to show
+  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const activeUrl = cameraMode === 'stream' && hasStream
     ? camera.streamUrl
-    : cameraMode === 'snapshot' && hasSnapshot
-    ? camera.snapshotUrl
+    : cameraMode === 'snapshot' && snapshotPreviewUrl
+    ? snapshotPreviewUrl
     : hasStream
     ? camera.streamUrl
-    : camera.snapshotUrl;
+    : snapshotPreviewUrl;
   const imageError = !!activeUrl && failedUrl === activeUrl;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
+  const externalUrl = cameraMode === 'stream' && hasStream
+    ? camera.streamUrl
+    : pollSnapshotPreview
+    ? null
+    : activeUrl;
   const cameraAttention = getCameraAttentionContent({
     healthStatus: camera.healthStatus,
     healthMessage: camera.healthMessage,
     hasStream,
     hasSnapshot,
-    imageError,
+    imageError: imageError || snapshotFailed,
     cameraMode,
   });
   const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
@@ -199,7 +285,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
   return (
     <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
       {/* Camera feed */}
-      <div className="relative w-full aspect-video bg-pf-bg-2">
+      <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
         {cameraMode === 'stream' && hasStream && activeUrl ? (
           <iframe
             src={activeUrl}
@@ -212,10 +298,20 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
           <img
             src={activeUrl}
             alt={`${camera.name} camera feed`}
-            className={`object-cover ${mediaClassName}`}
+            className={`object-contain bg-black ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
+        ) : unsupportedPreview ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+            <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
+            <span className="text-center text-sm font-medium text-pf-text-secondary">
+              No live preview available
+            </span>
+            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+              This camera does not provide an embeddable MJPEG live stream.
+            </span>
+          </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
@@ -239,8 +335,8 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
 
       {/* Camera info */}
       <div className="space-y-3 p-3 bg-pf-bg-1">
-        <div className="flex items-center gap-2 mb-1">
-          <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0" />
+        <div className="flex items-start gap-2 mb-1">
+          <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0 mt-1" />
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-pf-text-primary truncate">{camera.name}</h3>
             {camera.printerName && (
@@ -252,6 +348,30 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
               <p className="text-xs text-pf-text-tertiary truncate">{camera.location}</p>
             )}
           </div>
+          {canManage && (
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={() => onEdit(camera)}
+                className="h-8 w-8 rounded-full p-0"
+                title={`Edit ${camera.name}`}
+                aria-label={`Edit camera ${camera.name}`}
+                iconCenter={<EditIcon className="w-4 h-4" />}
+              />
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={() => onDelete(camera)}
+                className="h-8 w-8 rounded-full p-0"
+                title={`Delete ${camera.name}`}
+                aria-label={`Delete camera ${camera.name}`}
+                iconCenter={<DeleteIcon className="w-4 h-4 text-pf-error" />}
+              />
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
@@ -316,9 +436,9 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
                 />
               </div>
             )}
-            {activeUrl && (
+            {externalUrl && (
               <a
-                href={cameraMode === 'stream' && hasStream ? camera.streamUrl : activeUrl}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex h-8 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"

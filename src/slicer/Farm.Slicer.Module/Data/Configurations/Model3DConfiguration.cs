@@ -35,6 +35,11 @@ public class Model3DConfiguration : IEntityTypeConfiguration<Model3D>
         _ = builder.Property(m => m.ValidationErrors).HasColumnType("TEXT");
         _ = builder.Property(m => m.ClientUploadHash).HasMaxLength(64);
 
+        // Attribution fields (nullable — only set for imported models)
+        _ = builder.Property(m => m.SourceUrl).HasMaxLength(2048);
+        _ = builder.Property(m => m.SourceLicense).HasMaxLength(128);
+        _ = builder.Property(m => m.SourceCreator).HasMaxLength(256);
+
         // Soft-reference indexes (no FK constraints — FolderNode, User live in core)
         _ = builder.HasIndex(m => m.FolderId);
         _ = builder.HasIndex(m => m.UploadedByUserId);

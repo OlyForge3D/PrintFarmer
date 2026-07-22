@@ -155,12 +155,12 @@ export function MaintenanceDashboardPage() {
       <div className="flex items-center justify-between gap-6 bg-pf-bg-1 border border-pf-border rounded-xl px-6 py-4 mb-6 overflow-x-auto">
         <SummaryStat
           label="Printers"
-          value={stats?.totalPrinters ?? '—'}
+          value={stats?.totalPrinters ?? 0}
         />
         <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Online"
-          value={stats?.printersOnline ?? '—'}
+          value={stats?.printersOnline ?? 0}
           accent="green"
         />
         <div className="w-px h-10 bg-pf-border shrink-0" />

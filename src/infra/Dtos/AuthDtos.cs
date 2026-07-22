@@ -91,6 +91,16 @@ public class UpdateUserRequest
 }
 
 /// <summary>
+/// Admin payload for changing another user's password.
+/// </summary>
+public class AdminChangeUserPasswordRequest
+{
+    public string NewPassword { get; set; } = string.Empty;
+
+    public string ConfirmNewPassword { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Result of a lightweight availability check for prospective username/email.
 /// null indicates the value was not requested / provided.
 /// </summary>

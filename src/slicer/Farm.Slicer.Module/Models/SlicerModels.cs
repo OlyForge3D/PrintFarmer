@@ -90,6 +90,9 @@ public class SlicingJobRequest
 
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
 
+    /// <summary>Optional: Plate index to slice from a multi-plate 3MF model.</summary>
+    public int? PlateIndex { get; set; }
+
     public Dictionary<string, object> Metadata { get; } = [];
 
     /// <summary>
@@ -173,6 +176,28 @@ public class DistributedSlicingJob : SlicingJobDto
 
     public DateTime? ScheduledAt { get; set; } // Optional: when job becomes available for processing (for delayed retries)
 
+    /// <summary>Optional: Plate index to slice from a multi-plate 3MF model.</summary>
+    public int? PlateIndex { get; set; }
+
+    /// <summary>
+    /// JSON-serialized model transform (rotation/scale) from the UI workspace.
+    /// </summary>
+    public string? ModelTransformJson { get; set; }
+
+    /// <summary>
+    /// Multiple model file URLs for multi-model slice jobs.
+    /// When populated, the worker downloads all listed models and passes them to the slicer CLI.
+    /// Falls back to <see cref="ModelFileUrl"/> for single-model jobs.
+    /// </summary>
+    public List<string>? ModelFileUrls { get; set; }
+
+    /// <summary>
+    /// Per-model transforms for multi-model slice jobs.
+    /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrls"/>.
+    /// Format per entry: JSON string with rotation/scale/position arrays.
+    /// </summary>
+    public List<string?>? ModelFileTransforms { get; set; }
+
     // Message envelope fields for idempotency
     public Guid CorrelationId { get; set; } = Guid.NewGuid();
 
@@ -206,6 +231,7 @@ public class DistributedSlicingJob : SlicingJobDto
             SlicerEngine = request.SlicerEngine.ToString(),
             Profile = request.SlicerProfile,
             Priority = request.Priority,
+            PlateIndex = request.PlateIndex,
             Status = SlicingJobStatus.Queued,
             CreatedAt = DateTime.UtcNow,
             CorrelationId = envelope.CorrelationId,

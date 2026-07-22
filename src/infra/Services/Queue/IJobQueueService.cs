@@ -25,8 +25,13 @@ public interface IJobQueueService
     /// <summary>Gets all jobs in a printer's queue.</summary>
     Task<IReadOnlyList<JobQueuePrintJobDto>> GetPrinterQueueAsync(Guid printerId, CancellationToken ct);
 
-    /// <summary>Adds a job to a printer's queue.</summary>
-    Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, CancellationToken ct);
+    /// <summary>
+    /// Adds a job to a printer's queue.
+    /// When <paramref name="userId"/> is provided, printer group ACL is enforced.
+    /// When null, the caller is trusted (API-key / system callers).
+    /// </summary>
+    /// <exception cref="QueueGroupAccessDeniedException">Thrown when the user lacks Submit access to the target printer group.</exception>
+    Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct);
 
     /// <summary>Gets a print job by ID.</summary>
     Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct);
