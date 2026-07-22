@@ -42,6 +42,25 @@ public interface ILibrarySyncJournal
     Task<IReadOnlyList<LibrarySyncChange>> GetChangesSinceAsync(long afterRevision, int maxCount, CancellationToken ct);
 
     /// <summary>
+    /// Returns journal entries with a revision strictly greater than <paramref name="afterRevision"/>
+    /// that are visible to the given caller, ordered by ascending revision. Visibility is applied
+    /// in the store query so the cursor can never surface changes the caller may not see:
+    /// administrators see every entry; a regular caller sees only entries they own, shared entries,
+    /// and owner-less entries. This backs the visibility-scoped pull for #845.
+    /// </summary>
+    /// <param name="afterRevision">Exclusive lower bound; pass 0 to read from the beginning.</param>
+    /// <param name="callerUserId">The caller whose visibility scope is applied.</param>
+    /// <param name="callerIsAdmin">When true, no visibility filter is applied.</param>
+    /// <param name="maxCount">Maximum number of entries to return (batch size).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<LibrarySyncChange>> GetVisibleChangesSinceAsync(
+        long afterRevision,
+        Guid callerUserId,
+        bool callerIsAdmin,
+        int maxCount,
+        CancellationToken ct);
+
+    /// <summary>
     /// Returns all journal entries for a single entity, ordered by ascending revision
     /// (including any tombstone). Useful for history and conflict diagnostics.
     /// </summary>
