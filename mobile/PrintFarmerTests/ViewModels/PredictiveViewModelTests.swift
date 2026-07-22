@@ -467,53 +467,310 @@ final class PredictiveViewModelTests: XCTestCase {
 
     // MARK: - AsyncGate handshake (helper proof)
 
-    /// Direct proof: wait() before waitForEntry() must be observed without
-    /// polling (lost-wakeup safe via pendingEntrySignals).
-    func testAsyncGateWaitBeforeEntryObserverIsObserved() async {
-        let gate = AsyncGate()
-        async let blocker: Void = gate.wait()
-
-        // Give the blocker a chance to enqueue its entry signal by
-        // observing the entry synchronously afterwards; this must return
-        // deterministically whether the entry happened before or after
-        // this call arrives at the actor.
-        await gate.waitForEntry()
-
-        await gate.open()
-        await blocker
-    }
-
-    /// Direct proof: waitForEntry() before wait() must suspend and then
-    /// resume exactly once when the first wait() reaches the gate.
-    func testAsyncGateEntryObserverBeforeWaitResumesOnce() async {
+    /// Strict actor-serialised ordering: observer registers first, then
+    /// waiter arrives. Because `registerObserver()` is synchronous-in-actor
+    /// (no `await` between register and the subsequent `registerWaiter`),
+    /// the snapshot after each step deterministically proves the order.
+    func testAsyncGateStrictOrder_observerBeforeWait() async {
         let gate = AsyncGate()
 
-        async let entryObserved: Void = gate.waitForEntry()
+        let observer = await gate.registerObserver()
+        let afterRegister = await gate.snapshot()
+        XCTAssertEqual(afterRegister.observerOrder, [observer.id])
+        XCTAssertEqual(afterRegister.pendingEntrySignals, 0)
+        XCTAssertEqual(afterRegister.completedObserverCount, 0)
 
-        // Drive an arrival at the gate. `wait()` will suspend (opened is
-        // false) — but the entry observer must have been resumed as part
-        // of that arrival, so `entryObserved` completes even though the
-        // waiter is still blocked.
-        async let blocker: Void = gate.wait()
+        let waiter = await gate.registerWaiter()
+        let afterWaiter = await gate.snapshot()
+        XCTAssertEqual(afterWaiter.observerOrder, [],
+                       "wait() must consume the parked observer via signalEntry")
+        XCTAssertEqual(afterWaiter.completedObserverCount, 1)
+        XCTAssertEqual(afterWaiter.pendingEntrySignals, 0)
+        XCTAssertEqual(afterWaiter.waiterOrder, [waiter.id])
 
-        await entryObserved
+        // Observer awaits — must return immediately without parking.
+        await gate.awaitObserver(observer)
 
         await gate.open()
-        await blocker
+        await gate.awaitWaiter(waiter)
+        await gate.close()
     }
 
-    /// Direct proof: open-before-wait still emits an entry signal so a
-    /// later `waitForEntry()` observer is not stranded, and repeated
-    /// `open()` is a safe no-op.
+    /// Strict actor-serialised ordering: waiter arrives first (bumps
+    /// pending signal), then observer registers and consumes it.
+    func testAsyncGateStrictOrder_waitBeforeObserver() async {
+        let gate = AsyncGate()
+
+        let waiter = await gate.registerWaiter()
+        let afterWaiter = await gate.snapshot()
+        XCTAssertEqual(afterWaiter.observerOrder, [])
+        XCTAssertEqual(afterWaiter.pendingEntrySignals, 1,
+                       "arriving with no observer must accumulate one pending signal")
+        XCTAssertEqual(afterWaiter.waiterOrder, [waiter.id])
+
+        let observer = await gate.registerObserver()
+        let afterObserver = await gate.snapshot()
+        XCTAssertEqual(afterObserver.pendingEntrySignals, 0,
+                       "observer must consume the pending signal")
+        XCTAssertEqual(afterObserver.completedObserverCount, 1)
+
+        await gate.awaitObserver(observer)
+        await gate.open()
+        await gate.awaitWaiter(waiter)
+        await gate.close()
+    }
+
+    /// Open-before-wait: `open()` first, then a subsequent `wait()` returns
+    /// immediately (opened latches) AND still emits an entry signal.
+    /// Repeated `open()` is a safe no-op.
     func testAsyncGateOpenBeforeWaitStillSignalsEntry() async {
         let gate = AsyncGate()
         await gate.open()
-        await gate.open()   // idempotent — must not crash or double-resume.
+        await gate.open()   // repeated open — idempotent
 
-        // `wait()` returns immediately because the gate is open, but must
-        // still emit an entry signal so the observer proceeds.
-        await gate.wait()
-        await gate.waitForEntry()
+        // Waiter after open: latched completed, no parking.
+        let waiter = await gate.registerWaiter()
+        let snap = await gate.snapshot()
+        XCTAssertTrue(snap.opened)
+        XCTAssertEqual(snap.waiterOrder, [], "waiter must not park after open")
+        XCTAssertEqual(snap.completedWaiterCount, 1)
+        // The waiter still emitted an entry signal — an observer registered
+        // afterwards must find it immediately.
+        let observer = await gate.registerObserver()
+        let snap2 = await gate.snapshot()
+        XCTAssertEqual(snap2.pendingEntrySignals, 0)
+        XCTAssertEqual(snap2.completedObserverCount, 1)
+
+        await gate.awaitWaiter(waiter)
+        await gate.awaitObserver(observer)
+        await gate.close()
+    }
+
+    /// Cancellation before registering the continuation: create a Task,
+    /// cancel it, then await its completion. The task must complete via
+    /// the structural cancellation handler, not hang.
+    func testAsyncGateCancelBeforeRegister() async {
+        let gate = AsyncGate()
+        let task = Task { await gate.wait() }
+        task.cancel()
+
+        // `await task.value` proves the task completed. If cancellation
+        // handling regressed, this would hang and the test would time out
+        // rather than deadlock.
+        await task.value
+
+        // Drain via close() to release any residual state — must complete.
+        await gate.close()
+    }
+
+    /// Cancellation after the continuation has been parked: register
+    /// synchronously, park in an unstructured Task, then cancel that Task.
+    /// The parked continuation is drained exactly once via
+    /// `cancelWaiter`/`cancelObserver`.
+    func testAsyncGateCancelAfterRegister() async {
+        let gate = AsyncGate()
+
+        // Waiter path.
+        let waiterToken = await gate.registerWaiter()
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        // Drain via cancellation.
+        waiterTask.cancel()
+        await waiterTask.value
+
+        // Observer path.
+        let observerToken = await gate.registerObserver()
+        let observerTask = Task { await gate.awaitObserver(observerToken) }
+        observerTask.cancel()
+        await observerTask.value
+
+        // Neither path may have left a parked continuation behind.
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0)
+        XCTAssertEqual(snap.parkedObserverCount, 0)
+        await gate.close()
+    }
+
+    /// Open/cancel race: start a waiter Task and simultaneously request
+    /// both `open()` and `task.cancel()`. Actor serialisation means
+    /// whichever operation reaches the actor first drains the
+    /// continuation; the other finds it gone and is a no-op. No double
+    /// resume, no hang.
+    func testAsyncGateOpenAndCancelRace() async {
+        let gate = AsyncGate()
+        let waiterToken = await gate.registerWaiter()
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+
+        // Kick off both terminations. `open()` is an actor call; cancel is
+        // a synchronous request that schedules `cancelWaiter` on the
+        // actor. Actor mailbox FIFO serialises them.
+        async let openCall: Void = gate.open()
+        waiterTask.cancel()
+        await openCall
+        await waiterTask.value
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.parkedWaiterCount, 0, "no parked continuation may remain")
+        XCTAssertTrue(snap.opened)
+        await gate.close()
+    }
+
+    /// Multi-party FIFO: three observers registered in order, three
+    /// waiters register-and-arrive in order → each waiter's entry signal
+    /// wakes exactly one observer in the same order. No observer is
+    /// signalled twice, no observer misses.
+    func testAsyncGateMultiPartyOneSignalPerObserver() async {
+        let gate = AsyncGate()
+        let o1 = await gate.registerObserver()
+        let o2 = await gate.registerObserver()
+        let o3 = await gate.registerObserver()
+        let regSnap = await gate.snapshot()
+        XCTAssertEqual(regSnap.observerOrder, [o1.id, o2.id, o3.id],
+                       "observer registration must preserve FIFO order")
+
+        // First waiter: signals o1.
+        let w1 = await gate.registerWaiter()
+        let afterW1 = await gate.snapshot()
+        XCTAssertEqual(afterW1.observerOrder, [o2.id, o3.id])
+        XCTAssertEqual(afterW1.completedObserverCount, 1)
+
+        // Second waiter: signals o2.
+        let w2 = await gate.registerWaiter()
+        let afterW2 = await gate.snapshot()
+        XCTAssertEqual(afterW2.observerOrder, [o3.id])
+        XCTAssertEqual(afterW2.completedObserverCount, 2)
+
+        // Third waiter: signals o3.
+        let w3 = await gate.registerWaiter()
+        let afterW3 = await gate.snapshot()
+        XCTAssertEqual(afterW3.observerOrder, [])
+        XCTAssertEqual(afterW3.completedObserverCount, 3)
+        XCTAssertEqual(afterW3.pendingEntrySignals, 0,
+                       "one signal per observer — no leftover pending")
+
+        // A fourth waiter with no observer would accumulate one pending
+        // signal — proving one-signal-per-observer semantics.
+        let w4 = await gate.registerWaiter()
+        let afterW4 = await gate.snapshot()
+        XCTAssertEqual(afterW4.pendingEntrySignals, 1)
+
+        // Await all — must complete without hang.
+        await gate.awaitObserver(o1)
+        await gate.awaitObserver(o2)
+        await gate.awaitObserver(o3)
+        // Release the queued waiters via open.
+        await gate.open()
+        await gate.awaitWaiter(w1)
+        await gate.awaitWaiter(w2)
+        await gate.awaitWaiter(w3)
+        await gate.awaitWaiter(w4)
+        await gate.close()
+    }
+
+    /// Repeated open() with queued waiters: multiple waiters pending,
+    /// open() drains them all on the first call; a second open() is a
+    /// safe no-op.
+    func testAsyncGateRepeatedOpenWithQueuedWaitersIsIdempotent() async {
+        let gate = AsyncGate()
+        let w1 = await gate.registerWaiter()
+        let w2 = await gate.registerWaiter()
+        let w3 = await gate.registerWaiter()
+
+        let before = await gate.snapshot()
+        XCTAssertEqual(before.waiterOrder, [w1.id, w2.id, w3.id])
+
+        await gate.open()
+        let afterOpen = await gate.snapshot()
+        XCTAssertTrue(afterOpen.opened)
+        XCTAssertEqual(afterOpen.waiterOrder, [], "all waiters drained")
+        XCTAssertEqual(afterOpen.completedWaiterCount, 3)
+
+        await gate.open()   // second open — no-op
+        let afterOpen2 = await gate.snapshot()
+        XCTAssertEqual(afterOpen2.completedWaiterCount, 3,
+                       "second open must not double-latch")
+        XCTAssertEqual(afterOpen2.waiterOrder, [])
+
+        await gate.awaitWaiter(w1)
+        await gate.awaitWaiter(w2)
+        await gate.awaitWaiter(w3)
+        await gate.close()
+    }
+
+    /// Explicit teardown: close() drains BOTH pending waiters and pending
+    /// entry observers exactly once, so a helper regression fails via a
+    /// completed-but-different assertion rather than deadlocking on scope
+    /// teardown.
+    func testAsyncGateTeardownDrainsPendingWaitersAndObservers() async {
+        let gate = AsyncGate()
+        let observer = await gate.registerObserver()
+        let waiter = await gate.registerWaiter()
+        // At this point the waiter's signalEntry already resumed the
+        // observer synchronously in-actor; register a fresh observer and
+        // a fresh waiter that both need `close()` to drain.
+        let pendingObserver = await gate.registerObserver()
+        let extraWaiter = await gate.registerWaiter()
+
+        // The extra waiter's registerWaiter also signals the pending
+        // observer, so `pendingObserver` is already latched completed.
+        // Register one more observer with no matching waiter so close()
+        // has real work.
+        let strandedObserver = await gate.registerObserver()
+
+        let before = await gate.snapshot()
+        XCTAssertEqual(before.waiterOrder.sorted(), [waiter.id, extraWaiter.id].sorted())
+        XCTAssertEqual(before.observerOrder, [strandedObserver.id])
+
+        await gate.close()
+        let after = await gate.snapshot()
+        XCTAssertTrue(after.closed)
+        XCTAssertEqual(after.waiterOrder, [])
+        XCTAssertEqual(after.observerOrder, [])
+        XCTAssertEqual(after.parkedWaiterCount, 0)
+        XCTAssertEqual(after.parkedObserverCount, 0)
+
+        // Every previously issued token must be awaitable — none may
+        // deadlock. Drain in unstructured tasks and await completion.
+        let tasks: [Task<Void, Never>] = [
+            Task { await gate.awaitObserver(observer) },
+            Task { await gate.awaitWaiter(waiter) },
+            Task { await gate.awaitObserver(pendingObserver) },
+            Task { await gate.awaitWaiter(extraWaiter) },
+            Task { await gate.awaitObserver(strandedObserver) },
+        ]
+        for t in tasks { await t.value }
+
+        // Post-close registrations must also complete without hanging.
+        let postCloseObserver = await gate.registerObserver()
+        let postCloseWaiter = await gate.registerWaiter()
+        await gate.awaitObserver(postCloseObserver)
+        await gate.awaitWaiter(postCloseWaiter)
+    }
+
+    /// Convenience-API integration: the shipping `wait()` / `waitForEntry()`
+    /// still exhibit the exact-order behaviour that the production tests
+    /// depend on.
+    func testAsyncGateConvenienceEntryObserverBeforeWaitResumesOnce() async {
+        let gate = AsyncGate()
+        let observerTask = Task { await gate.waitForEntry() }
+        let waiterTask = Task { await gate.wait() }
+        await observerTask.value        // resumed by the wait's entry signal
+        await gate.open()
+        await waiterTask.value
+        await gate.close()
+    }
+
+    func testAsyncGateConvenienceWaitBeforeEntryObserverIsObserved() async {
+        let gate = AsyncGate()
+        let waiterTask = Task { await gate.wait() }
+        // Force `waiterTask` to reach the actor by awaiting an unrelated
+        // actor call — since the actor is a serial mailbox, this snapshot
+        // synchronously drains any prior mailbox items on the actor
+        // executor. No polling.
+        _ = await gate.snapshot()
+        await gate.waitForEntry()       // consumes the pending signal
+        await gate.open()
+        await waiterTask.value
+        await gate.close()
     }
 
     // MARK: - Load Alerts
@@ -759,72 +1016,251 @@ final class PredictiveViewModelTests: XCTestCase {
     }
 }
 
-/// Deterministic suspension gate used to hold a request in flight across a
-/// real suspension point (never `Task.sleep`/yield). Extended from the
-/// polling helper originally used in `HarvestViewModelTests` with an
-/// explicit lost-wakeup-safe entry handshake so tests can synchronise on
-/// "the `wait()` caller has reached the gate" without polling loops.
+/// Cancellation-aware, tokenized suspension gate used to hold a request in
+/// flight across a real suspension point (never `Task.sleep`/yield). Every
+/// pending continuation — waiters (parked in `wait()`) and entry observers
+/// (parked in `waitForEntry()`) — is tracked by a monotonic token so that
+/// `open()`, `close()` (teardown), and per-task cancellation each remove
+/// and resume that continuation exactly once.
 ///
-/// Ordering guarantees (all handled by actor serialisation):
-///   * open-before-wait — `wait()` returns immediately AND still signals
-///     an entry, so any observer waiting on entry is not stranded.
-///   * wait-before-entry-observer — `wait()` bumps `pendingEntrySignals`;
-///     a later `waitForEntry()` consumes exactly one and returns.
-///   * entry-observer-before-wait — `waitForEntry()` parks a continuation;
-///     the next `wait()` resumes exactly that continuation.
-///   * repeated open — `opened` latches true; second `open()` drains an
-///     empty waiter list and is a no-op.
-///   * teardown/early assertion — no pollers to leak; unresumed observer
-///     continuations are released when the actor is deallocated.
-///   * exactly-once continuation resume — waiters are drained to a local
-///     copy before resume; entry observers are removed from their queue
-///     before resume.
+/// Public convenience API (`wait()` / `waitForEntry()`) is unchanged. The
+/// underlying two-phase API (`registerObserver`/`awaitObserver`,
+/// `registerWaiter`/`awaitWaiter`) is exposed for tests that need to prove
+/// strict actor-serialised ordering without relying on `async let`
+/// scheduler races.
+///
+/// Guarantees (all enforced by actor serialisation of state mutations):
+///   * exactly-once continuation resume — the continuation is removed
+///     from its dictionary before `resume()` is called on it;
+///   * cancellation-safe — an in-flight `wait()`/`waitForEntry()` whose
+///     Task is cancelled resumes the parked continuation through the
+///     structural `onCancel` handler, so scope teardown never leaks;
+///   * lost-wakeup-safe — signals delivered before the observer parks are
+///     accumulated in `pendingEntrySignals`, and completed-before-await
+///     tokens are latched in `completedObservers` / `completedWaiters`;
+///   * FIFO fairness — one entry signal wakes exactly one observer, in
+///     the order in which the observers were registered;
+///   * idempotent `open()` — `opened` latches true; a second `open()`
+///     drains an empty queue and is a no-op;
+///   * explicit teardown — `close()` drains BOTH pending waiters and
+///     pending entry observers exactly once so tests never hang on a
+///     helper regression.
 private actor AsyncGate {
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-    private var entryObservers: [CheckedContinuation<Void, Never>] = []
-    private var pendingEntrySignals = 0
+    struct ObserverToken: Sendable, Hashable { let id: UInt64 }
+    struct WaiterToken: Sendable, Hashable { let id: UInt64 }
+
+    /// Test-only introspection snapshot. Purely reads state under the
+    /// actor so tests can assert precise transitions without polling.
+    struct Snapshot: Sendable, Equatable {
+        let pendingEntrySignals: Int
+        let observerOrder: [UInt64]
+        let waiterOrder: [UInt64]
+        let completedObserverCount: Int
+        let completedWaiterCount: Int
+        let parkedObserverCount: Int
+        let parkedWaiterCount: Int
+        let opened: Bool
+        let closed: Bool
+    }
+
+    private var nextID: UInt64 = 1
+    private var parkedObservers: [UInt64: CheckedContinuation<Void, Never>] = [:]
+    private var completedObservers: Set<UInt64> = []
+    private var observerOrder: [UInt64] = []
+    private var parkedWaiters: [UInt64: CheckedContinuation<Void, Never>] = [:]
+    private var completedWaiters: Set<UInt64> = []
+    private var waiterOrder: [UInt64] = []
+    private var pendingEntrySignals: Int = 0
     private var opened = false
+    private var closed = false
 
-    /// Suspends the caller until `open()` is invoked. Regardless of whether
-    /// the gate is already open, an entry signal is emitted so observers
-    /// can deterministically synchronise on "wait() reached the gate".
-    func wait() async {
-        signalEntryLocked()
-        if opened { return }
-        await withCheckedContinuation { c in
-            waiters.append(c)
-        }
-    }
+    // MARK: Observer (entry-side)
 
-    /// Lost-wakeup-safe entry handshake. If one or more entries have
-    /// already occurred since the last observation, returns immediately by
-    /// consuming exactly one pending signal. Otherwise suspends until the
-    /// next entry signal. Exactly-once resume is guaranteed because the
-    /// installed continuation is removed from `entryObservers` before
-    /// `resume()` is called.
-    func waitForEntry() async {
-        if pendingEntrySignals > 0 {
+    /// Reserve an observer slot. Synchronous-in-actor: if a pending entry
+    /// signal exists it is consumed and the token is latched as
+    /// completed. Otherwise the token is appended to the FIFO order.
+    func registerObserver() -> ObserverToken {
+        let id = nextID; nextID &+= 1
+        if closed {
+            completedObservers.insert(id)
+        } else if pendingEntrySignals > 0 {
             pendingEntrySignals -= 1
-            return
+            completedObservers.insert(id)
+        } else {
+            observerOrder.append(id)
         }
-        await withCheckedContinuation { c in
-            entryObservers.append(c)
+        return ObserverToken(id: id)
+    }
+
+    /// Await the previously registered observer. Structurally
+    /// cancellation-safe: if the enclosing Task is cancelled before or
+    /// after the continuation is parked, the observer is drained exactly
+    /// once via `cancelObserver`.
+    func awaitObserver(_ token: ObserverToken) async {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { c in
+                if completedObservers.remove(token.id) != nil {
+                    c.resume()
+                    return
+                }
+                if closed {
+                    observerOrder.removeAll { $0 == token.id }
+                    c.resume()
+                    return
+                }
+                if Task.isCancelled {
+                    observerOrder.removeAll { $0 == token.id }
+                    c.resume()
+                    return
+                }
+                parkedObservers[token.id] = c
+            }
+        } onCancel: {
+            Task { await self.cancelObserver(id: token.id) }
         }
     }
 
+    private func cancelObserver(id: UInt64) {
+        observerOrder.removeAll { $0 == id }
+        if let c = parkedObservers.removeValue(forKey: id) {
+            c.resume()
+        } else if completedObservers.contains(id) == false {
+            // Continuation not yet parked. Latch completion so a later
+            // `awaitObserver` returns immediately.
+            completedObservers.insert(id)
+        }
+    }
+
+    /// Convenience: single-shot observer registration + await.
+    func waitForEntry() async {
+        let token = registerObserver()
+        await awaitObserver(token)
+    }
+
+    // MARK: Waiter (open-side)
+
+    /// Reserve a waiter slot. Synchronous-in-actor: emits an entry signal
+    /// (observer-facing) first, then decides whether to park or latch
+    /// completion depending on gate state.
+    func registerWaiter() -> WaiterToken {
+        signalEntryLocked()
+        let id = nextID; nextID &+= 1
+        if opened || closed {
+            completedWaiters.insert(id)
+        } else {
+            waiterOrder.append(id)
+        }
+        return WaiterToken(id: id)
+    }
+
+    func awaitWaiter(_ token: WaiterToken) async {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { c in
+                if completedWaiters.remove(token.id) != nil {
+                    c.resume()
+                    return
+                }
+                if opened || closed {
+                    waiterOrder.removeAll { $0 == token.id }
+                    c.resume()
+                    return
+                }
+                if Task.isCancelled {
+                    waiterOrder.removeAll { $0 == token.id }
+                    c.resume()
+                    return
+                }
+                parkedWaiters[token.id] = c
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id: token.id) }
+        }
+    }
+
+    private func cancelWaiter(id: UInt64) {
+        waiterOrder.removeAll { $0 == id }
+        if let c = parkedWaiters.removeValue(forKey: id) {
+            c.resume()
+        } else if completedWaiters.contains(id) == false {
+            completedWaiters.insert(id)
+        }
+    }
+
+    /// Convenience: single-shot waiter registration + await.
+    func wait() async {
+        let token = registerWaiter()
+        await awaitWaiter(token)
+    }
+
+    // MARK: Terminal transitions
+
+    /// Open: drain all pending waiters exactly once. Idempotent.
     func open() {
         opened = true
-        let toResume = waiters
-        waiters.removeAll()
-        for c in toResume { c.resume() }
+        let ids = waiterOrder
+        waiterOrder.removeAll()
+        for id in ids {
+            if let c = parkedWaiters.removeValue(forKey: id) {
+                c.resume()
+            } else {
+                completedWaiters.insert(id)
+            }
+        }
     }
 
+    /// Terminal teardown. Drains both pending waiters and observers
+    /// exactly once. After `close()`, further register* calls latch as
+    /// completed immediately so tests always converge.
+    func close() {
+        closed = true
+        let wIds = waiterOrder
+        waiterOrder.removeAll()
+        for id in wIds {
+            if let c = parkedWaiters.removeValue(forKey: id) {
+                c.resume()
+            } else {
+                completedWaiters.insert(id)
+            }
+        }
+        let oIds = observerOrder
+        observerOrder.removeAll()
+        for id in oIds {
+            if let c = parkedObservers.removeValue(forKey: id) {
+                c.resume()
+            } else {
+                completedObservers.insert(id)
+            }
+        }
+    }
+
+    // MARK: Introspection (test-only)
+
+    func snapshot() -> Snapshot {
+        Snapshot(
+            pendingEntrySignals: pendingEntrySignals,
+            observerOrder: observerOrder,
+            waiterOrder: waiterOrder,
+            completedObserverCount: completedObservers.count,
+            completedWaiterCount: completedWaiters.count,
+            parkedObserverCount: parkedObservers.count,
+            parkedWaiterCount: parkedWaiters.count,
+            opened: opened,
+            closed: closed
+        )
+    }
+
+    // MARK: Private
+
     private func signalEntryLocked() {
-        if entryObservers.isEmpty {
-            pendingEntrySignals += 1
+        if let id = observerOrder.first {
+            observerOrder.removeFirst()
+            if let c = parkedObservers.removeValue(forKey: id) {
+                c.resume()
+            } else {
+                completedObservers.insert(id)
+            }
         } else {
-            let observer = entryObservers.removeFirst()
-            observer.resume()
+            pendingEntrySignals += 1
         }
     }
 }
