@@ -1,8 +1,10 @@
 ﻿using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Spoolman;
@@ -13,7 +15,8 @@ namespace Farm.Infrastructure.Services.Spoolman;
 public sealed class FilamentCoverageSpoolResolver(
     ISpoolmanService spoolmanService,
     IBackendClientFactory backendClientFactory,
-    ILogger<FilamentCoverageSpoolResolver> logger) : IFilamentCoverageSpoolResolver
+    ILogger<FilamentCoverageSpoolResolver> logger,
+    AppDbContext? db = null) : IFilamentCoverageSpoolResolver
 {
     internal const string ReasonSpoolmanUnconfigured = "spoolman-unconfigured";
     internal const string ReasonSourceUnavailable = "spool-source-unavailable";
@@ -22,6 +25,7 @@ public sealed class FilamentCoverageSpoolResolver(
     private readonly ISpoolmanService _spoolmanService = spoolmanService;
     private readonly IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly ILogger<FilamentCoverageSpoolResolver> _logger = logger;
+    private readonly AppDbContext? _db = db;
 
     public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
         CanonicalSpoolIdentity identity,
@@ -69,6 +73,15 @@ public sealed class FilamentCoverageSpoolResolver(
         }
         else
         {
+            if (!await IsConfiguredNativeSourceAsync(identity.SourceIdentity, ct)
+                    .ConfigureAwait(false))
+            {
+                return new FilamentCoverageSpoolSnapshot(
+                    null,
+                    true,
+                    ReasonSourceUnavailable);
+            }
+
             try
             {
                 IBackendClient client = _backendClientFactory.GetClient((int)PrinterBackend.Moonraker);
@@ -110,6 +123,45 @@ public sealed class FilamentCoverageSpoolResolver(
                 null,
                 identity.SourceKind == SpoolSourceKind.MoonrakerNative,
                 ReasonSpoolNotFound);
+    }
+
+    private async Task<bool> IsConfiguredNativeSourceAsync(
+        string sourceIdentity,
+        CancellationToken ct)
+    {
+        if (_db is null)
+        {
+            return false;
+        }
+
+        List<string> configuredUrls = await _db.Printers
+            .AsNoTracking()
+            .Where(printer => printer.Backend == (int)PrinterBackend.Moonraker)
+            .Select(printer => printer.ServerUrl)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (string configuredUrl in configuredUrls)
+        {
+            try
+            {
+                string configuredIdentity =
+                    CanonicalSpoolIdentity.NormalizeSourceIdentity(configuredUrl);
+                if (string.Equals(
+                        configuredIdentity,
+                        sourceIdentity,
+                        StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                // Invalid configured URLs cannot authorize an outbound request.
+            }
+        }
+
+        return false;
     }
 
     public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(

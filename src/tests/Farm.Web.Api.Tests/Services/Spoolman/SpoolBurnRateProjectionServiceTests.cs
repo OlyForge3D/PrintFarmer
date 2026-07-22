@@ -225,6 +225,43 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime
         result.ProjectedThresholdCrossingUtc.Should().Be(Now.UtcDateTime);
     }
 
+    [Fact]
+    public async Task ProjectAsync_UnrepresentableCrossing_ReturnsNonReadyWithoutThrowing()
+    {
+        CanonicalSpoolIdentity identity = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local");
+        await SeedCompletedSampleAsync(identity, 1e-300, Now.AddDays(-1));
+        SetupRemaining(identity, double.MaxValue);
+        SetMinimumSamples(1);
+
+        await using AppDbContext projectionContext = CreateContext();
+        SpoolBurnRateProjectionDto result =
+            await CreateService(projectionContext).ProjectAsync(identity);
+
+        result.State.Should().Be(SpoolBurnRateProjectionState.InsufficientData);
+        result.ProjectedThresholdCrossingUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProjectAsync_NonFiniteRemainingWeight_ReturnsSourceUnavailable()
+    {
+        CanonicalSpoolIdentity identity = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local");
+        await SeedCompletedSampleAsync(identity, 30, Now.AddDays(-1));
+        SetupRemaining(identity, double.PositiveInfinity);
+        SetMinimumSamples(1);
+
+        await using AppDbContext projectionContext = CreateContext();
+        SpoolBurnRateProjectionDto result =
+            await CreateService(projectionContext).ProjectAsync(identity);
+
+        result.State.Should().Be(SpoolBurnRateProjectionState.SourceUnavailable);
+        result.RemainingGrams.Should().BeNull();
+        result.ProjectedThresholdCrossingUtc.Should().BeNull();
+    }
+
     private AppDbContext CreateContext() => new(_options);
 
     private SpoolBurnRateProjectionService CreateService(AppDbContext db)

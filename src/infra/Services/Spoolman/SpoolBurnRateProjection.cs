@@ -102,6 +102,11 @@ public sealed class SpoolBurnRateProjectionService(
             .ResolveSpoolAsync(identity, ct)
             .ConfigureAwait(false);
         double? remainingGrams = snapshot.Spool?.RemainingWeightG;
+        if (remainingGrams is < 0
+            || (remainingGrams.HasValue && !double.IsFinite(remainingGrams.Value)))
+        {
+            remainingGrams = null;
+        }
 
         SpoolBurnRateProjectionState state;
         DateTime? thresholdCrossingUtc = null;
@@ -115,11 +120,24 @@ public sealed class SpoolBurnRateProjectionService(
         }
         else
         {
-            state = SpoolBurnRateProjectionState.Ready;
             double gramsAboveThreshold = remainingGrams.Value - settings.SpoolReorderThresholdGrams;
-            thresholdCrossingUtc = gramsAboveThreshold <= 0
-                ? evaluatedAtUtc
-                : evaluatedAtUtc.AddDays(gramsAboveThreshold / burnRate.Value);
+            double projectedDays = gramsAboveThreshold / burnRate.Value;
+            double maximumProjectedDays = (DateTime.MaxValue - evaluatedAtUtc).TotalDays;
+            if (gramsAboveThreshold <= 0)
+            {
+                state = SpoolBurnRateProjectionState.Ready;
+                thresholdCrossingUtc = evaluatedAtUtc;
+            }
+            else if (!double.IsFinite(projectedDays)
+                || projectedDays > maximumProjectedDays)
+            {
+                state = SpoolBurnRateProjectionState.InsufficientData;
+            }
+            else
+            {
+                state = SpoolBurnRateProjectionState.Ready;
+                thresholdCrossingUtc = evaluatedAtUtc.AddDays(projectedDays);
+            }
         }
 
         return new SpoolBurnRateProjectionDto(
