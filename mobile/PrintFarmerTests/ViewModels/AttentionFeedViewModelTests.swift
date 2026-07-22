@@ -1632,6 +1632,319 @@ final class AttentionFeedViewModelTests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
 
+    // MARK: - Cycle 5: reachable-stranding fix (last-completion drain)
+
+    func testStaleCompletionAsLastRefreshTriggersFollowUpForPendingEvent() async {
+        // Reachable stranding scenario (Hicks blocker on cycle 4):
+        // Two concurrent refreshes R1 and R2 start. Event E arrives
+        // after both start-cover watermarks. R2 (newer loadStamp)
+        // succeeds first — activeCount 2→1 — cannot schedule
+        // follow-up because another refresh is still active. R1
+        // completes last, is stale by loadStamp (R2 advanced it),
+        // decrements to 0.
+        //
+        // Pre-fix: R1's stale return path skipped the follow-up gate
+        // entirely. Pending event E was stranded indefinitely.
+        // Post-fix: every terminal completion (stale or applied) runs
+        // through tryScheduleFollowupIfPending, which schedules
+        // exactly one follow-up when the last active refresh
+        // releases under a still-valid authority.
+        let r1Gate = AttentionResultGate<AttentionFeed>()
+        let r2Gate = AttentionResultGate<AttentionFeed>()
+        let r2Feed = makeAttentionFeed(healthyPrinterCount: 3)
+        let r3Feed = makeAttentionFeed(healthyPrinterCount: 9)
+        let service = ScriptedAttentionService(steps: [
+            .gated(r1Gate),
+            .gated(r2Gate),
+            .value(r3Feed),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+        let r2 = Task { await vm.refresh() }
+        await service.waitForLoadCount(2)
+
+        // Event E arrives AFTER both refresh start-cover watermarks.
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()  // latch pending
+        let midCount = await service.loadCallCount
+        XCTAssertEqual(
+            midCount, 2,
+            "Callback drain during two in-flight refreshes must not launch a third concurrent GET"
+        )
+
+        // R2 succeeds first (its loadStamp is the newest). Applies.
+        // activeCount 2→1 — cannot schedule follow-up.
+        await r2Gate.succeed(r2Feed)
+        _ = await r2.value
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 3, "R2 applied")
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "No follow-up yet — R1 still in flight"
+        )
+
+        // R1 completes last with a "poison" payload — stale by
+        // loadStamp. Must not overwrite R2. Cycle-5 fix: this stale
+        // completion IS the last release, so it must schedule the
+        // follow-up.
+        await r1Gate.succeed(makeAttentionFeed(healthyPrinterCount: 999))
+        _ = await r1.value
+        XCTAssertEqual(
+            vm.snapshot?.healthyPrinterCount, 3,
+            "R1's stale payload must not overwrite R2"
+        )
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "Stale-last completion under valid authority must schedule exactly one follow-up when pending uncovered"
+        )
+
+        await callbackQueue.runNext()  // R3 = follow-up
+        let finalCount = await service.loadCallCount
+        XCTAssertEqual(
+            finalCount, 3,
+            "Total: R1 + R2 + R3 (follow-up) = 3"
+        )
+        XCTAssertEqual(
+            vm.snapshot?.healthyPrinterCount, 9,
+            "R3 covers the stranded event"
+        )
+    }
+
+    func testStaleCompletionFirstThenValidCompletionYieldsSingleFollowUp() async {
+        // Reverse completion order: R1 (older, will be stale) completes
+        // FIRST; R2 (newer, valid) completes LAST. Symmetric proof —
+        // exactly one follow-up regardless of who completes last.
+        let r1Gate = AttentionResultGate<AttentionFeed>()
+        let r2Gate = AttentionResultGate<AttentionFeed>()
+        let r2Feed = makeAttentionFeed(healthyPrinterCount: 3)
+        let r3Feed = makeAttentionFeed(healthyPrinterCount: 9)
+        let service = ScriptedAttentionService(steps: [
+            .gated(r1Gate),
+            .gated(r2Gate),
+            .value(r3Feed),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+        let r2 = Task { await vm.refresh() }
+        await service.waitForLoadCount(2)
+
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // R1 (stale by loadStamp) completes first. activeCount 2→1 —
+        // does NOT schedule (not the last release).
+        await r1Gate.succeed(makeAttentionFeed(healthyPrinterCount: 999))
+        _ = await r1.value
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "Stale completion with another refresh still in flight must not schedule follow-up prematurely"
+        )
+
+        // R2 (valid) completes last. activeCount 1→0 — schedules
+        // exactly one follow-up via the success path.
+        await r2Gate.succeed(r2Feed)
+        _ = await r2.value
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 3)
+        XCTAssertEqual(
+            callbackQueue.count, 1,
+            "Exactly one follow-up scheduled — regardless of stale-vs-valid completion order"
+        )
+
+        await callbackQueue.runNext()
+        let finalCount = await service.loadCallCount
+        XCTAssertEqual(finalCount, 3)
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 9)
+    }
+
+    func testStaleCompletionAfterDeactivateDoesNotScheduleOldOwnerFollowup() async {
+        // Authority-invalidation guard: R1 in flight, event E drained
+        // (pending latched), then deactivate. R1's completion is
+        // BOTH loadStamp-stale AND activation-stale. Its captured
+        // activation != current activation → the follow-up scheduler
+        // MUST NOT run (it would be old-owner work reactivating
+        // under an off-screen authority).
+        let r1Gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [.gated(r1Gate)])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()  // latch pending; inactive-check
+                                       // won't happen here (still active)
+
+        // Deactivate BEFORE R1 completes. Bumps activationEpoch.
+        vm.deactivate()
+
+        await r1Gate.succeed(makeAttentionFeed(healthyPrinterCount: 5))
+        _ = await r1.value
+
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "Stale-last completion after deactivate must NOT schedule follow-up (authority invalid)"
+        )
+        XCTAssertNil(
+            vm.snapshot,
+            "Nothing applied — view was inactive at completion time"
+        )
+    }
+
+    func testStaleCompletionAfterServiceReplacementDoesNotScheduleOldOwnerFollowup() async {
+        // Authority-invalidation via service replacement:
+        // invalidateAuthority bumps activationEpoch AND resets the
+        // pending state. Old-service refresh completion must not
+        // schedule follow-up work under the new authority.
+        let r1Gate = AttentionResultGate<AttentionFeed>()
+        let oldService = ScriptedAttentionService(steps: [.gated(r1Gate)])
+        let newService = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(healthyPrinterCount: 4)),
+        ])
+        let oldSignalR = MockSignalRService()
+        let newSignalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: oldService,
+            signalRService: oldSignalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await oldService.waitForLoadCount(1)
+
+        oldSignalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // Replace the service+signalR. invalidateAuthority bumps
+        // activation and resets pending coverage.
+        vm.configure(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+
+        await r1Gate.succeed(makeAttentionFeed(healthyPrinterCount: 5))
+        _ = await r1.value
+
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "Stale completion under old authority must not schedule follow-up for the new authority"
+        )
+        // The new authority's own refresh path handles its lifecycle.
+    }
+
+    func testStaleTriggeredFollowupFailureDoesNotLoop() async {
+        // Regression: the cycle-5 fix schedules a follow-up from a
+        // stale completion when appropriate. If that follow-up
+        // FAILS, the failure path must NOT schedule another
+        // follow-up — preserving the no-auto-loop invariant even
+        // under the new stranding-fix path.
+        let r1Gate = AttentionResultGate<AttentionFeed>()
+        let r2Gate = AttentionResultGate<AttentionFeed>()
+        let service = ScriptedAttentionService(steps: [
+            .gated(r1Gate),
+            .gated(r2Gate),
+            .failure(.forced("follow-up failed")),
+        ])
+        let signalR = MockSignalRService()
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let r1 = Task { await vm.refresh() }
+        await service.waitForLoadCount(1)
+        let r2 = Task { await vm.refresh() }
+        await service.waitForLoadCount(2)
+
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "failure:x",
+                changeKind: .updated,
+                occurredAt: Date()
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        // R2 succeeds first, R1 stale last — stranding fix schedules
+        // one follow-up.
+        await r2Gate.succeed(makeAttentionFeed(healthyPrinterCount: 3))
+        _ = await r2.value
+        await r1Gate.succeed(makeAttentionFeed(healthyPrinterCount: 999))
+        _ = await r1.value
+        XCTAssertEqual(callbackQueue.count, 1)
+
+        // Drain follow-up — the scripted step here is `.failure`.
+        await callbackQueue.runNext()
+        // Follow-up failed. Must NOT schedule another follow-up.
+        XCTAssertEqual(
+            callbackQueue.count, 0,
+            "Failed follow-up must not schedule another — no auto-loop"
+        )
+        // Snapshot preserved from R2 (failure applyFailure keeps it).
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 3)
+        // Inline load failure surfaced.
+        XCTAssertNotNil(vm.loadFailure)
+        XCTAssertEqual(vm.loadFailure?.message, "follow-up failed")
+    }
+
     // MARK: - Helpers
 
     private func configuredViewModel(

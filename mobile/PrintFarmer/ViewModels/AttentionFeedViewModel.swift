@@ -613,6 +613,16 @@ final class AttentionFeedViewModel {
                 if phase == .loading { phase = .idle }
                 pendingReloadOnActivate = true
             }
+            // #779 cycle-5 reachable-stranding fix: even a
+            // generation-stale completion (loadStamp advanced by a
+            // newer concurrent refresh) evaluates the follow-up gate.
+            // If we are the LAST active refresh AND our captured
+            // activation is still current (i.e. this is only
+            // generation-stale, not authority-invalidated), an
+            // uncovered pending event must trigger exactly one
+            // follow-up canonical GET. Coverage is NOT advanced here
+            // — only valid applied successes may mark events covered.
+            tryScheduleFollowupIfPending(capturedActivation: stampedActivation)
             return false
         }
 
@@ -626,32 +636,15 @@ final class AttentionFeedViewModel {
                pending <= lastCoveredEventSequence {
                 pendingCoverageEventSequence = nil
             }
-            // Follow-up gate:
-            //   * only the LAST completing refresh dispatches
-            //     (activeRefreshCount == 0), so multiple overlapping
-            //     refreshes don't each launch a follow-up;
-            //   * only when uncovered pending coverage remains, so
-            //     redundant follow-ups aren't scheduled.
-            //
-            // Multi-event coalescing: N events arriving during a
-            // single in-flight refresh all latch onto the same
-            // pendingCoverageEventSequence (max wins), and this
-            // completion launches at most ONE follow-up covering all
-            // of them.
-            if activeRefreshCount == 0,
-               let pending = pendingCoverageEventSequence,
-               pending > lastCoveredEventSequence {
-                let enqueue = callbackEnqueuer
-                enqueue { [weak self] in
-                    await self?.refresh()
-                }
-            }
+            tryScheduleFollowupIfPending(capturedActivation: stampedActivation)
             return true
         case .featureDisabled:
             applyDisabled()
             // Do NOT advance lastCoveredEventSequence or launch a
-            // follow-up: disabled is a terminal state that requires
-            // explicit recovery (retryDisabledRecovery).
+            // follow-up: disabled is a terminal teardown that
+            // requires explicit recovery (retryDisabledRecovery).
+            // tryScheduleFollowupIfPending would be blocked by
+            // `attentionEnabled == false` anyway.
             return false
         case .failure(let error):
             applyFailure(error)
@@ -660,7 +653,51 @@ final class AttentionFeedViewModel {
             // Pending coverage persists until either a subsequent
             // successful refresh clears it (user pull-to-refresh) or
             // a genuinely later event triggers a new drain cycle.
+            //
+            // Do NOT call tryScheduleFollowupIfPending here — that
+            // would create the exact auto-loop the criterion forbids
+            // when the follow-up itself fails.
             return false
+        }
+    }
+
+    /// Centralized "last-refresh-wins" follow-up scheduler. Called from
+    /// every applied-success completion AND from every generation-stale
+    /// completion. Schedules exactly one canonical follow-up refresh
+    /// through `callbackEnqueuer` iff:
+    ///
+    /// * this completion released the last active refresh
+    ///   (`activeRefreshCount == 0`),
+    /// * the completion's captured activation is still current
+    ///   (distinguishes generation-stale within a valid authority
+    ///   from authority-invalidated old-owner work),
+    /// * the authority is currently valid (`isActive`,
+    ///   `attentionEnabled`, `attentionService != nil`), and
+    /// * there is uncovered pending event coverage
+    ///   (`pendingCoverageEventSequence > lastCoveredEventSequence`).
+    ///
+    /// Deliberately not called from `.failure` / `.featureDisabled`
+    /// completion paths to preserve the no-auto-loop invariant.
+    private func tryScheduleFollowupIfPending(capturedActivation: UInt64) {
+        // Only the last active refresh schedules a follow-up. When
+        // concurrent refreshes overlap, only one launches.
+        guard activeRefreshCount == 0 else { return }
+        // Authority validity: don't schedule for a deactivated view,
+        // a disabled feature, or a service that has since been
+        // replaced (nil after invalidateAuthority reset).
+        guard isActive, attentionEnabled, attentionService != nil else { return }
+        // Distinguish generation staleness (same activation, newer
+        // loadStamp took over) from authority invalidity (activation
+        // moved via deactivate / invalidateAuthority). The former is
+        // safe to schedule under — the follow-up runs on the current
+        // activation. The latter is NOT — that would be old-owner
+        // work reactivating under a fresh lifecycle.
+        guard capturedActivation == activationEpoch else { return }
+        guard let pending = pendingCoverageEventSequence,
+              pending > lastCoveredEventSequence else { return }
+        let enqueue = callbackEnqueuer
+        enqueue { [weak self] in
+            await self?.refresh()
         }
     }
 
