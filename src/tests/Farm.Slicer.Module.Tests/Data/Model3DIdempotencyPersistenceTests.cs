@@ -1,5 +1,6 @@
 ﻿using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Tests.TestInfrastructure;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -51,6 +52,34 @@ public class Model3DIdempotencyPersistenceTests
             CancellationToken.None);
 
         Assert.Equal(secondModel.Id, result?.Id);
+    }
+
+    [Fact]
+    public async Task SaveChangesAsync_WithStaleUpdatedAt_RejectsConcurrentModelUpdate()
+    {
+        await using SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options = new DbContextOptionsBuilder<SlicerDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using (SlicerDbContext setup = new(options))
+        {
+            _ = await setup.Database.EnsureCreatedAsync();
+            setup.Models3D.Add(CreateModel(Guid.NewGuid(), clientUploadId: null));
+            _ = await setup.SaveChangesAsync();
+        }
+
+        await using SlicerDbContext firstContext = new(options);
+        await using SlicerDbContext staleContext = new(options);
+        Model3D first = await firstContext.Models3D.SingleAsync();
+        Model3D stale = await staleContext.Models3D.SingleAsync();
+        first.ThumbnailFileName = "first.png";
+        first.UpdatedAt = first.UpdatedAt.AddSeconds(1);
+        _ = await firstContext.SaveChangesAsync();
+        stale.ThumbnailFileName = "stale.png";
+        stale.UpdatedAt = stale.UpdatedAt.AddSeconds(2);
+
+        _ = await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => staleContext.SaveChangesAsync());
     }
 
     private static Model3D CreateModel(Guid? userId, Guid? clientUploadId)

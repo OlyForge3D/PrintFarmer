@@ -27,6 +27,9 @@ public record PlatformCapabilitiesDto
     /// <summary>Gets whether model uploads support caller-provided idempotency identifiers.</summary>
     public bool IdempotentModelUploadEnabled { get; init; } = true;
 
+    /// <summary>Gets whether owners and administrators can replace model thumbnails.</summary>
+    public bool ModelThumbnailReplacementEnabled { get; init; } = true;
+
     /// <summary>Gets an optional note explaining platform limitations.</summary>
     public string? PlatformNote { get; init; }
 }

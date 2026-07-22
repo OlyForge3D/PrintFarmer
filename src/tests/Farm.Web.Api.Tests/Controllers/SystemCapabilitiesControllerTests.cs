@@ -26,6 +26,7 @@ public class SystemCapabilitiesControllerTests
         PlatformCapabilitiesDto capabilities = Assert.IsType<PlatformCapabilitiesDto>(okResult.Value);
         Assert.True(capabilities.ClientThumbnailUploadEnabled);
         Assert.True(capabilities.IdempotentModelUploadEnabled);
+        Assert.True(capabilities.ModelThumbnailReplacementEnabled);
     }
 
     [Fact]
@@ -34,7 +35,8 @@ public class SystemCapabilitiesControllerTests
         PlatformCapabilitiesDto capabilities = new()
         {
             ClientThumbnailUploadEnabled = true,
-            IdempotentModelUploadEnabled = true
+            IdempotentModelUploadEnabled = true,
+            ModelThumbnailReplacementEnabled = true
         };
 
         string json = JsonSerializer.Serialize(
@@ -44,5 +46,6 @@ public class SystemCapabilitiesControllerTests
         using JsonDocument document = JsonDocument.Parse(json);
         Assert.True(document.RootElement.GetProperty("clientThumbnailUploadEnabled").GetBoolean());
         Assert.True(document.RootElement.GetProperty("idempotentModelUploadEnabled").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("modelThumbnailReplacementEnabled").GetBoolean());
     }
 }

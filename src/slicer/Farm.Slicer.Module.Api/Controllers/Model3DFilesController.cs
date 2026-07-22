@@ -4,6 +4,7 @@ using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Controllers;
@@ -76,6 +77,7 @@ public class Model3DFilesController(
                     parsedClientUploadId,
                     ct)
                 : await _modelService.UploadModelAsync(modelFile, thumbnailFile, ct);
+            Response.Headers.ETag = result.ETag;
             return Created($"/api/models/{result.Id}", result);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -91,6 +93,84 @@ public class Model3DFilesController(
         {
             _logger.LogError(ex, "Failed to upload 3D model");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload model");
+        }
+    }
+
+    /// <summary>
+    /// Replaces a model's thumbnail with a validated client-generated PNG.
+    /// </summary>
+    /// <param name="id">The model identifier.</param>
+    /// <param name="thumbnailFile">The replacement PNG thumbnail.</param>
+    /// <param name="ct">Cancellation token for the request.</param>
+    [HttpPut("{id:guid}/thumbnail")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(Model3DThumbnailUpdateResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    [RequestSizeLimit(11 * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 11 * 1024 * 1024)]
+    public async Task<IActionResult> ReplaceThumbnailAsync(
+        Guid id,
+        [FromForm] IFormFile thumbnailFile,
+        CancellationToken ct)
+    {
+        if (thumbnailFile is null || thumbnailFile.Length == 0)
+        {
+            return BadRequest("No thumbnail uploaded or thumbnail is empty.");
+        }
+
+        bool isAdmin = User.IsInRole("farm_admin");
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        Guid? userId = Guid.TryParse(userIdClaim, out Guid parsedUserId) && parsedUserId != Guid.Empty
+            ? parsedUserId
+            : null;
+        if (!isAdmin && !userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            Model3DThumbnailUpdateResultDto result = await _modelService.ReplaceThumbnailAsync(
+                id,
+                thumbnailFile,
+                userId,
+                isAdmin,
+                Request.Headers.IfMatch.ToString(),
+                ct);
+            Response.Headers.ETag = result.ETag;
+            return Ok(result);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Thumbnail replacement validation failed for model {Id}: {Message}", id, ex.Message);
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return StatusCode(
+                StatusCodes.Status412PreconditionFailed,
+                "The model changed before its thumbnail could be replaced.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to replace thumbnail for model {Id}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to replace thumbnail");
         }
     }
 
@@ -143,7 +223,13 @@ public class Model3DFilesController(
     public async Task<IActionResult> GetModelAsync(Guid id)
     {
         Model3DDto? model = await _modelService.GetModelAsync(id, CancellationToken.None);
-        return model is null ? NotFound() : Ok(model);
+        if (model is null)
+        {
+            return NotFound();
+        }
+
+        Response.Headers.ETag = model.ETag;
+        return Ok(model);
     }
 
     /// <summary>
@@ -157,7 +243,13 @@ public class Model3DFilesController(
     public async Task<IActionResult> GetModelDetailsAsync(Guid id, CancellationToken ct)
     {
         Model3DDto? model = await _modelService.GetModelAsync(id, ct);
-        return model is null ? NotFound() : Ok(model);
+        if (model is null)
+        {
+            return NotFound();
+        }
+
+        Response.Headers.ETag = model.ETag;
+        return Ok(model);
     }
 
     /// <summary>

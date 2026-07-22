@@ -204,6 +204,33 @@ test_orcaslicer_worker_config() {
     pass_test
 }
 
+test_model_thumbnail_replacement_routing() {
+    start_test "model thumbnail replacement routing"
+
+    local split_config="$REPO_ROOT/deploy/nginx/nginx-proxy-split.conf"
+    assert_file_exists "$split_config"
+
+    local route_count
+    route_count=$(grep -c "location /api/3d-models/" "$split_config")
+    assert_equals "2" "$route_count" "Split proxy should route 3D model endpoints over HTTP and HTTPS"
+
+    local routed_to_slicer
+    routed_to_slicer=$(awk '
+        /location \/api\/3d-models\// { in_route = 1; next }
+        in_route && /proxy_pass http:\/\/slicer_backend/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$routed_to_slicer" "Both 3D model routes should target slicer_backend"
+
+    assert_contains \
+        "$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy.conf")" \
+        "location /api/" \
+        "Monolith proxy should route 3D model endpoints through the main API"
+
+    pass_test
+}
+
 # Test OrcaSlicer worker variations
 test_orcaslicer_worker_variations() {
     start_test "OrcaSlicer worker variations"
@@ -1700,6 +1727,7 @@ run_all_tests() {
     test_registry_stack_configuration
     test_telemetry_stack_configuration
     test_orcaslicer_worker_config
+    test_model_thumbnail_replacement_routing
     test_orcaslicer_worker_variations
     test_prusaslicer_worker_disabled
     test_database_provider_config

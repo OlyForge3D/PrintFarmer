@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Dtos;
 
 namespace Farm.Slicer.Module.Dtos;
 
@@ -55,6 +56,10 @@ public class Model3DDto
 
     /// <summary>Gets or sets the associated tags.</summary>
     public TagDto[]? Tags { get; set; }
+
+    /// <summary>Gets or sets the strong entity tag used for optimistic updates.</summary>
+    [JsonPropertyName("etag")]
+    public string ETag { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -118,6 +123,26 @@ public class Model3DUploadResultDto
 
     /// <summary>Gets or sets the caller-provided upload idempotency identifier.</summary>
     public Guid? ClientUploadId { get; set; }
+
+    /// <summary>Gets or sets the strong entity tag used for optimistic updates.</summary>
+    [JsonPropertyName("etag")]
+    public string ETag { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Result of replacing a model thumbnail.
+/// </summary>
+public class Model3DThumbnailUpdateResultDto
+{
+    /// <summary>Gets or sets the model identifier.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the replaced thumbnail URL.</summary>
+    public string ThumbnailUrl { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the strong entity tag for the updated model.</summary>
+    [JsonPropertyName("etag")]
+    public string ETag { get; set; } = string.Empty;
 }
 
 /// <summary>

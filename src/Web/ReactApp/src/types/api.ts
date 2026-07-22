@@ -1750,6 +1750,13 @@ export interface Model3DUploadResultDto {
   thumbnailUrl?: string;
   wasExisting: boolean;
   clientUploadId?: string;
+  etag: string;
+}
+
+export interface Model3DThumbnailUpdateResultDto {
+  id: string;
+  thumbnailUrl: string;
+  etag: string;
 }
 
 // G-code library runtime settings
@@ -3237,6 +3244,7 @@ export interface SystemCapabilities {
   gcodeUploadEnabled: boolean;
   clientThumbnailUploadEnabled: boolean;
   idempotentModelUploadEnabled: boolean;
+  modelThumbnailReplacementEnabled: boolean;
   platformNote?: string;
 }
 

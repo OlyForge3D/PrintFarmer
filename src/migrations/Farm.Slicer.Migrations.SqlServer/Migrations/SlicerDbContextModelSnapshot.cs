@@ -332,6 +332,13 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ClientUploadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("ClientUploadId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -402,6 +409,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAt")
+                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("UploadedAt")
@@ -431,6 +439,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.HasIndex("UploadedAt");
 
                     b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("UploadedByUserId", "ClientUploadId")
+                        .IsUnique()
+                        .HasFilter("[UploadedByUserId] IS NOT NULL AND [ClientUploadId] IS NOT NULL");
 
                     b.ToTable("Models3D", "slicer");
                 });

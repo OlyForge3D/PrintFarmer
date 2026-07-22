@@ -88,6 +88,21 @@ public interface IModel3DFileService
         Guid? clientUploadId,
         CancellationToken ct);
 
+    /// <summary>Replaces a model thumbnail after validating ownership and an optional HTTP precondition.</summary>
+    /// <param name="modelId">The model identifier.</param>
+    /// <param name="thumbnailFile">The client-generated PNG thumbnail.</param>
+    /// <param name="userId">The authenticated user identifier, if present.</param>
+    /// <param name="isAdmin">Whether the caller has farm administrator privileges.</param>
+    /// <param name="ifMatch">Optional If-Match header value.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3DThumbnailUpdateResultDto> ReplaceThumbnailAsync(
+        Guid modelId,
+        IFormFile thumbnailFile,
+        Guid? userId,
+        bool isAdmin,
+        string? ifMatch,
+        CancellationToken ct);
+
     /// <summary>Gets or creates a folder for the given directory path and type.</summary>
     /// <param name="directoryPath">The virtual directory path.</param>
     /// <param name="folderType">The folder type: "models" or "gcode".</param>
