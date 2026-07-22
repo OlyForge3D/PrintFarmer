@@ -2986,6 +2986,230 @@ final class AttentionFeedViewModelTests: XCTestCase {
         XCTAssertEqual(bCount, 1, "B untouched by stale pagination retry")
     }
 
+    // MARK: - Cycle 8 delta: post-await lifecycle-token guard restored
+
+    func testRecoveryOrchestratorBailsWhenTokenBumpsDuringCapabilityAwait() async {
+        // Cycle-8-delta blocker (Hicks): recovery orchestrator dropped
+        // the post-await lifecycle-token guard. Reachable: disabled
+        // Try again under authority A → capability refresh suspends
+        // → view disappears / deactivate bumps lifecycle token →
+        // task resumes with UNCHANGED server generation (no service
+        // swap) → old code configured/refreshed off-screen anyway.
+        //
+        // Fix: restore the token re-check immediately after the
+        // capability await. This proof gates the capability closure,
+        // bumps the token via `vm.deactivate()` mid-await, resolves
+        // the gate, and asserts ZERO VM mutation and ZERO GET.
+        let capabilityGate = AttentionResultGate<Void>()
+        let service = ScriptedAttentionService(steps: [])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        // Simulate the view state.
+        let capturedGeneration = 1
+        let capturedToken = vm.currentLifecycleToken()
+        let currentGenerationBox = SendableIntBox(initial: 1)
+        var attentionEnabled = true
+        var configureCallCount = 0
+        var resetLatchCallCount = 0
+        var refreshCallCount = 0
+        let vmForClosures = vm
+
+        let recoveryTask = Task { @MainActor in
+            await AttentionRecoveryOrchestrator.run(
+                capturedServerGeneration: capturedGeneration,
+                capturedLifecycleToken: capturedToken,
+                currentServerGeneration: { currentGenerationBox.value },
+                currentLifecycleToken: { vmForClosures.currentLifecycleToken() },
+                capabilityRefresh: { _ = try? await capabilityGate.wait() },
+                resolvedAttentionEnabled: { true },
+                getAttentionEnabled: { attentionEnabled },
+                setAttentionEnabled: { attentionEnabled = $0 },
+                configureVMWithNewGate: { newEnabled in
+                    configureCallCount += 1
+                    vmForClosures.configure(
+                        attentionService: service,
+                        signalRService: signalR,
+                        attentionEnabled: newEnabled
+                    )
+                },
+                resetDisabledLatch: { newEnabled in
+                    resetLatchCallCount += 1
+                    vmForClosures.retryDisabledRecovery(attentionEnabled: newEnabled)
+                },
+                refresh: {
+                    refreshCallCount += 1
+                    _ = await vmForClosures.refresh()
+                }
+            )
+        }
+
+        // The recovery is suspended on the capability gate. Simulate
+        // the reachable race: deactivate bumps the lifecycle token
+        // while we're waiting.
+        vm.deactivate()
+
+        // Resolve the capability gate so the recovery resumes.
+        await capabilityGate.succeed(())
+        await recoveryTask.value
+
+        // Post-await token guard must have caught the deactivate —
+        // ZERO VM mutation, ZERO GET.
+        XCTAssertEqual(configureCallCount, 0, "No configure after token drift")
+        XCTAssertEqual(resetLatchCallCount, 0, "No latch reset after token drift")
+        XCTAssertEqual(refreshCallCount, 0, "No refresh after token drift")
+        let calls = await service.loadCallCount
+        XCTAssertEqual(calls, 0, "Zero canonical GET after token drift")
+    }
+
+    func testRecoveryOrchestratorBailsWhenTokenBumpsViaDeactivateReactivate() async {
+        // Same fence, more aggressive drift: deactivate + reactivate
+        // during the capability await. Token has bumped multiple
+        // times; the recovery captured T0, current is T2+. Post-await
+        // token check catches it → zero VM mutation. The current
+        // owner is authoritative — this test ends without any
+        // recovery-driven GET, proving the OLD task is inert.
+        let capabilityGate = AttentionResultGate<Void>()
+        let service = ScriptedAttentionService(steps: [])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let capturedGeneration = 1
+        let capturedToken = vm.currentLifecycleToken()
+        let currentGenerationBox = SendableIntBox(initial: 1)
+        var attentionEnabled = true
+        var configureCallCount = 0
+        var refreshCallCount = 0
+        let vmForClosures = vm
+
+        let recoveryTask = Task { @MainActor in
+            await AttentionRecoveryOrchestrator.run(
+                capturedServerGeneration: capturedGeneration,
+                capturedLifecycleToken: capturedToken,
+                currentServerGeneration: { currentGenerationBox.value },
+                currentLifecycleToken: { vmForClosures.currentLifecycleToken() },
+                capabilityRefresh: { _ = try? await capabilityGate.wait() },
+                resolvedAttentionEnabled: { true },
+                getAttentionEnabled: { attentionEnabled },
+                setAttentionEnabled: { attentionEnabled = $0 },
+                configureVMWithNewGate: { newEnabled in
+                    configureCallCount += 1
+                    vmForClosures.configure(
+                        attentionService: service,
+                        signalRService: signalR,
+                        attentionEnabled: newEnabled
+                    )
+                },
+                resetDisabledLatch: { _ in },
+                refresh: {
+                    refreshCallCount += 1
+                    _ = await vmForClosures.refresh()
+                }
+            )
+        }
+
+        // Deactivate + reactivate during the capability await — token
+        // bumps at least twice; captured T0 is stale by application
+        // time.
+        vm.deactivate()
+        vm.activate()
+
+        await capabilityGate.succeed(())
+        await recoveryTask.value
+
+        XCTAssertEqual(
+            configureCallCount, 0,
+            "Old task must not configure after multi-drift"
+        )
+        XCTAssertEqual(
+            refreshCallCount, 0,
+            "Old task must not refresh after multi-drift"
+        )
+        let calls = await service.loadCallCount
+        XCTAssertEqual(
+            calls, 0,
+            "Old recovery task performs zero GET; current owner is authoritative"
+        )
+    }
+
+    func testRecoveryOrchestratorFiresExactlyOneGETWhenIdentitiesUnchanged() async {
+        // Fence-not-a-wedge proof: same-owner recovery with
+        // unchanged token and generation between capture and drain
+        // fires exactly one canonical GET.
+        let capabilityGate = AttentionResultGate<Void>()
+        let feed = makeAttentionFeed(healthyPrinterCount: 4)
+        let service = ScriptedAttentionService(steps: [.value(feed)])
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+
+        let capturedGeneration = 1
+        let capturedToken = vm.currentLifecycleToken()
+        let currentGenerationBox = SendableIntBox(initial: 1)
+        var attentionEnabled = true
+        var configureCallCount = 0
+        var refreshCallCount = 0
+        let vmForClosures = vm
+
+        let recoveryTask = Task { @MainActor in
+            await AttentionRecoveryOrchestrator.run(
+                capturedServerGeneration: capturedGeneration,
+                capturedLifecycleToken: capturedToken,
+                currentServerGeneration: { currentGenerationBox.value },
+                currentLifecycleToken: { vmForClosures.currentLifecycleToken() },
+                capabilityRefresh: { _ = try? await capabilityGate.wait() },
+                resolvedAttentionEnabled: { true },
+                getAttentionEnabled: { attentionEnabled },
+                setAttentionEnabled: { attentionEnabled = $0 },
+                configureVMWithNewGate: { newEnabled in
+                    configureCallCount += 1
+                    vmForClosures.configure(
+                        attentionService: service,
+                        signalRService: signalR,
+                        attentionEnabled: newEnabled
+                    )
+                },
+                resetDisabledLatch: { newEnabled in
+                    vmForClosures.retryDisabledRecovery(attentionEnabled: newEnabled)
+                },
+                refresh: {
+                    refreshCallCount += 1
+                    _ = await vmForClosures.refresh()
+                }
+            )
+        }
+
+        // NO drift during the capability await.
+        await capabilityGate.succeed(())
+        await recoveryTask.value
+
+        XCTAssertEqual(
+            configureCallCount, 0,
+            "Gate unchanged (attentionEnabled true → still true) — no reconfigure"
+        )
+        XCTAssertEqual(refreshCallCount, 1, "Exactly one canonical GET issued")
+        let calls = await service.loadCallCount
+        XCTAssertEqual(
+            calls, 1,
+            "Same-owner recovery fires exactly one canonical GET (fence not a wedge)"
+        )
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 4)
+    }
+
     // MARK: - Helpers
 
     private func configuredViewModel(
@@ -3000,5 +3224,26 @@ final class AttentionFeedViewModelTests: XCTestCase {
             attentionEnabled: attentionEnabled
         )
         return vm
+    }
+}
+
+/// Lock-protected `Int` box used by the recovery-orchestrator tests
+/// to simulate the view's `services.activeServerGeneration` mutable
+/// state from `@MainActor` closures without triggering Swift 6
+/// concurrency warnings on captured `var`s.
+private final class SendableIntBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: Int
+
+    init(initial: Int) { self._value = initial }
+
+    var value: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _value
+    }
+
+    func set(_ v: Int) {
+        lock.lock(); defer { lock.unlock() }
+        _value = v
     }
 }

@@ -1172,3 +1172,113 @@ final class AttentionFeedViewModel {
         phase = .idle
     }
 }
+
+// MARK: - AttentionRecoveryOrchestrator
+
+/// Testable, view-decoupled recovery orchestration used by
+/// `AttentionView.performRecoveryRefresh`.
+///
+/// The orchestration is a pure sequence of owner-fence guards and
+/// async awaits. Isolating it as a static function with closure
+/// dependencies lets us prove the owner-fence properties (both
+/// server-generation AND lifecycle-token) without a SwiftUI test
+/// harness, and lets us regression-test the reachable stranding
+/// scenarios Hicks flagged in cycles 6, 7, and 8.
+///
+/// Owner-fence semantics:
+/// * `capturedServerGeneration`: bumped only on service swap.
+///   Authority-crossing fence — survives the recovery's own
+///   `configureVMWithNewGate` call because that call does not swap
+///   services on the container.
+/// * `capturedLifecycleToken`: bumped on deactivate AND on service
+///   swap. Deactivate fence — checked before capability work AND
+///   again immediately after the async capability await. NOT
+///   re-checked past our own `configureVMWithNewGate` because a
+///   gate change bumps the token as a side effect of our own action.
+///
+/// Same-owner recovery fires exactly one canonical GET via the
+/// supplied `refresh` closure.
+enum AttentionRecoveryOrchestrator {
+    /// Perform a recovery cycle. See type doc for the fence semantics.
+    ///
+    /// The closure dependencies are:
+    /// * `currentServerGeneration` / `currentLifecycleToken`: read
+    ///   the current owner identities. Called after every await and
+    ///   before every VM mutation.
+    /// * `capabilityRefresh`: perform the async capability service
+    ///   refresh. This is the awaitable that can suspend and allow
+    ///   deactivate/reactivate to race with us.
+    /// * `resolvedAttentionEnabled`: post-capability resolved gate.
+    /// * `getAttentionEnabled` / `setAttentionEnabled`: read/write
+    ///   the view's local mirror of the gate.
+    /// * `configureVMWithNewGate`: called only when the gate flipped.
+    /// * `resetDisabledLatch`: always called before the final refresh
+    ///   to clear a latched featureDisabled state on the VM.
+    /// * `refresh`: the canonical GET.
+    @MainActor
+    static func run(
+        capturedServerGeneration: Int,
+        capturedLifecycleToken: AttentionLifecycleToken,
+        currentServerGeneration: @MainActor () -> Int,
+        currentLifecycleToken: @MainActor () -> AttentionLifecycleToken,
+        capabilityRefresh: () async -> Void,
+        resolvedAttentionEnabled: @MainActor () -> Bool,
+        getAttentionEnabled: @MainActor () -> Bool,
+        setAttentionEnabled: @MainActor (Bool) -> Void,
+        configureVMWithNewGate: @MainActor (Bool) -> Void,
+        resetDisabledLatch: @MainActor (Bool) -> Void,
+        refresh: () async -> Void
+    ) async {
+        // Pre-work owner check: bail before touching anything if the
+        // authority or lifecycle has already moved.
+        guard capturedServerGeneration == currentServerGeneration() else { return }
+        guard capturedLifecycleToken == currentLifecycleToken() else { return }
+
+        await capabilityRefresh()
+        if Task.isCancelled { return }
+
+        // Post-await owner re-check. BOTH identities re-validated:
+        //   * server generation catches service swap during the
+        //     capability await (blocker B from cycle 8),
+        //   * lifecycle token catches deactivate during the capability
+        //     await (cycle-8 delta blocker — this guard was dropped in
+        //     cycle 8 with false reasoning; restored here).
+        //
+        // Task.isCancelled is an ADDITIONAL guard (SwiftUI cancels
+        // the parent Task on view removal), NOT a substitute for
+        // lifecycle-token equality — a swallowed cancellation or a
+        // deactivate that does not cancel the task would still be
+        // caught by the token re-check.
+        guard capturedServerGeneration == currentServerGeneration() else { return }
+        guard capturedLifecycleToken == currentLifecycleToken() else { return }
+
+        let newEnabled = resolvedAttentionEnabled()
+        let previouslyEnabled = getAttentionEnabled()
+        setAttentionEnabled(newEnabled)
+
+        // If the gate flipped (either direction) reconfigure so the
+        // VM's own gate aligns with the fresh capability truth.
+        // Lifecycle token deliberately NOT re-checked past this
+        // point: our own `configureVMWithNewGate` bumps the token,
+        // so a post-configure token check would false-positive on
+        // our own action. The `capturedServerGeneration` guard
+        // remains — it fences authority swaps only.
+        if previouslyEnabled != newEnabled {
+            guard capturedServerGeneration == currentServerGeneration() else { return }
+            configureVMWithNewGate(newEnabled)
+        }
+
+        guard capturedServerGeneration == currentServerGeneration() else { return }
+        // Independently clear any VM-side disabled latch — the gate may
+        // still be true locally but a previous featureDisabled response
+        // could have set the VM's internal flag. This is the fence that
+        // makes the disabled-surface Refresh button recoverable in
+        // place, without a tab round-trip.
+        resetDisabledLatch(newEnabled)
+
+        if newEnabled {
+            guard capturedServerGeneration == currentServerGeneration() else { return }
+            await refresh()
+        }
+    }
+}

@@ -145,63 +145,39 @@ struct AttentionView: View {
     /// authority A — could begin running AFTER B had bootstrapped,
     /// and would then capture B's identity and duplicate its GET.
     ///
-    /// The fix moves the identity capture to the SYNCHRONOUS UI
-    /// trigger (Button action / `.refreshable` closure entry). The
-    /// captured values are passed in as parameters and re-validated
-    /// at every await boundary and before every VM mutation:
-    /// * `capturedServerGeneration`: ServiceContainer's
-    ///   `activeServerGeneration`, bumped only on service swap.
-    ///   This is the authority-crossing fence — it survives our
-    ///   own `configure(newGate)` because we do not swap services.
-    /// * `capturedLifecycleToken`: VM's lifecycle token, used for
-    ///   the pre-work guard (protects against deactivate). We do
-    ///   NOT re-check it after our own `configure`, because a gate
-    ///   change bumps the token as a side effect of our own action.
-    ///
-    /// Same-owner recovery still fires exactly one canonical GET.
+    /// Cycle-8 delta fix: RESTORE the post-capability-await lifecycle
+    /// token guard. Cycle 8 dropped it (with the false reasoning
+    /// that our own configure(newGate) would bump the token). But
+    /// that only matters AFTER we configure — a deactivate that
+    /// bumps the token BEFORE we configure must still cause the
+    /// recovery to abort with zero VM mutation. See
+    /// `AttentionRecoveryOrchestrator.run` for the full guard
+    /// sequence.
     private func performRecoveryRefresh(
         capturedServerGeneration: Int,
         capturedLifecycleToken: AttentionLifecycleToken
     ) async {
-        // Pre-work owner check: bail before touching anything if the
-        // authority or lifecycle has already moved.
-        guard capturedServerGeneration == services.activeServerGeneration else { return }
-        guard capturedLifecycleToken == feedViewModel.currentLifecycleToken() else { return }
-
-        await services.capabilitiesService.refresh()
-        if Task.isCancelled { return }
-        // Re-validate after the async capability await.
-        guard capturedServerGeneration == services.activeServerGeneration else { return }
-        // Lifecycle token deliberately not re-checked past this point:
-        // the recovery itself may configure(newGate) which bumps the
-        // token. Authority swap is fenced by activeServerGeneration.
-
-        let previouslyEnabled = attentionEnabled
-        attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
-
-        // If the gate flipped (either direction) reconfigure so the
-        // VM's own gate aligns with the fresh capability truth.
-        if previouslyEnabled != attentionEnabled {
-            guard capturedServerGeneration == services.activeServerGeneration else { return }
-            feedViewModel.configure(
-                attentionService: services.attentionService,
-                signalRService: services.signalRService,
-                attentionEnabled: attentionEnabled
-            )
-        }
-
-        guard capturedServerGeneration == services.activeServerGeneration else { return }
-        // Independently clear any VM-side disabled latch — the gate may
-        // still be true locally but a previous featureDisabled response
-        // could have set the VM's internal flag. This is the fence that
-        // makes the disabled-surface Refresh button recoverable in
-        // place, without a tab round-trip.
-        feedViewModel.retryDisabledRecovery(attentionEnabled: attentionEnabled)
-
-        if attentionEnabled {
-            guard capturedServerGeneration == services.activeServerGeneration else { return }
-            await feedViewModel.refresh()
-        }
+        await AttentionRecoveryOrchestrator.run(
+            capturedServerGeneration: capturedServerGeneration,
+            capturedLifecycleToken: capturedLifecycleToken,
+            currentServerGeneration: { services.activeServerGeneration },
+            currentLifecycleToken: { feedViewModel.currentLifecycleToken() },
+            capabilityRefresh: { await services.capabilitiesService.refresh() },
+            resolvedAttentionEnabled: { services.capabilitiesService.resolved.attentionEnabled },
+            getAttentionEnabled: { attentionEnabled },
+            setAttentionEnabled: { attentionEnabled = $0 },
+            configureVMWithNewGate: { newEnabled in
+                feedViewModel.configure(
+                    attentionService: services.attentionService,
+                    signalRService: services.signalRService,
+                    attentionEnabled: newEnabled
+                )
+            },
+            resetDisabledLatch: { newEnabled in
+                feedViewModel.retryDisabledRecovery(attentionEnabled: newEnabled)
+            },
+            refresh: { await feedViewModel.refresh() }
+        )
     }
 
     /// Synchronous UI trigger for a recovery refresh. Captures the
