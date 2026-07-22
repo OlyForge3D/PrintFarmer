@@ -23,6 +23,11 @@ struct FilamentCoverageDetailSection: View {
             HStack {
                 Label("Filament Coverage", systemImage: "gauge.with.dots.needle.50percent")
                     .font(.subheadline.weight(.semibold))
+                    // Attach the section marker to the header Label
+                    // rather than the outer VStack so the descendant
+                    // toolhead rows remain independently reachable
+                    // in the accessibility tree.
+                    .accessibilityIdentifier("filament-coverage-section")
                 Spacer()
                 FilamentCoverageBadge(
                     status: coverage.status,
@@ -42,7 +47,6 @@ struct FilamentCoverageDetailSection: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.pfBorder, lineWidth: 1)
         )
-        .accessibilityIdentifier("filament-coverage-section")
     }
 }
 
@@ -97,8 +101,14 @@ private struct ToolheadCoverageRow: View {
             }
         }
         .padding(.vertical, 4)
-        // Stable per-row accessibility id keyed by the model's id, so
-        // XCUI can navigate rows even when two toolheads share a name.
+        // Combine children into a single a11y element for the row
+        // so XCUI locates it via the stable id even when the outer
+        // container is a plain SwiftUI HStack (accessibilityIdentifier
+        // alone doesn't guarantee the container surfaces as its own
+        // element). The stable identifier is derived from the model's
+        // stable id (backend UUID > index fallback), never the
+        // display name.
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("filament-coverage-toolhead-\(toolhead.id)")
     }
 }

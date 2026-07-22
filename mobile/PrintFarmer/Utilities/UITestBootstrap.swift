@@ -60,6 +60,23 @@ enum UITestBootstrap {
         "--uitesting-shift-task-initial-load-failure"
     #endif
 
+    /// Seeds a deterministic fleet coverage snapshot spanning all four
+    /// #778 states (covers, runout+ETA, runout without ETA, unknown)
+    /// plus a multi-toolhead printer whose two toolheads share a
+    /// display name, so XCUI can prove:
+    ///
+    ///   * badge presence + a11y labels for every state,
+    ///   * `.unknown` NEVER surfaces a coverage claim on the Farm card,
+    ///   * per-toolhead rows on the detail screen remain distinct
+    ///     even when their `toolheadName` collides,
+    ///   * navigation to the correct printer by stable UUID.
+    ///
+    /// The snapshot is served by `StubFilamentCoverageService`, which
+    /// bypasses the demo service's `featureDisabled` short-circuit.
+    /// Production code never touches this argument.
+    static let filamentCoverageScenarioLaunchArgument =
+        "--uitesting-filament-coverage-scenario"
+
     /// Deterministic launch modes selectable from the UI-test harness.
     enum Mode: Equatable {
         /// Pre-authenticated demo operator shell (default).
@@ -74,6 +91,9 @@ enum UITestBootstrap {
         case authenticatedShiftTaskMutationError
         case authenticatedShiftTaskInitialLoadFailure
         #endif
+        /// Authenticated operator shell with a deterministic fleet
+        /// coverage snapshot injected (F4-M #778 UI tests).
+        case authenticatedFilamentCoverageScenario
     }
 
     /// Dedicated `UserDefaults` suite. Isolated from `.standard` so a
@@ -110,6 +130,9 @@ enum UITestBootstrap {
     /// Pure overload: resolves the launch mode from an explicit argument
     /// list so unit tests can exercise it without `CommandLine`.
     static func mode(in arguments: [String]) -> Mode {
+        if arguments.contains(filamentCoverageScenarioLaunchArgument) {
+            return .authenticatedFilamentCoverageScenario
+        }
         if arguments.contains(attentionDisabledLaunchArgument) {
             return .authenticatedAttentionDisabled
         }
@@ -179,6 +202,11 @@ enum UITestBootstrap {
             disabled.attentionEnabled = false
             services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
         }
+        if mode == .authenticatedFilamentCoverageScenario {
+            services.filamentCoverageService = StubFilamentCoverageService(
+                fleet: Self.filamentCoverageScenarioFleet()
+            )
+        }
         #if DEBUG
         if mode == .authenticatedShiftTaskMutationError {
             services.shiftTaskService = DemoShiftTaskService(
@@ -204,6 +232,8 @@ enum UITestBootstrap {
         case .authenticatedShiftTaskInitialLoadFailure:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         #endif
+        case .authenticatedFilamentCoverageScenario:
+            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         }
 
         return Environment(
@@ -219,5 +249,166 @@ enum UITestBootstrap {
         let defaults = UserDefaults(suiteName: userDefaultsSuiteName) ?? .standard
         defaults.removePersistentDomain(forName: userDefaultsSuiteName)
         return defaults
+    }
+
+    // MARK: - F4-M #778 UI-test scenario
+
+    /// Builds the deterministic fleet coverage snapshot used by the
+    /// `authenticatedFilamentCoverageScenario` mode. Every state
+    /// required by the frozen contract is covered by exactly one
+    /// demo printer so a single Farm view exercises them in one pass:
+    ///
+    ///   * Prusa MK4 #1 → `.covers`
+    ///   * Prusa MK4 #2 → `.runout` with predicted ETA
+    ///   * Bambu X1C    → `.runout` without predicted ETA
+    ///   * Bambu P1S    → `.unknown` (no badge, per contract)
+    ///   * Voron 2.4    → `.runout` with predicted ETA, and three
+    ///     toolheads TWO of which share the display name
+    ///     `"Extruder"` — proving stable-id rows survive duplicate
+    ///     names.
+    ///
+    /// Ender 3 V3 (id 6) is intentionally omitted from the coverage
+    /// fleet so the "printer without a snapshot" path also gets
+    /// exercised implicitly (badge absent for that card).
+    static func filamentCoverageScenarioFleet() -> FleetFilamentCoverage {
+        // Use fixed timestamps so the ETA badge text is deterministic
+        // across runs and destinations. The formatter renders the
+        // local short time, so tests key on the presence of "at " in
+        // the a11y label rather than a specific hour.
+        let evaluatedAt = ISO8601DateFormatter().date(from: "2026-07-21T18:00:00Z")!
+        let runoutETA  = ISO8601DateFormatter().date(from: "2026-07-21T21:30:00Z")!
+        let voronETA   = ISO8601DateFormatter().date(from: "2026-07-21T22:15:00Z")!
+
+        let covers = PrinterFilamentCoverage(
+            printerId: DemoData.prusaMK4_1_ID,
+            printerName: "Prusa MK4 #1",
+            status: .covers,
+            toolheads: [
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 0,
+                    toolheadName: "Extruder 1",
+                    material: "PLA",
+                    remainingGrams: 620,
+                    status: .covers
+                )
+            ],
+            activeJobId: nil,
+            activeJobName: nil,
+            activeJobProgress: nil,
+            earliestPredictedRunoutAt: nil,
+            assignedQueuedJobCount: 0,
+            evaluatedAtUtc: evaluatedAt
+        )
+
+        let runoutWithETA = PrinterFilamentCoverage(
+            printerId: DemoData.prusaMK4_2_ID,
+            printerName: "Prusa MK4 #2",
+            status: .runout,
+            toolheads: [
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 0,
+                    toolheadName: "Extruder 1",
+                    material: "PETG",
+                    remainingGrams: 42,
+                    status: .runout,
+                    predictedRunoutAt: runoutETA
+                )
+            ],
+            activeJobId: nil,
+            activeJobName: nil,
+            activeJobProgress: nil,
+            earliestPredictedRunoutAt: runoutETA,
+            assignedQueuedJobCount: 1,
+            evaluatedAtUtc: evaluatedAt
+        )
+
+        let runoutWithoutETA = PrinterFilamentCoverage(
+            printerId: DemoData.bambuX1C_ID,
+            printerName: "Bambu X1C",
+            status: .runout,
+            toolheads: [
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 0,
+                    toolheadName: "Hotend",
+                    material: "PLA",
+                    remainingGrams: 15,
+                    status: .runout
+                )
+            ],
+            activeJobId: nil,
+            activeJobName: nil,
+            activeJobProgress: nil,
+            earliestPredictedRunoutAt: nil,
+            assignedQueuedJobCount: 2,
+            evaluatedAtUtc: evaluatedAt
+        )
+
+        let unknown = PrinterFilamentCoverage(
+            printerId: DemoData.bambuP1S_ID,
+            printerName: "Bambu P1S",
+            status: .unknown,
+            toolheads: [
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 0,
+                    toolheadName: "Hotend",
+                    status: .unknown,
+                    statusReason: "spool-remaining-unknown"
+                )
+            ],
+            activeJobId: nil,
+            activeJobName: nil,
+            activeJobProgress: nil,
+            earliestPredictedRunoutAt: nil,
+            assignedQueuedJobCount: 0,
+            evaluatedAtUtc: evaluatedAt
+        )
+
+        // Voron 2.4: 3 toolheads. Toolheads 0 and 2 deliberately share
+        // the display name "Extruder" to prove that per-row identity
+        // uses the backend id (or stable index), never the display
+        // name. Toolhead 1 carries a distinct `toolheadId` so the
+        // detail row's a11y id is derived from that backend UUID.
+        let sharedName = "Extruder"
+        let voron = PrinterFilamentCoverage(
+            printerId: DemoData.voron24_ID,
+            printerName: "Voron 2.4",
+            status: .runout,
+            toolheads: [
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 0,
+                    toolheadName: sharedName,
+                    material: "PLA",
+                    remainingGrams: 500,
+                    status: .covers
+                ),
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 1,
+                    toolheadId: UUID(uuidString: "20000000-1111-2222-3333-444444444444")!,
+                    toolheadName: "Support",
+                    material: "PVA",
+                    remainingGrams: 30,
+                    status: .runout,
+                    predictedRunoutAt: voronETA
+                ),
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 2,
+                    toolheadName: sharedName,
+                    material: "PETG",
+                    remainingGrams: 12,
+                    status: .runout
+                )
+            ],
+            activeJobId: nil,
+            activeJobName: nil,
+            activeJobProgress: nil,
+            earliestPredictedRunoutAt: voronETA,
+            assignedQueuedJobCount: 0,
+            evaluatedAtUtc: evaluatedAt
+        )
+
+        return FleetFilamentCoverage(
+            printers: [covers, runoutWithETA, runoutWithoutETA, unknown, voron],
+            evaluatedAtUtc: evaluatedAt
+        )
     }
 }
