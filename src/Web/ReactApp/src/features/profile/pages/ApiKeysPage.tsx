@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Toggle, FormField, Select, Checkbox, Input, Badge } from '@/common/components/ui';
@@ -39,6 +40,30 @@ export function ApiKeysPage() {
   const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({});
 
   const userId = user?.id;
+
+  // Focus management for the strictly one-time secret panel: move focus to it the instant
+  // it appears (so keyboard/screen-reader users are taken straight to the secret and its
+  // aria-live announcement), and restore focus to whatever triggered it (Create/Rotate)
+  // once it is dismissed. The panel never re-appears with the same secret after dismissal.
+  const createdKeyPanelRef = useRef<HTMLDivElement | null>(null);
+  const createButtonRef = useRef<HTMLButtonElement | null>(null);
+  const focusRestoreRef = useRef<'create' | HTMLElement | null>(null);
+  const wasCreatedKeyShownRef = useRef(false);
+
+  useEffect(() => {
+    if (createdKey) {
+      wasCreatedKeyShownRef.current = true;
+      createdKeyPanelRef.current?.focus();
+    } else if (wasCreatedKeyShownRef.current) {
+      wasCreatedKeyShownRef.current = false;
+      if (focusRestoreRef.current === 'create') {
+        createButtonRef.current?.focus();
+      } else {
+        focusRestoreRef.current?.focus();
+      }
+      focusRestoreRef.current = null;
+    }
+  }, [createdKey]);
 
   // Fetch API key settings (whether hashing is enabled)
   const { data: settings } = useQuery({
@@ -143,6 +168,7 @@ export function ApiKeysPage() {
         return;
       }
     }
+    focusRestoreRef.current = 'create';
     createMutation.mutate({
       name: newKeyName.trim(),
       purpose: newKeyPurpose,
@@ -167,6 +193,7 @@ export function ApiKeysPage() {
 
   const handleRotate = (keyId: string, keyName: string) => {
     if (confirm(`Are you sure you want to rotate API key "${keyName}"? The old key will stop working immediately.`)) {
+      focusRestoreRef.current = document.activeElement as HTMLElement | null;
       rotateMutation.mutate({ keyId });
     }
   };
@@ -193,9 +220,13 @@ export function ApiKeysPage() {
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    alert('API key copied to clipboard!');
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('API key copied to clipboard');
+    } catch {
+      toast.error('Could not copy API key automatically. Please select and copy it manually.');
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -223,7 +254,14 @@ export function ApiKeysPage() {
 
         {/* Created Key Display */}
         {createdKey && (
-          <div className="bg-pf-success/10 border border-pf-success rounded-lg p-4" role="status" aria-live="polite">
+          <div
+            ref={createdKeyPanelRef}
+            tabIndex={-1}
+            className="bg-pf-success/10 border border-pf-success rounded-lg p-4 focus:outline-hidden focus:ring-2 focus:ring-pf-success focus:ring-offset-2 focus:ring-offset-pf-bg-0"
+            role="status"
+            aria-live="polite"
+            aria-label="One-time API key secret"
+          >
             <h3 className="font-semibold text-pf-success mb-2">API Key Created Successfully</h3>
             <p className="text-pf-text-secondary text-sm mb-3">
               <strong className="text-pf-warning">Important:</strong> Copy this API key now. You won't be able to see it again!
@@ -262,6 +300,7 @@ export function ApiKeysPage() {
             {!showCreateForm && (
               <Button
                 variant="primary"
+                ref={createButtonRef}
                 onClick={() => setShowCreateForm(true)}
                 iconLeft={<PlusIcon className="w-4 h-4" />}
               >
