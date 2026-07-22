@@ -33,3 +33,21 @@ public interface IAttentionSource
     /// </summary>
     Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Internal attention-source result with mutation-watermark provenance.
+/// </summary>
+public sealed record AttentionSourceResult(
+    IReadOnlyList<AttentionItemDto> Items,
+    long? OriginWatermark);
+
+/// <summary>
+/// Optional seam for attention sources that compose observations carrying their own provenance.
+/// </summary>
+public interface IAttentionSourceWithOrigin
+{
+    /// <summary>
+    /// Returns attention items together with the oldest required input watermark.
+    /// </summary>
+    Task<AttentionSourceResult> GetItemsWithOriginAsync(CancellationToken cancellationToken);
+}

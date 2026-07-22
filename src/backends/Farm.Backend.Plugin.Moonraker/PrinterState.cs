@@ -5,6 +5,13 @@ namespace Farm.Backend.Plugin.Moonraker;
 // Persistent state for a printer to avoid overwriting good values with nulls
 internal sealed class PrinterState
 {
+    public long? OriginWatermark { get; private set; }
+
+    public void IncludeOrigin(long? originWatermark)
+    {
+        OriginWatermark = originWatermark;
+    }
+
     public double? X { get; set; }
 
     public double? Y { get; set; }

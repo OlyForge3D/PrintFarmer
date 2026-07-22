@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
@@ -20,15 +21,18 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
     private readonly IEnumerable<IAttentionSource> _attentionSources;
     private readonly ISettingsService _settings;
     private readonly ILogger<AttentionShiftPlanTaskSource> _logger;
+    private readonly IMutationWatermarkReader? _watermarkReader;
 
     public AttentionShiftPlanTaskSource(
         IEnumerable<IAttentionSource> attentionSources,
         ISettingsService settings,
-        ILogger<AttentionShiftPlanTaskSource> logger)
+        ILogger<AttentionShiftPlanTaskSource> logger,
+        IMutationWatermarkReader? watermarkReader = null)
     {
         _attentionSources = attentionSources;
         _settings = settings;
         _logger = logger;
+        _watermarkReader = watermarkReader;
     }
 
     public string SourceName => "attention";
@@ -41,29 +45,54 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
         UserTaskSourceKind.FilamentCoverage,
     ];
 
-    public async Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
+    public async Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
     {
         List<ShiftPlanTaskSpec> results = new();
-        SpoolCoverageSettings spool;
+        SettingsSnapshot<SpoolCoverageSettings> settingsSnapshot;
         try
         {
-            spool = _settings.Get<SpoolCoverageSettings>() ?? new SpoolCoverageSettings();
+            settingsSnapshot = _settings.GetSnapshot<SpoolCoverageSettings>()
+                ?? new SettingsSnapshot<SpoolCoverageSettings>(
+                    _settings.Get<SpoolCoverageSettings>(),
+                    OriginWatermark: null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogDebug(ex, "SpoolCoverageSettings unavailable; using defaults");
-            spool = new SpoolCoverageSettings();
+            settingsSnapshot = new SettingsSnapshot<SpoolCoverageSettings>(
+                new SpoolCoverageSettings(),
+                OriginWatermark: null);
         }
 
+        SpoolCoverageSettings spool = settingsSnapshot.Value;
         int runoutLeadMinutes = Math.Max(0, spool.RunoutWarningLeadMinutes);
+        List<long?> requiredOrigins = [settingsSnapshot.OriginWatermark];
 
         foreach (IAttentionSource src in _attentionSources)
         {
             ct.ThrowIfCancellationRequested();
+            long? observationOrigin = await OriginWatermark
+                .CaptureAsync(_watermarkReader, _logger, $"attention source {src.SourceName}", ct)
+                .ConfigureAwait(false);
 
             // Fix 4: do NOT catch per-inner-source exceptions — let them propagate
             // so the compiler can suppress auto-complete for this source's OwnedKinds.
-            IReadOnlyList<AttentionItemDto> items = await src.GetItemsAsync(ct).ConfigureAwait(false);
+            IReadOnlyList<AttentionItemDto> items;
+            if (src is IAttentionSourceWithOrigin sourceWithOrigin)
+            {
+                AttentionSourceResult sourceResult = await sourceWithOrigin
+                    .GetItemsWithOriginAsync(ct)
+                    .ConfigureAwait(false);
+                items = sourceResult.Items;
+                requiredOrigins.Add(OriginWatermark.Combine(
+                    observationOrigin,
+                    sourceResult.OriginWatermark));
+            }
+            else
+            {
+                items = await src.GetItemsAsync(ct).ConfigureAwait(false);
+                requiredOrigins.Add(observationOrigin);
+            }
 
             foreach (AttentionItemDto item in items)
             {
@@ -75,7 +104,9 @@ public sealed class AttentionShiftPlanTaskSource : IShiftPlanTaskSource
             }
         }
 
-        return results;
+        return new ShiftPlanSourceResult(
+            results,
+            OriginWatermark.Combine([.. requiredOrigins]));
     }
 
     private static ShiftPlanTaskSpec? MapItem(AttentionItemDto item, int runoutLeadMinutes)

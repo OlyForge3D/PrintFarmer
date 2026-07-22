@@ -398,6 +398,13 @@ public class UserTask
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Committed global mutation sequence that last changed this task.
+    /// Zero identifies rows created before mutation watermark rollout.
+    /// </summary>
+    [JsonIgnore]
+    public long LastMutationSequence { get; set; }
+
     // -- Shift-plan compiler fields (issue #713) --
 
     /// <summary>

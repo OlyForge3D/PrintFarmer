@@ -59,6 +59,9 @@ public sealed class UserTaskConfiguration : IEntityTypeConfiguration<UserTask>
             .IsRequired();
 
         _ = builder.Property(t => t.SourceId).HasMaxLength(128);
+        _ = builder.Property(t => t.LastMutationSequence)
+            .IsConcurrencyToken()
+            .IsRequired();
 
         // NOTE: the (SourceKind, SourceId) dedupe index is a provider-aware unique
         // filtered index declared in AppDbContext.OnModelCreating (Fix E/I) — it cannot

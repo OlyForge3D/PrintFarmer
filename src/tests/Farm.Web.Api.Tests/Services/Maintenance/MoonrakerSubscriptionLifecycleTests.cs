@@ -18,6 +18,20 @@ namespace Farm.Web.Api.Tests.Services.Maintenance;
 public sealed class MoonrakerSubscriptionLifecycleTests
 {
     [Fact]
+    public void PrinterState_OriginTracksLatestObservation()
+    {
+        var state = new PrinterState();
+
+        state.IncludeOrigin(3);
+        state.IncludeOrigin(9);
+
+        state.OriginWatermark.Should().Be(9);
+
+        state.IncludeOrigin(null);
+        state.OriginWatermark.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Enumeration_PrinterDeleted_CancelsLoopAndKeepsAccumulatorCleared()
     {
         bool printerIsActive = true;

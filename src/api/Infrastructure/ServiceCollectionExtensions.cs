@@ -324,6 +324,8 @@ public static class ServiceCollectionExtensions
 
         // Task repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Mutations.IMutationWatermarkReader,
+            Farm.Infrastructure.Services.Mutations.MutationWatermarkReader>();
 
         // Settings repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository, Farm.Infrastructure.Repositories.Settings.EfAppSettingsRepository>();

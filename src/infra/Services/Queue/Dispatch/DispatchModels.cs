@@ -36,6 +36,13 @@ public record DispatchScore(
     List<string> EliminationReasons);
 
 /// <summary>
+/// Dispatch scores with the watermark captured before their required observations.
+/// </summary>
+public sealed record DispatchScoreResult(
+    IReadOnlyList<DispatchScore> Scores,
+    long? OriginWatermark);
+
+/// <summary>
 /// Dispatch action recorded in the audit trail.
 /// </summary>
 public enum DispatchAction

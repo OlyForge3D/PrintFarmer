@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Services.Mutations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.Configuration;
@@ -38,6 +39,8 @@ public class SettingsService : ISettingsService
 
     private readonly ILogger<SettingsService> _logger;
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
+    private readonly IMutationWatermarkReader? _watermarkReader;
+    private Dictionary<string, long?> _settingsOriginWatermarks = [];
 
     public void Save<T>(T settings)
         where T : class, IAppSetting
@@ -45,6 +48,7 @@ public class SettingsService : ISettingsService
         ArgumentNullException.ThrowIfNull(settings);
         Type type = typeof(T);
         AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>() ?? throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting]. Only AppSettings can be persisted to DB.");
+        _settingsOriginWatermarks[appAttr.Key] = CaptureOriginWatermark();
         _settings[appAttr.Key] = settings;
 
         // Persist to DB (AppSettings only)
@@ -72,7 +76,12 @@ public class SettingsService : ISettingsService
 
     private readonly Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository _settingsRepo;
 
-    public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, ILogger<SettingsService> logger, Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo)
+    public SettingsService(
+        IConfiguration config,
+        IDbContextFactory<AppDbContext> dbContextFactory,
+        ILogger<SettingsService> logger,
+        Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo,
+        IMutationWatermarkReader? watermarkReader = null)
     {
         _settingTypes = AppDomain.CurrentDomain.GetAssemblies()
             .SelectMany(a =>
@@ -91,12 +100,15 @@ public class SettingsService : ISettingsService
         _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _settingsRepo = settingsRepo ?? throw new ArgumentNullException(nameof(settingsRepo));
+        _watermarkReader = watermarkReader;
         LoadSettings(config);
     }
 
     private void LoadSettings(IConfiguration config)
     {
+        long? originWatermark = CaptureOriginWatermark();
         Dictionary<string, object> newSettings = new Dictionary<string, object>();
+        Dictionary<string, long?> newOriginWatermarks = [];
         using AppDbContext dbContext = _dbContextFactory.CreateDbContext();
 
         foreach (Type type in _settingTypes)
@@ -147,9 +159,11 @@ public class SettingsService : ISettingsService
             }
 
             newSettings[key] = instance;
+            newOriginWatermarks[key] = originWatermark;
         }
 
         _settings = newSettings;
+        _settingsOriginWatermarks = newOriginWatermarks;
     }
 
     /// <summary>
@@ -166,6 +180,38 @@ public class SettingsService : ISettingsService
     {
         T? result = _settings.Values.OfType<T>().FirstOrDefault();
         return result == null ? throw new InvalidOperationException($"No settings instance found for type {typeof(T).Name}") : result;
+    }
+
+    public SettingsSnapshot<T> GetSnapshot<T>()
+        where T : class
+    {
+        T value = Get<T>();
+        string? key = _settings.FirstOrDefault(pair => ReferenceEquals(pair.Value, value)).Key;
+        long? originWatermark = key is not null
+            && _settingsOriginWatermarks.TryGetValue(key, out long? captured)
+                ? captured
+                : null;
+        return new SettingsSnapshot<T>(value, originWatermark);
+    }
+
+    private long? CaptureOriginWatermark()
+    {
+        if (_watermarkReader is null)
+        {
+            return null;
+        }
+
+        try
+        {
+#pragma warning disable VSTHRD002 // Settings loading is synchronous by design.
+            return _watermarkReader.GetCurrentAsync().GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to capture mutation watermark before loading settings; provenance is unavailable");
+            return null;
+        }
     }
 
     public object GetByKey(string key)

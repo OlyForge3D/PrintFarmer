@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -16,7 +17,8 @@ public sealed class FilamentCoverageSpoolResolver(
     ISpoolmanService spoolmanService,
     IBackendClientFactory backendClientFactory,
     ILogger<FilamentCoverageSpoolResolver> logger,
-    AppDbContext? db = null) : IFilamentCoverageSpoolResolver
+    AppDbContext? db = null,
+    IMutationWatermarkReader? watermarkReader = null) : IFilamentCoverageSpoolResolver
 {
     internal const string ReasonSpoolmanUnconfigured = "spoolman-unconfigured";
     internal const string ReasonSourceUnavailable = "spool-source-unavailable";
@@ -26,11 +28,15 @@ public sealed class FilamentCoverageSpoolResolver(
     private readonly IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly ILogger<FilamentCoverageSpoolResolver> _logger = logger;
     private readonly AppDbContext? _db = db;
+    private readonly IMutationWatermarkReader? _watermarkReader = watermarkReader;
 
     public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
         CanonicalSpoolIdentity identity,
         CancellationToken ct)
     {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "source-qualified filament spool", ct)
+            .ConfigureAwait(false);
         HashSet<int> spoolIds = [identity.SpoolId];
         Dictionary<int, FilamentCoverageSpoolSnapshot> resolved;
 
@@ -69,7 +75,7 @@ public sealed class FilamentCoverageSpoolResolver(
                     ReasonSourceUnavailable);
             }
 
-            resolved = await ResolveCentralAsync(spoolIds, ct).ConfigureAwait(false);
+            resolved = await ResolveCentralAsync(spoolIds, originWatermark, ct).ConfigureAwait(false);
         }
         else
         {
@@ -101,6 +107,7 @@ public sealed class FilamentCoverageSpoolResolver(
                     {
                         SpoolIds = { identity.SpoolId },
                     },
+                    originWatermark,
                     ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -173,6 +180,9 @@ public sealed class FilamentCoverageSpoolResolver(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(printer);
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "filament spool source", ct)
+            .ConfigureAwait(false);
 
         SourceSelection selection = SelectSource(printer);
         if (selection.ErrorReason is not null)
@@ -180,27 +190,32 @@ public sealed class FilamentCoverageSpoolResolver(
             return new FilamentCoverageSpoolSnapshot(
                 null,
                 selection.Key.Native,
-                selection.ErrorReason);
+                selection.ErrorReason,
+                OriginWatermark: null);
         }
 
         var request = new SourceRequest(selection.NativeClient, selection.ServerUrl);
         _ = request.SpoolIds.Add(spoolId);
         Dictionary<int, FilamentCoverageSpoolSnapshot> resolved = selection.Key.Native
-            ? await ResolveNativeAsync(request, ct).ConfigureAwait(false)
-            : await ResolveCentralAsync(request.SpoolIds, ct).ConfigureAwait(false);
+            ? await ResolveNativeAsync(request, originWatermark, ct).ConfigureAwait(false)
+            : await ResolveCentralAsync(request.SpoolIds, originWatermark, ct).ConfigureAwait(false);
 
         return resolved.TryGetValue(spoolId, out FilamentCoverageSpoolSnapshot? snapshot)
             ? snapshot
             : new FilamentCoverageSpoolSnapshot(
                 null,
                 selection.Key.Native,
-                ReasonSpoolNotFound);
+                ReasonSpoolNotFound,
+                OriginWatermark: null);
     }
 
     public async Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> ResolveAsync(
         IReadOnlyList<Printer> printers,
         CancellationToken ct)
     {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "filament spool sources", ct)
+            .ConfigureAwait(false);
         Dictionary<Guid, SourceAssignment> assignments = [];
         Dictionary<SourceKey, SourceRequest> requests = [];
 
@@ -247,8 +262,8 @@ public sealed class FilamentCoverageSpoolResolver(
         foreach ((SourceKey key, SourceRequest request) in requests)
         {
             resolvedSources[key] = key.Native
-                ? await ResolveNativeAsync(request, ct).ConfigureAwait(false)
-                : await ResolveCentralAsync(request.SpoolIds, ct).ConfigureAwait(false);
+                ? await ResolveNativeAsync(request, originWatermark, ct).ConfigureAwait(false)
+                : await ResolveCentralAsync(request.SpoolIds, originWatermark, ct).ConfigureAwait(false);
         }
 
         Dictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result = [];
@@ -261,7 +276,7 @@ public sealed class FilamentCoverageSpoolResolver(
             {
                 if (assignment.ErrorReason is not null)
                 {
-                    printerSpools[spoolId] = new(null, false, assignment.ErrorReason);
+                    printerSpools[spoolId] = new(null, false, assignment.ErrorReason, OriginWatermark: null);
                 }
                 else if (resolvedSources.TryGetValue(assignment.Key, out Dictionary<int, FilamentCoverageSpoolSnapshot>? source)
                     && source.TryGetValue(spoolId, out FilamentCoverageSpoolSnapshot? snapshot))
@@ -270,7 +285,7 @@ public sealed class FilamentCoverageSpoolResolver(
                 }
                 else
                 {
-                    printerSpools[spoolId] = new(null, assignment.Key.Native, ReasonSpoolNotFound);
+                    printerSpools[spoolId] = new(null, assignment.Key.Native, ReasonSpoolNotFound, OriginWatermark: null);
                 }
             }
 
@@ -282,6 +297,7 @@ public sealed class FilamentCoverageSpoolResolver(
 
     private async Task<Dictionary<int, FilamentCoverageSpoolSnapshot>> ResolveNativeAsync(
         SourceRequest request,
+        long? originWatermark,
         CancellationToken ct)
     {
         try
@@ -297,7 +313,7 @@ public sealed class FilamentCoverageSpoolResolver(
             Dictionary<int, SpoolmanSpoolDto> spools = SpoolmanJsonParser.ParseSpools(json)
                 .GroupBy(s => s.Id)
                 .ToDictionary(g => g.Key, g => g.First());
-            return BuildSnapshots(request.SpoolIds, spools, true);
+            return BuildSnapshots(request.SpoolIds, spools, true, originWatermark);
         }
         catch (OperationCanceledException)
         {
@@ -312,6 +328,7 @@ public sealed class FilamentCoverageSpoolResolver(
 
     private async Task<Dictionary<int, FilamentCoverageSpoolSnapshot>> ResolveCentralAsync(
         HashSet<int> spoolIds,
+        long? originWatermark,
         CancellationToken ct)
     {
         SpoolmanConfigDto? config = _spoolmanService.GetConfig();
@@ -350,7 +367,7 @@ public sealed class FilamentCoverageSpoolResolver(
             }
             while (found.Count < spoolIds.Count && offset < totalCount);
 
-            return BuildSnapshots(spoolIds, found, false);
+            return BuildSnapshots(spoolIds, found, false, originWatermark);
         }
         catch (OperationCanceledException)
         {
@@ -366,12 +383,13 @@ public sealed class FilamentCoverageSpoolResolver(
     private static Dictionary<int, FilamentCoverageSpoolSnapshot> BuildSnapshots(
         IEnumerable<int> spoolIds,
         Dictionary<int, SpoolmanSpoolDto> spools,
-        bool tracksLiveConsumption)
+        bool tracksLiveConsumption,
+        long? originWatermark)
         => spoolIds.ToDictionary(
             id => id,
             id => spools.TryGetValue(id, out SpoolmanSpoolDto? spool)
-                ? new FilamentCoverageSpoolSnapshot(spool, tracksLiveConsumption, null)
-                : new FilamentCoverageSpoolSnapshot(null, tracksLiveConsumption, ReasonSpoolNotFound));
+                ? new FilamentCoverageSpoolSnapshot(spool, tracksLiveConsumption, null, originWatermark)
+                : new FilamentCoverageSpoolSnapshot(null, tracksLiveConsumption, ReasonSpoolNotFound, OriginWatermark: null));
 
     private static Dictionary<int, FilamentCoverageSpoolSnapshot> Failure(
         IEnumerable<int> spoolIds,
@@ -379,7 +397,7 @@ public sealed class FilamentCoverageSpoolResolver(
         string reason)
         => spoolIds.ToDictionary(
             id => id,
-            _ => new FilamentCoverageSpoolSnapshot(null, tracksLiveConsumption, reason));
+            _ => new FilamentCoverageSpoolSnapshot(null, tracksLiveConsumption, reason, OriginWatermark: null));
 
     private static string NormalizeSource(string serverUrl)
         => CanonicalSpoolIdentity.NormalizeSourceIdentity(serverUrl);

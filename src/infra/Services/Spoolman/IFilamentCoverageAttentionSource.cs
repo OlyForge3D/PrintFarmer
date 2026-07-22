@@ -14,4 +14,17 @@ public interface IFilamentCoverageAttentionSource
     /// Never emits warnings for slots whose coverage is <see cref="FilamentCoverageStatus.Unknown"/>.
     /// </summary>
     Task<IReadOnlyList<FilamentRunoutWarningDto>> GetRunoutWarningsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Returns runout warnings with nullable origin provenance.
+    /// </summary>
+    async Task<FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>>> GetRunoutWarningsWithOriginAsync(
+        CancellationToken ct)
+    {
+        IReadOnlyList<FilamentRunoutWarningDto> warnings =
+            await GetRunoutWarningsAsync(ct).ConfigureAwait(false);
+        return new FilamentCoverageResult<IReadOnlyList<FilamentRunoutWarningDto>>(
+            warnings,
+            OriginWatermark: null);
+    }
 }

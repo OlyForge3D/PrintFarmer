@@ -862,15 +862,15 @@ public class ShiftPlanCompilerTests
     {
         public string SourceName { get; } = name;
         public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = ownedKinds;
-        public Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<ShiftPlanTaskSpec>>(specs);
+        public Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
+            => Task.FromResult(new ShiftPlanSourceResult(specs, OriginWatermark: null));
     }
 
     private sealed class ThrowingSource(IReadOnlyCollection<UserTaskSourceKind> ownedKinds) : IShiftPlanTaskSource
     {
         public string SourceName => "boom";
         public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = ownedKinds;
-        public Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
+        public Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
             => throw new InvalidOperationException("simulated");
     }
 }

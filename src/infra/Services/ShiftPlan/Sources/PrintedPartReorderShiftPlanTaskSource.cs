@@ -2,8 +2,11 @@
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure.Services.ShiftPlan.Sources;
 
@@ -29,7 +32,9 @@ public sealed record PrintedPartRestockTaskMetadata(
 /// </summary>
 public sealed class PrintedPartReorderShiftPlanTaskSource(
     IReorderEvaluationService reorderEvaluation,
-    IOperatorFeatureGate featureGate) : IShiftPlanTaskSource
+    IOperatorFeatureGate featureGate,
+    ILogger<PrintedPartReorderShiftPlanTaskSource>? logger = null,
+    IMutationWatermarkReader? watermarkReader = null) : IShiftPlanTaskSource
 {
     private const string SourceIdPrefix = "partinventory:";
 
@@ -46,8 +51,15 @@ public sealed class PrintedPartReorderShiftPlanTaskSource(
         [UserTaskSourceKind.PrintedPartStock];
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
+    public async Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
     {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(
+                watermarkReader,
+                logger ?? NullLogger<PrintedPartReorderShiftPlanTaskSource>.Instance,
+                "printed-part reorder source",
+                ct)
+            .ConfigureAwait(false);
         await EnsureFeaturesEnabledAsync(ct).ConfigureAwait(false);
 
         IReadOnlyList<ReorderCandidateResponse> candidates = await reorderEvaluation
@@ -73,9 +85,10 @@ public sealed class PrintedPartReorderShiftPlanTaskSource(
         // snapshot that may resolve or refresh tasks.
         await EnsureFeaturesEnabledAsync(ct).ConfigureAwait(false);
 
-        return specs
+        List<ShiftPlanTaskSpec> orderedSpecs = specs
             .OrderBy(spec => spec.SourceId, StringComparer.Ordinal)
             .ToList();
+        return new ShiftPlanSourceResult(orderedSpecs, originWatermark);
     }
 
     private async Task EnsureFeaturesEnabledAsync(CancellationToken ct)

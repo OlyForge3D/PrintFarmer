@@ -2512,6 +2512,29 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Model3DTag", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MutationCounter", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("Value")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("MutationCounters");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Value = 0L
+                        });
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5872,6 +5895,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<long>("LastMutationSequence")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
 
                     b.Property<string>("MetadataJson")
                         .HasColumnType("nvarchar(max)");

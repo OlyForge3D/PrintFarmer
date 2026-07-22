@@ -31,6 +31,25 @@ public sealed record ShiftPlanTaskSpec(
     string? RelatedEntityIdsJson = null);
 
 /// <summary>
+/// Complete output from one shift-plan source evaluation.
+/// </summary>
+/// <param name="Specs">The authoritative specs observed by the source.</param>
+/// <param name="OriginWatermark">Oldest proven mutation watermark captured before the required observations.</param>
+public sealed record ShiftPlanSourceResult(
+    IReadOnlyList<ShiftPlanTaskSpec> Specs,
+    long? OriginWatermark) : IReadOnlyList<ShiftPlanTaskSpec>
+{
+    public int Count => Specs.Count;
+
+    public ShiftPlanTaskSpec this[int index] => Specs[index];
+
+    public IEnumerator<ShiftPlanTaskSpec> GetEnumerator() => Specs.GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+        => GetEnumerator();
+}
+
+/// <summary>
 /// Pluggable producer of shift-plan task specs. Each source is responsible
 /// for one operational concern (attention, filament coverage, maintenance,
 /// harvest, restock, …) and returns the full current set of specs it would
@@ -61,7 +80,7 @@ public interface IShiftPlanTaskSource
     IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; }
 
     /// <summary>Returns the specs this source currently wants materialized.</summary>
-    Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct);
+    Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct);
 }
 
 /// <summary>

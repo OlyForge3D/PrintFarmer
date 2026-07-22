@@ -115,7 +115,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         foreach (IShiftPlanTaskSource src in _sources)
         {
             ct.ThrowIfCancellationRequested();
-            IReadOnlyList<ShiftPlanTaskSpec> produced;
+            ShiftPlanSourceResult produced;
             try
             {
                 produced = await src.ProduceAsync(ct).ConfigureAwait(false);
@@ -135,7 +135,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 continue;
             }
 
-            foreach (ShiftPlanTaskSpec spec in produced)
+            foreach (ShiftPlanTaskSpec spec in produced.Specs)
             {
                 if (spec.SourceKind == UserTaskSourceKind.Unspecified || string.IsNullOrWhiteSpace(spec.SourceId))
                 {

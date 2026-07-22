@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
@@ -19,19 +20,22 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
     private readonly ISettingsService _settings;
     private readonly IOperatorFeatureGate _featureGate;
     private readonly ILogger<MaintenanceIdleWindowShiftPlanTaskSource> _logger;
+    private readonly IMutationWatermarkReader? _watermarkReader;
 
     public MaintenanceIdleWindowShiftPlanTaskSource(
         IMaintenanceAlertRepository alerts,
         IIdleWindowService idleWindows,
         ISettingsService settings,
         IOperatorFeatureGate featureGate,
-        ILogger<MaintenanceIdleWindowShiftPlanTaskSource> logger)
+        ILogger<MaintenanceIdleWindowShiftPlanTaskSource> logger,
+        IMutationWatermarkReader? watermarkReader = null)
     {
         _alerts = alerts;
         _idleWindows = idleWindows;
         _settings = settings;
         _featureGate = featureGate;
         _logger = logger;
+        _watermarkReader = watermarkReader;
     }
 
     public string SourceName => "maintenance-idle-window";
@@ -40,19 +44,28 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
     public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } =
         [UserTaskSourceKind.Maintenance];
 
-    public async Task<IReadOnlyList<ShiftPlanTaskSpec>> ProduceAsync(CancellationToken ct)
+    public async Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
     {
-        ShiftPlanSettings settings;
+        long? rootOrigin = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "maintenance shift-plan inputs", ct)
+            .ConfigureAwait(false);
+        SettingsSnapshot<ShiftPlanSettings> settingsSnapshot;
         try
         {
-            settings = _settings.Get<ShiftPlanSettings>() ?? new ShiftPlanSettings();
+            settingsSnapshot = _settings.GetSnapshot<ShiftPlanSettings>()
+                ?? new SettingsSnapshot<ShiftPlanSettings>(
+                    _settings.Get<ShiftPlanSettings>(),
+                    OriginWatermark: null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogDebug(ex, "ShiftPlanSettings unavailable; using defaults");
-            settings = new ShiftPlanSettings();
+            settingsSnapshot = new SettingsSnapshot<ShiftPlanSettings>(
+                new ShiftPlanSettings(),
+                OriginWatermark: null);
         }
 
+        ShiftPlanSettings settings = settingsSnapshot.Value;
         TimeSpan minWindow = TimeSpan.FromMinutes(Math.Max(1, settings.MinIdleWindowMinutes));
         TimeSpan lead = TimeSpan.FromMinutes(Math.Max(0, settings.MaintenanceLeadMinutes));
 
@@ -67,7 +80,7 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
 
         if (active.Count == 0)
         {
-            return Array.Empty<ShiftPlanTaskSpec>();
+            return BuildResult([], rootOrigin, settingsSnapshot.OriginWatermark);
         }
 
         // Finding H5 (issue #711): when the multi-slot fallback feature is off,
@@ -80,7 +93,7 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
             active = active.Where(a => !a.ToolheadId.HasValue).ToList();
             if (active.Count == 0)
             {
-                return Array.Empty<ShiftPlanTaskSpec>();
+                return BuildResult([], rootOrigin, settingsSnapshot.OriginWatermark);
             }
         }
 
@@ -159,6 +172,15 @@ public sealed class MaintenanceIdleWindowShiftPlanTaskSource : IShiftPlanTaskSou
                 DueAt: null));
         }
 
-        return specs;
+        return BuildResult(
+            specs,
+            rootOrigin,
+            settingsSnapshot.OriginWatermark,
+            idleResult.OriginWatermark);
     }
+
+    private static ShiftPlanSourceResult BuildResult(
+        IReadOnlyList<ShiftPlanTaskSpec> specs,
+        params long?[] origins)
+        => new(specs, OriginWatermark.Combine(origins));
 }
