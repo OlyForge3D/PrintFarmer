@@ -65,12 +65,24 @@
     <!-- SA1615: Return value documentation missing - method names indicate return -->
     <!-- SA1618: Generic type parameter documentation missing - code context is sufficient -->
     <!-- StyleCop Naming (SA1300): Conflicts with C# conventions for record parameters (camelCase), -->
-    <!-- private fields with underscore prefix, and intentional version namespaces like v2_3_1 -->
+    <!-- private fields with underscore prefix, and intentional version namespaces like v2_4_0 -->
     <!-- StyleCop Formatting (SA1025): Intentional alignment in enums and tables improves readability -->
     <NoWarn>$(NoWarn);CA1812;CA1515;CA1822;CA1852;CA1814;CA1031;S108;S2486;CA1848;S6667;CA2007;CA2016;S6966;CA1305;CA1307;CA1310;CA1311;CA1304;CA1308;CA1054;CA1055;CA1056;CA2234;S1075;CA2000;CA1816;IDISP004;IDISP001;CA1062;CA1508;CA2100;CA1860;CA1869;CA1850;CA1872;S6602;S6605;CA1861;S1066;S3358;S1125;S1481;S2139;S2325;S1135;CS1591;CA1819;CA2227;CA1002;CA1805;CA1716;CA1707;CA1711;CA1847;CA1063;IDISP003;IDISP025;S125;S3260;S3267;S4136;S4487;S1450;S1854;S3881;S6603;SA1611;SA1615;SA1618;SA1300;SA1025</NoWarn>
   </PropertyGroup>
 
   <!-- Note: Analyzer packages (IDisposableAnalyzers, Microsoft.VisualStudio.Threading, SonarAnalyzer.CSharp)
        are already defined in root Directory.Build.props and inherited via Import above -->
+
+  <!-- Security: force the patched SQLite native bundle solution-wide.
+       Microsoft.Data.Sqlite / EF Core Sqlite (10.0.x) transitively pull
+       SQLitePCLRaw.bundle_e_sqlite3 2.1.11 -> SQLitePCLRaw.lib.e_sqlite3 2.1.11,
+       which carries a known high-severity SQLite CVE (GHSA-2m69-gcr7-jv3q) with no
+       fix in the 2.x line. SQLitePCLRaw 3.x replaces lib.e_sqlite3 with the patched
+       SourceGear.sqlite3 (SQLite 3.50.x), so we pin the bundle here. SQLitePCLRaw.core
+       3.x keeps the managed API used by Microsoft.Data.Sqlite 10.0, verified by the
+       SQLite-backed test suite. -->
+  <ItemGroup>
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
 
 </Project>

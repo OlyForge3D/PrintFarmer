@@ -6,8 +6,10 @@
 ############################################################
 
 # Global build arguments
-ARG ORCASLICER_VERSION=2.3.1
+ARG ORCASLICER_VERSION=2.4.1
 ARG BUILD_VERBOSITY=quiet
+# Short git SHA of the source commit; embedded into each service's version endpoint
+ARG GIT_SHA=unknown
 
 # Multi-architecture support
 # BUILDPLATFORM = arch of the build host (for compile stages — faster, no emulation)
@@ -31,10 +33,15 @@ ARG UBUNTU_TAG=24.04
 FROM --platform=${BUILDPLATFORM:-linux/amd64} mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
 WORKDIR /
 
+# Re-declare git SHA in this stage (ARGs are scoped per-stage after FROM).
+# Passed to `dotnet publish` as GitCommitSha so InformationalVersion carries the commit.
+ARG GIT_SHA=unknown
+
 # Copy root-level files and the entire src directory
 # The context root is the repository root (/home/pi/pfarm)
 COPY Directory.Build.props ./
 COPY global.json ./
+COPY VERSION ./
 COPY proto ./proto
 COPY src/ ./src/
 
@@ -46,12 +53,13 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
     dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
-    dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj && \
+    dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj
+    dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj
 
 # Build and publish all services: sequential restore, then sequential publish
 # Using BUILD_VERBOSITY argument: quiet, minimal, normal, or detailed
@@ -65,20 +73,22 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj && \
     echo "Publishing API..." && \
-    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing OrcaSlicer Worker..." && \
-    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Printer Discovery..." && \
-    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Slicer Host..." && \
-    dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Building backend plugins..." && \
     dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
-    dotnet build ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
+    dotnet build ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
 
 # Verify critical runtime files exist and fail immediately if any are missing
 RUN echo "Checking published artifacts..." && \
@@ -97,6 +107,7 @@ RUN echo "Checking published artifacts..." && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.Sdcp.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Sdcp.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.FlashForge.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.FlashForge.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.TestEmulator.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.TestEmulator.dll"; exit 1)) && \
     echo "✓ All .NET builds completed successfully"
 
 ############################################################
@@ -129,16 +140,16 @@ COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
 # Create startup script to fix mounted volume permissions for appuser (UID 1001)
 # This handles the case where mounted volumes from host preserve host UID/GID
 # Run as root initially to fix permissions, then drop to appuser to run the app
-RUN cat > /app/entrypoint.sh << 'EOF'
-#!/bin/bash
-set -e
-# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them
-# The appuser may not own these directories if they're bind mounts from the host
-mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
-chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
-# Drop to appuser and run application
-exec gosu appuser dotnet Farm.Web.Api.dll
-EOF
+RUN printf '%s\n' \
+    '#!/bin/bash' \
+    'set -e' \
+    '# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them' \
+    '# The appuser may not own these directories if they are bind mounts from the host' \
+    'mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
+    'chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
+    '# Drop to appuser and run application' \
+    'exec gosu appuser dotnet Farm.Web.Api.dll' \
+    > /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Install gosu for privilege dropping (used by many Docker images)
@@ -198,7 +209,7 @@ ENTRYPOINT ["dotnet", "Farm.Slicer.Host.dll"]
 FROM --platform=linux/amd64 ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCA_ASSET_PATH=""
-ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
+ARG ORCASLICER_URL=https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage
 ARG ALLOW_STUB=true
 ARG GITHUB_TOKEN
 ARG _SKIP_ORCA_BINARY_BUILD=0
@@ -240,14 +251,24 @@ RUN set -e; \
         fi; \
     fi; \
     \
+    # Determine target architecture for asset selection (2.4.0+ ships both x86_64 and aarch64 AppImages) \
+    target_arch="$(uname -m)"; \
+    case "$target_arch" in aarch64|arm64) arch_is_arm=1;; *) arch_is_arm=0;; esac; \
+    echo "[orcaslicer-binaries] Target arch=${target_arch} (arm=${arch_is_arm})"; \
+    \
     # Try to find the correct download URL dynamically (only if not using cached AppImage) \
     if [ ! -f orcaslicer.AppImage ]; then \
-        dynamic_url=$(curl -H "Accept: application/vnd.github+json" \
+        all_appimages=$(curl -H "Accept: application/vnd.github+json" \
                           -H "User-Agent: OrcaSlicerWorker/1.0" \
-                          -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases" | \
+                          -fsSL "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases" | \
                       jq -r --arg ver "v${ORCASLICER_VERSION}" \
-                         '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | \
-                      head -n1 || true); \
+                         '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)AppImage$")) | .browser_download_url' || true); \
+        if [ "$arch_is_arm" = "1" ]; then \
+            dynamic_url=$(printf '%s\n' "$all_appimages" | grep -iE 'aarch64|arm64' | head -n1 || true); \
+        else \
+            dynamic_url=$(printf '%s\n' "$all_appimages" | grep -ivE 'aarch64|arm64' | head -n1 || true); \
+        fi; \
+        [ -z "$dynamic_url" ] && dynamic_url=$(printf '%s\n' "$all_appimages" | head -n1 || true); \
         \
         if [ -n "$dynamic_url" ]; then \
             echo "[orcaslicer-binaries] Discovered asset: $dynamic_url"; \
@@ -275,10 +296,19 @@ RUN set -e; \
     \
     # Try multiple URL patterns (only if not using cached AppImage) \
     if [ ! -f orcaslicer.AppImage ]; then \
-        try_download "${ORCASLICER_URL}" \
-        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
-        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
-        || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+        if [ "$arch_is_arm" = "1" ]; then \
+            # Try the aarch64 asset first: ORCASLICER_URL defaults to the x86_64 AppImage, \
+            # so if dynamic discovery failed we must NOT fall through to it on ARM. \
+            try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCASLICER_VERSION}.AppImage" \
+            || try_download "${ORCASLICER_URL}" \
+            || echo "[orcaslicer-binaries] WARNING: All ARM download attempts failed"; \
+        else \
+            try_download "${ORCASLICER_URL}" \
+            || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage" \
+            || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
+            || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
+            || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+        fi; \
     fi; \
     \
     # Extract AppImage if available \
@@ -345,7 +375,10 @@ WORKDIR /app
 # Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl wget ca-certificates \
-        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 \
+        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
+        libglu1-mesa \
+        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libmspack0 \
+        libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
         xvfb fuse squashfs-tools file p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
@@ -384,6 +417,9 @@ RUN set -e; \
     # Create cache directory for SQLite profile cache \
     mkdir -p /app/cache && \
     chown appuser:appuser /app/cache && \
+    # Ensure temp working directory is writable by appuser \
+    mkdir -p /app/temp && \
+    chown appuser:appuser /app/temp && \
     # Verify profile directories exist \
     PROFILES_DIR="/opt/orcaslicer/resources/profiles"; \
     if [ -d "$PROFILES_DIR" ]; then \
@@ -462,27 +498,37 @@ COPY src/Web/ReactApp/ ./
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+# Short git SHA baked into the frontend bundle (vite.config reads process.env.VITE_GIT_SHA
+# as a fallback when .git is not present in the build context).
+ARG GIT_SHA=unknown
+ARG VITE_GIT_SHA=${GIT_SHA}
 RUN set -eux; \
     echo "[frontend-build] Starting React build with Vite..."; \
     echo "[frontend-build] VITE_API_BASE_URL=${VITE_API_BASE_URL}"; \
     echo "[frontend-build] VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL}"; \
     echo "[frontend-build] VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}"; \
+    echo "[frontend-build] VITE_GIT_SHA=${VITE_GIT_SHA}"; \
     \
     export VITE_API_BASE_URL="${VITE_API_BASE_URL}"; \
     export VITE_SIGNALR_PRINTERS_URL="${VITE_SIGNALR_PRINTERS_URL}"; \
     export VITE_SIGNALR_HARVEST_URL="${VITE_SIGNALR_HARVEST_URL}"; \
+    export VITE_GIT_SHA="${VITE_GIT_SHA}"; \
     \
-    npm run build 2>&1; \
+    set +e; \
+    npm run build > /tmp/frontend-build.log 2>&1; \
     build_status=$?; \
+    set -e; \
     \
     if [ "$build_status" -ne 0 ]; then \
         echo "[frontend-build] ERROR: Build failed with status $build_status"; \
+        tail -n 200 /tmp/frontend-build.log; \
         exit $build_status; \
     fi; \
     \
     if [ ! -d dist ] || [ ! -f dist/index.html ]; then \
         echo "[frontend-build] ERROR: dist directory or index.html not found!"; \
         ls -la; \
+        tail -n 80 /tmp/frontend-build.log || true; \
         exit 1; \
     fi; \
     \

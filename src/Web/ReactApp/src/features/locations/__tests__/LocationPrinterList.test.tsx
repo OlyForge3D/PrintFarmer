@@ -2,7 +2,6 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Printer } from '@/types/api';
 
 vi.mock('@/common/components/ui', () => ({
   Card: Object.assign(
@@ -33,30 +32,31 @@ vi.mock('@/common/components/ui', () => ({
   Badge: ({ children, variant, size, className }: { children: React.ReactNode; variant?: string; size?: string; className?: string }) => (
     <span data-testid="badge" data-variant={variant} data-size={size} className={className}>{children}</span>
   ),
+  Button: ({ children, onClick, className, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) => (
+    <button className={className} onClick={onClick} {...rest}>{children}</button>
+  ),
 }));
 
 vi.mock('@/common/components/icons/MdiIcons', () => ({
   SearchIcon: ({ className }: { className?: string }) => <span data-testid="search-icon" className={className} />,
 }));
 
-import { LocationPrinterList } from '../components/LocationPrinterList';
+import { LocationPrinterList, type LocationPrinterListPrinter } from '../components/LocationPrinterList';
 
-const makePrinter = (overrides: Partial<Printer> = {}): Printer => ({
+const makePrinter = (overrides: Partial<LocationPrinterListPrinter> = {}): LocationPrinterListPrinter => ({
   id: 'p1',
   name: 'Test Printer',
-  backend: 0,
-  backendUrl: 'http://localhost',
   isOnline: true,
-  isReachable: true,
-  state: 'Idle',
+  status: 'Idle',
+  currentJobName: null,
   ...overrides,
-} as Printer);
+});
 
 describe('LocationPrinterList', () => {
-  const printers: Printer[] = [
-    makePrinter({ id: 'p1', name: 'Prusa MK4', isOnline: true, state: 'Printing', progress: 75 }),
-    makePrinter({ id: 'p2', name: 'Voron 2.4', isOnline: true, state: 'Idle' }),
-    makePrinter({ id: 'p3', name: 'Ender 3', isOnline: false, state: 'Disconnected' }),
+  const printers: LocationPrinterListPrinter[] = [
+    makePrinter({ id: 'p1', name: 'Prusa MK4', isOnline: true, status: 'Printing', currentJobName: 'gearbox.gcode' }),
+    makePrinter({ id: 'p2', name: 'Voron 2.4', isOnline: true, status: 'Idle' }),
+    makePrinter({ id: 'p3', name: 'Ender 3', isOnline: false, status: 'Disconnected' }),
   ];
 
   beforeEach(() => {
@@ -70,9 +70,12 @@ describe('LocationPrinterList', () => {
     expect(screen.getByText('Ender 3')).toBeInTheDocument();
   });
 
-  it('shows print progress for printing printers', () => {
+  it('shows current job names without dead progress or temperature placeholders', () => {
     render(<LocationPrinterList printers={printers} />);
-    expect(screen.getByText(/75%/)).toBeInTheDocument();
+    expect(screen.getByText(/Printing — gearbox\.gcode/)).toBeInTheDocument();
+    expect(screen.queryByText(/75%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/🔥/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/🛏️/)).not.toBeInTheDocument();
   });
 
   it('filters by search text', () => {
@@ -107,8 +110,7 @@ describe('LocationPrinterList', () => {
   it('calls onPrinterClick when a printer card is clicked', () => {
     const onClick = vi.fn();
     render(<LocationPrinterList printers={printers} onPrinterClick={onClick} />);
-    const cards = screen.getAllByTestId('card-body');
-    fireEvent.click(cards[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Prusa MK4/i }));
     expect(onClick).toHaveBeenCalledWith('p1');
   });
 

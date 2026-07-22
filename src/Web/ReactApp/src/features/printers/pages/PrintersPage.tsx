@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
-import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities } from '@/common/hooks/useApi';
+import React, { useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
@@ -37,6 +37,7 @@ import { HelpButton } from '@/common/components/HelpButton';
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 'FlashForge';
 type PrinterSortMode = 'state' | 'name' | 'backend';
+type AvailabilityFilter = 'all' | '1' | '2' | '4' | '8' | '12' | '24';
 
 /** State priority for sorting: lower number = higher in list */
 function getStateSortPriority(printer: Printer, pendingIds: Set<string>): number {
@@ -64,6 +65,8 @@ export function PrintersPage() {
     isLoading,
     refetch: refetchPrinters
   } = usePrinters();
+
+  const { data: bedTypes = [] } = useBedTypes();
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
@@ -117,7 +120,6 @@ export function PrintersPage() {
   });
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [expandedPrinterId, setExpandedPrinterId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
     printers: Printer[];
@@ -159,6 +161,8 @@ export function PrintersPage() {
   // Filter state
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
+  const [bedTypeFilter, setBedTypeFilter] = useState<string>('all');
   const [sortMode, setSortMode] = useState<PrinterSortMode>(() => {
     const saved = localStorage.getItem('printerSortMode');
     if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
@@ -172,11 +176,24 @@ export function PrintersPage() {
 
   // Tabs removed — admin controls are now inline and permission-gated
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  const { printerId: routePrinterId } = useParams<{ printerId?: string }>();
   const printersById = useMemo(() => {
     const map: Record<string, Printer> = {};
     (printers || []).forEach(p => { map[p.id] = p; });
     return map;
   }, [printers]);
+  const expandedPrinterId = routePrinterId && printersById[routePrinterId] ? routePrinterId : null;
+
+  // Hours value for availability filter — cutoff is derived dynamically so it never goes stale
+  const [availabilityHours, setAvailabilityHours] = useState<number | null>(null);
+
+  // Ticking now value for availability filter — updates every 30s so filter stays fresh
+  const [filterNow, setFilterNow] = useState(Date.now);
+  useEffect(() => {
+    if (availabilityHours === null) return;
+    const id = setInterval(() => setFilterNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [availabilityHours]);
 
   // React 19: Filter printers using optimisticPrinters for optimistic deletion feedback
   const userPrinters = useMemo(() => {
@@ -195,6 +212,18 @@ export function PrintersPage() {
     // Backend filter
     if (backendFilter !== 'all') {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
+    }
+    // Availability filter — show printers available within N hours (idle printers are always available)
+    if (availabilityHours !== null) {
+      const cutoffMs = filterNow + availabilityHours * 60 * 60 * 1000;
+      filtered = filtered.filter(p => {
+        if (!p.estimatedCompletionTimeUtc) return true; // idle = already available
+        return new Date(p.estimatedCompletionTimeUtc).getTime() <= cutoffMs;
+      });
+    }
+    // Bed type filter
+    if (bedTypeFilter !== 'all') {
+      filtered = filtered.filter(p => p.bedTypeId === bedTypeFilter);
     }
     // Sort based on selected mode
     filtered.sort((a, b) => {
@@ -217,7 +246,9 @@ export function PrintersPage() {
       return 0;
     });
     return filtered;
-  }, [optimisticPrinters, stateFilter, backendFilter, sortMode, pendingPrinterIds]);
+  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds, bedTypeFilter]);
+
+  const deferredUserPrinters = useDeferredValue(userPrinters);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -282,15 +313,29 @@ export function PrintersPage() {
 
   // Import/export handled by admin components (PrinterImportControls / PrinterExportControls)
 
-  const handleEditPrinter = (printer: Printer) => {
+  // Stable identity so memoized printer cards don't re-render when the page does
+  const handleEditPrinter = useCallback((printer: Printer) => {
     setEditPrinterId(printer.id);
     setShowEditModal(true);
-  };
+  }, []);
 
   const handleOpenMaintenance = (printer: Printer) => {
     navigate(`/printers/${printer.id}/maintenance`);
   };
 
+  const handleOpenPrinterDetails = useCallback((printerId: string) => {
+    navigate(`/printers/${printerId}`);
+  }, [navigate]);
+
+  const handleClosePrinterDetails = useCallback(() => {
+    navigate('/printers');
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!isLoading && routePrinterId && !printersById[routePrinterId]) {
+      navigate('/printers', { replace: true });
+    }
+  }, [isLoading, navigate, printersById, routePrinterId]);
 
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
@@ -323,7 +368,7 @@ export function PrintersPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
+      <div className="min-h-full bg-pf-bg-2 pt-4 pb-8 lg:pt-20">
         <div className="mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
           <div className="pf-skeleton pf-animate-skeleton h-8 w-48 rounded-sm mb-6" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
@@ -341,7 +386,7 @@ export function PrintersPage() {
     );
   }
 
-  const isCollapsedSidebarOpen = viewMode === 'collapsed' && !!expandedPrinterId;
+  const isSidebarOpen = !!expandedPrinterId;
 
   return (
     <PageTemplate
@@ -350,7 +395,7 @@ export function PrintersPage() {
       icon={PrinterIcon}
       titleActions={<HelpButton onClick={startTour} />}
     >
-      <div className={isCollapsedSidebarOpen ? 'min-w-0 lg:pr-96' : 'min-w-0'}>
+      <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
           {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
           <div className="flex flex-col gap-4 mb-6">
@@ -414,6 +459,49 @@ export function PrintersPage() {
                   </Select>
                 </div>
 
+                {/* Availability Filter */}
+                <div className="flex items-center gap-2">
+                  <label htmlFor="availability-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Done in:</label>
+                  <Select
+                    id="availability-filter"
+                    value={availabilityFilter}
+                    onChange={e => {
+                      const val = e.target.value as AvailabilityFilter;
+                      setAvailabilityFilter(val);
+                      setAvailabilityHours(val !== 'all' ? parseInt(val, 10) : null);
+                    }}
+                    aria-label="Filter by estimated completion time"
+                    className="min-w-0"
+                  >
+                    <option value="all">Any Time</option>
+                    <option value="1">≤ 1 hour</option>
+                    <option value="2">≤ 2 hours</option>
+                    <option value="4">≤ 4 hours</option>
+                    <option value="8">≤ 8 hours</option>
+                    <option value="12">≤ 12 hours</option>
+                    <option value="24">≤ 24 hours</option>
+                  </Select>
+                </div>
+
+                {/* Bed Type Filter */}
+                {bedTypes.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="bed-type-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Bed:</label>
+                    <Select
+                      id="bed-type-filter"
+                      value={bedTypeFilter}
+                      onChange={e => setBedTypeFilter(e.target.value)}
+                      aria-label="Filter by bed type"
+                      className="min-w-0"
+                    >
+                      <option value="all">All Beds</option>
+                      {bedTypes.map(bt => (
+                        <option key={bt.id} value={bt.id}>{bt.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+
                 {/* Sort Order */}
                 <div className="flex items-center gap-2">
                   <label htmlFor="sort-mode" className="text-sm text-pf-text-secondary hidden sm:inline">Sort:</label>
@@ -436,14 +524,14 @@ export function PrintersPage() {
             </div>
           </div>
 
-          {/* Sidebar (Collapsed View) - small screens: between toolbar and grid */}
-          {isCollapsedSidebarOpen && (
+          {/* Printer details sidebar on small screens: between toolbar and grid */}
+          {isSidebarOpen && (
             <div className="lg:hidden mb-6 min-w-0">
               <PrinterDetailsSidebar
                 printerId={expandedPrinterId}
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
                 backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
-                onClose={() => setExpandedPrinterId(null)}
+                onClose={handleClosePrinterDetails}
                 layout="content"
               />
             </div>
@@ -452,7 +540,7 @@ export function PrintersPage() {
           {/* Content Area */}
           <div data-tour="printers-grid" className="space-y-6">
             {(
-              (userPrinters.length === 0) ? (
+              (deferredUserPrinters.length === 0) ? (
                 <div className="text-center py-12">
                   <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
@@ -460,25 +548,26 @@ export function PrintersPage() {
                 </div>
               ) : viewMode === 'collapsed' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,18rem)] gap-4 transition-opacity duration-200 min-w-0">
-                  {userPrinters.map((printer, index) => (
+                  {deferredUserPrinters.map((printer, index) => (
                     <div key={printer.id} {...(index === 0 ? { 'data-tour': 'printers-card' } : {})}>
                       <CompactPrinterCard
                         printer={printer}
                         backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                        onExpand={() => setExpandedPrinterId(printer.id)}
-                        onEdit={() => handleEditPrinter(printer)}
+                        onExpand={handleOpenPrinterDetails}
+                        onEdit={handleEditPrinter}
                       />
                     </div>
                   ))}
                 </div>
               ) : viewMode === 'detailed' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4">
-                  {userPrinters.map((printer) => (
+                  {deferredUserPrinters.map((printer) => (
                     <DetailedPrinterCard
                       key={printer.id}
                       printer={printer}
                       backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                      onEdit={() => handleEditPrinter(printer)}
+                      onEdit={handleEditPrinter}
+                      onOpenDetails={handleOpenPrinterDetails}
                     />
                   ))}
                 </div>
@@ -494,10 +583,11 @@ export function PrintersPage() {
                   </div>
 
                   <PrinterTableView
-                    printers={userPrinters}
+                    printers={deferredUserPrinters}
                     onEdit={handleEditPrinter}
                     onDelete={handleDeleteClick}
                     onBulkSetMaintenance={handleBulkSetMaintenance}
+                    onOpenDetails={(printer) => handleOpenPrinterDetails(printer.id)}
                     onOpenMaintenance={handleOpenMaintenance}
                     showEnableColumn={hasPermission('printers', 'admin')}
                     onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
@@ -519,14 +609,14 @@ export function PrintersPage() {
           </div>
         </div>
 
-        {/* Sidebar (Collapsed View) - large screens: fixed overlay on the right */}
-        {isCollapsedSidebarOpen && (
-          <div className="hidden lg:block fixed right-0 top-12 bottom-0 w-96 z-40">
+        {isSidebarOpen && (
+          <div className="hidden lg:block lg:self-start lg:sticky lg:top-0 lg:max-h-[calc(100dvh-5rem)]">
             <PrinterDetailsSidebar
               printerId={expandedPrinterId}
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
               backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
-              onClose={() => setExpandedPrinterId(null)}
+              onClose={handleClosePrinterDetails}
+              layout="content"
             />
           </div>
         )}

@@ -34,4 +34,6 @@ public sealed class OctoPrintStatusData
     public string? CameraStreamUrl { get; set; }
 
     public string? CameraSnapshotUrl { get; set; }
+
+    public double? PrintTimeLeftSeconds { get; set; }
 }

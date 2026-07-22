@@ -1,8 +1,8 @@
 // Common components
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { ErrorBoundary } from '@/common/components/ErrorBoundary';
+import { NotFoundPage } from '@/common/components/NotFoundPage';
 import { Layout } from '@/common/components/Layout';
-import { PrinterDashboard } from '@/features/printers/components/PrinterDashboard';
 import { SetupWizard } from '@/features/auth/components/SetupWizard';
 
 // Contexts & Providers
@@ -24,42 +24,13 @@ import { printerSignalRService } from '@/services/printer-signalr';
 import { apiClient } from '@/services/api';
 
 // Feature Pages
-import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
-import { FilamentManagementPage } from '@/features/filamentManagement/pages/FilamentManagementPage';
-import { PrintersPage } from '@/features/printers/pages/PrintersPage';
-import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
-import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
-import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
-import { SettingsPage } from '@/features/admin/pages/SettingsPage';
-import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
-import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
-import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
-import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
-import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
-import { ProfileImportWizardPage } from '@/features/tasks';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
-import { FilesPage } from '@/features/files/pages/FilesPage';
-import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
-import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
-import { FileHealthDashboard } from '@/features/gcode/components/file-health';
-import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
-import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
-import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
-import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
-import { StatisticsPage } from '@/features/statistics/pages/StatisticsPage';
-import { CostDashboardPage } from '@/features/statistics/pages/CostDashboardPage';
-import { AnalyticsDashboardPage } from '@/features/analytics/pages/AnalyticsDashboardPage';
-import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
-import { LocationDashboardPage } from '@/features/locations/pages/LocationDashboardPage';
-import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
-import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
-import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -70,16 +41,75 @@ import { Toaster, toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
 
-const LazyWorkerManagementPage = lazy(() =>
-  import('@/features/slicer/pages/WorkerManagementPage').then(mod => ({ default: mod.WorkerManagementPage }))
+const LazyPrinterDashboard = lazy(() =>
+  import('@/features/printers/components/PrinterDashboard').then(mod => ({ default: mod.PrinterDashboard }))
 );
-const LazySlicerProfilesPage = lazy(() =>
-  import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
+const LazyCatalogPage = lazy(() =>
+  import('@/features/catalog/pages/CatalogPage').then(mod => ({ default: mod.CatalogPage }))
+);
+const LazyFilamentManagementPage = lazy(() =>
+  import('@/features/filamentManagement/pages/FilamentManagementPage').then(mod => ({ default: mod.FilamentManagementPage }))
+);
+const LazyPrintersPage = lazy(() =>
+  import('@/features/printers/pages/PrintersPage').then(mod => ({ default: mod.PrintersPage }))
+);
+const LazyPrinterGroupsPage = lazy(() =>
+  import('@/features/printer-groups/pages/PrinterGroupsPage').then(mod => ({ default: mod.PrinterGroupsPage }))
+);
+const LazySettingsShell = lazy(() =>
+  import('@/features/settings/pages/SettingsShell').then(mod => ({ default: mod.SettingsShell }))
+);
+const LazyApiKeysPage = lazy(() =>
+  import('@/features/profile/pages/ApiKeysPage').then(mod => ({ default: mod.ApiKeysPage }))
+);
+const LazyPrintQueueDashboardPage = lazy(() =>
+  import('@/features/queue/pages/PrintQueueDashboardPage').then(mod => ({ default: mod.PrintQueueDashboardPage }))
+);
+const LazyFilesPage = lazy(() =>
+  import('@/features/files/pages/FilesPage').then(mod => ({ default: mod.FilesPage }))
+);
+const LazyProjectsPage = lazy(() =>
+  import('@/features/projects/pages/ProjectsPage').then(mod => ({ default: mod.ProjectsPage }))
+);
+const LazyMaintenanceDashboardPage = lazy(() =>
+  import('@/features/maintenance/pages/MaintenanceDashboardPage').then(mod => ({ default: mod.MaintenanceDashboardPage }))
+);
+const LazyPrinterMaintenancePage = lazy(() =>
+  import('@/features/maintenance/pages/PrinterMaintenancePage').then(mod => ({ default: mod.PrinterMaintenancePage }))
+);
+const LazyNfcBindingsPage = lazy(() =>
+  import('@/features/nfc/pages/NfcBindingsPage').then(mod => ({ default: mod.NfcBindingsPage }))
+);
+const LazyAnalyticsHubPage = lazy(() =>
+  import('@/features/analytics/pages/AnalyticsHubPage').then(mod => ({ default: mod.AnalyticsHubPage }))
+);
+const LazyLocationDashboardPage = lazy(() =>
+  import('@/features/locations/pages/LocationDashboardPage').then(mod => ({ default: mod.LocationDashboardPage }))
+);
+const LazyAutoDispatchDashboardPage = lazy(() =>
+  import('@/features/auto-dispatch/pages/AutoDispatchDashboardPage').then(mod => ({ default: mod.AutoDispatchDashboardPage }))
+);
+const LazySchedulingPage = lazy(() =>
+  import('@/features/scheduling/pages/SchedulingPage').then(mod => ({ default: mod.SchedulingPage }))
+);
+const LazyPowerMonitorSettingsPage = lazy(() =>
+  import('@/features/power-monitors').then(mod => ({ default: mod.PowerMonitorSettingsPage }))
+);
+const LazyNotificationPreferencesPage = lazy(() =>
+  import('@/features/notifications/pages/NotificationPreferencesPage').then(mod => ({ default: mod.NotificationPreferencesPage }))
+);
+const LazyPasskeysPage = lazy(() =>
+  import('@/features/profile/pages/PasskeysPage').then(mod => ({ default: mod.PasskeysPage }))
+);
+const LazyPrintablesOAuthCallbackPage = lazy(() =>
+  import('@/features/models3d/pages/PrintablesOAuthCallbackPage').then(mod => ({ default: mod.PrintablesOAuthCallbackPage }))
+);
+const LazyProfileImportWizardPage = lazy(() =>
+  import('@/features/tasks').then(mod => ({ default: mod.ProfileImportWizardPage }))
 );
 const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
-const LazyOrcaSlicerPage = lazy(() => import('@/features/slicer/pages/OrcaSlicerPage'));
 
 function RouteLoader() {
   return (
@@ -93,25 +123,59 @@ function RouteSuspense({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<RouteLoader />}>{children}</Suspense>;
 }
 
-function SlicerUnavailableMessage() {
-  return (
-    <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-semibold text-pf-text-primary">Slicer is not available</h1>
-      <p className="mt-2 text-pf-text-secondary">
-        The 3D slicer workspace loads only when a slicer worker is enabled and registered.
-      </p>
-      <p className="mt-2 text-sm text-pf-text-tertiary">
-        If you expect slicing to work here, enable the worker and/or register at least one slicer service.
-      </p>
-    </div>
-  );
+function lazyRoute(children: React.ReactNode) {
+  return <RouteSuspense>{children}</RouteSuspense>;
 }
 
-function SlicerGate({ children }: { children: React.ReactNode }) {
-  const { isLoading, isSlicerAvailable } = useSlicer();
-  if (isLoading) return <RouteLoader />;
-  if (!isSlicerAvailable) return <SlicerUnavailableMessage />;
-  return children;
+function LegacySettingsRedirect({
+  to,
+  searchParamMap,
+}: {
+  to: string;
+  searchParamMap?: Record<string, string>;
+}) {
+  const location = useLocation();
+  const [pathname, search = ''] = to.split('?');
+  const currentSearchParams = new URLSearchParams(location.search);
+  const nextSearchParams = new URLSearchParams(search);
+
+  Object.entries(searchParamMap ?? {}).forEach(([fromKey, toKey]) => {
+    const value = currentSearchParams.get(fromKey);
+    if (value) {
+      nextSearchParams.set(toKey, value);
+    }
+  });
+
+  const nextLocation = nextSearchParams.toString()
+    ? `${pathname}?${nextSearchParams.toString()}`
+    : pathname;
+
+  return <Navigate to={nextLocation} replace />;
+}
+
+const LEGACY_SYSTEM_TAB_MAP: Record<string, string> = {
+  services: '/admin/manage?tab=operations&sub=workers',
+  status: '/admin/manage?tab=operations&sub=status',
+  logs: '/admin/manage?tab=operations&sub=status',
+  connections: '/admin/manage?tab=operations&sub=status',
+  monitoring: '/admin/manage?tab=operations&sub=status',
+};
+
+function LegacySystemTabRedirect() {
+  const location = useLocation();
+  const tabParam = new URLSearchParams(location.search).get('tab');
+  const target = (tabParam && LEGACY_SYSTEM_TAB_MAP[tabParam]) || '/admin/manage?tab=operations&sub=status';
+  return <Navigate to={target} replace />;
+}
+
+function SystemSettingsRoute() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  if (params.get('tab') === 'hardware' && params.get('sub') === 'locations') {
+    return <Navigate to="/locations/dashboard" replace />;
+  }
+
+  return lazyRoute(<LazySettingsShell routeScope="system" />);
 }
 
 /**
@@ -196,62 +260,76 @@ function AuthenticatedAppRoutes() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/confirm-email" element={<ConfirmEmailPage />} />
+      <Route path="/oauth/printables/callback" element={lazyRoute(<LazyPrintablesOAuthCallbackPage />)} />
       <Route path="/registration-pending" element={<RegistrationPendingPage />} />
       <Route path="/*" element={<Layout />}>
-        <Route index element={<PrinterDashboard />} />
-        <Route path="dashboard" element={<PrinterDashboard />} />
-        <Route path="printers" element={<PrintersPage />} />
-        <Route path="printers/:printerId/maintenance" element={<PrinterMaintenancePage />} />
-        <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin"><PrinterGroupsPage /></ProtectedRoute>} />
-        <Route path="printQueue" element={<PrintQueueDashboardPage />} />
-        <Route path="printQueue/:tabId" element={<PrintQueueDashboardPage />} />
+        <Route index element={lazyRoute(<LazyPrinterDashboard />)} />
+        <Route path="dashboard" element={lazyRoute(<LazyPrinterDashboard />)} />
+        <Route path="printers" element={lazyRoute(<LazyPrintersPage />)} />
+        <Route path="printers/:printerId" element={lazyRoute(<LazyPrintersPage />)} />
+        <Route path="printers/:printerId/maintenance" element={lazyRoute(<LazyPrinterMaintenancePage />)} />
+        <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPrinterGroupsPage />)}</ProtectedRoute>} />
+        <Route path="printQueue" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />
+        <Route path="printQueue/:tabId" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />
         <Route path="files/projects" element={<Navigate to="/projects" replace />} />
-        <Route path="files/*" element={<FilesPage />} />
-        <Route path="projects" element={<ProjectsPage />} />
-        <Route path="spools" element={<FilamentManagementPage />} />
-        <Route path="spools/:tabId" element={<FilamentManagementPage />} />
-        <Route path="cameras" element={<CamerasPage />} />
-        <Route path="cameras/:tabId" element={<CamerasPage />} />
-        <Route path="nfc-devices" element={<NfcDevicesPage />} />
-        <Route path="maintenance" element={<MaintenanceDashboardPage />} />
-        <Route path="auto-dispatch" element={<AutoDispatchDashboardPage />} />
-        <Route path="statistics" element={<StatisticsPage />} />
-        <Route path="statistics/costs" element={<CostDashboardPage />} />
-        <Route path="analytics" element={<AnalyticsDashboardPage />} />
-        <Route path="scheduling" element={<SchedulingPage />} />
-        <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
-        <Route path="locations/dashboard" element={<LocationDashboardPage />} />
-        <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
-        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
-        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
-        <Route path="profile/api-keys" element={<ApiKeysPage />} />
+        <Route path="files/*" element={lazyRoute(<LazyFilesPage />)} />
+        <Route path="projects" element={lazyRoute(<LazyProjectsPage />)} />
+        <Route path="spools" element={lazyRoute(<LazyFilamentManagementPage />)} />
+        <Route path="spools/:tabId" element={lazyRoute(<LazyFilamentManagementPage />)} />
+        <Route path="cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
+        <Route path="cameras/:tabId" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
+        <Route path="nfc-devices" element={<Navigate to="/admin/settings?tab=hardware&sub=nfc" replace />} />
+        <Route path="nfc-bindings" element={lazyRoute(<LazyNfcBindingsPage />)} />
+        <Route path="maintenance" element={lazyRoute(<LazyMaintenanceDashboardPage />)} />
+        <Route path="auto-dispatch" element={lazyRoute(<LazyAutoDispatchDashboardPage />)} />
+        <Route path="statistics" element={<Navigate to="/analytics?lens=production" replace />} />
+        <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
+        <Route path="analytics" element={lazyRoute(<LazyAnalyticsHubPage />)} />
+        <Route path="scheduling" element={lazyRoute(<LazySchedulingPage />)} />
+        <Route path="locations" element={<Navigate to="/locations/dashboard" replace />} />
+        <Route path="locations/dashboard" element={lazyRoute(<LazyLocationDashboardPage />)} />
+        <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyCatalogPage />)}</ProtectedRoute>} />
+        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/manage?tab=users&sub=accounts" replace /></ProtectedRoute>} />
+        <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="user" />)} />
+        <Route path="settings/system" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/settings?tab=general" replace /></ProtectedRoute>} />
+        <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/settings?tab=general" replace /></ProtectedRoute>} />
+        {/*
+         * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
+         * API key management is a per-user feature — every authenticated user needs
+         * access to create/revoke their own keys. Admins can also reach ApiKeysPage
+         * via the User Settings profile section, but the direct /profile/api-keys route
+         * must remain open to all authenticated users to avoid a regression.
+         */}
+        <Route path="preferences" element={<Navigate to="/settings" replace />} />
+        <Route path="profile/api-keys" element={lazyRoute(<LazyApiKeysPage />)} />
+        <Route path="profile/notifications" element={lazyRoute(<LazyNotificationPreferencesPage />)} />
+        <Route path="profile/passkeys" element={lazyRoute(<LazyPasskeysPage />)} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
-          <Route path="slicer/job-status/:id" element={<FeatureGate feature="slicing"><SlicerJobStatus /></FeatureGate>} />
-          <Route path="printers" element={<PrintersPage />} />
-          <Route path="workers" element={<FeatureGate feature="slicing"><RouteSuspense><LazyWorkerManagementPage /></RouteSuspense></FeatureGate>} />
-          <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<FeatureGate feature="slicing"><RouteSuspense><LazySlicerProfilesPage /></RouteSuspense></FeatureGate>} />
-          <Route path="tags" element={<TagAdminPage />} />
-          <Route path="webhooks" element={<WebhooksAdminPage />} />
-          <Route path="data" element={<DataManagementPage />} />
-          <Route path="system" element={<SystemDashboardPage />} />
-          <Route path="monitoring" element={<Navigate to="/admin/system?tab=monitoring" replace />} />
-          <Route path="cameras" element={<Navigate to="/cameras/manage" replace />} />
+          <Route index element={<Navigate to="/admin/settings" replace />} />
+          <Route path="settings" element={<SystemSettingsRoute />} />
+          <Route path="manage" element={lazyRoute(<LazySettingsShell routeScope="admin" />)} />
+          <Route path="printers" element={<Navigate to="/printers" replace />} />
+          <Route path="workers" element={<LegacySettingsRedirect to="/admin/manage?tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
+          <Route path="file-health" element={<Navigate to="/admin/manage?tab=operations&sub=status" replace />} />
+          <Route path="slicer-profiles" element={<Navigate to="/admin/settings?tab=slicing&sub=profiles" replace />} />
+          <Route path="tags" element={<Navigate to="/admin/manage?tab=data&sub=tags" replace />} />
+          <Route path="bed-types" element={<Navigate to="/admin/settings?tab=slicing&sub=bed-types" replace />} />
+          <Route path="custom-fields" element={<Navigate to="/admin/settings?tab=hardware&sub=custom-fields" replace />} />
+          <Route path="webhooks" element={<Navigate to="/admin/settings?tab=integrations" replace />} />
+          <Route path="quotas" element={<Navigate to="/admin/settings?tab=quotas" replace />} />
+          <Route path="power-monitors" element={lazyRoute(<LazyPowerMonitorSettingsPage />)} />
+          <Route path="data" element={<Navigate to="/admin/manage?tab=data&sub=management" replace />} />
+          <Route path="system" element={<LegacySystemTabRedirect />} />
+          <Route path="monitoring" element={<Navigate to="/admin/manage?tab=operations&sub=status" replace />} />
+          <Route path="cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
+          <Route path="security/login-audit" element={<Navigate to="/admin/manage?tab=users&sub=audit" replace />} />
         </Route>
-        <Route path="jobs/new" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
-        <Route
-          path="slicer"
-          element={
-            <FeatureGate feature="slicing">
-              <SlicerGate>
-                <RouteSuspense>
-                  <LazyOrcaSlicerPage />
-                </RouteSuspense>
-              </SlicerGate>
-            </FeatureGate>
-          }
-        />
-        <Route path="profiles/import" element={<ProfileImportWizardPage />} />
+        <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
+        <Route path="slice-jobs" element={<Navigate to="/admin/manage?tab=operations&sub=workers&workerTab=jobs" replace />} />
+        <Route path="slicer-profiles" element={<Navigate to="/admin/settings?tab=slicing&sub=profiles" replace />} />
+        <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
+        <Route path="profiles/import" element={lazyRoute(<LazyProfileImportWizardPage />)} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

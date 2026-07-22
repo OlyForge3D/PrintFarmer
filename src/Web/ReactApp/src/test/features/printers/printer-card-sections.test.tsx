@@ -154,6 +154,7 @@ describe('DetailedPrinterCard Decomposition', () => {
     supportsFileOperations: true,
     supportsHistory: true,
     supportsCameraUrl: true,
+    supportsObjectExclusion: false,
   };
 
   describe('PrinterStatusHeader Section', () => {

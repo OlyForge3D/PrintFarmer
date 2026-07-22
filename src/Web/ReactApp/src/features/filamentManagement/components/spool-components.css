@@ -1,9 +1,4 @@
 .color-swatch { background-color: var(--swatch-color); }
-.spool-usage-fill { width: var(--used-pct); }
-.spool-usage-progress { appearance: none; }
-.spool-usage-progress::-webkit-progress-bar { background: var(--pf-bg-0, #1e1e1e); border-radius: 9999px; }
-.spool-usage-progress::-webkit-progress-value { background: currentColor; border-radius: 9999px; }
-.spool-usage-progress::-moz-progress-bar { background: currentColor; border-radius: 9999px; }
 
 /* Skeleton / shimmer */
 .skeleton-base { position: relative; overflow: hidden; background: var(--pf-bg-0, #1e1e1e); }
@@ -14,4 +9,3 @@
 
 [data-skeleton-item] { height: var(--skeleton-h, 1rem); }
 [data-skeleton-item][data-sz] { --skeleton-h: attr(data-sz); }
-

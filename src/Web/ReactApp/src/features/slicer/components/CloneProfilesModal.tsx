@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
-import { Button, Select, Alert, FormField } from '@/common/components/ui';
+import { Button, Alert, FormField } from '@/common/components/ui';
+import Dropdown from '@/common/components/ui/Select';
 import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 
@@ -131,8 +132,12 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
                 </Alert>
               ) : (
                 <>
-                  <FormField label="Source Machine Profile">
-                    <Select
+                  <FormField label="Source Machine Profile" htmlFor="source-machine-profile">
+                    <Dropdown
+                      id="source-machine-profile"
+                      label="Source Machine Profile"
+                      aria-label="Source Machine Profile"
+                      title="Source Machine Profile"
                       value={selectedMachineId}
                       onChange={(e) => setSelectedMachineId(e.target.value)}
                       disabled={cloneMutation.isPending}
@@ -143,7 +148,7 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
                           {machine.name}
                         </option>
                       ))}
-                    </Select>
+                    </Dropdown>
                   </FormField>
 
                   {cloneMutation.error && (

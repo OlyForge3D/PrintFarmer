@@ -57,6 +57,8 @@ public record GcodeFileDto(
     bool? IroningEnabled = null,
     string? FilamentPerExtruderWeightG = null,
     string? FilamentPerExtruderLengthMm = null,
+    string? FilamentPerExtruderColorHex = null,
+    string? FilamentPerExtruderType = null,
     int? ExtruderCount = null);
 
 /// <summary>
