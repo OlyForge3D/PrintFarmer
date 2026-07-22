@@ -611,6 +611,17 @@ final class LifecycleStateObserver: @unchecked Sendable {
     var last: SignalRConnectionState? { snapshot().last }
     func contains(_ s: SignalRConnectionState) -> Bool { snapshot().contains(s) }
 
+    /// Current number of recorded states. Callers capture this as a
+    /// "watermark" *before* an action, then pass it to
+    /// `waitFor(state:afterCount:)` so the wait can only be
+    /// satisfied by a state appended AFTER the action (issue #830).
+    /// This defeats vacuous satisfaction off the service's initial
+    /// `.disconnected` that `recordStates` seeds into the recorder.
+    func count() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return states.count
+    }
+
     /// Await until `state` has been appended to the sequence. If it
     /// is already present, returns immediately. Lock manipulation
     /// happens in a sync helper because NSLock is unavailable from
@@ -619,6 +630,32 @@ final class LifecycleStateObserver: @unchecked Sendable {
         if _quickCheckAndPossiblyEnqueue(state) == .alreadyPresent { return }
         await withCheckedContinuation { cont in
             _enqueueWaiter(state: state, cont: cont)
+        }
+    }
+
+    /// Watermark-aware variant of `waitFor(state:)`: only completes
+    /// when `state` appears at an index `>= watermark`. If a
+    /// matching state was already appended at or after `watermark`,
+    /// returns immediately; otherwise waits for the next matching
+    /// append.
+    ///
+    /// Non-vacuity contract (issue #830): with `watermark = count()`
+    /// captured immediately before an action, this wait CANNOT be
+    /// satisfied by any state recorded before the action — in
+    /// particular it cannot satisfy off the recorder's initial
+    /// `.disconnected` seed. If the post-watermark `state` never
+    /// arrives, the wait never returns, so the test cannot pass
+    /// vacuously.
+    ///
+    /// The existing waiter queue is reused: once a waiter is
+    /// enqueued, the next matching `append` fires it, and by
+    /// construction any append after enqueue occurs at an index
+    /// `>= watermark` (states.count at enqueue time is already
+    /// `>= watermark`).
+    func waitFor(state: SignalRConnectionState, afterCount watermark: Int) async {
+        if _quickCheckPostWatermark(state: state, watermark: watermark) == .alreadyPresent { return }
+        await withCheckedContinuation { cont in
+            _enqueueWatermarkWaiter(state: state, watermark: watermark, cont: cont)
         }
     }
 
@@ -637,6 +674,38 @@ final class LifecycleStateObserver: @unchecked Sendable {
         // Re-check under the lock in case `append` fired between the
         // quick-check and here.
         if states.contains(state) {
+            lock.unlock()
+            cont.resume()
+            return
+        }
+        waiters.append((state, cont))
+        lock.unlock()
+    }
+
+    /// Sync helper for `waitFor(state:afterCount:)`. Returns
+    /// `.alreadyPresent` if `state` appears at any index
+    /// `>= watermark` in the current recorded history.
+    private func _quickCheckPostWatermark(state: SignalRConnectionState, watermark: Int) -> _Presence {
+        lock.lock(); defer { lock.unlock() }
+        if watermark < states.count && states[watermark...].contains(state) {
+            return .alreadyPresent
+        }
+        return .needsWaiter
+    }
+
+    /// Enqueue helper for `waitFor(state:afterCount:)`. Re-checks
+    /// post-watermark presence under the lock; if still not present
+    /// the waiter is parked in the shared `waiters` queue. Any
+    /// subsequent matching `append` will occur at an index
+    /// `>= watermark` (states.count at enqueue time is already
+    /// `>= watermark`), so the standard append-fires-waiter path
+    /// preserves the non-vacuity contract without needing a
+    /// separate parallel queue.
+    private func _enqueueWatermarkWaiter(state: SignalRConnectionState,
+                                          watermark: Int,
+                                          cont: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if watermark < states.count && states[watermark...].contains(state) {
             lock.unlock()
             cont.resume()
             return
@@ -1580,8 +1649,18 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         // (r10 blocker #3), so the released reconnect observes
         // cleared ownership and no-ops.
         let baselineSleeps = await sleeper.totalSleepEntries()
+        // #830 non-vacuity watermark: capture the recorder length
+        // BEFORE `disconnect()` so the subsequent wait cannot be
+        // satisfied by the initial `.disconnected` that
+        // `recordStates` seeded (nor by any earlier `.disconnected`
+        // observed on this run). Only a NEW `.disconnected`
+        // transition emitted after the watermark can release the
+        // wait; if that transition never arrives the test hangs
+        // (and CI's per-test timeout fails it) rather than passing
+        // vacuously.
+        let preDisconnectWatermark = recorder.count()
         await service.disconnect()
-        await recorder.waitFor(state: .disconnected)
+        await recorder.waitFor(state: .disconnected, afterCount: preDisconnectWatermark)
 
         // r12 blocker #2: deterministic tear-down barrier. Prove
         // the reconnect owner Task actually reached exit
@@ -1622,8 +1701,18 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
             afterSecondRelease,
             "No further negotiate calls should occur after disconnect(). afterSecondRelease=\(afterSecondRelease) final=\(final)"
         )
-        XCTAssertEqual(recorder.last, .disconnected, "Final state must be .disconnected. Full: \(recorder.snapshot())")
-        XCTAssertFalse(recorder.contains(.connected), "No .connected during always-failing negotiate")
+        // #830 atomic evidence: read the recorded state history
+        // ONCE and derive both assertions from that single sample.
+        // Reading `recorder.last` and `recorder.snapshot()`
+        // separately raced against late appends from the reconnect
+        // owner's tear-down path (observed final CI snapshot
+        // `[.disconnected, .connecting, .reconnecting, .disconnected]`
+        // while a separately-sampled `.last` was `.reconnecting`).
+        let finalStates = recorder.snapshot()
+        XCTAssertEqual(finalStates.last, .disconnected,
+                       "Final state must be .disconnected. Full: \(finalStates)")
+        XCTAssertFalse(finalStates.contains(.connected),
+                       "No .connected during always-failing negotiate. Full: \(finalStates)")
     }
 
     // MARK: - r10 blocker #1 — type-7 close-frame no-hang
