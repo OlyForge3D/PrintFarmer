@@ -18,7 +18,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("slicer")
-                .HasAnnotation("ProductVersion", "10.0.3")
+                .HasAnnotation("ProductVersion", "10.0.7")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -354,6 +354,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<double?>("DimensionZ")
                         .HasColumnType("float");
 
+                    b.Property<string>("ExtractedMetadataJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("FileFormat")
                         .HasColumnType("int");
 
@@ -383,6 +386,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
+                    b.Property<DateTime?>("ImportedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("IsValid")
                         .HasColumnType("bit");
 
@@ -400,6 +406,18 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<string>("SourceCreator")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("SourceLicense")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("ThumbnailFileName")
                         .HasMaxLength(255)
@@ -587,6 +605,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<int?>("EstimatedPrintTimeSeconds")
                         .HasColumnType("int");
 
+                    b.Property<string>("ExtruderFilamentProfileNamesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal?>("FilamentUsedGrams")
                         .HasColumnType("decimal(18,2)");
 
@@ -598,10 +619,19 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
+                    b.Property<string>("ModelFileTransformsJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("ModelFileUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
                         .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("ModelFileUrlsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelTransformJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uniqueidentifier");

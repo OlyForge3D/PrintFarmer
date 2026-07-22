@@ -97,21 +97,7 @@ export class PrinterSignalRService {
         },
       })
       .build();
-    
-    // Suppress benign UnifiedLoggingService warnings about missing client methods
-    // These occur when the server broadcasts messages before all client handlers finish registering,
-    // or when a client method hasn't been registered yet on this connection.
-    // We use a wrapper that intercepts console.warn to filter these specific messages.
-    const originalWarn = console.warn.bind(console);
-    console.warn = (...args: Parameters<typeof console.warn>) => {
-      const messageStr = String(args?.[0] ?? '');
-      // Only suppress warnings about missing client methods; let all other warnings through
-      if (messageStr.includes('No client method with the name')) {
-        return; // Silently suppress this known harmless warning
-      }
-      originalWarn(...args);
-    };
-    
+
     this.setupEventHandlers();
   }
 

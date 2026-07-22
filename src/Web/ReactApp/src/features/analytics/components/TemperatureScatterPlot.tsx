@@ -20,9 +20,9 @@ interface Props {
   error: Error | null;
 }
 
-export const TemperatureScatterPlot: React.FC<Props> = ({ data, isLoading, error }) => {
-  const successful = data.filter((d) => d.success);
-  const failed = data.filter((d) => !d.success);
+export const TemperatureScatterPlot = React.memo(function TemperatureScatterPlot({ data, isLoading, error }: Props) {
+  const successful = React.useMemo(() => data.filter((d) => d.success), [data]);
+  const failed = React.useMemo(() => data.filter((d) => !d.success), [data]);
 
   return (
     <Card title="Temperature vs Quality" className="h-96">
@@ -48,4 +48,4 @@ export const TemperatureScatterPlot: React.FC<Props> = ({ data, isLoading, error
       )}
     </Card>
   );
-};
+});

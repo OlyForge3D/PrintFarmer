@@ -50,6 +50,20 @@ public interface ISpoolmanService
     Task<IReadOnlyList<SpoolmanFilamentDto>> ListFilamentsAsync(CancellationToken ct);
 
     /// <summary>
+    /// Gets a paginated, filtered, and sorted list of filament types from the configured Spoolman server.
+    /// </summary>
+    /// <param name="queryParams">Query parameters for pagination, filtering, and sorting.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>A paginated result containing matching filaments and total count.</returns>
+    Task<SpoolmanPagedResult<SpoolmanFilamentDto>> ListFilamentsPagedAsync(SpoolmanFilamentQueryParams queryParams, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the filament whose articleNumber exactly matches the scanned barcode.
+    /// Returns the lowest-ID filament if duplicate articleNumbers exist.
+    /// </summary>
+    Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct);
+
+    /// <summary>
     /// Gets a specific filament type by its ID from the configured Spoolman server.
     /// </summary>
     /// <param name="filamentId">The unique identifier of the filament type to retrieve</param>
@@ -133,6 +147,17 @@ public interface ISpoolmanService
     Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct);
 
     /// <summary>
+    /// Stores a barcode mapping on a filament by setting its articleNumber field.
+    /// Duplicate mappings are allowed and resolved deterministically by barcode lookup.
+    /// </summary>
+    Task<SpoolmanFilamentDto?> SaveBarcodeMappingAsync(int filamentId, string barcode, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a barcode to a filament and creates a spool for the resolved filament.
+    /// </summary>
+    Task<SpoolmanSpoolDto?> CreateSpoolByBarcodeAsync(SpoolmanImportSpoolByBarcodeRequest request, CancellationToken ct);
+
+    /// <summary>
     /// Bulk-updates multiple filaments in Spoolman. Only non-null fields in the request are applied.
     /// </summary>
     Task<SpoolmanBulkUpdateResult> BulkUpdateFilamentsAsync(SpoolmanBulkUpdateFilamentsRequest request, CancellationToken ct);
@@ -185,4 +210,16 @@ public interface ISpoolmanService
     /// falling back to client-side aggregation if the endpoint is not available.
     /// </summary>
     Task<IReadOnlyList<string>> GetAvailableMaterialsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Returns distinct material, vendor, and location values across all spools.
+    /// Fetches all spools with a large page size and extracts unique non-empty values.
+    /// </summary>
+    Task<SpoolFilterOptionsDto> GetFilterOptionsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Returns distinct material and vendor values across all filament types.
+    /// Fetches all filaments and extracts unique non-empty values for filter dropdowns.
+    /// </summary>
+    Task<FilamentFilterOptionsDto> GetFilamentFilterOptionsAsync(CancellationToken ct);
 }

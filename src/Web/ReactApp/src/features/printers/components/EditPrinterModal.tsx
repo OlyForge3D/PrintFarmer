@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
-import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
-import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, AccordionButton } from '@/common/components/ui';
+import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
+import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, Toggle, AccordionButton } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { generateUUID } from '@/utils/uuid';
 import { printerBackendStringToEnum } from '@/common/utils/enumHelpers';
@@ -22,6 +22,7 @@ interface EditPrinterModalProps {
 
 export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: EditPrinterModalProps) {
   const { data: printerDetails } = usePrinterDetails(printerId || '');
+  const { data: linkedCameras = [] } = usePrinterCameras(printerId || undefined);
   const { data: manufacturers } = useManufacturers();
   const { isSlicerAvailable } = useSlicer();
   const { data: filamentTypes } = useFilamentTypes();
@@ -40,7 +41,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [lastModelId, setLastModelId] = useState<string | undefined>();
-  const [isRefreshingCameras, setIsRefreshingCameras] = useState(false);
   const [showCloneProfilesModal, setShowCloneProfilesModal] = useState(false);
   const [toolheads, setToolheads] = useState<UpdateToolheadDto[]>([]);
   const [originalToolheads, setOriginalToolheads] = useState<UpdateToolheadDto[]>([]);
@@ -74,8 +74,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         username: printerDetails.username,
         // PrusaLink stores credential as password (username is fixed to "maker")
         password: printerDetails.password,
-        cameraStreamUrl: printerDetails.cameraStreamUrl,
-        cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
         // Printer capabilities
         nozzleDiameter: printerDetails.capabilities?.nozzleDiameter,
         supportedMaterials: printerDetails.capabilities?.supportedMaterials,
@@ -92,8 +90,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backendPort: printerDetails.backendPort ?? undefined,
         frontendPort: printerDetails.frontendPort ?? undefined,
         obicoEnabled: printerDetails.obicoEnabled ?? false,
+        useModelDispatchDefaults: printerDetails.useModelDispatchDefaults ?? true,
         wattage: printerDetails.wattage ?? undefined,
         machineHourlyRate: printerDetails.machineHourlyRate ?? undefined,
+        buddyCameraIp: printerDetails.buddyCameraIp ?? undefined,
       };
       
       setFormData(initialFormData);
@@ -175,12 +175,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     const fields: (keyof UpdatePrinterDto)[] = [
       'name', 'serverUrl', 'notes', 'manufacturerId', 'modelId',
       'newManufacturerName', 'newModelName', 'backend', 'apiKey', 'username', 'password',
-      'cameraStreamUrl', 'cameraSnapshotUrl', 'nozzleDiameter',
+      'nozzleDiameter',
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
-      'backendPort', 'frontendPort', 'obicoEnabled',
-      'wattage', 'machineHourlyRate'
+      'backendPort', 'frontendPort', 'obicoEnabled', 'useModelDispatchDefaults',
+      'wattage', 'machineHourlyRate', 'buddyCameraIp'
     ];
     
     for (const field of fields) {
@@ -421,26 +421,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     onClose();
   };
 
-  const handleRefreshCameraUrls = async () => {
-    if (!printerId) return;
-    setIsRefreshingCameras(true);
-    try {
-      const updated = await apiClient.refreshCameraUrls(printerId);
-      if (updated.cameraStreamUrl || updated.cameraSnapshotUrl) {
-        toast.success('Camera URLs detected and updated');
-      } else {
-        toast.info('No camera URLs found. Make sure your printer is online and configured with a camera.');
-      }
-      // Optionally refetch printer details to update form if needed
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to refresh camera URLs';
-      toast.error(message);
-      console.error('Failed to refresh camera URLs:', err);
-    } finally {
-      setIsRefreshingCameras(false);
-    }
-  };
-
   /**
    * Tests connectivity to the printer using current form credentials.
    * Uses backend-specific test methods (Moonraker, PrusaLink, OctoPrint).
@@ -500,6 +480,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   };
 
   if (!isOpen || !formData) return null;
+
+  const hasCameraForObico = linkedCameras.some(
+    (camera) => camera.isEnabled && !!(camera.streamUrl || camera.snapshotUrl),
+  );
+  const canToggleObico = hasCameraForObico || !!formData.obicoEnabled;
 
   const filteredModels = models || [];
 
@@ -1036,43 +1021,34 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               )}
             </div>
 
-            {/* Camera URLs Section */}
+            {/* Camera Configuration */}
             <div className="border-t pt-5 mt-5">
-              <div className="flex items-center justify-between mb-4">
+              <div className="mb-4">
                 <h4 className="text-lg font-medium text-pf-text-primary">Camera Configuration</h4>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleRefreshCameraUrls}
-                  disabled={isRefreshingCameras}
-                  title="Auto-detect camera URLs from the printer backend"
-                  iconLeft={<RefreshIcon className={`w-4 h-4 ${isRefreshingCameras ? 'animate-spin' : ''}`} />}
-                >
-                  {isRefreshingCameras ? 'Detecting...' : 'Auto-Detect'}
-                </Button>
               </div>
               <div className="space-y-4">
-                <FormField label="Camera Stream URL" htmlFor="camera-stream-url">
-                  <Input
-                    id="camera-stream-url"
-                    type="text"
-                    value={formData.cameraStreamUrl || ''}
-                    onChange={e => handleInputChange('cameraStreamUrl', e.target.value || undefined)}
-                    placeholder="http://printer.local/webcam/?action=stream"
-                    title="Live video stream URL (MJPEG or similar)"
-                  />
-                </FormField>
-                <FormField label="Camera Snapshot URL" htmlFor="camera-snapshot-url">
-                  <Input
-                    id="camera-snapshot-url"
-                    type="text"
-                    value={formData.cameraSnapshotUrl || ''}
-                    onChange={e => handleInputChange('cameraSnapshotUrl', e.target.value || undefined)}
-                    placeholder="http://printer.local/webcam/?action=snapshot"
-                    title="Static image snapshot URL (JPEG)"
-                  />
-                </FormField>
+                <Alert type="info" title="Manage Cameras From Cameras Page">
+                  {linkedCameras.length > 0
+                    ? `This printer has ${linkedCameras.length} linked camera${linkedCameras.length === 1 ? '' : 's'}.`
+                    : 'No cameras are currently linked to this printer.'} Configure, attach, and enable cameras from the Cameras page.
+                </Alert>
+                {formData.backend === PrinterBackend.PrusaLink && (
+                  <FormField label="Buddy Camera IP" htmlFor="buddy-camera-ip">
+                    <Input
+                      id="buddy-camera-ip"
+                      type="text"
+                      value={formData.buddyCameraIp || ''}
+                      onChange={e => handleInputChange('buddyCameraIp', e.target.value)}
+                      placeholder="192.168.1.100"
+                      title="IP address of the Prusa Buddy board camera"
+                    />
+                    {formData.buddyCameraIp && (
+                      <p className="mt-1 text-xs text-pf-text-secondary">
+                        RTSP URL: <code className="bg-pf-surface-secondary px-1 rounded">rtsp://{formData.buddyCameraIp}:554/live/</code>
+                      </p>
+                    )}
+                  </FormField>
+                )}
               </div>
             </div>
             
@@ -1115,24 +1091,38 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               </div>
             </div>
 
+            {/* Auto-Dispatch Defaults */}
+            <FormField
+              label="Model Dispatch Defaults"
+              htmlFor="use-model-dispatch-defaults"
+              helper="When enabled, this printer inherits dispatch settings from its model"
+            >
+              <Toggle
+                id="use-model-dispatch-defaults"
+                checked={formData.useModelDispatchDefaults ?? true}
+                onChange={e => handleInputChange('useModelDispatchDefaults', e.target.checked)}
+                label="Use model dispatch defaults"
+              />
+            </FormField>
+
             {/* Obico AI Failure Detection */}
             <FormField 
               label="Obico AI Monitoring" 
               htmlFor="obico-enabled"
               helper={
-                !formData.cameraStreamUrl && !formData.cameraSnapshotUrl
-                  ? "Configure a camera URL above to enable failure detection."
+                !hasCameraForObico
+                  ? "Configure and enable a linked camera on the Cameras page to enable failure detection."
                   : "Enable AI-powered print failure detection. Requires a camera. The app uses the best available Obico ML server when one is configured, or falls back to the global Obico Failure Detection settings."
               }
             >
               <Checkbox
                 id="obico-enabled"
                 checked={formData.obicoEnabled || false}
-                disabled={!formData.cameraStreamUrl && !formData.cameraSnapshotUrl}
+                disabled={!canToggleObico}
                 onChange={e => {
                   const enabling = e.target.checked;
-                  if (enabling && !formData.cameraStreamUrl && !formData.cameraSnapshotUrl) {
-                    toast.error('Obico monitoring requires a camera. Configure a camera URL first.');
+                  if (enabling && !hasCameraForObico) {
+                    toast.error('Obico monitoring requires an enabled linked camera. Configure one on the Cameras page first.');
                     return;
                   }
                   handleInputChange('obicoEnabled', enabling);

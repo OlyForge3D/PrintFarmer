@@ -27,6 +27,7 @@ services:
         NODE_TAG: ${NODE_TAG}
         NGINX_TAG: ${NGINX_TAG}
         UBUNTU_TAG: ${UBUNTU_TAG}
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: printfarmer-printer-discovery
     container_name: printfarmer-printer-discovery
     restart: unless-stopped

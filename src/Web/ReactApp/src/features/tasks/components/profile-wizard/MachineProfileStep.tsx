@@ -82,7 +82,7 @@ export const MachineProfileStep: React.FC<MachineProfileStepProps> = ({
           </span>
         </Alert>
       ) : (
-        <div className="space-y-2 max-h-[400px] overflow-y-auto">
+        <div className="space-y-2 max-h-96 overflow-y-auto">
           {machineProfiles.map((machine) => {
             const isSelected = selectedMachines.has(machine.name);
             const isImported = importedSet.has(machine.name);

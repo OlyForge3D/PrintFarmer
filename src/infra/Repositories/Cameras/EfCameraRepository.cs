@@ -30,6 +30,7 @@ public class EfCameraRepository : ICameraRepository
     public async Task<List<Camera>> GetAllAsync(CancellationToken ct)
     {
         return await _dbContext.Cameras
+            .Include(c => c.Printer)
             .OrderBy(c => c.SortOrder)
             .ThenBy(c => c.Name)
             .ToListAsync(ct);
@@ -42,6 +43,7 @@ public class EfCameraRepository : ICameraRepository
     public async Task<List<Camera>> GetEnabledAsync(CancellationToken ct)
     {
         return await _dbContext.Cameras
+            .Include(c => c.Printer)
             .Where(c => c.IsEnabled)
             .OrderBy(c => c.SortOrder)
             .ThenBy(c => c.Name)
@@ -55,7 +57,9 @@ public class EfCameraRepository : ICameraRepository
     /// <param name="ct">Cancellation token.</param>
     public async Task<Camera?> FindByIdAsync(Guid id, CancellationToken ct)
     {
-        return await _dbContext.Cameras.FindAsync(new object[] { id }, cancellationToken: ct);
+        return await _dbContext.Cameras
+            .Include(c => c.Printer)
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
     }
 
     /// <summary>
@@ -117,6 +121,7 @@ public class EfCameraRepository : ICameraRepository
     public async Task<List<Camera>> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
         return await _dbContext.Cameras
+            .Include(c => c.Printer)
             .Where(c => c.PrinterId == printerId)
             .OrderBy(c => c.SortOrder)
             .ThenBy(c => c.Name)
@@ -132,6 +137,7 @@ public class EfCameraRepository : ICameraRepository
     public async Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct)
     {
         return await _dbContext.Cameras
+            .Include(c => c.Printer)
             .Where(c => c.PrinterId == printerId && c.CameraType == type)
             .FirstOrDefaultAsync(ct);
     }
@@ -154,6 +160,7 @@ public class EfCameraRepository : ICameraRepository
     public async Task<Camera?> FindByPrinterIdAndSourceAsync(Guid printerId, CameraSource source, CancellationToken ct)
     {
         return await _dbContext.Cameras
+            .Include(c => c.Printer)
             .Where(c => c.PrinterId == printerId && c.Source == source)
             .FirstOrDefaultAsync(ct);
     }

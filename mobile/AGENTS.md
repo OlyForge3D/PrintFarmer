@@ -1,40 +1,32 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
-
-## Quick Reference
+Use GitHub issues for all task tracking. Create and manage issues via:
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
+gh issue create --title "Your issue title" --body "Details"
+gh issue list
+gh issue view <number>
 ```
 
-## Landing the Plane (Session Completion)
+For more information, see GitHub CLI documentation: https://cli.github.com/manual/gh_issue
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+## Session Completion
 
-**MANDATORY WORKFLOW:**
+**When ending a work session**, ensure all work is pushed to remote:
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+3. **Update issue status** - Close finished work via `Closes #N` in PR body
+4. **PUSH TO REMOTE** - Commit and push your changes:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+5. **Verify** - All changes committed AND pushed to remote
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
+- NEVER stop before pushing—that leaves work stranded locally
 - If push fails, resolve and retry until it succeeds
 

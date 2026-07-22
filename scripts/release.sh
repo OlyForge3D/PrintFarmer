@@ -17,11 +17,13 @@ set -euo pipefail
 # will never surface internal team files.
 #
 # Usage:
-#   ./scripts/release.sh [major|minor|patch|vX.Y.Z] [--clean-history]
+#   ./scripts/release.sh [major|minor|patch|alpha|beta|vX.Y.Z[-alpha.N|-beta.N]] [--clean-history]
 #
 #   patch (default) — v0.1.0 → v0.1.1
 #   minor           — v0.1.0 → v0.2.0
 #   major           — v0.1.0 → v1.0.0
+#   alpha           — v1.2.3 → v1.2.3-alpha.1 (auto-increments from existing tags)
+#   beta            — v1.2.3 → v1.2.3-beta.1 (auto-increments from existing tags)
 #
 # Options:
 #   --clean-history   One-time: force-push a fresh orphan main to the release
@@ -44,6 +46,27 @@ bump_version() {
     patch) patch=$((patch + 1)) ;;
   esac
   echo "v${major}.${minor}.${patch}"
+}
+
+base_version() {
+  local version="$1"
+  echo "${version%%-*}"
+}
+
+next_prerelease_tag() {
+  local base="$1"
+  local channel="$2"
+  local max=0
+  local tag number
+
+  while IFS= read -r tag; do
+    number="${tag##"${base}"-"${channel}".}"
+    if [[ "$number" =~ ^[0-9]+$ ]] && (( number > max )); then
+      max=$number
+    fi
+  done < <(git tag -l "${base}-${channel}.*")
+
+  echo "${base}-${channel}.$((max + 1))"
 }
 
 # Remove forbidden paths from the git index and working tree.
@@ -79,21 +102,6 @@ done
 
 CURRENT="$(cat VERSION 2>/dev/null || echo "v0.0.0")"
 ARG="${ARGS[0]:-patch}"
-case "$ARG" in
-  major|minor|patch) TAG="$(bump_version "$CURRENT" "$ARG")" ;;
-  v*) TAG="$ARG" ;;
-  *)
-    echo "❌ Usage: $0 [major|minor|patch|vX.Y.Z] [--clean-history]"
-    echo "   Default: patch"
-    exit 1
-    ;;
-esac
-
-echo "🚀 Releasing ${TAG} (was ${CURRENT})"
-if $CLEAN_HISTORY; then
-  echo "   ⚠️  --clean-history: release remote history will be reset"
-fi
-echo ""
 
 # --- Pre-flight checks -------------------------------------------------------
 
@@ -115,6 +123,26 @@ fi
 echo "📥 Fetching latest from remotes..."
 git fetch origin
 git fetch "$RELEASE_REMOTE" 2>/dev/null || true
+git fetch --tags origin 2>/dev/null || true
+git fetch --tags "$RELEASE_REMOTE" 2>/dev/null || true
+
+CURRENT_BASE="$(base_version "$CURRENT")"
+case "$ARG" in
+  major|minor|patch) TAG="$(bump_version "$CURRENT_BASE" "$ARG")" ;;
+  alpha|beta) TAG="$(next_prerelease_tag "$CURRENT_BASE" "$ARG")" ;;
+  v*) TAG="$ARG" ;;
+  *)
+    echo "❌ Usage: $0 [major|minor|patch|alpha|beta|vX.Y.Z[-alpha.N|-beta.N]] [--clean-history]"
+    echo "   Default: patch"
+    exit 1
+    ;;
+esac
+
+echo "🚀 Releasing ${TAG} (was ${CURRENT})"
+if $CLEAN_HISTORY; then
+  echo "   ⚠️  --clean-history: release remote history will be reset"
+fi
+echo ""
 
 # --- 2. Merge development → main (full history for origin) -------------------
 

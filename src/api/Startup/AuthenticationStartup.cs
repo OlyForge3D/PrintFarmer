@@ -23,14 +23,9 @@ public static class AuthenticationStartup
         services.AddAuthentication("Bearer")
             .AddJwtBearer("Bearer", options =>
             {
-                // Enable extra diagnostics in Development and Testing
-                if (environment.IsDevelopment() || environment.EnvironmentName == "Testing")
-                {
-                    // Avoid building a temporary service provider here (BuildServiceProvider creates a second provider and may duplicate singletons).
-                    // We intentionally pass nulls here; the ProgramHelpers events will fall back to resolving per-request if needed.
-                    // The concrete startup logging references will be populated after the application is built.
-                    options.Events = ProgramHelpers.CreateJwtEvents(null, null);
-                }
+                // Always accept ?access_token= for SignalR hub transports; keep verbose diagnostics disabled here
+                // because startup logging is only wired for Development/Testing elsewhere.
+                options.Events = ProgramHelpers.CreateJwtEvents(null, null);
 
                 // Allow HTTP in test runs and relax validation for test environment
                 if (environment.EnvironmentName == "Testing")
@@ -71,6 +66,10 @@ public static class AuthenticationStartup
         // Add Authorization with custom policies
         services.AddAuthorization(options =>
         {
+            options.FallbackPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build();
+
             options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
             options.AddPolicy("RequireAdmin", policy =>
             {

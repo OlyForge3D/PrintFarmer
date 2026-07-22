@@ -10,11 +10,13 @@ import type {
   MoveRequest,
   Printer,
   PrinterBackendCapabilitiesDto,
+  PrinterCameraUrlResult,
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
   PrinterFileDto,
   PrinterVersionInfo,
+  PrintJobObjectListDto,
   PrintJobStatusDto,
   SpoolmanSpool,
   StartDiscoveryRequest,
@@ -122,6 +124,14 @@ export const printerService = {
     return apiClient.getPrinterCameraUrls();
   },
 
+  async getPrinterCameraUrl(id: string): Promise<PrinterCameraUrlResult> {
+    return apiClient.getPrinterCameraUrl(id);
+  },
+
+  async getPrinterSnapshot(id: string): Promise<Blob> {
+    return apiClient.getPrinterSnapshot(id);
+  },
+
   async refreshCameraUrls(id: string): Promise<Printer> {
     return apiClient.refreshCameraUrls(id);
   },
@@ -186,6 +196,14 @@ export const printerService = {
 
   async disableMotors(printerId: string): Promise<CommandResult> {
     return apiClient.disableMotors(printerId);
+  },
+
+  async getPrintJobObjects(printerId: string): Promise<PrintJobObjectListDto> {
+    return apiClient.getPrintJobObjects(printerId);
+  },
+
+  async excludePrintJobObject(printerId: string, name: string): Promise<CommandResult> {
+    return apiClient.excludePrintJobObject(printerId, name);
   },
 
   // ── Filament ──────────────────────────────────────────────────────────

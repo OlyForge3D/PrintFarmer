@@ -94,6 +94,8 @@ export interface ModelFiltersBarProps {
 export interface QueueHistoryTabProps {
   onRerun?: (jobId: string) => Promise<void>;
   onViewDetails?: (jobId: string) => void;
+  dateFrom: Date | null;
+  dateTo: Date | null;
 }
 
 export interface HistoryFiltersBarProps {
@@ -223,11 +225,6 @@ export interface CloneProfilesModalProps {
   onClose: () => void;
   sourceProfile: MachineProfile;
   onSuccess?: () => void;
-}
-
-export interface SlicerJobStatusProps {
-  jobId: string;
-  onComplete?: (result: SliceCompleteResult) => void;
 }
 
 export interface SlicerConfigModalProps {

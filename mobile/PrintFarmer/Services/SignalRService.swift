@@ -51,10 +51,19 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     // MARK: - Public API
 
     func connect() async throws {
+        guard connectionState != .connected && connectionState != .connecting else { return }
         intentionalDisconnect = false
         connectionState = .connecting
         reconnectAttempt = 0
-        try await performConnect()
+        do {
+            try await performConnect()
+        } catch {
+            // Initial connect failed. Route into the reconnect flow (mirroring a
+            // mid-session drop) so the hub recovers on its own via backoff instead
+            // of being stuck in `.connecting` forever with no retry scheduled.
+            Task { [weak self] in await self?.handleDisconnect() }
+            throw error
+        }
     }
 
     func disconnect() async {

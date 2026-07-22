@@ -3,7 +3,7 @@ import { useMaintenanceTrends } from '../hooks/useMaintenanceTrends';
 import { Card } from '@/common/components/ui/Card';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 
-export const MaintenanceTrendsChart: React.FC = () => {
+export const MaintenanceTrendsChart = React.memo(function MaintenanceTrendsChart() {
   const { data, isLoading, error } = useMaintenanceTrends();
 
   return (
@@ -27,4 +27,4 @@ export const MaintenanceTrendsChart: React.FC = () => {
       )}
     </Card>
   );
-};
+});
