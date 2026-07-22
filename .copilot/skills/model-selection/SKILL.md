@@ -5,7 +5,7 @@
 ## SCOPE
 
 ✅ THIS SKILL PRODUCES:
-- A resolved `model` parameter for every `task` tool call
+- A resolved `model` parameter for every supported agent spawn
 - Persistent model preferences in `.squad/config.json`
 - Spawn acknowledgments that include the resolved model
 
@@ -16,7 +16,7 @@
 
 ## Context
 
-Squad supports 18+ models across three tiers (premium, standard, fast). The coordinator must select the right model for each agent spawn. Users can set persistent preferences that survive across sessions.
+Squad supports 18 models across three routing tiers (premium, standard, fast/cheap). These tiers are policy groupings, not verified pricing claims. The coordinator must select the right model for each agent spawn while preserving explicit user preferences.
 
 ## 5-Layer Model Resolution Hierarchy
 
@@ -28,10 +28,10 @@ Resolution is **first-match-wins** — the highest layer with a value wins.
 | **0b** | Global Config | `.squad/config.json` → `defaultModel` | Persistent (survives sessions) |
 | **1** | Session Directive | User said "use X" in current session | Session-only |
 | **2** | Charter Preference | Agent's `charter.md` → `## Model` section | Persistent (in charter) |
-| **3** | Task-Aware Auto | Code → sonnet, docs → haiku, visual → opus | Computed per-spawn |
-| **4** | Default | `claude-haiku-4.5` | Hardcoded fallback |
+| **3** | Task-Aware Auto | Select by task output | Computed per-spawn |
+| **4** | Default | `gpt-5.6-luna` | Final automatic default |
 
-**Key principle:** Layer 0 (persistent config) beats everything. If the user said "always use opus" and it was saved to config.json, every agent gets opus regardless of role or task type. This is intentional — the user explicitly chose quality over cost.
+**Key principle:** Layer 0 (persistent config) beats everything. If the user saved a model preference, honor it regardless of role or task type.
 
 ## AGENT WORKFLOW
 
@@ -49,18 +49,20 @@ Resolution is **first-match-wins** — the highest layer with a value wins.
 3. CHECK Layer 1: Did the user give a session directive? → Use it.
 4. CHECK Layer 2: Does the agent's charter have a `## Model` section? → Use it.
 5. CHECK Layer 3: Determine task type:
-   - Code (implementation, tests, refactoring, bug fixes) → `claude-sonnet-4.6`
-   - Prompts, agent designs → `claude-sonnet-4.6`
-   - Visual/design with image analysis → `claude-opus-4.6`
-   - Non-code (docs, planning, triage, changelogs) → `claude-haiku-4.5`
-6. FALLBACK Layer 4: `claude-haiku-4.5`
+   - Architecture, security, reviewer gates, complex coordination → `gpt-5.6-sol`
+   - Visual/design under the existing Opus convention → `claude-opus-4.8`
+   - Code, tests, refactoring, prompt architecture → `claude-sonnet-5`
+   - Docs, planning, triage, mechanical work → `gpt-5.6-luna`
+   - Heavy code generation → `gpt-5.3-codex`
+   - Analytical diversity → `gemini-3.1-pro-preview`
+6. FALLBACK Layer 4: `gpt-5.6-luna`
 7. INCLUDE model in spawn acknowledgment: `🔧 {Name} ({resolved_model}) — {task}`
 
 ### When User Sets a Preference
 
 **Trigger phrases:** "always use X", "use X for everything", "switch to X", "default to X"
 
-1. VALIDATE the model ID against the catalog (18+ models)
+1. VALIDATE the model ID against the 18-model catalog
 2. WRITE `defaultModel` to `.squad/config.json` (merge, don't overwrite)
 3. ACKNOWLEDGE: `✅ Model preference saved: {model} — all future sessions will use this until changed.`
 
@@ -92,10 +94,10 @@ After resolving the model and including it in the spawn template, this skill is 
 ```json
 {
   "version": 1,
-  "defaultModel": "claude-opus-4.6",
+  "defaultModel": "claude-opus-4.8",
   "agentModelOverrides": {
-    "fenster": "claude-sonnet-4.6",
-    "mcmanus": "claude-haiku-4.5"
+    "fenster": "claude-sonnet-5",
+    "mcmanus": "gpt-5.6-luna"
   }
 }
 ```
@@ -104,14 +106,27 @@ After resolving the model and including it in the spawn template, this skill is 
 - `agentModelOverrides` — per-agent overrides that take priority over `defaultModel`
 - Both fields are optional. When absent, Layers 1-4 apply normally.
 
+## Valid Model Catalog
+
+Premium: `gpt-5.6-sol`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`
+Standard: `claude-sonnet-5`, `gpt-5.6-terra`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `gemini-3.1-pro-preview`
+Fast/Cheap policy: `gpt-5.6-luna`, `gemini-3.5-flash`, `claude-haiku-4.5`, `gpt-5.4-mini`, `gpt-5-mini`, `mai-code-1-flash-picker`
+
+Runtime rejection overrides this static catalog.
+
 ## Fallback Chains
 
-If a model is unavailable (rate limit, plan restriction), retry within the same tier:
+If a model is unavailable, make at most three retries, then omit the model parameter:
 
 ```
-Premium:  claude-opus-4.6 → claude-opus-4.6-fast → claude-opus-4.5 → claude-sonnet-4.6
-Standard: claude-sonnet-4.6 → gpt-5.4 → claude-sonnet-4.5 → gpt-5.3-codex → claude-sonnet-4
-Fast:     claude-haiku-4.5 → gpt-5.1-codex-mini → gpt-4.1 → gpt-5-mini
+Premium:  gpt-5.6-sol → claude-opus-4.8 → claude-opus-4.7 → claude-sonnet-5 → (omit model param)
+Standard: claude-sonnet-5 → gpt-5.6-terra → gpt-5.5 → claude-sonnet-4.6 → (omit model param)
+Fast:     gpt-5.6-luna → gemini-3.5-flash → claude-haiku-4.5 → gpt-5.4-mini → (omit model param)
+Visual:   claude-opus-4.8 → claude-opus-4.7 → claude-opus-4.6 → (omit model param)
 ```
 
-**Never fall UP in tier.** A fast task won't land on a premium model via fallback.
+- If the user specified a provider, try compatible models from that provider in chain order, then omit the model parameter.
+- Never fall UP in tier. Premium may fall down to Standard; Standard and Fast never move upward.
+- Keep reasoning effort and context-window settings separate from model IDs. Never create suffix IDs such as `-xhigh`.
+- Drop reasoning-effort or context-window parameters unsupported by the fallback model.
+- Runtime rejection overrides the static catalog.
