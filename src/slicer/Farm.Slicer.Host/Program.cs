@@ -9,6 +9,7 @@ using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -50,11 +51,12 @@ builder.Services.AddUnimplementedSlicerServiceStubs();
 // Standalone mode auto-authenticates every request as admin (transitional; see
 // StandaloneAuthHandler). When Jwt:Key is configured (the host shares JWT
 // signing configuration with the main API, e.g. because Desktop-exchanged
-// tokens from issue #838 may be presented), a JWT bearer scheme is also
-// registered. A policy scheme forwards requests carrying a Bearer
-// Authorization header to the JWT handler and everything else to the
-// standalone admin handler, so existing standalone deployments (no Jwt:Key
-// configured) are completely unaffected.
+// tokens from issue #838 may be presented, or the host is deployed behind
+// the same gateway as the main API), a JWT bearer scheme is also registered.
+// A policy scheme forwards requests carrying a Bearer Authorization header
+// to the JWT handler and everything else to the standalone admin handler,
+// so existing standalone deployments (no Jwt:Key configured) are completely
+// unaffected.
 string? jwtKey = builder.Configuration["Jwt:Key"];
 bool jwtConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
 
@@ -84,6 +86,30 @@ if (jwtConfigured)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero
         };
+
+        // SignalR's WebSocket / Server-Sent-Events transports cannot set the Authorization
+        // header on the browser handshake, so the client sends the JWT as a ?access_token=
+        // query parameter instead. Honour it for hub paths (e.g. /hubs/slicers); without this
+        // the WS upgrade to the [Authorize] hub is rejected 401 and SignalR silently downgrades
+        // to long-polling. The negotiate POST still uses the Authorization header (default).
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                // Authorization header still takes precedence (mirrors the main API): only fall
+                // back to the query token when the header didn't already supply one.
+                if (string.IsNullOrEmpty(context.Token))
+                {
+                    string? token = SlicerHubAuth.ResolveHubAccessToken(context.Request);
+                    if (token is not null)
+                    {
+                        context.Token = token;
+                    }
+                }
+
+                return Task.CompletedTask;
+            },
+        };
     });
 
     authBuilder.AddPolicyScheme("SmartScheme", "Bearer token or standalone admin", options =>
@@ -107,7 +133,7 @@ else
 
 builder.Services.AddAuthorization(opts =>
 {
-    opts.AddPolicy("farm_admin", policy => policy.RequireAssertion(_ => true));
+    opts.AddPolicy("farm_admin", policy => policy.RequireRole("farm_admin"));
 
     // Desktop API-key exchange scope policies (issue #838). The standalone admin
     // principal carries no token_use claim, so DesktopScopeAuthorizationHandler
@@ -142,7 +168,13 @@ builder.Services.AddHealthChecks()
 // ── CORS ──────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
+    {
+#pragma warning disable S5122 // slicer-host is internal and reached same-origin via nginx; all internal LAN origins are intentional, and restriction breaks direct LAN access.
+        _ = policy.AllowAnyOrigin();
+#pragma warning restore S5122
+        _ = policy.AllowAnyMethod();
+        _ = policy.AllowAnyHeader();
+    }));
 
 // ── Bind port ─────────────────────────────────────────────────────────────────
 #pragma warning disable S1075
@@ -178,6 +210,34 @@ app.MapControllers();
 app.MapSlicerHubs();
 app.MapHealthChecks("/healthz");
 app.MapGet("/", () => Results.Ok(new { service = "Farm.Slicer.Host", status = "running" }));
+
+// Build version endpoint
+app.MapGet("/api/system/version", () =>
+{
+    var asm = System.Reflection.Assembly.GetEntryAssembly();
+    string? infoVersion = (asm is not null
+        ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+            as System.Reflection.AssemblyInformationalVersionAttribute
+        : null)?.InformationalVersion;
+    string version = "0.0.0";
+    string? commit = null;
+    if (infoVersion != null)
+    {
+        string[] parts = infoVersion.Split('+', 2);
+        version = parts[0];
+        commit = parts.Length > 1 ? parts[1] : null;
+    }
+
+    return Results.Ok(new
+    {
+        service = "Farm.Slicer.Host",
+        version,
+        commit,
+        environment = app.Environment.EnvironmentName,
+        runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+        timestamp = DateTime.UtcNow,
+    });
+});
 
 await app.RunAsync();
 

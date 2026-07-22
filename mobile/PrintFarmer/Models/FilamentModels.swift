@@ -8,7 +8,7 @@ struct SpoolmanSpool: Codable, Identifiable, Sendable {
     let name: String
     let material: String
     let colorHex: String?
-    let inUse: Bool?
+    let inUse: Bool
     let filamentName: String?
     let vendor: String?
     let registeredAt: String?
@@ -43,7 +43,7 @@ struct SpoolmanSpool: Codable, Identifiable, Sendable {
         name: String,
         material: String,
         colorHex: String?,
-        inUse: Bool?,
+        inUse: Bool,
         filamentName: String?,
         vendor: String?,
         registeredAt: String?,
@@ -111,6 +111,58 @@ struct SpoolmanFilament: Codable, Identifiable, Sendable {
     let comment: String?
     let multiColorHexes: String?
     let externalId: String?
+}
+
+struct SpoolmanFilamentRequest: Codable, Sendable {
+    var name: String?
+    var vendorId: Int?
+    var material: String
+    var colorHex: String?
+    var density: Double?
+    var diameter: Double?
+    var weight: Double?
+    var spoolWeight: Double?
+    var price: Double?
+    var settingsExtruderTemp: Int?
+    var settingsBedTemp: Int?
+    var articleNumber: String?
+    var comment: String?
+    var multiColorHexes: String?
+    var externalId: String?
+
+    init(
+        name: String? = nil,
+        vendorId: Int? = nil,
+        material: String,
+        colorHex: String? = nil,
+        density: Double? = nil,
+        diameter: Double? = nil,
+        weight: Double? = nil,
+        spoolWeight: Double? = nil,
+        price: Double? = nil,
+        settingsExtruderTemp: Int? = nil,
+        settingsBedTemp: Int? = nil,
+        articleNumber: String? = nil,
+        comment: String? = nil,
+        multiColorHexes: String? = nil,
+        externalId: String? = nil
+    ) {
+        self.name = name
+        self.vendorId = vendorId
+        self.material = material
+        self.colorHex = colorHex
+        self.density = density
+        self.diameter = diameter
+        self.weight = weight
+        self.spoolWeight = spoolWeight
+        self.price = price
+        self.settingsExtruderTemp = settingsExtruderTemp
+        self.settingsBedTemp = settingsBedTemp
+        self.articleNumber = articleNumber
+        self.comment = comment
+        self.multiColorHexes = multiColorHexes
+        self.externalId = externalId
+    }
 }
 
 // MARK: - Spoolman Vendor (matches SpoolmanVendorDto)

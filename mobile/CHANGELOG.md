@@ -2,6 +2,20 @@
 
 All notable changes to PrintFarmer iOS will be documented in this file.
 
+## [v1.0-beta.78] — 2026-07-05
+
+### Fixed
+- **Login on multi-server builds** — Signing in with valid credentials no longer bounces straight back to the login screen. The access token is now applied to the API client immediately on login (previously it was only wired up when switching to a *different* server, so logging into the already-selected server left the client unauthenticated). The token-expiry check is also now scoped to the specific server you logged into.
+
+## [v1.0-beta.76] — 2026-07-05
+
+### Added
+- **Barcode scan-intake for filament spools** — Scan a spool's 1D retail barcode (UPC/EAN/Code128) to import it into Spoolman. A recognized barcode imports the spool instantly in a rapid "scan next" loop; an unrecognized barcode prompts you to pick or create the matching filament, then remembers the barcode so future scans import automatically. The barcode↔filament mapping is stored in Spoolman's article number.
+- **Multi-server support** — Register, edit, switch between, and delete multiple PrintFarmer servers from the app. Credentials are stored per server in the Keychain, a quick server switcher is available in the app chrome (and the iPad sidebar), and switching servers rebuilds services at runtime. Existing single-server installs migrate automatically on first launch.
+
+### Notes
+- Consolidates the beta.69–beta.75 internal builds.
+
 ## [v1.0-beta.68] — 2026-04-03
 
 ### Fixed

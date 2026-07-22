@@ -148,6 +148,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// </summary>
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
+        _ = useInMemorySqlite;
+
         return new CustomWebApplicationFactory();
     }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -6,6 +6,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export function useInstallPrompt() {
+  const mountedRef = useRef(true);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isDismissed, setIsDismissed] = useState<boolean>(() => {
     // Check if dismissed in the last 7 days
@@ -18,6 +19,14 @@ export function useInstallPrompt() {
     }
     return false;
   });
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -39,18 +48,22 @@ export function useInstallPrompt() {
     const { outcome } = await installPrompt.userChoice;
 
     if (outcome === 'accepted') {
-      setInstallPrompt(null);
+      if (mountedRef.current) {
+        setInstallPrompt(null);
+      }
       return true;
-    } else {
-      dismiss();
-      return false;
     }
+
+    dismiss();
+    return false;
   };
 
-  const dismiss = () => {
+  const dismiss = useCallback(() => {
     localStorage.setItem('pwa-install-dismissed', new Date().toISOString());
-    setIsDismissed(true);
-  };
+    if (mountedRef.current) {
+      setIsDismissed(true);
+    }
+  }, []);
 
   return {
     canInstall: !!installPrompt && !isDismissed,

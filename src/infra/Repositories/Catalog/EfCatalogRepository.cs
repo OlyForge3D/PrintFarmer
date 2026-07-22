@@ -132,7 +132,9 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             m.MaxBedTemp,
             m.MaxPrintSpeed,
             DefaultWattage: m.DefaultWattage,
-            DefaultHourlyRate: m.DefaultHourlyRate)).ToList();
+            DefaultHourlyRate: m.DefaultHourlyRate,
+            DefaultAutoDispatchState: m.DefaultAutoDispatchState,
+            DefaultStartBehavior: m.DefaultStartBehavior)).ToList();
         return list;
     }
 
@@ -166,6 +168,8 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 model.MaxPrintSpeed,
                 DefaultWattage: model.DefaultWattage,
                 DefaultHourlyRate: model.DefaultHourlyRate,
+                DefaultAutoDispatchState: model.DefaultAutoDispatchState,
+                DefaultStartBehavior: model.DefaultStartBehavior,
                 Toolheads: model.Toolheads.Select(t => new PrinterModelToolheadDto(
                     t.Id,
                     t.Name,

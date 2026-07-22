@@ -328,6 +328,33 @@ final class PrivateNetworkSessionDelegate: NSObject, URLSessionDelegate, URLSess
     }
 }
 
+// MARK: - Active Server Generation
+
+final class ActiveServerGeneration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var current: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    @discardableResult
+    func advance() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
+    }
+
+    func isCurrent(_ generation: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value == generation
+    }
+}
+
 // MARK: - API Client
 
 actor APIClient {
@@ -337,6 +364,8 @@ actor APIClient {
     private var baseURL: URL
     private var accessToken: String?
     private var tokenExpiryChecker: (@Sendable () async -> Bool)?
+    private let serverGeneration: ActiveServerGeneration?
+    private let generationAtCreation: Int?
 
     /// Shared delegate that trusts self-signed certs on private networks.
     private static let privateNetworkDelegate = PrivateNetworkSessionDelegate()
@@ -364,13 +393,17 @@ actor APIClient {
 
     /// Restores the saved server URL string, upgrading legacy `http://` IP URLs.
     static func savedServerURLString() -> String? {
-        guard let saved = UserDefaults.standard.string(forKey: serverURLKey),
+        savedServerURLString(userDefaults: .standard)
+    }
+
+    static func savedServerURLString(userDefaults: UserDefaults) -> String? {
+        guard let saved = userDefaults.string(forKey: serverURLKey),
               let normalized = normalizeServerURLString(saved, upgradeLegacyIPHTTP: true) else {
             return nil
         }
 
         if normalized != saved {
-            UserDefaults.standard.set(normalized, forKey: serverURLKey)
+            userDefaults.set(normalized, forKey: serverURLKey)
         }
 
         return normalized
@@ -393,6 +426,13 @@ actor APIClient {
 
         if upgradeLegacyIPHTTP, scheme == "http", isIPv4Address(host) {
             components.scheme = "https"
+        }
+        let effectiveScheme = components.scheme?.lowercased() ?? scheme
+        components.scheme = effectiveScheme
+        components.host = host.lowercased()
+        if (effectiveScheme == "https" && components.port == 443)
+            || (effectiveScheme == "http" && components.port == 80) {
+            components.port = nil
         }
 
         guard let url = components.url else { return nil }
@@ -421,9 +461,17 @@ actor APIClient {
         return f
     }()
 
-    init(baseURL: URL, session: URLSession? = nil) {
+    init(
+        baseURL: URL,
+        session: URLSession? = nil,
+        serverGeneration: ActiveServerGeneration? = nil,
+        accessToken: String? = nil
+    ) {
         self.baseURL = baseURL
         self.session = session ?? Self.makePrivateNetworkSession()
+        self.accessToken = accessToken
+        self.serverGeneration = serverGeneration
+        self.generationAtCreation = serverGeneration?.current
 
         self.decoder = JSONDecoder()
         // ASP.NET Core can emit fractional seconds; the built-in .iso8601 strategy
@@ -466,6 +514,10 @@ actor APIClient {
         accessToken
     }
 
+    func unauthenticatedClient(baseURL: URL) -> APIClient {
+        APIClient(baseURL: baseURL, session: session)
+    }
+
     /// Restores a previously-saved server URL from UserDefaults.
     /// Upgrades legacy `http://` IP URLs to `https://` to match current behavior.
     static func savedBaseURL() -> URL? {
@@ -491,8 +543,32 @@ actor APIClient {
         try await checkTokenExpiry()
         let request = try buildRequest(path: path, method: "GET")
         let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
         try validateResponse(response, data: data)
         return data
+    }
+
+    // MARK: - Reachability
+
+    /// Lightweight, unauthenticated reachability probe for the connection indicator.
+    /// Sends a short GET to `path` (default `/healthz`) using the configured
+    /// private-network session so self-signed certs are still trusted. Returns
+    /// `true` when the server answers with an HTTP status below 500 (server is up),
+    /// `false` on transport failure or a 5xx response. Never throws.
+    func isReachable(path: String = "/healthz", timeout: TimeInterval = 6) async -> Bool {
+        guard let url = URL(string: path, relativeTo: baseURL) else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return http.statusCode < 500
+        } catch {
+            return false
+        }
     }
 
     func post<T: Decodable & Sendable>(_ path: String) async throws -> T {
@@ -546,6 +622,7 @@ actor APIClient {
     // MARK: - Internal
 
     private func buildRequest(path: String, method: String) throws -> URLRequest {
+        try validateActiveServerGeneration()
         // Pre-flight: reject if token is known to be expired
         // (check is sync-safe — the actual async check happens in execute/executeVoid wrappers)
         guard let url = URL(string: path, relativeTo: baseURL) else {
@@ -565,6 +642,7 @@ actor APIClient {
     private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
         try await checkTokenExpiry()
         let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
         try validateResponse(response, data: data)
         
         // Handle empty response body for Optional types (e.g., 204 No Content, 200 with empty body)
@@ -576,11 +654,14 @@ actor APIClient {
             }
             // Non-optional type with empty body is an error
             throw NetworkError.decodingFailed(
-                DecodingError.dataCorrupted(
-                    DecodingError.Context(
-                        codingPath: [],
-                        debugDescription: "Empty response body for non-optional type \(T.self)"
-                    )
+                ResponseDecodingFailure(
+                    error: DecodingError.dataCorrupted(
+                        DecodingError.Context(
+                            codingPath: [],
+                            debugDescription: "Empty response body for non-optional type \(T.self)"
+                        )
+                    ),
+                    targetType: T.self
                 )
             )
         }
@@ -593,20 +674,29 @@ actor APIClient {
             print("⚠️ [APIClient] Decode failed for \(T.self) at \(request.url?.path ?? "?"): \(error)")
             print("⚠️ [APIClient] Response body preview: \(preview)")
             #endif
-            throw NetworkError.decodingFailed(error)
+            throw NetworkError.decodingFailed(ResponseDecodingFailure(error: error, targetType: T.self))
         }
     }
 
     private func executeVoid(_ request: URLRequest) async throws {
         try await checkTokenExpiry()
         let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
         try validateResponse(response, data: data)
     }
 
     private func checkTokenExpiry() async throws {
+        try validateActiveServerGeneration()
         if let checker = tokenExpiryChecker, await checker() {
             NotificationCenter.default.post(name: .sessionExpired, object: nil)
             throw NetworkError.unauthorized
+        }
+    }
+
+    private func validateActiveServerGeneration() throws {
+        guard let serverGeneration, let generationAtCreation else { return }
+        if !serverGeneration.isCurrent(generationAtCreation) {
+            throw NetworkError.staleServerResponse
         }
     }
 
@@ -652,6 +742,8 @@ actor APIClient {
             throw NetworkError.forbidden
         case 404:
             throw NetworkError.notFound
+        case 405:
+            throw NetworkError.methodNotAllowed
         case 409:
             throw NetworkError.conflict
         case 400...499:
@@ -667,12 +759,70 @@ actor APIClient {
 
 // MARK: - Errors
 
+struct ResponseDecodingFailure: Error, Sendable {
+    let targetType: String
+    let kind: String
+    let codingPath: String
+    let expectedType: String
+    let debugDescription: String
+
+    init(error: Error, targetType: Any.Type) {
+        self.targetType = String(describing: targetType)
+
+        guard let decodingError = error as? DecodingError else {
+            self.kind = "unknown"
+            self.codingPath = "<root>"
+            self.expectedType = String(describing: targetType)
+            self.debugDescription = error.localizedDescription
+            return
+        }
+
+        switch decodingError {
+        case .keyNotFound(let key, let context):
+            self.kind = "keyNotFound"
+            self.codingPath = Self.formatPath(context.codingPath + [key])
+            self.expectedType = "required key '\(key.stringValue)'"
+            self.debugDescription = context.debugDescription
+        case .typeMismatch(let type, let context):
+            self.kind = "typeMismatch"
+            self.codingPath = Self.formatPath(context.codingPath)
+            self.expectedType = String(describing: type)
+            self.debugDescription = context.debugDescription
+        case .valueNotFound(let type, let context):
+            self.kind = "valueNotFound"
+            self.codingPath = Self.formatPath(context.codingPath)
+            self.expectedType = String(describing: type)
+            self.debugDescription = context.debugDescription
+        case .dataCorrupted(let context):
+            self.kind = "dataCorrupted"
+            self.codingPath = Self.formatPath(context.codingPath)
+            self.expectedType = String(describing: targetType)
+            self.debugDescription = context.debugDescription
+        @unknown default:
+            self.kind = "unknown"
+            self.codingPath = "<root>"
+            self.expectedType = String(describing: targetType)
+            self.debugDescription = error.localizedDescription
+        }
+    }
+
+    var userMessage: String {
+        "Failed to decode response for \(targetType): \(kind) at \(codingPath); expected \(expectedType); \(debugDescription).\nYour PrintFarmer server version may be incompatible; update the server."
+    }
+
+    private static func formatPath(_ codingPath: [CodingKey]) -> String {
+        guard !codingPath.isEmpty else { return "<root>" }
+        return codingPath.map(\.stringValue).joined(separator: ".")
+    }
+}
+
 enum NetworkError: LocalizedError, Sendable {
     case invalidURL(String)
     case invalidResponse
     case unauthorized
     case forbidden
     case notFound
+    case methodNotAllowed
     case conflict
     case noConnection
     case timeout
@@ -680,9 +830,10 @@ enum NetworkError: LocalizedError, Sendable {
     case clientError(Int, APIError?)
     case serverError(Int)
     case unexpectedStatus(Int)
-    case decodingFailed(Error)
+    case decodingFailed(ResponseDecodingFailure)
     case transportError(URLError)
     case authFailed(String)
+    case staleServerResponse
 
     var errorDescription: String? {
         switch self {
@@ -691,6 +842,8 @@ enum NetworkError: LocalizedError, Sendable {
         case .unauthorized: return "Authentication required"
         case .forbidden: return "Access denied"
         case .notFound: return "Resource not found"
+        case .methodNotAllowed:
+            return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
         case .conflict: return "Conflict — resource was modified"
         case .noConnection: return "No internet connection"
         case .timeout: return "Request timed out"
@@ -699,7 +852,7 @@ enum NetworkError: LocalizedError, Sendable {
             return apiError?.detail ?? apiError?.message ?? apiError?.title ?? "Client error (\(code))"
         case .serverError(let code): return "Server error (\(code))"
         case .unexpectedStatus(let code): return "Unexpected status (\(code))"
-        case .decodingFailed(let error): return "Failed to decode response: \(error.localizedDescription)"
+        case .decodingFailed(let failure): return failure.userMessage
         case .transportError(let error):
             let tlsSummary = TLSDiagnostics.recentSummary()
             let base: String
@@ -723,6 +876,7 @@ enum NetworkError: LocalizedError, Sendable {
             guard !details.isEmpty else { return base }
             return "\(base) [\(details.joined(separator: "] ["))]"
         case .authFailed(let message): return message
+        case .staleServerResponse: return "Ignored response from a previous server selection"
         }
     }
 

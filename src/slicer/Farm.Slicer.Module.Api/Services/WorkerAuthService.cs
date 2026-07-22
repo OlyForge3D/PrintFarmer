@@ -9,6 +9,7 @@ namespace Farm.Slicer.Module.Api.Services;
 public sealed class WorkerAuthService(IConfiguration configuration, IHostEnvironment env) : IWorkerAuthService
 {
     private readonly string? _sharedKey = configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"]
+                     ?? configuration.GetSection(WorkerAuthSettings.SectionName)["SharedApiKey"]
                      ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
 
     private readonly IHostEnvironment _env = env;
@@ -22,10 +23,10 @@ public sealed class WorkerAuthService(IConfiguration configuration, IHostEnviron
             return false;
         }
 
-        // Allow bypass when no key configured and environment is Testing to keep integration tests simple until explicit key set.
+        // Allow bypass when no key configured and environment is Development or Testing.
         if (string.IsNullOrWhiteSpace(_sharedKey))
         {
-            return _env.IsEnvironment("Testing");
+            return _env.IsDevelopment() || _env.IsEnvironment("Testing");
         }
 
         if (!httpContext.Request.Headers.TryGetValue(HeaderName, out StringValues values))

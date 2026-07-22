@@ -542,6 +542,14 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     }
 
     /// <summary>
+    /// Returns true when the SDCP <c>CurrentStatus</c> array indicates the printer is
+    /// actively printing (code 1) or in a transient start phase (code 9).
+    /// Used by the secondary firmware-409 defense in <see cref="StartPrintAsync(string, string, PrinterCredential?, CancellationToken)"/> (#317).
+    /// </summary>
+    internal static bool IsPrintingStatus(int[] currentStatus) =>
+        currentStatus.Any(c => c is 1 or 9);
+
+    /// <summary>
     /// Computes print progress as a 0.0–1.0 fraction.
     /// Prefers CurrentLayer/TotalLayer (always updated during printing), falling back to
     /// the firmware Progress field (which some firmware only updates sporadically).
@@ -579,6 +587,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     private async Task<string?> ReceiveTextMessageAsync(ClientWebSocket ws, string operation, string correlationId, CancellationToken ct)
 #pragma warning restore S1172
     {
+        _ = operation;
+        _ = correlationId;
+
         byte[] rented = ArrayPool<byte>.Shared.Rent(8192);
         try
         {
@@ -741,6 +752,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         CancellationToken ct)
 #pragma warning restore S1172
     {
+        _ = operation;
+        _ = correlationId;
+
         List<Uri> candidates = GetWebSocketCandidateUris(baseUrl);
         Exception? lastException = null;
 
@@ -1148,10 +1162,39 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
         LogSdcp(LogLevel.Information, $"SDCP starting print: {sdcpPath}");
 
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint,
+        bool started = await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint,
             new { Filename = sdcpPath, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 },
             timeout: _timeouts.PrintControlTimeout,
             ct: ct);
+
+        if (!started)
+        {
+            // Secondary defense (#317): SDCP Ack codes don't distinguish "printer is printing" from
+            // other errors (Ack=1 is a generic error). Query CurrentStatus to determine whether the
+            // rejection was caused by an active print job and propagate as PrinterBackendBusyException.
+            // CurrentStatus code 1 = printing, 9 = starting (transient while a print is being set up).
+            // TODO(#317-followup): if a future SDCP spec version introduces a dedicated "busy/printing"
+            // Ack code, replace this round-trip with a direct Ack check in SendCommandAsync.
+            try
+            {
+                int[]? currentStatus = await GetCurrentStatusArrayAsync(baseUrl, ct);
+                if (currentStatus is { Length: > 0 } && IsPrintingStatus(currentStatus))
+                {
+                    throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                        $"SDCP printer at {baseUrl} rejected StartPrint — printer is already printing (CurrentStatus=[{string.Join(",", currentStatus)}]).");
+                }
+            }
+            catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+            {
+                throw;
+            }
+            catch
+            {
+                // Status check failure is non-fatal; fall through and return false.
+            }
+        }
+
+        return started;
     }
 
     public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1622,6 +1665,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     /// MD5 is required by the SDCP upload protocol for file integrity verification — not used for security.
     /// </summary>
 #pragma warning disable CA5351 // MD5 required by SDCP protocol, not used for security
+#pragma warning disable S4790 // SDCP firmware protocol requires MD5 for file integrity verification, not credential or security hashing.
     private static async Task<string> ComputeMd5Async(Stream stream, CancellationToken ct)
     {
         using MD5 md5 = MD5.Create();
@@ -1629,6 +1673,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         return Convert.ToHexStringLower(hash);
     }
 #pragma warning restore CA5351
+#pragma warning restore S4790
 
     public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {

@@ -4,6 +4,7 @@ import Foundation
 final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     var spoolsPageToReturn = SpoolmanPagedResult<SpoolmanSpool>(items: [], totalCount: 0)
     var spoolToReturn: SpoolmanSpool?
+    var filamentToReturn: SpoolmanFilament?
     var filamentsToReturn: [SpoolmanFilament] = []
     var vendorsToReturn: [SpoolmanVendor] = []
     var materialsToReturn: [SpoolmanMaterial] = []
@@ -15,6 +16,7 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     // swiftlint:disable:next large_tuple
     var listSpoolsArgs: (limit: Int, offset: Int, search: String?, material: String?, vendor: String?)?
     var createSpoolCalledWith: SpoolmanSpoolRequest?
+    var createFilamentCalledWith: SpoolmanFilamentRequest?
     var updateSpoolCalledWith: (id: Int, request: SpoolmanSpoolRequest)?
     var deleteSpoolCalledWith: Int?
     var listFilamentsCalled = false
@@ -54,6 +56,13 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         return filamentsToReturn
     }
 
+    func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament {
+        createFilamentCalledWith = request
+        if let error = errorToThrow { throw error }
+        guard let filament = filamentToReturn else { throw NetworkError.notFound }
+        return filament
+    }
+
     func listVendors() async throws -> [SpoolmanVendor] {
         listVendorsCalled = true
         if let error = errorToThrow { throw error }
@@ -75,6 +84,7 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     func reset() {
         spoolsPageToReturn = SpoolmanPagedResult<SpoolmanSpool>(items: [], totalCount: 0)
         spoolToReturn = nil
+        filamentToReturn = nil
         filamentsToReturn = []
         vendorsToReturn = []
         materialsToReturn = []
@@ -83,6 +93,7 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         listSpoolsCalled = false
         listSpoolsArgs = nil
         createSpoolCalledWith = nil
+        createFilamentCalledWith = nil
         updateSpoolCalledWith = nil
         deleteSpoolCalledWith = nil
         listFilamentsCalled = false

@@ -16,5 +16,6 @@ public class AppSettingsConfiguration : IEntityTypeConfiguration<AppSettingsEnti
         _ = builder.Property(a => a.SettingsJson).IsRequired().HasColumnType("TEXT");
         _ = builder.Property(a => a.UpdatedAt).IsRequired();
         _ = builder.HasIndex(a => a.Key).IsUnique();
+        _ = builder.Property(a => a.RowVersion).IsConcurrencyToken();
     }
 }

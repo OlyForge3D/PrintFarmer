@@ -43,6 +43,29 @@ public class MonitoringControllerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateSession_PlainHttpRequest_SetsNonSecureCookie()
+    {
+        var response = await _adminClient!.PostAsync("/api/monitoring/session", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var setCookie = response.Headers.GetValues("Set-Cookie").First();
+        setCookie.Contains("; secure", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateSession_ForwardedHttpsRequest_SetsSecureCookie()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/monitoring/session");
+        request.Headers.Add("X-Forwarded-Proto", "https");
+
+        var response = await _adminClient!.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var setCookie = response.Headers.GetValues("Set-Cookie").First();
+        setCookie.Contains("; secure", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task CreateSession_Unauthenticated_Returns401()
     {
         var response = await _anonClient!.PostAsync("/api/monitoring/session", null);

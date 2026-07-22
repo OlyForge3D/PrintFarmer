@@ -21,6 +21,15 @@ public class UnifiedSettingsController(
     private readonly DiscoveryHeartbeatMonitorService _discoveryMonitor = discoveryMonitor;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
 
+    // Keys for settings types that own their own secret fields (encrypted tokens, etc.) and must
+    // not be exposed or mutated through the generic settings surface.  Each such type has a
+    // dedicated admin controller that handles masking / encryption correctly.
+    private static readonly HashSet<string> _settingsBlocklist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        HomeAssistantSettings.SectionName,
+        TelegramSettings.SectionName
+    };
+
     // Lazy-initialize this since it depends on _modularSettingsService
     private Dictionary<string, string>? _keyNameToClassNameMap;
 
@@ -42,6 +51,13 @@ public class UnifiedSettingsController(
         Dictionary<string, object> result = new();
         foreach (SettingMetadata meta in allMetadata)
         {
+            // Skip settings types that manage their own secret fields.
+            // These must be accessed via their dedicated admin controllers.
+            if (_settingsBlocklist.Contains(meta.Key))
+            {
+                continue;
+            }
+
             object settings = _modularSettingsService.GetByKey(meta.Key);
             result[meta.Key] = settings ?? new { };
         }
@@ -63,7 +79,7 @@ public class UnifiedSettingsController(
     {
         try
         {
-            _logger.LogDebug("Settings POST: Raw payload object: {@SettingsSections}", settingsSections);
+            _logger.LogDebug("Settings POST: Raw payload object keys: {Keys}", string.Join(", ", settingsSections.Keys));
             Dictionary<string, Type> keyToType = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
                 .Where(t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<AppSettingAttribute>(t) != null)
@@ -76,6 +92,14 @@ public class UnifiedSettingsController(
                 string key = kvp.Key;
                 object value = kvp.Value;
                 _logger.LogDebug("Settings POST: Processing section key '{Key}'", key);
+
+                // Skip settings types that manage their own secret fields.
+                if (_settingsBlocklist.Contains(key))
+                {
+                    _logger.LogWarning("Settings POST: Skipping blocked section '{Key}' — use the dedicated admin endpoint", key);
+                    continue;
+                }
+
                 if (!keyToType.TryGetValue(key, out Type? settingsType))
                 {
                     _logger.LogWarning("Settings POST: Unknown section key '{Key}'", key);
@@ -88,7 +112,7 @@ public class UnifiedSettingsController(
                     try
                     {
                         object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
-                        _logger.LogDebug("Settings POST: Deserialized object for '{Key}': {@TypedSettings}", key, typedSettings);
+                        _logger.LogDebug("Settings POST: Deserialized section '{Key}' successfully", key);
                         if (typedSettings != null)
                         {
                             // Verify the type implements IAppSetting (required for Save<T>)
@@ -213,12 +237,19 @@ public class UnifiedSettingsController(
     {
         try
         {
-            IEnumerable<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata();
+            // Materialize inside the try: GetAllMetadata() is a lazy yield iterator, so without
+            // this the enumeration (and any exception, e.g. a settings property missing
+            // [JsonPropertyName]) would happen during response serialization — after the 200 status
+            // and headers are already on the wire — surfacing to the browser as a truncated
+            // ERR_INCOMPLETE_CHUNKED_ENCODING instead of a clean error. ToList() forces failure here.
+            List<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata()
+                .Where(meta => !_settingsBlocklist.Contains(meta.Key))
+                .ToList();
             return Ok(metadata);
         }
         catch (Exception ex)
         {
-            return BadRequest($"Failed to get settings metadata: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get settings metadata: {ex.Message}");
         }
     }
 
@@ -235,12 +266,14 @@ public class UnifiedSettingsController(
     {
         try
         {
-            IEnumerable<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata();
+            // Materialize inside the try (lazy yield iterator) so failures surface as a clean
+            // 500 rather than a mid-stream truncated response. See GetMetadata() for details.
+            List<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata().ToList();
             return Ok(groups);
         }
         catch (Exception ex)
         {
-            return BadRequest($"Failed to get settings group metadata: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get settings group metadata: {ex.Message}");
         }
     }
 
@@ -253,6 +286,12 @@ public class UnifiedSettingsController(
     [HttpGet("{keyName}")]
     public ActionResult<object> GetSettingsByKeyName(string keyName)
     {
+        // Block settings types that manage their own secret fields.
+        if (_settingsBlocklist.Contains(keyName))
+        {
+            return NotFound($"Settings key '{keyName}' not found");
+        }
+
         try
         {
             string? className = MapKeyNameToClassName(keyName);
@@ -324,6 +363,12 @@ public class UnifiedSettingsController(
     [HttpPost("{keyName}")]
     public async Task<ActionResult> UpdateSettingsByKeyNameAsync(string keyName, [FromBody] object settingsValues)
     {
+        // Block settings types that manage their own secret fields.
+        if (_settingsBlocklist.Contains(keyName))
+        {
+            return NotFound($"Settings key '{keyName}' not found");
+        }
+
         try
         {
             // Use the modular settings service to save the individual settings

@@ -181,9 +181,10 @@ export function DataTable<T>({
       onRowSelect={handleRowSelect}
       onRowFocus={handleRowFocus}
       className={className}
+      rowCount={sortedData.length}
     >
       <TableHead>
-        <TableRow isHoverable={false}>
+        <TableRow isHoverable={false} rowIndex={-1}>
           {columns.map(column => (
             <TableHeaderCell
               key={column.key}

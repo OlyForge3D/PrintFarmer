@@ -91,6 +91,19 @@ public interface IMoonrakerClient : IBackendClient
     Task<byte[]?> GetCameraSnapshotAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
+    /// Captures a stock Snapmaker U1 camera frame. U1 stock firmware exposes a snapshot file only
+    /// after camera.start_monitor is sent over Moonraker websocket JSON-RPC; it is not a plain MJPEG stream.
+    /// LAN cleartext HTTP/ws is supported because stock U1 and SnapCon use that transport. If an API key is
+    /// configured it is sent as X-Api-Key for HTTP and token= on the websocket for firmware variants that require it.
+    /// </summary>
+    Task<byte[]?> GetSnapmakerU1CameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets stock Snapmaker U1 snapshot-only URLs. StreamUrl is null because stock U1 monitor.jpg is not MJPEG/WebRTC/RTSP.
+    /// </summary>
+    Task<(string? StreamUrl, string? SnapshotUrl)> GetSnapmakerU1CameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Queries the Moonraker API for actual camera URLs configured on the printer.
     /// This queries /server/webcams/list API and returns the first enabled camera's URLs.
     /// </summary>
@@ -269,6 +282,24 @@ public interface IMoonrakerClient : IBackendClient
     Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default);
 
     Task<bool> SendGcodeAsync(Uri baseUrl, string gcode, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets object-exclusion metadata for the active print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="credential">Optional printer credential.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>The active job objects, or null when unavailable.</returns>
+    Task<PrintJobObjectListDto?> GetCurrentJobObjectsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Excludes a named object from the active print.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="objectName">The object name from object-exclusion metadata.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>True if Moonraker accepted the command.</returns>
+    Task<bool> ExcludeObjectAsync(string baseUrl, string objectName, CancellationToken ct = default);
 
     /// <summary>
     /// Starts printing a G-code file by name.

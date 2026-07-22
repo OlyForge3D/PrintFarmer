@@ -5,8 +5,10 @@ import {
   ApiError,
   PrintJobStatusDto,
   AuthenticationResult,
+  BedType,
   CatalogContext,
   CommandResult,
+  CreateBedTypeRequest,
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
   CreateHotendModelDto,
@@ -35,23 +37,32 @@ import {
   MoveRequest,
   NozzleModelDefinition,
   Printer,
+  PrinterCameraUrlResult,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
   PrinterBackendCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
+  PrintJobObjectListDto,
   PrinterFileDto,
   PrinterGroup,
+  PrinterGroupAccessRule,
   PrinterGroupDetail,
   PrinterModelDto,
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
   QueueHistoryPageDto,
   QueueOverviewDto,
+  QueueStatsDto,
   RegisterRequest,
+  SystemInfo,
   ResolveHostnameRequest,
+  RoleDto,
+  SetAccessRulesRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
+  ProfileSchemasResponse,
+  ProfileTypeSchema,
   SlicerModelAliasDto,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
@@ -70,9 +81,13 @@ import {
   UpdateToolheadModelDefDto,
   UserDto,
   DiscoveredGcodeFileDto,
+  SetModelDispatchDefaultsRequest,
+  ApplyModelDefaultsResult,
   GcodeHarvestResultDto,
   BulkImportResponse,
   SpoolmanSpool,
+  SpoolFilterOptions,
+  FilamentFilterOptions,
   SpoolmanFilament,
   SpoolmanVendor,
   SpoolmanMaterial,
@@ -94,10 +109,14 @@ import {
   ConnectionDiagnosticsResponse,
   PagedResponse,
   SystemCapabilities,
-    DispatchHistoryPageDto,
-    FailureDetectionEvent,
-    NotificationDto,
+  DispatchHistoryPageDto,
+  FailureDetectionEvent,
+  NotificationDto,
   NotificationPreferencesDto,
+  TelegramSettingsDto,
+  TelegramTestResult,
+  UpdateBedTypeRequest,
+  UpdateTelegramSettingsRequest,
   UpdateNotificationPreferencesRequest,
   UnreadCountResponse,
   ScheduledJob,
@@ -113,11 +132,100 @@ import {
   ObicoServerHealthResponse,
   TimelineEventDto,
   TimezoneInfo,
+  MaterialClusterDto,
+  CreateMaterialClusterRequest,
+  UpdateMaterialClusterRequest,
+  QuotaDto,
+  CreateQuotaRequest,
+  UpdateQuotaRequest,
+  CheckQuotaRequest,
+  QuotaCheckResult,
+  UserBalanceDto,
+  BalanceTransactionDto,
+  BalanceAdjustRequest,
+  ZOffsetSaveRequest,
+  CustomFieldDefinition,
+  CustomFieldEntityType,
+  CustomFieldValue,
+  CreateCustomFieldDefinitionRequest,
+  UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
+import type {
+  PrintablesDownloadHistoryItem,
+  GeometryUploadResultDto,
+  PrintablesCollectionSummary,
+  PrintablesModelSummary,
+  PrintablesOAuthStatus,
+  PrintablesPagedResponse,
+  ThreeMfMetadata
+} from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
+/**
+ * Extended Axios request config with PrintFarmer-specific interceptor bypass flags.
+ * Pass a `PfRequestConfig` to `apiClient.request()` when you need to suppress the
+ * default 401 redirect behaviour for endpoints that signal soft failures via 401
+ * (e.g. passkey assertion completion).
+ */
+export interface PfRequestConfig extends AxiosRequestConfig {
+  /**
+   * When `true`, a 401 response will not trigger the global token-clear and
+   * redirect-to-/login behaviour in the response interceptor.  Use this for
+   * endpoints that legitimately return 401 to indicate a failed operation
+   * rather than an expired session.
+   */
+  skipAuthRedirect?: boolean;
+}
+
 const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
+
+interface PrintablesModelSummaryApiDto {
+  id: string;
+  name?: string;
+  title?: string;
+  slug?: string | null;
+  authorHandle?: string | null;
+  authorName?: string | null;
+  author?: string | null;
+  thumbnailUrl?: string | null;
+  likesCount?: number;
+  likeCount?: number;
+  downloadCount?: number;
+  downloadsCount?: number;
+  fileCount?: number;
+  sourceUrl?: string;
+}
+
+interface PrintablesCursorApiResponse<T> {
+  items?: T[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+}
+
+interface PrintablesSearchApiResponse<T> {
+  items?: T[];
+  hasMore?: boolean;
+  offset?: number;
+  limit?: number;
+}
+
+type SerializedArray<T> = T[] | string | null | undefined;
+
+interface GcodeFileApiResponse extends Omit<GcodeFile,
+  "filamentPerExtruderWeightG" |
+  "filamentPerExtruderLengthMm" |
+  "filamentPerExtruderColorHex" |
+  "filamentPerExtruderType"> {
+  filamentPerExtruderWeightG?: SerializedArray<number>;
+  filamentPerExtruderLengthMm?: SerializedArray<number>;
+  filamentPerExtruderColorHex?: SerializedArray<string>;
+  filamentPerExtruderType?: SerializedArray<string>;
+}
+
+interface GetGcodeFilesApiResponse extends Omit<GetGcodeFilesResponse, "files"> {
+  files: GcodeFileApiResponse[];
+}
 
 export class ApiClient {
   // Utility to generate a correlation ID (UUID v4)
@@ -135,6 +243,132 @@ export class ApiClient {
         return v.toString(16);
       }
     );
+  }
+
+  private static normalizePrintablesUsername(username: string): string {
+    return username.trim().replace(/^@+/, "");
+  }
+
+  private static mapPrintablesModelSummary(model: PrintablesModelSummaryApiDto): PrintablesModelSummary {
+    return {
+      id: model.id,
+      title: model.title ?? model.name ?? "",
+      slug: model.slug ?? null,
+      author: model.author ?? model.authorHandle ?? model.authorName ?? "Unknown",
+      thumbnailUrl: model.thumbnailUrl ?? null,
+      likesCount: model.likesCount ?? model.likeCount,
+      downloadsCount: model.downloadsCount ?? model.downloadCount,
+      fileCount: model.fileCount,
+      sourceUrl: model.sourceUrl,
+    };
+  }
+
+  private static parseSerializedNumberArray(value: SerializedArray<number>): number[] | undefined {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return undefined;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.every((item) => typeof item === "number") ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static parseSerializedStringArray(value: SerializedArray<string>): string[] | undefined {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return undefined;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static mapGcodeFile(file: GcodeFileApiResponse): GcodeFile {
+    return {
+      ...file,
+      filamentPerExtruderWeightG: ApiClient.parseSerializedNumberArray(file.filamentPerExtruderWeightG),
+      filamentPerExtruderLengthMm: ApiClient.parseSerializedNumberArray(file.filamentPerExtruderLengthMm),
+      filamentPerExtruderColorHex: ApiClient.parseSerializedStringArray(file.filamentPerExtruderColorHex),
+      filamentPerExtruderType: ApiClient.parseSerializedStringArray(file.filamentPerExtruderType),
+    };
+  }
+
+  private static mapGcodeFilesResponse(response: GetGcodeFilesApiResponse): GetGcodeFilesResponse {
+    return {
+      ...response,
+      files: response.files.map(ApiClient.mapGcodeFile),
+    };
+  }
+
+  private static normalizePrintablesCursorPage(
+    page: PrintablesCursorApiResponse<PrintablesModelSummaryApiDto> | PrintablesPagedResponse<PrintablesModelSummary> | null | undefined,
+  ): PrintablesPagedResponse<PrintablesModelSummary> {
+    if (!page) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const items = (page.items ?? []).map((item) => ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto));
+    return {
+      items,
+      nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
+      hasMore: Boolean(page.hasMore),
+    };
+  }
+
+  private static normalizePrintablesHistoryPage(
+    page:
+      | PrintablesCursorApiResponse<PrintablesModelSummaryApiDto & { downloadedAt?: string | null }>
+      | PrintablesPagedResponse<PrintablesDownloadHistoryItem>
+      | null
+      | undefined,
+  ): PrintablesPagedResponse<PrintablesDownloadHistoryItem> {
+    if (!page) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const items = (page.items ?? []).map((item) => {
+      const mappedModel = ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto);
+      return {
+        ...mappedModel,
+        downloadedAt: (item as { downloadedAt?: string | null }).downloadedAt ?? null,
+      };
+    });
+
+    return {
+      items,
+      nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
+      hasMore: Boolean(page.hasMore),
+    };
+  }
+
+  private static normalizePrintablesSearchPage(
+    page: PrintablesSearchApiResponse<PrintablesModelSummaryApiDto> | PrintablesPagedResponse<PrintablesModelSummary> | null | undefined,
+  ): PrintablesPagedResponse<PrintablesModelSummary> {
+    if (!page) {
+      return { items: [], hasMore: false, offset: 0, limit: 0 };
+    }
+
+    const items = (page.items ?? []).map((item) => ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto));
+    return {
+      items,
+      hasMore: Boolean(page.hasMore),
+      offset: typeof page.offset === "number" ? page.offset : 0,
+      limit: typeof page.limit === "number" ? page.limit : items.length,
+    };
   }
   // ============ Generic Settings API methods ============
   /**
@@ -264,8 +498,11 @@ export class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
-        // Handle 401 Unauthorized - clear token and redirect to login
-        if (error.response?.status === 401) {
+        // Handle 401 Unauthorized — clear token and redirect to login unless
+        // the caller set skipAuthRedirect:true on the request config to handle
+        // the 401 inline (e.g. passkey assertion, which the backend signals
+        // with 401 for failed credentials rather than as a session expiry).
+        if (error.response?.status === 401 && !(error.config as PfRequestConfig)?.skipAuthRedirect) {
           localStorage.removeItem("auth-token");
           // Only redirect if not already on auth pages
           if (
@@ -413,6 +650,24 @@ export class ApiClient {
     return response.data;
   }
 
+  async getPrinterCameraUrl(id: string): Promise<PrinterCameraUrlResult> {
+    const response = await this.client.get<PrinterCameraUrlResult>(
+      `/printers/${id}/camera/url`
+    );
+    return response.data;
+  }
+
+  async getPrinterSnapshot(id: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/printers/${id}/snapshot`,
+      {
+        params: { _: Date.now() },
+        responseType: "blob",
+      }
+    );
+    return response.data;
+  }
+
   async getPrinterBackendCapabilities(): Promise<PrinterBackendCapabilitiesDto[]> {
     const response = await this.client.get<PrinterBackendCapabilitiesDto[]>(
       "/printers/backend-capabilities"
@@ -434,6 +689,13 @@ export class ApiClient {
 
   async getPrinterVersionInfo(printerId: string): Promise<PrinterVersionInfo> {
     const response = await this.client.get<PrinterVersionInfo>(`/printers/${printerId}/version`);
+    return response.data;
+  }
+
+  async getPrintJobObjects(printerId: string): Promise<PrintJobObjectListDto> {
+    const response = await this.client.get<PrintJobObjectListDto>(
+      `/printers/${printerId}/printjob/objects`
+    );
     return response.data;
   }
 
@@ -838,6 +1100,27 @@ export class ApiClient {
     return response.data;
   }
 
+  async excludePrintJobObject(printerId: string, name: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/printjob/objects/exclude`,
+      { name }
+    );
+    return response.data;
+  }
+
+  /**
+   * Save calibrated Z-offset to the printer and optionally to firmware.
+   * @param printerId The printer's GUID
+   * @param request The Z-offset save payload
+   */
+  async saveZOffset(printerId: string, request: ZOffsetSaveRequest): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/z-offset`,
+      request
+    );
+    return response.data;
+  }
+
   /**
    * Set the active spool on a printer via Spoolman.
    * @param printerId The printer's GUID
@@ -985,6 +1268,80 @@ export class ApiClient {
     await this.client.delete(`/printer-groups/${groupId}/printers/${printerId}`);
   }
 
+  async getPrinterGroupAccessRules(groupId: string): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.get<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`
+    );
+    return response.data;
+  }
+
+  async setPrinterGroupAccessRules(
+    groupId: string,
+    dto: SetAccessRulesRequest
+  ): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.put<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`,
+      dto
+    );
+    return response.data;
+  }
+
+  async getRoles(): Promise<RoleDto[]> {
+    const response = await this.client.get<RoleDto[]>("/users/roles");
+    return response.data;
+  }
+
+  // ============ Bed Type API methods ============
+
+  async getBedTypes(): Promise<BedType[]> {
+    const response = await this.client.get<BedType[]>("/bed-types");
+    return response.data;
+  }
+
+  async createBedType(dto: CreateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.post<BedType>("/bed-types", dto);
+    return response.data;
+  }
+
+  async updateBedType(id: string, dto: UpdateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.put<BedType>(`/bed-types/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteBedType(id: string): Promise<void> {
+    await this.client.delete(`/bed-types/${id}`);
+  }
+
+  // ============ Custom Fields API methods ============
+
+  async getCustomFieldDefinitions(entityType: CustomFieldEntityType): Promise<CustomFieldDefinition[]> {
+    const response = await this.client.get<CustomFieldDefinition[]>('/custom-fields/definitions', { params: { entityType } });
+    return response.data;
+  }
+
+  async createCustomFieldDefinition(dto: CreateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.post<CustomFieldDefinition>('/custom-fields/definitions', dto);
+    return response.data;
+  }
+
+  async updateCustomFieldDefinition(id: string, dto: UpdateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.put<CustomFieldDefinition>(`/custom-fields/definitions/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteCustomFieldDefinition(id: string): Promise<void> {
+    await this.client.delete(`/custom-fields/definitions/${id}`);
+  }
+
+  async getCustomFieldValues(entityType: CustomFieldEntityType, entityId: string): Promise<CustomFieldValue[]> {
+    const response = await this.client.get<CustomFieldValue[]>(`/custom-fields/values/${entityType}/${entityId}`);
+    return response.data;
+  }
+
+  async setCustomFieldValues(entityType: CustomFieldEntityType, entityId: string, values: Record<string, string | null>): Promise<void> {
+    await this.client.put(`/custom-fields/values/${entityType}/${entityId}`, { values });
+  }
+
   // ============ Catalog API methods ============
 
   async getManufacturers(): Promise<ManufacturerDto[]> {
@@ -1070,6 +1427,24 @@ export class ApiClient {
     const response = await this.client.put<SlicerModelAliasDto[]>(
       `/catalog/printer-models/${modelId}/aliases`,
       request
+    );
+    return response.data;
+  }
+
+  async setModelDispatchDefaults(
+    modelId: string,
+    request: SetModelDispatchDefaultsRequest
+  ): Promise<PrinterModelDto> {
+    const response = await this.client.put<PrinterModelDto>(
+      `/catalog/printer-models/${modelId}/dispatch-defaults`,
+      request
+    );
+    return response.data;
+  }
+
+  async applyModelDefaults(modelId: string): Promise<ApplyModelDefaultsResult> {
+    const response = await this.client.post<ApplyModelDefaultsResult>(
+      `/catalog/printer-models/${modelId}/apply-defaults`
     );
     return response.data;
   }
@@ -1419,6 +1794,66 @@ export class ApiClient {
     return response.data;
   }
 
+  // ============ Material Clusters ============
+
+  async getMaterialClusters(): Promise<MaterialClusterDto[]> {
+    const response = await this.client.get<MaterialClusterDto[]>(
+      "/material-clusters"
+    );
+    return response.data;
+  }
+
+  async getMaterialCluster(id: string): Promise<MaterialClusterDto> {
+    const response = await this.client.get<MaterialClusterDto>(
+      `/material-clusters/${id}`
+    );
+    return response.data;
+  }
+
+  async createMaterialCluster(
+    request: CreateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      "/material-clusters",
+      request
+    );
+    return response.data;
+  }
+
+  async updateMaterialCluster(
+    id: string,
+    request: UpdateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.put<MaterialClusterDto>(
+      `/material-clusters/${id}`,
+      request
+    );
+    return response.data;
+  }
+
+  async deleteMaterialCluster(id: string): Promise<void> {
+    await this.client.delete(`/material-clusters/${id}`);
+  }
+
+  async addMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
+    return response.data;
+  }
+
+  async removeMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<void> {
+    await this.client.delete(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
+  }
+
   // ============ Network utilities ============
 
   async resolveHostname(
@@ -1434,15 +1869,15 @@ export class ApiClient {
   // ============ G-code library methods ============
 
   async getGcodeFiles(page = 1, pageSize = 50): Promise<GcodeFile[]> {
-    const response = await this.client.get<GcodeFile[]>("/gcode-files", {
+    const response = await this.client.get<GcodeFileApiResponse[]>("/gcode-files", {
       params: { page, pageSize },
     });
-    return response.data;
+    return response.data.map(ApiClient.mapGcodeFile);
   }
 
   async getGcodeFile(id: string): Promise<GcodeFile> {
-    const response = await this.client.get<GcodeFile>(`/gcode-files/${id}`);
-    return response.data;
+    const response = await this.client.get<GcodeFileApiResponse>(`/gcode-files/${id}`);
+    return ApiClient.mapGcodeFile(response.data);
   }
 
   async uploadGcodeFile(
@@ -1455,7 +1890,7 @@ export class ApiClient {
     if (description) formData.append("description", description);
     if (tags) formData.append("tags", JSON.stringify(tags));
 
-    const response = await this.client.post<GcodeFile>(
+    const response = await this.client.post<GcodeFileApiResponse>(
       "/gcode-files/upload",
       formData,
       {
@@ -1464,7 +1899,7 @@ export class ApiClient {
         },
       }
     );
-    return response.data;
+    return ApiClient.mapGcodeFile(response.data);
   }
 
   async deleteGcodeFile(id: string): Promise<void> {
@@ -1700,11 +2135,11 @@ export class ApiClient {
       console.log('[API Client] getGcodeFilesWithFilter params after filtering:', params);
     }
     
-    const response = await this.client.get<GetGcodeFilesResponse>(
+    const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files",
       { params }
     );
-    return response.data;
+    return ApiClient.mapGcodeFilesResponse(response.data);
   }
 
   async getGcodeFilesQuery(
@@ -1723,11 +2158,11 @@ export class ApiClient {
       console.log('[API Client] getGcodeFilesQuery params after filtering:', params);
     }
     
-    const response = await this.client.get<GetGcodeFilesResponse>(
+    const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files/query",
       { params }
     );
-    return response.data;
+    return ApiClient.mapGcodeFilesResponse(response.data);
   }
 
   async getGcodeFilesFolders(): Promise<Array<{ path: string; fileName: string; isDirectory: boolean }>> {
@@ -1750,6 +2185,150 @@ export class ApiClient {
       apiRequest
     );
     return response.data;
+  }
+
+  async getPrintablesUserCollections(
+    username: string,
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesCollectionSummary>> {
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesCollectionSummary> & { collections?: PrintablesCollectionSummary[] }>(
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/collections`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    const items = Array.isArray(response.data.items)
+      ? response.data.items
+      : Array.isArray(response.data.collections)
+        ? response.data.collections
+        : [];
+
+    return {
+      items,
+      nextCursor: typeof response.data.nextCursor === "string" ? response.data.nextCursor : null,
+    };
+  }
+
+  async getPrintablesCollectionModels(
+    collectionId: string,
+    options?: { cursor?: string; limit?: number; query?: string; ordering?: string }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/collections/${encodeURIComponent(collectionId)}/models`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+          query: options?.query,
+          ordering: options?.ordering,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesCursorPage(response.data);
+  }
+
+  async getPrintablesUserModels(
+    username: string,
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/models`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesCursorPage(response.data);
+  }
+
+  async searchPrintablesModels(
+    query: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesSearchApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/search`,
+      {
+        params: {
+          query,
+          offset: options?.offset ?? 0,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesSearchPage(response.data);
+  }
+
+  async getPrintablesOAuthStatus(): Promise<PrintablesOAuthStatus> {
+    const response = await this.client.get<PrintablesOAuthStatus>(
+      "/3d-models/printables/oauth/status"
+    );
+    return response.data;
+  }
+
+  async getPrintablesOAuthAuthorizeUrl(): Promise<{ authorizationUrl: string }> {
+    const response = await this.client.post<{ authorizationUrl: string }>(
+      "/3d-models/printables/oauth/connect"
+    );
+    return response.data;
+  }
+
+  async completePrintablesOAuthCallback(code: string, state: string): Promise<PrintablesOAuthStatus> {
+    const response = await this.client.get<PrintablesOAuthStatus>(
+      "/3d-models/printables/oauth/callback",
+      {
+        params: { code, state },
+      }
+    );
+    return response.data;
+  }
+
+  async disconnectPrintablesOAuth(): Promise<void> {
+    await this.client.post("/3d-models/printables/oauth/disconnect");
+  }
+
+  async getPrintablesLikedModels(
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      "/3d-models/printables/liked",
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesCursorPage(response.data);
+  }
+
+  async getPrintablesDownloadHistory(
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesDownloadHistoryItem>> {
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto & { downloadedAt?: string | null }>>(
+      "/3d-models/printables/history",
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesHistoryPage(response.data);
   }
 
   async deleteGcodeFiles(fileIds: string[]): Promise<void> {
@@ -1830,7 +2409,7 @@ export class ApiClient {
 
       // Build URL with params
       const params = new URLSearchParams({ path: virtualPath });
-      xhr.open("POST", `/api/gcode-files/upload?${params.toString()}`);
+      xhr.open("POST", `${getApiBaseUrl()}/gcode-files/upload?${params.toString()}`);
 
       // Set auth header if available
       const token = localStorage.getItem("auth-token");
@@ -1894,7 +2473,7 @@ export class ApiClient {
 
       // Build URL with params
       const params = new URLSearchParams({ path: virtualPath });
-      xhr.open("POST", `/api/3d-models/upload?${params.toString()}`);
+      xhr.open("POST", `${getApiBaseUrl()}/3d-models/upload?${params.toString()}`);
 
       // Set auth header if available
       const token = localStorage.getItem("auth-token");
@@ -2043,11 +2622,29 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Dispatch a job to a specific printer, bypassing the scorer's material compatibility check.
+   * Used when the operator explicitly overrides a material mismatch.
+   */
+  async dispatchJobToPrinter(jobId: string, printerId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
+      `/job-queue/${jobId}/dispatch-to`,
+      { printerId },
+      { timeout: 0 }
+    );
+    return response.data;
+  }
+
   // ============ Dispatch history ============
 
-  async getDispatchHistory(page: number = 1, pageSize: number = 20): Promise<DispatchHistoryPageDto> {
+  async getDispatchHistory(page: number = 1, pageSize: number = 20, dateFrom?: Date, dateTo?: Date): Promise<DispatchHistoryPageDto> {
     const response = await this.client.get<DispatchHistoryPageDto>('/dispatch/history', {
-      params: { page, pageSize },
+      params: {
+        page,
+        pageSize,
+        ...(dateFrom && { dateFrom: dateFrom.toISOString() }),
+        ...(dateTo && { dateTo: dateTo.toISOString() }),
+      },
     });
     return response.data;
   }
@@ -2114,6 +2711,16 @@ export class ApiClient {
 
   async getSystemCapabilities(): Promise<SystemCapabilities> {
     const response = await this.client.get<SystemCapabilities>('/system/capabilities');
+    return response.data;
+  }
+
+  async getSystemInfo(): Promise<SystemInfo> {
+    const response = await this.client.get<SystemInfo>('/system/info');
+    return response.data;
+  }
+
+  async getFeatureFlags(): Promise<Record<string, boolean>> {
+    const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
     return response.data;
   }
 
@@ -2203,7 +2810,7 @@ export class ApiClient {
 
   // ============ Generic request method ============
 
-  async request<T>(config: AxiosRequestConfig): Promise<T> {
+  async request<T>(config: PfRequestConfig): Promise<T> {
     const response = await this.client.request<T>(config);
     return response.data;
   }
@@ -2347,7 +2954,7 @@ export class ApiClient {
   }
 
   async removePrinterFromLocation(printerId: string): Promise<Record<string, unknown>> {
-    const response = await this.client.post(`/printers/${printerId}/location/remove`, {});
+    const response = await this.client.delete(`/printers/${printerId}/location`);
     return response.data;
   }
 
@@ -2560,20 +3167,27 @@ export class ApiClient {
     return response.data || [];
   }
 
+  /**
+   * Upload raw STL geometry (e.g. cut model pieces) to the server.
+   * Returns a server-side URL that slicer workers can HTTP-fetch.
+   */
+  async uploadGeometry(stlBlob: Blob, fileName: string): Promise<GeometryUploadResultDto> {
+    const formData = new FormData();
+    formData.append('geometryFile', new File([stlBlob], fileName, { type: 'application/octet-stream' }));
+    const response = await this.client.post<GeometryUploadResultDto>(
+      '/3d-models/upload-geometry',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return response.data;
+  }
+
   // ============ User Management API methods ============
   /**
    * Get all users
    */
   async getUsers(): Promise<Record<string, unknown>[]> {
     const response = await this.client.get('/users');
-    return response.data || [];
-  }
-
-  /**
-   * Get all roles
-   */
-  async getRoles(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/users/roles');
     return response.data || [];
   }
 
@@ -2620,6 +3234,21 @@ export class ApiClient {
    */
   async deleteUser(userId: string): Promise<void> {
     await this.client.delete(`/users/${userId}`);
+  }
+
+  /**
+   * Admin: change another user's password.
+   */
+  async adminChangeUserPassword(
+    userId: string,
+    newPassword: string,
+    confirmNewPassword: string
+  ): Promise<{ message: string }> {
+    const response = await this.client.post<{ message: string }>(`/users/${userId}/change-password`, {
+      newPassword,
+      confirmNewPassword,
+    });
+    return response.data;
   }
 
   // ============ Setup & Initialization API methods ============
@@ -2686,6 +3315,7 @@ export class ApiClient {
     vendor?: string;
     location?: string;
     allowArchived?: boolean;
+    signal?: AbortSignal;
   }): Promise<{ items: SpoolmanSpool[]; totalCount: number }> {
     const queryParams: Record<string, string | number | boolean> = {};
     if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
@@ -2699,6 +3329,7 @@ export class ApiClient {
 
     const response = await this.client.get('/spoolman/spools', {
       params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      signal: params?.signal,
     });
     const data = response.data;
 
@@ -2713,7 +3344,17 @@ export class ApiClient {
 
     // Fallback for plain array response (backward compatibility)
     const items = Array.isArray(data) ? (data as SpoolmanSpool[]) : [];
-    return { items, totalCount: items.length };
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
+  }
+
+  /**
+   * Get distinct material, vendor, and location values across all spools.
+   * Used to populate filter dropdowns without relying on paginated data.
+   */
+  async getSpoolFilterOptions(): Promise<SpoolFilterOptions> {
+    const response = await this.client.get<SpoolFilterOptions>('/spoolman/filter-options');
+    return response.data;
   }
 
   /**
@@ -2723,6 +3364,56 @@ export class ApiClient {
     const response = await this.client.get('/spoolman/filaments');
     const data = response.data;
     return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanFilament[] || [];
+  }
+
+  /**
+   * Get paginated filament types/products from Spoolman with server-side filtering and sorting.
+   */
+  async getFilamentsPaged(params?: {
+    limit?: number;
+    offset?: number;
+    sort?: string;
+    search?: string;
+    material?: string;
+    vendor?: string;
+    signal?: AbortSignal;
+  }): Promise<{ items: SpoolmanFilament[]; totalCount: number }> {
+    const queryParams: Record<string, string | number> = {};
+    if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
+    if (params?.offset && params.offset > 0) queryParams.offset = params.offset;
+    if (params?.sort) queryParams.sort = params.sort;
+    if (params?.search) queryParams.search = params.search;
+    if (params?.material) queryParams.material = params.material;
+    if (params?.vendor) queryParams.vendor = params.vendor;
+
+    const response = await this.client.get('/spoolman/filaments', {
+      params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      signal: params?.signal,
+    });
+    const data = response.data;
+
+    // Handle paginated response format { items, totalCount }
+    if (data && typeof data === 'object' && !Array.isArray(data) && 'items' in data) {
+      const result = data as { items: SpoolmanFilament[]; totalCount: number };
+      return {
+        items: Array.isArray(result.items) ? result.items : [],
+        totalCount: typeof result.totalCount === 'number' ? result.totalCount : 0,
+      };
+    }
+
+    // Fallback for plain array response (backward compatibility)
+    const items = Array.isArray(data) ? (data as SpoolmanFilament[]) : [];
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
+  }
+
+  /**
+   * Get distinct material and vendor values across all filament types.
+   * Used to populate filter dropdowns on the Filaments tab.
+   */
+  async getFilamentFilterOptions(): Promise<FilamentFilterOptions> {
+    const response = await this.client.get<FilamentFilterOptions>('/spoolman/filaments/filter-options');
+    return response.data;
   }
 
   /**
@@ -3064,6 +3755,22 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Get all profile schemas (process, machine, filament)
+   */
+  async getProfileSchemas(): Promise<ProfileSchemasResponse> {
+    const response = await this.client.get<ProfileSchemasResponse>('/slicer/profiles/schemas');
+    return response.data;
+  }
+
+  /**
+   * Get process profile schema
+   */
+  async getProcessProfileSchema(): Promise<ProfileTypeSchema> {
+    const response = await this.client.get<ProfileTypeSchema>('/slicer/profiles/schema/process');
+    return response.data;
+  }
+
   // ============ Generic API methods ============
 
   /**
@@ -3116,6 +3823,14 @@ export class ApiClient {
   }
 
   /**
+   * Get extracted 3MF metadata for a model
+   */
+  async getModel3DMetadata(modelId: string): Promise<ThreeMfMetadata | null> {
+    const response = await this.client.get(`/3d-models/${modelId}/metadata`);
+    return response.data as ThreeMfMetadata | null;
+  }
+
+  /**
    * Update 3D model
    */
   async updateModel3D(modelId?: string, updates?: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -3152,15 +3867,21 @@ export class ApiClient {
     filterStatus?: string,
     filterModel?: string,
     filterMaterial?: string,
+    sortBy: "priority" | "deadline" | "deadline_desc" = "priority",
     limit: number = 50,
-    offset: number = 0
+    offset: number = 0,
+    queuedFrom?: Date,
+    queuedTo?: Date
   ): Promise<unknown[]> {
     const params = new URLSearchParams();
     if (filterStatus) params.append("filterStatus", filterStatus);
     if (filterModel) params.append("filterModel", filterModel);
     if (filterMaterial) params.append("filterMaterial", filterMaterial);
+    params.append("sortBy", sortBy);
     params.append("limit", limit.toString());
     params.append("offset", offset.toString());
+    if (queuedFrom) params.append("queuedFrom", queuedFrom.toISOString());
+    if (queuedTo) params.append("queuedTo", queuedTo.toISOString());
 
     const response = await this.client.get(`/job-queue-analytics?${params.toString()}`);
     return response.data;
@@ -3182,11 +3903,10 @@ export class ApiClient {
   /**
    * Get queue statistics (analytics)
    */
-  async getAnalyticsQueueStats(): Promise<unknown> {
+  async getAnalyticsQueueStats(): Promise<QueueStatsDto> {
     const response = await this.client.get(`/job-queue-analytics/stats`);
-    return response.data;
+    return response.data as QueueStatsDto;
   }
-
   /**
    * Get queue statistics by model (analytics)
    */
@@ -3521,6 +4241,17 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Detect camera endpoints for a printer backend.
+   */
+  async detectCameraEndpoints(
+    request: import('@/types/api').DetectCameraEndpointsRequest
+  ): Promise<import('@/types/api').DetectCameraEndpointsResponse> {
+    // TODO: Confirm Lambert's backend contract remains POST /api/cameras/detect-endpoints with { printerId }.
+    const response = await this.client.post('/cameras/detect-endpoints', request);
+    return response.data;
+  }
+
   // ====== NFC Devices ======
 
   async getNfcDevices(): Promise<import('@/types/api').NfcDeviceDto[]> {
@@ -3545,6 +4276,19 @@ export class ApiClient {
 
   async deleteNfcDevice(id: string): Promise<void> {
     await this.client.delete(`/nfc-devices/${id}`);
+  }
+
+  async linkNfcTag(request: import('@/features/nfc/types').NfcLinkRequest): Promise<void> {
+    await this.client.post('/nfc/link', request);
+  }
+
+  async getNfcBindings(): Promise<import('@/features/nfc/types').NfcBindingDto[]> {
+    const response = await this.client.get('/nfc/bindings');
+    return response.data;
+  }
+
+  async deleteNfcBinding(id: string): Promise<void> {
+    await this.client.delete(`/nfc/bindings/${id}`);
   }
 
   async getNfcDeviceScanHistory(id: string, limit = 50): Promise<import('@/types/api').NfcScanHistoryDto[]> {
@@ -3720,6 +4464,21 @@ export class ApiClient {
     return response.data;
   }
 
+  async getTelegramSettings(): Promise<TelegramSettingsDto> {
+    const response = await this.client.get('/admin/integrations/telegram/settings');
+    return response.data;
+  }
+
+  async updateTelegramSettings(settings: UpdateTelegramSettingsRequest): Promise<TelegramSettingsDto> {
+    const response = await this.client.put('/admin/integrations/telegram/settings', settings);
+    return response.data;
+  }
+
+  async sendTelegramTestMessage(): Promise<TelegramTestResult> {
+    const response = await this.client.post('/admin/integrations/telegram/test');
+    return response.data;
+  }
+
   // ============ Auto-Dispatch API methods ============
   async getAutoDispatchStatus(): Promise<AutoDispatchGlobalStatus> {
     const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/status`);
@@ -3857,6 +4616,72 @@ export class ApiClient {
    */
   async clearToolheadSpool(printerId: string, toolheadIndex: number): Promise<void> {
     await this.client.delete(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`);
+  }
+
+  // ── Quotas & Balances ───────────────────────────────────────────────
+
+  async getQuotas(): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>('/quotas');
+    return data;
+  }
+
+  async getQuotasForUser(userId: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/user/${userId}`);
+    return data;
+  }
+
+  async getQuotasForGroup(groupName: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/group/${encodeURIComponent(groupName)}`);
+    return data;
+  }
+
+  async getQuota(id: string): Promise<QuotaDto> {
+    const { data } = await this.client.get<QuotaDto>(`/quotas/${id}`);
+    return data;
+  }
+
+  async createQuota(request: CreateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.post<QuotaDto>('/quotas', request);
+    return data;
+  }
+
+  async updateQuota(id: string, request: UpdateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.put<QuotaDto>(`/quotas/${id}`, request);
+    return data;
+  }
+
+  async deleteQuota(id: string): Promise<void> {
+    await this.client.delete(`/quotas/${id}`);
+  }
+
+  async checkQuota(request: CheckQuotaRequest): Promise<QuotaCheckResult> {
+    const { data } = await this.client.post<QuotaCheckResult>('/quotas/check', request);
+    return data;
+  }
+
+  async resetExpiredQuotas(): Promise<{ resetCount: number }> {
+    const { data } = await this.client.post<{ resetCount: number }>('/quotas/reset-expired');
+    return data;
+  }
+
+  async getBalance(userId: string): Promise<UserBalanceDto> {
+    const { data } = await this.client.get<UserBalanceDto>(`/quotas/balance/${userId}`);
+    return data;
+  }
+
+  async creditBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/credit`, request);
+    return data;
+  }
+
+  async debitBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/debit`, request);
+    return data;
+  }
+
+  async getBalanceTransactions(userId: string, take = 50): Promise<BalanceTransactionDto[]> {
+    const { data } = await this.client.get<BalanceTransactionDto[]>(`/quotas/balance/${userId}/transactions`, { params: { take } });
+    return data;
   }
 }
 

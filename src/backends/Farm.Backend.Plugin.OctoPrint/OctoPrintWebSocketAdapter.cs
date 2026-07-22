@@ -237,7 +237,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 BedTemp: status.BedTemp,
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
-                SpoolInfo: null);
+                SpoolInfo: null,
+                PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
 
             // Update cache before broadcasting to clients
             _statusCacheWriter.UpdateStatus(cacheUpdate);
@@ -277,6 +278,8 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<OctoPrintStatusData?> TryHttpPollingFallbackAsync(CancellationToken ct)
     {
+        _ = ct;
+
         // Only poll if enough time has passed since last poll
         if (DateTime.UtcNow - _lastHttpPoll < _pollingInterval)
         {
@@ -329,7 +332,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 HotendTarget = null,
                 BedTarget = null,
                 ThumbnailUrl = null,
-                CameraStreamUrl = null
+                CameraStreamUrl = null,
+                PrintTimeLeftSeconds = jobStatus.PrintTimeLeft
             };
         }
         catch (Exception ex)
@@ -491,6 +495,14 @@ public sealed class OctoPrintWebSocketAdapter(
                 }
             }
 
+            double? printTimeLeft = null;
+            if (currentObj.TryGetProperty("progress", out JsonElement progObj2) &&
+                progObj2.TryGetProperty("printTimeLeft", out JsonElement ptl) &&
+                ptl.ValueKind != JsonValueKind.Null)
+            {
+                printTimeLeft = ptl.GetDouble();
+            }
+
             return new OctoPrintStatusData
             {
                 IsOnline = operational,
@@ -502,7 +514,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 HotendTemp = hotendTemp,
                 BedTemp = bedTemp,
                 HotendTarget = hotendTarget,
-                BedTarget = bedTarget
+                BedTarget = bedTarget,
+                PrintTimeLeftSeconds = printTimeLeft
             };
         }
         catch (Exception ex)

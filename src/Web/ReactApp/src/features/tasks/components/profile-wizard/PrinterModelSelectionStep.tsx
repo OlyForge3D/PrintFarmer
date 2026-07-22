@@ -152,7 +152,7 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
           {searchQuery ? 'No printer models match your search.' : 'No printer models found in catalog.'}
         </div>
       ) : (
-        <div className="max-h-[450px] overflow-y-auto border border-pf-border rounded-lg">
+        <div className="max-h-112 overflow-y-auto border border-pf-border rounded-lg">
           {filteredData.map((group) => (
             <div key={group.manufacturer.id}>
               {/* Manufacturer header */}

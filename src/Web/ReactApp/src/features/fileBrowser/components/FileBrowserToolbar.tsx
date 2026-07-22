@@ -13,6 +13,7 @@ interface FileBrowserToolbarProps {
   onToggleSortOrder: () => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  filterActions?: ReactNode;
   extraActions?: ReactNode;
 }
 
@@ -26,6 +27,7 @@ export const FileBrowserToolbar = ({
   onToggleSortOrder,
   viewMode,
   onViewModeChange,
+  filterActions,
   extraActions,
 }: FileBrowserToolbarProps) => {
   return (
@@ -44,6 +46,12 @@ export const FileBrowserToolbar = ({
           className="min-w-[16rem]"
         />
       </div>
+
+      {filterActions && (
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter files by type">
+          {filterActions}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap">
         <label htmlFor="file-browser-sort" className="text-sm text-pf-text-secondary whitespace-nowrap">

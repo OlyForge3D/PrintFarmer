@@ -59,6 +59,7 @@ struct AddSpoolView: View {
                 }
             }
             .task {
+                viewModel.isViewActive = true
                 viewModel.configure(spoolService: services.spoolService)
                 if let scannedData {
                     viewModel.prefill(from: scannedData)

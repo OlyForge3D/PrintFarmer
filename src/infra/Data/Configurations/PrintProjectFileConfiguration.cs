@@ -45,10 +45,10 @@ public class PrintProjectFileConfiguration : IEntityTypeConfiguration<PrintProje
             .IsRequired(false)
             .OnDelete(DeleteBehavior.SetNull);
 
-        // Unique constraint: same file can only be in a project once
-        builder.HasIndex(pf => new { pf.PrintProjectId, pf.GcodeFileId })
+        // Unique constraint: same file and plate combination can only be in a project once
+        builder.HasIndex(pf => new { pf.PrintProjectId, pf.GcodeFileId, pf.PlateIndex })
             .IsUnique()
-            .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId");
+            .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId_PlateIndex");
 
         // Indexes for common queries
         builder.HasIndex(pf => pf.PrintProjectId);

@@ -4,6 +4,7 @@ import { Button } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Modal } from '@/common/components/modals/Modal';
 import { PrinterImage } from '@/common/components/PrinterImage';
+import { sortPrintersByAvailability } from '@/utils/printerSort';
 
 interface PrinterItem {
     id: string;
@@ -55,9 +56,10 @@ export function PrinterSelectorModal({
     };
 
     const filteredPrinters = useMemo(() => {
-        if (!searchText.trim()) return printers;
+        const sorted = sortPrintersByAvailability(printers);
+        if (!searchText.trim()) return sorted;
         const search = searchText.toLowerCase();
-        return printers.filter(p =>
+        return sorted.filter(p =>
             p.name.toLowerCase().includes(search) ||
             p.modelName?.toLowerCase().includes(search) ||
             p.manufacturerName?.toLowerCase().includes(search)

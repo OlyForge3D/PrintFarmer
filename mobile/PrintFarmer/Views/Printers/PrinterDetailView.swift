@@ -3,7 +3,9 @@ import SwiftUI
 struct PrinterDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
+    @Environment(AuthViewModel.self) private var authViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: PrinterDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
 
@@ -37,6 +39,7 @@ struct PrinterDetailView: View {
         #endif
         .refreshable {
             await viewModel.loadPrinter()
+            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
         }
         .alert(
             viewModel.pendingAction?.title ?? "Confirm",
@@ -60,6 +63,8 @@ struct PrinterDetailView: View {
             }
         }
         .task {
+            viewModel.isViewActive = true
+            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
             viewModel.configure(printerService: services.printerService)
             #if canImport(UIKit)
             if let nfc = services.nfcService {
@@ -71,6 +76,7 @@ struct PrinterDetailView: View {
             viewModel.configurePredictive(services.predictiveService)
             viewModel.configureFailureDetection(services.failureDetectionService)
             await viewModel.loadPrinter()
+            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
 
             // Handle NFC "mark ready" deep link
             if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
@@ -82,6 +88,19 @@ struct PrinterDetailView: View {
             activeTasks.forEach { $0.cancel() }
             activeTasks.removeAll()
             viewModel.isViewActive = false
+            viewModel.stopSnapshotPolling()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:
+                if viewModel.isViewActive {
+                    viewModel.setSnapshotPollingAllowed(true)
+                }
+            case .inactive, .background:
+                viewModel.setSnapshotPollingAllowed(false)
+            @unknown default:
+                viewModel.setSnapshotPollingAllowed(false)
+            }
         }
         .sheet(isPresented: $viewModel.showSpoolPicker) {
             SpoolPickerView { spool in
@@ -270,6 +289,7 @@ struct PrinterDetailView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     headerSection(printer)
                     temperatureSection(printer)
+                    PrinterControlsSection(printer: printer, printerService: services.printerService)
 
                     if let jobName = printer.fileName ?? printer.jobName,
                        let state = printer.state?.lowercased(),
@@ -317,6 +337,7 @@ struct PrinterDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 headerSection(printer)
                 temperatureSection(printer)
+                PrinterControlsSection(printer: printer, printerService: services.printerService)
                 filamentSection(printer)
                 AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
 
@@ -442,6 +463,10 @@ struct PrinterDetailView: View {
                             .background(.black.opacity(0.3), in: Capsule())
                             .foregroundStyle(.white)
                     }
+
+                    if let homedAxes = printer.homedAxes ?? viewModel.statusDetail?.homedAxes {
+                        homedAxesBadges(homedAxes)
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -472,6 +497,30 @@ struct PrinterDetailView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(baseColor.opacity(0.3), lineWidth: 1)
         )
+    }
+
+    // MARK: - Homed Axes
+
+    /// Compact X/Y/Z badges showing which axes have been homed. Hidden entirely when
+    /// the backend doesn't supply the field (older backend or unsupported printer).
+    @ViewBuilder
+    private func homedAxesBadges(_ homedAxes: String) -> some View {
+        let normalized = homedAxes.lowercased()
+        HStack(spacing: 4) {
+            ForEach(["x", "y", "z"], id: \.self) { axis in
+                let isHomed = normalized.contains(axis)
+                Text(axis.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        isHomed ? Color.green.opacity(0.85) : Color.black.opacity(0.3),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("\(axis.uppercased()) axis \(isHomed ? "homed" : "not homed")")
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Temperatures
@@ -548,14 +597,14 @@ struct PrinterDetailView: View {
                 Text("Camera")
                     .font(.headline)
 
-                if viewModel.canShowLivestream {
-                    Text(viewModel.showLivestream ? "LIVE" : "SNAPSHOT")
+                if viewModel.canShowLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
+                    Text(viewModel.showLivestream && viewModel.canShowLivestream ? "LIVE" : "SNAPSHOT")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(viewModel.showLivestream ? .white : Color.pfTextSecondary)
+                        .foregroundStyle(viewModel.showLivestream && viewModel.canShowLivestream ? .white : Color.pfTextSecondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
-                            viewModel.showLivestream ? Color.red : Color.pfBorder,
+                            viewModel.showLivestream && viewModel.canShowLivestream ? Color.red : Color.pfBorder,
                             in: Capsule()
                         )
                 }
@@ -572,7 +621,8 @@ struct PrinterDetailView: View {
                     .accessibilityLabel(viewModel.showLivestream ? "Switch to snapshot" : "Switch to livestream")
                 }
 
-                if viewModel.snapshotData != nil || printer.cameraSnapshotUrl != nil {
+                if viewModel.cameraPreviewMode != .unsupported,
+                   viewModel.snapshotData != nil || printer.cameraSnapshotUrl != nil || viewModel.cameraPreviewMode == .snapshotPolling {
                     Button {
                         viewModel.rotateCameraView()
                     } label: {
@@ -581,9 +631,9 @@ struct PrinterDetailView: View {
                     }
                     .accessibilityLabel("Rotate camera view")
                     
-                    if !viewModel.showLivestream {
+                    if !viewModel.showLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
                         Button {
-                            let task = Task { await viewModel.refreshSnapshot() }
+                            let task = Task { _ = await viewModel.refreshSnapshot() }
                             activeTasks.append(task)
                         } label: {
                             Image(systemName: "arrow.clockwise")
@@ -596,29 +646,7 @@ struct PrinterDetailView: View {
             }
 
             Group {
-                #if canImport(UIKit)
-                if viewModel.showLivestream,
-                   let streamUrlString = printer.cameraStreamUrl,
-                   let streamUrl = URL(string: streamUrlString) {
-                    MJPEGStreamContainer(url: streamUrl, rotation: viewModel.cameraRotation)
-                } else if let data = viewModel.snapshotData {
-                    snapshotImage(from: data)
-                } else if let urlString = printer.cameraSnapshotUrl,
-                          let url = URL(string: urlString) {
-                    asyncSnapshotImage(url: url)
-                } else {
-                    noCameraPlaceholder()
-                }
-                #else
-                if let data = viewModel.snapshotData {
-                    snapshotImage(from: data)
-                } else if let urlString = printer.cameraSnapshotUrl,
-                          let url = URL(string: urlString) {
-                    asyncSnapshotImage(url: url)
-                } else {
-                    noCameraPlaceholder()
-                }
-                #endif
+                cameraPreview(printer)
             }
             .frame(maxWidth: .infinity)
             .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
@@ -626,6 +654,57 @@ struct PrinterDetailView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.pfBorder, lineWidth: 1)
             )
+        }
+    }
+
+    @ViewBuilder
+    private func cameraPreview(_ printer: Printer) -> some View {
+        switch viewModel.cameraPreviewMode {
+        case .mjpegStream:
+            #if canImport(UIKit)
+            if viewModel.showLivestream,
+               let streamUrlString = printer.cameraStreamUrl,
+               let streamUrl = URL(string: streamUrlString) {
+                MJPEGStreamContainer(url: streamUrl, rotation: viewModel.cameraRotation)
+            } else if let data = viewModel.snapshotData {
+                snapshotImage(from: data)
+            } else if let urlString = printer.cameraSnapshotUrl,
+                      let url = URL(string: urlString) {
+                asyncSnapshotImage(url: url)
+            } else {
+                noCameraPlaceholder()
+            }
+            #else
+            if let data = viewModel.snapshotData {
+                snapshotImage(from: data)
+            } else if let urlString = printer.cameraSnapshotUrl,
+                      let url = URL(string: urlString) {
+                asyncSnapshotImage(url: url)
+            } else {
+                noCameraPlaceholder()
+            }
+            #endif
+        case .snapshotPolling:
+            if let data = viewModel.snapshotData {
+                snapshotImage(from: data)
+            } else if viewModel.isLoadingSnapshot {
+                loadingSnapshotPlaceholder()
+            } else {
+                snapshotUnavailable()
+            }
+        case .directSnapshot:
+            if let data = viewModel.snapshotData {
+                snapshotImage(from: data)
+            } else if let urlString = printer.cameraSnapshotUrl,
+                      let url = URL(string: urlString) {
+                asyncSnapshotImage(url: url)
+            } else {
+                snapshotUnavailable()
+            }
+        case .unsupported:
+            unsupportedCameraPlaceholder()
+        case .none:
+            noCameraPlaceholder()
         }
     }
 
@@ -777,6 +856,30 @@ struct PrinterDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private func unsupportedCameraPlaceholder() -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: "video.slash.fill")
+                .font(.title)
+                .foregroundStyle(Color.pfTextTertiary)
+            Text("No live preview available")
+                .font(.subheadline)
+                .foregroundStyle(Color.pfTextSecondary)
+        }
+        .frame(height: 120)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func loadingSnapshotPlaceholder() -> some View {
+        VStack(spacing: 8) {
+            ProgressView()
+            Text("Loading snapshot…")
+                .font(.caption)
+                .foregroundStyle(Color.pfTextSecondary)
+        }
+        .frame(height: 200)
+        .frame(maxWidth: .infinity)
+    }
+
     private func snapshotUnavailable() -> some View {
         VStack(spacing: 8) {
             Image(systemName: "photo.badge.exclamationmark")
@@ -834,21 +937,23 @@ struct PrinterDetailView: View {
                     .disabled(viewModel.isPerformingAction)
                 }
 
-                // Maintenance toggle
-                Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    let task = Task { await viewModel.toggleMaintenance() }
-                    activeTasks.append(task)
-                } label: {
-                    Label(
-                        printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
-                        systemImage: "wrench.and.screwdriver"
-                    )
-                    .fullWidthActionButton()
+                // Maintenance toggle (admin only)
+                if authViewModel.currentUserRole == "farm_admin" {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        let task = Task { await viewModel.toggleMaintenance() }
+                        activeTasks.append(task)
+                    } label: {
+                        Label(
+                            printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
+                            systemImage: "wrench.and.screwdriver"
+                        )
+                        .fullWidthActionButton()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
+                    .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
                 }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
-                .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
 
                 #if canImport(UIKit)
                 // Write NFC printer tag
