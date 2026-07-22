@@ -263,6 +263,42 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ProduceAsync_MaximumLengthSourceIdentities_RemainBoundedAndDistinct()
+    {
+        const string sourcePrefix = "http://moon.local/";
+        int suffixLength =
+            CanonicalSpoolIdentity.MaxSourceIdentityLength - sourcePrefix.Length;
+        string sharedPrefix = new('a', suffixLength - 1);
+        string firstSource = $"{sourcePrefix}{sharedPrefix}a";
+        string secondSource = $"{sourcePrefix}{sharedPrefix}b";
+        await SeedPrinterAsync(PrinterBackend.Moonraker, firstSource, 42);
+        await SeedPrinterAsync(PrinterBackend.Moonraker, secondSource, 42);
+        _projections
+            .Setup(service => service.ProjectAsync(
+                It.IsAny<CanonicalSpoolIdentity>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CanonicalSpoolIdentity identity, CancellationToken _) =>
+                Ready(identity, Now.AddHours(2).UtcDateTime));
+        _resolver
+            .Setup(service => service.ResolveSpoolAsync(
+                It.IsAny<CanonicalSpoolIdentity>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CanonicalSpoolIdentity identity, CancellationToken _) =>
+                Snapshot(identity, "Spool"));
+        await using AppDbContext db = CreateContext();
+
+        ShiftPlanSourceResult result = await CreateSource(db)
+            .ProduceAsync(CancellationToken.None);
+
+        Assert.Equal(2, result.Specs.Count);
+        Assert.All(result.Specs, spec => Assert.True(spec.SourceId.Length <= 128));
+        Assert.Equal(
+            2,
+            result.Specs.Select(spec => spec.SourceId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(2, result.Specs.Select(spec => spec.EntityId).Distinct().Count());
+    }
+
+    [Fact]
     public async Task ProduceAsync_ToolheadAssignmentOverridesStaleLegacyScalar()
     {
         Guid printerId = await SeedPrinterAsync(
@@ -506,18 +542,24 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime
     {
         await SeedPrinterAsync(PrinterBackend.PrusaLink, "http://one.local", 41);
         await SeedPrinterAsync(PrinterBackend.PrusaLink, "http://two.local", 42);
-        int active = 0;
-        int maximumActive = 0;
+        var firstStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
         _projections
             .Setup(service => service.ProjectAsync(
                 It.IsAny<CanonicalSpoolIdentity>(),
                 It.IsAny<CancellationToken>()))
             .Returns(async (CanonicalSpoolIdentity identity, CancellationToken ct) =>
             {
-                int current = Interlocked.Increment(ref active);
-                maximumActive = Math.Max(maximumActive, current);
-                await Task.Delay(10, ct);
-                _ = Interlocked.Decrement(ref active);
+                int call = Interlocked.Increment(ref calls);
+                if (call == 1)
+                {
+                    _ = firstStarted.TrySetResult();
+                    await releaseFirst.Task.WaitAsync(ct);
+                }
+
                 return Ready(identity, Now.AddHours(2).UtcDateTime);
             });
         _resolver
@@ -528,11 +570,22 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime
                 Snapshot(identity, $"Spool {identity.SpoolId}"));
         await using AppDbContext db = CreateContext();
 
-        ShiftPlanSourceResult result = await CreateSource(db)
+        Task<ShiftPlanSourceResult> produceTask = CreateSource(db)
             .ProduceAsync(CancellationToken.None);
+        await firstStarted.Task;
+        try
+        {
+            Assert.Equal(1, Volatile.Read(ref calls));
+        }
+        finally
+        {
+            _ = releaseFirst.TrySetResult();
+        }
+
+        ShiftPlanSourceResult result = await produceTask;
 
         Assert.Equal(2, result.Specs.Count);
-        Assert.Equal(1, maximumActive);
+        Assert.Equal(2, calls);
     }
 
     [Fact]
