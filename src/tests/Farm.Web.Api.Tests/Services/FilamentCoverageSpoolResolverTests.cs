@@ -15,6 +15,64 @@ namespace Farm.Web.Api.Tests.Services;
 public class FilamentCoverageSpoolResolverTests
 {
     [Fact]
+    public async Task ResolveSpoolAsync_CanonicalCentralIdentity_RejectsChangedSource()
+    {
+        Mock<ISpoolmanService> central = new();
+        central.Setup(service => service.GetConfig())
+            .Returns(new SpoolmanConfigDto("http://new-central.local"));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "http://old-central.local",
+            42);
+
+        FilamentCoverageSpoolSnapshot result =
+            await resolver.ResolveSpoolAsync(identity, CancellationToken.None);
+
+        result.Spool.Should().BeNull();
+        result.ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        central.Verify(
+            service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveSpoolAsync_CanonicalNativeIdentity_UsesHistoricalSource()
+    {
+        Mock<IBackendClient> native = NativeClient(
+            JsonSerializer.Serialize(new[]
+            {
+                new { id = 42, remaining_weight = 321, material = "PLA" },
+            }));
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.MoonrakerNative,
+            "HTTP://MOON.LOCAL:80/",
+            42);
+
+        FilamentCoverageSpoolSnapshot result =
+            await resolver.ResolveSpoolAsync(identity, CancellationToken.None);
+
+        result.Spool!.RemainingWeightG.Should().Be(321);
+        native.As<ISupportsSpoolman>().Verify(
+            service => service.GetSpoolmanSpoolsAsync(
+                "http://moon.local",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task ResolveSpoolAsync_DuplicateNativeAndCentralId_UsesPrinterOwningSource()
     {
         Mock<IBackendClient> native = NativeClient(

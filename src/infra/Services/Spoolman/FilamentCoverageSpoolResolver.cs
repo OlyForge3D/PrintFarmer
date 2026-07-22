@@ -24,6 +24,95 @@ public sealed class FilamentCoverageSpoolResolver(
     private readonly ILogger<FilamentCoverageSpoolResolver> _logger = logger;
 
     public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
+        CanonicalSpoolIdentity identity,
+        CancellationToken ct)
+    {
+        HashSet<int> spoolIds = [identity.SpoolId];
+        Dictionary<int, FilamentCoverageSpoolSnapshot> resolved;
+
+        if (identity.SourceKind == SpoolSourceKind.Central)
+        {
+            SpoolmanConfigDto? config = _spoolmanService.GetConfig();
+            if (config is null || string.IsNullOrWhiteSpace(config.BaseUrl))
+            {
+                return new FilamentCoverageSpoolSnapshot(
+                    null,
+                    false,
+                    ReasonSpoolmanUnconfigured);
+            }
+
+            string configuredIdentity;
+            try
+            {
+                configuredIdentity = CanonicalSpoolIdentity.NormalizeSourceIdentity(config.BaseUrl);
+            }
+            catch (ArgumentException)
+            {
+                return new FilamentCoverageSpoolSnapshot(
+                    null,
+                    false,
+                    ReasonSourceUnavailable);
+            }
+
+            if (!string.Equals(
+                    configuredIdentity,
+                    identity.SourceIdentity,
+                    StringComparison.Ordinal))
+            {
+                return new FilamentCoverageSpoolSnapshot(
+                    null,
+                    false,
+                    ReasonSourceUnavailable);
+            }
+
+            resolved = await ResolveCentralAsync(spoolIds, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            try
+            {
+                IBackendClient client = _backendClientFactory.GetClient((int)PrinterBackend.Moonraker);
+                if (client is not ISupportsSpoolman native)
+                {
+                    return new FilamentCoverageSpoolSnapshot(
+                        null,
+                        true,
+                        ReasonSourceUnavailable);
+                }
+
+                resolved = await ResolveNativeAsync(
+                    new SourceRequest(native, identity.SourceIdentity)
+                    {
+                        SpoolIds = { identity.SpoolId },
+                    },
+                    ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "[FilamentCoverage] Native Spoolman source unavailable at {ServerUrl}",
+                    identity.SourceIdentity);
+                return new FilamentCoverageSpoolSnapshot(
+                    null,
+                    true,
+                    ReasonSourceUnavailable);
+            }
+        }
+
+        return resolved.TryGetValue(identity.SpoolId, out FilamentCoverageSpoolSnapshot? snapshot)
+            ? snapshot
+            : new FilamentCoverageSpoolSnapshot(
+                null,
+                identity.SourceKind == SpoolSourceKind.MoonrakerNative,
+                ReasonSpoolNotFound);
+    }
+
+    public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
         Printer printer,
         int spoolId,
         CancellationToken ct)
@@ -238,7 +327,7 @@ public sealed class FilamentCoverageSpoolResolver(
             _ => new FilamentCoverageSpoolSnapshot(null, tracksLiveConsumption, reason));
 
     private static string NormalizeSource(string serverUrl)
-        => serverUrl.Trim().TrimEnd('/');
+        => CanonicalSpoolIdentity.NormalizeSourceIdentity(serverUrl);
 
     private SourceSelection SelectSource(Printer printer)
     {

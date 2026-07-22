@@ -56,19 +56,28 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
     public int MinIdleWindowMinutes { get; set; } = 20;
 
     /// <summary>
-    /// Spool reorder threshold in grams. When Spoolman burn-rate + on-hand
-    /// projections drop below this, a <c>SpoolRestock</c> task is materialized.
+    /// Spool reorder threshold in grams used by source-qualified burn-rate projections.
     /// </summary>
     [JsonPropertyName("spoolReorderThresholdGrams")]
-    [SettingDisplay(Name = "Spool Reorder Threshold (g)", Description = "Emit a restock task when projected spool grams fall below this value (0–100000).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 100000, Order = 4)]
+    [SettingDisplay(Name = "Spool Reorder Threshold (g)", Description = "Project when remaining spool weight will cross this value (0–100000).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 100000, Order = 4)]
     public double SpoolReorderThresholdGrams { get; set; } = 250;
+
+    /// <summary>Completed-job lookback used for authoritative burn-rate samples.</summary>
+    [JsonPropertyName("spoolBurnRateLookbackDays")]
+    [SettingDisplay(Name = "Spool Burn-Rate Lookback (days)", Description = "Completed-job history window used for burn-rate projection (1–3650).", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 3650, Order = 5)]
+    public int SpoolBurnRateLookbackDays { get; set; } = 30;
+
+    /// <summary>Minimum authoritative usage rows required for a ready projection.</summary>
+    [JsonPropertyName("spoolBurnRateMinimumSamples")]
+    [SettingDisplay(Name = "Spool Burn-Rate Minimum Samples", Description = "Minimum completed authoritative usage samples required for projection (1–1000).", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 1000, Order = 6)]
+    public int SpoolBurnRateMinimumSamples { get; set; } = 3;
 
     /// <summary>
     /// Lead time for harvest tasks. Applied when a harvest is anticipated from
     /// an in-progress job's ETA rather than an already-completed plate.
     /// </summary>
     [JsonPropertyName("harvestLeadMinutes")]
-    [SettingDisplay(Name = "Harvest Lead Time (minutes)", Description = "How far ahead of a projected harvest the task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 5)]
+    [SettingDisplay(Name = "Harvest Lead Time (minutes)", Description = "How far ahead of a projected harvest the task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 7)]
     public int HarvestLeadMinutes { get; set; }
 
     /// <inheritdoc />
@@ -92,6 +101,16 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
         if (SpoolReorderThresholdGrams is < 0 or > 100000)
         {
             throw new ValidationException("Spool reorder threshold must be between 0 and 100000 grams.");
+        }
+
+        if (SpoolBurnRateLookbackDays is < 1 or > 3650)
+        {
+            throw new ValidationException("Spool burn-rate lookback must be between 1 and 3650 days.");
+        }
+
+        if (SpoolBurnRateMinimumSamples is < 1 or > 1000)
+        {
+            throw new ValidationException("Spool burn-rate minimum samples must be between 1 and 1000.");
         }
 
         if (HarvestLeadMinutes is < 0 or > 1440)

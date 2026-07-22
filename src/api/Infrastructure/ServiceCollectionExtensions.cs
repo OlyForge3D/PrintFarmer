@@ -727,6 +727,7 @@ public static class ServiceCollectionExtensions
         // a scope hop.
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver, Farm.Infrastructure.Services.Spoolman.FilamentCoverageSpoolResolver>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.ISpoolBurnRateProjectionService, Farm.Infrastructure.Services.Spoolman.SpoolBurnRateProjectionService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageService>(sp =>
             sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
         _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageAttentionSource>(sp =>

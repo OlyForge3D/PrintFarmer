@@ -4001,6 +4001,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("FilamentUsageGrams")
                         .HasColumnType("float");
 
+                    b.Property<bool>("IsFilamentUsageAuthoritative")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<decimal?>("MaterialCostUsd")
                         .HasColumnType("decimal(18,2)");
 
@@ -4009,6 +4014,14 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<double?>("SlicerEstimateGrams")
                         .HasColumnType("float");
+
+                    b.Property<string>("SpoolSourceIdentity")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("SpoolSourceKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<int?>("SpoolmanSpoolId")
                         .HasColumnType("int");
@@ -4021,6 +4034,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("PrintJobId", "ToolheadIndex")
                         .IsUnique()
                         .HasDatabaseName("IX_PrintJobToolheadUsages_PrintJobId_ToolheadIndex");
+
+                    b.HasIndex("SpoolSourceKind", "SpoolSourceIdentity", "SpoolmanSpoolId", "IsFilamentUsageAuthoritative")
+                        .HasDatabaseName("IX_PrintJobToolheadUsages_SpoolProjection");
 
                     b.ToTable("PrintJobToolheadUsages");
                 });

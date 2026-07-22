@@ -27,7 +27,8 @@ public class SpoolmanController(
     ISettingsService settingsService,
     IBarcodeScanLogService barcodeScanLogService,
     ILogger<SpoolmanController> logger,
-    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : ControllerBase
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    ISpoolBurnRateProjectionService? burnRateProjectionService = null) : ControllerBase
 {
     private readonly ISettingsService _settingsService = settingsService;
     private readonly ILogger<SpoolmanController> _logger = logger;
@@ -65,6 +66,54 @@ public class SpoolmanController(
     [ProducesResponseType(typeof(SpoolmanConfigDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public ActionResult<SpoolmanConfigDto?> GetConfig() => spoolman.GetConfig();
+
+    /// <summary>
+    /// Projects authoritative burn rate for one source-qualified spool.
+    /// </summary>
+    /// <param name="spoolId">Positive numeric spool ID within the source.</param>
+    /// <param name="sourceKind">Owning source namespace.</param>
+    /// <param name="sourceIdentity">Owning source URL; equivalent URLs are normalized.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("spools/{spoolId:int}/burn-rate")]
+    [ProducesResponseType(typeof(SpoolBurnRateProjectionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<SpoolBurnRateProjectionDto>> GetBurnRateAsync(
+        int spoolId,
+        [FromQuery] SpoolSourceKind? sourceKind,
+        [FromQuery] string? sourceIdentity,
+        CancellationToken ct)
+    {
+        if (spoolId <= 0 || sourceKind is null || string.IsNullOrWhiteSpace(sourceIdentity))
+        {
+            return BadRequest(new
+            {
+                message = "A positive spoolId, sourceKind, and sourceIdentity are required.",
+            });
+        }
+
+        if (burnRateProjectionService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { message = "Spool burn-rate projection is unavailable." });
+        }
+
+        CanonicalSpoolIdentity identity;
+        try
+        {
+            identity = new CanonicalSpoolIdentity(
+                sourceKind.Value,
+                sourceIdentity,
+                spoolId);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        return Ok(await burnRateProjectionService.ProjectAsync(identity, ct));
+    }
 
     /// <summary>
     /// Updates the Spoolman integration configuration.

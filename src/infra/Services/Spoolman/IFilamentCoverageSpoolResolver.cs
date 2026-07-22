@@ -8,6 +8,14 @@ namespace Farm.Infrastructure.Services.Spoolman;
 public interface IFilamentCoverageSpoolResolver
 {
     /// <summary>
+    /// Resolves one spool from its immutable source-qualified identity.
+    /// A changed central configuration never falls through to the new source.
+    /// </summary>
+    Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
+        CanonicalSpoolIdentity identity,
+        CancellationToken ct);
+
+    /// <summary>
     /// Resolves one spool id from the source owned by <paramref name="printer"/>.
     /// Moonraker printers use their native Spoolman source; all other backends use the
     /// centrally managed source. Missing or unavailable native sources never fall back.
