@@ -5,6 +5,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Repositories.Tasks;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.ShiftPlan;
@@ -19,6 +20,29 @@ namespace Farm.Web.Api.Tests.Services.ShiftPlan;
 
 public sealed class PrintedPartReorderShiftPlanTaskSourceTests
 {
+    [Fact]
+    public async Task ProduceAsync_CapturesOriginBeforeRequiredObservations()
+    {
+        bool captured = false;
+        var reader = new CallbackWatermarkReader(47, () => captured = true);
+        var reorder = new ControlledReorderEvaluationService();
+        var gate = new ControlledFeatureGate((_, _) =>
+        {
+            Assert.True(captured);
+            return true;
+        });
+        var source = new PrintedPartReorderShiftPlanTaskSource(
+            reorder,
+            gate,
+            NullLogger<PrintedPartReorderShiftPlanTaskSource>.Instance,
+            reader);
+
+        ShiftPlanSourceResult result = await source.ProduceAsync(CancellationToken.None);
+
+        Assert.Equal(47, result.OriginWatermark);
+        Assert.Empty(result.Specs);
+    }
+
     [Fact]
     public async Task ProduceAsync_BoundaryCandidatesAndDuplicateLabels_MapsStableTypedSpecs()
     {
@@ -557,6 +581,15 @@ public sealed class PrintedPartReorderShiftPlanTaskSourceTests
             QueryCount++;
             return Handler?.Invoke(ct)
                 ?? Task.FromResult(Candidates);
+        }
+    }
+
+    private sealed class CallbackWatermarkReader(long value, Action onRead) : IMutationWatermarkReader
+    {
+        public Task<long> GetCurrentAsync(CancellationToken ct = default)
+        {
+            onRead();
+            return Task.FromResult(value);
         }
     }
 
