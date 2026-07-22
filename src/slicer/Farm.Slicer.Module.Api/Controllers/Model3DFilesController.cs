@@ -24,14 +24,20 @@ public class Model3DFilesController(
     private readonly I3MfToStlConversionService _threeMfConverter = threeMfConverter;
 
     /// <summary>
-    /// Uploads a 3D model file (STL, 3MF, OBJ, etc.) with validation and thumbnail generation.
+    /// Uploads a 3D model file (STL, 3MF, OBJ, etc.) with validation and optional client PNG thumbnail.
     /// </summary>
     /// <param name="modelFile">The file to upload.</param>
+    /// <param name="thumbnailFile">Optional client-generated PNG thumbnail.</param>
+    /// <param name="ct">Cancellation token for the request.</param>
     [HttpPost("upload")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [RequestSizeLimit(500_000_000)] // 500 MB
-    public async Task<IActionResult> UploadModelAsync(IFormFile modelFile)
+    [RequestSizeLimit(512_000_000)] // 500 MB model + 10 MiB thumbnail + multipart overhead
+    [RequestFormLimits(MultipartBodyLengthLimit = 512_000_000)]
+    public async Task<IActionResult> UploadModelAsync(
+        [FromForm] IFormFile modelFile,
+        [FromForm] IFormFile? thumbnailFile = null,
+        CancellationToken ct = default)
     {
         if (modelFile is null || modelFile.Length == 0)
         {
@@ -40,8 +46,12 @@ public class Model3DFilesController(
 
         try
         {
-            Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
+            Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, thumbnailFile, ct);
             return Created($"/api/models/{result.Id}", result);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (ArgumentException ex)
         {
