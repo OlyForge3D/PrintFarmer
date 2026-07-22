@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers;
+using Farm.Slicer.Module.Contracts;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
@@ -56,7 +57,7 @@ public class SlicersControllerUnitTests
         IActionResult res = await controller.ListAsync();
         _ = res.Should().BeOfType<OkObjectResult>();
         OkObjectResult? ok = res as OkObjectResult;
-        IReadOnlyList<SlicerService>? list = ok!.Value as IReadOnlyList<SlicerService>;
+        IReadOnlyList<SlicerServiceResponseDto>? list = ok!.Value as IReadOnlyList<SlicerServiceResponseDto>;
         _ = list.Should().NotBeNull();
         _ = list!.Count.Should().BeGreaterThanOrEqualTo(1);
     }

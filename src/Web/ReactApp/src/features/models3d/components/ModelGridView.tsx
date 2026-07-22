@@ -6,6 +6,7 @@ import { Button } from '@/common/components/ui';
 import { ContextMenu } from '@/common/components/ContextMenu';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useContextMenu } from '@/common/hooks/useContextMenu';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import type { Model } from '@/types/models';
 import type { ModelGridViewProps } from '@/types/components';
@@ -99,6 +100,18 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                   </div>
                 )}
 
+                {/* Attribution */}
+                {model.sourceUrl && (
+                  <a
+                    href={model.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-pf-text-tertiary hover:text-pf-accent truncate block mb-1.5"
+                  >
+                    from Printables{model.sourceCreator ? ` by ${model.sourceCreator}` : ''}
+                  </a>
+                )}
+
                 {/* Metadata */}
                 <div className="text-xs text-pf-text-secondary space-y-0.5 mb-2 flex-1">
                   {model.fileType && <div className="flex justify-between gap-1"><span>Type:</span> <span className="font-medium text-right">{model.fileType.toUpperCase()}</span></div>}
@@ -138,7 +151,7 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                     <TagIcon className="w-4 h-4" />
                   </Button>
                   <Button
-                    onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
+                    onClick={() => navigate(`/slicer?modelId=${model.id}`)}
                     variant="primary"
                     size="sm"
                     className="flex-1"
@@ -173,7 +186,7 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                     const model = models.find(m => m.id === selectedModelId);
                     if (model) {
                       const a = document.createElement('a');
-                      a.href = `/api/3d-models/file/${model.id}`;
+                      a.href = `${getApiBaseUrl()}/3d-models/file/${model.id}`;
                       a.download = model.fileName;
                       a.click();
                     }

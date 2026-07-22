@@ -339,15 +339,24 @@ public class AuthAuditIntegrationTests : IAsyncLifetime
 
         DumpAuthAuditInfo(context, "PasswordResetInitiated");
 
+        // The reset email is masked before being persisted to the audit metadata
+        // (see AuthAuditService.MaskIdentifier: "{local[0]}***{local[^1]}@{domain}").
+        // Filter by the masked value so the assertion targets this test's own entry
+        // and is not affected by other entries that share the audit log table.
+        string localPart = email.Split('@')[0];
+        string maskedEmail = $"{localPart[0]}***{localPart[^1]}@test.com";
+
         List<AuthAuditLog> auditLogs = await context.AuthAuditLogs
-            .Where(a => a.EventType == AuthEventType.PasswordResetInitiated)
+            .Where(a => a.EventType == AuthEventType.PasswordResetInitiated
+                && a.Metadata != null && a.Metadata.Contains(maskedEmail))
             .OrderByDescending(a => a.Timestamp)
             .ToListAsync();
 
         _ = auditLogs.Should().NotBeEmpty();
         AuthAuditLog resetLog = auditLogs.First();
         _ = resetLog.Success.Should().BeTrue();
-        _ = resetLog.Metadata.Should().Contain(email);
+        _ = resetLog.Metadata.Should().Contain(maskedEmail);
+        _ = resetLog.Metadata.Should().NotContain(email, "raw emails must never be persisted to audit metadata");
     }
 
     [Fact]

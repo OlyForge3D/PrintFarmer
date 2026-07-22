@@ -1,5 +1,14 @@
 <Project>
   <!-- Test-only analyzer suppressions. This file applies to all projects under src/tests/ -->
+
+  <!-- Security: this file shadows ../Directory.Build.props (MSBuild auto-imports only the nearest
+       Directory.Build.props), so the solution-wide patched-SQLite pin must be repeated here to
+       guarantee test projects never resolve the vulnerable SQLitePCLRaw.lib.e_sqlite3 2.1.11
+       (GHSA-2m69-gcr7-jv3q) even if a future test project doesn't reference a pinned src project. -->
+  <ItemGroup>
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
   <PropertyGroup>
     <!-- Suppress noisy rules in tests: Sonar (S*), IDisposableAnalyzers (IDISP*), some CA*, CS1998, and StyleCop (SA*) -->
     <NoWarn>$(NoWarn);

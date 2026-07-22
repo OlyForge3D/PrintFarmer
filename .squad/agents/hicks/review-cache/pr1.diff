@@ -1,0 +1,645 @@
+diff --git a/docs/design/printer-controls-section.md b/docs/design/printer-controls-section.md
+new file mode 100644
+index 000000000..6c2762da7
+--- /dev/null
++++ b/docs/design/printer-controls-section.md
+@@ -0,0 +1,639 @@
++# Printer Controls Section — Design Specification
++
++**Issue:** [#283](https://github.com/OlyForge3D/PrintFarmer/issues/283)  
++**Author:** Newt (Industrial UI Designer)  
++**Date:** 2026-05-28  
++**Status:** Ready for Implementation
++
++## Overview
++
++This document specifies the UI design for the **Printer Controls** section in `PrinterDetailView.swift`. The section contains three subgroups: **Preheat**, **Home**, and **Jog** — providing operators with quick access to common maintenance tasks.
++
++### Design Principles
++
++- **Industrial precision:** Clear, data-forward controls with unambiguous labels
++- **Dark-first:** Designed for `pfBackground` (#0b1020) with appropriate contrast
++- **Accessible:** WCAG 2.2 AA compliant, color-blind friendly disabled states
++- **HIG compliant:** All touch targets ≥44pt per Apple Human Interface Guidelines
++
++---
++
++## Section Placement
++
++### Phone (Compact Width)
++
++The Controls section appears in `printerContent(_:)` **after** `actionSection` and **before** the view's bottom padding. It is rendered only when `printer.isOnline == true`.
++
++```
++┌────────────────────────────────────────┐
++│ Header Section                         │
++├────────────────────────────────────────┤
++│ Temperatures Section                   │
++├────────────────────────────────────────┤
++│ Current Job (if printing/paused)       │
++├────────────────────────────────────────┤
++│ Camera Section                         │
++├────────────────────────────────────────┤
++│ Failure Detection (if active)          │
++├────────────────────────────────────────┤
++│ Filament Section                       │
++├────────────────────────────────────────┤
++│ Auto-Dispatch Section                  │
++├────────────────────────────────────────┤
++│ Predictive Insights Link               │
++├────────────────────────────────────────┤
++│ Action Section (pause/resume/stop)     │
++├────────────────────────────────────────┤
++│ ▶ CONTROLS SECTION (new)               │  ← NEW
++│   ├ Preheat Subgroup                   │
++│   ├ Home Subgroup                      │
++│   └ Jog Subgroup                       │
++└────────────────────────────────────────┘
++```
++
++### iPad (Regular Width — 2-Column)
++
++In `iPadPrinterContent(_:)`, allocate Controls to the **left column** below Action Section:
++
++| Left Column | Right Column |
++|-------------|--------------|
++| Header | Camera |
++| Temperatures | Current Job |
++| Filament | Failure Detection |
++| Auto-Dispatch | |
++| Predictive Insights | |
++| Action Section | |
++| **Controls Section** | |
++
++---
++
++## Section Container
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Controls                                    [header]   │
++├─────────────────────────────────────────────────────────┤
++│  ┌─────────────────────────────────────────────────┐    │
++│  │  Preheat Subgroup                               │    │
++│  └─────────────────────────────────────────────────┘    │
++│  ┌─────────────────────────────────────────────────┐    │
++│  │  Home Subgroup                                  │    │
++│  └─────────────────────────────────────────────────┘    │
++│  ┌─────────────────────────────────────────────────┐    │
++│  │  Jog Subgroup                                   │    │
++│  └─────────────────────────────────────────────────┘    │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Container Styling
++
++```swift
++VStack(alignment: .leading, spacing: 12) {
++    Text("Controls")
++        .font(.headline)
++    
++    // Preheat subgroup
++    // Home subgroup
++    // Jog subgroup
++}
++```
++
++- **Section spacing:** 12pt between subgroups
++- **No outer card:** Subgroups have their own card backgrounds
++
++---
++
++## Preheat Subgroup
++
++### Layout — List Style (Recommended)
++
++A vertical list provides clear temperature readouts and sufficient touch targets.
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Preheat                                                │
++├─────────────────────────────────────────────────────────┤
++│  ┌───────────────────────────────────────────────────┐  │
++│  │ [🔥] PLA                               200° / 60° │  │
++│  ├───────────────────────────────────────────────────┤  │
++│  │ [🔥] PETG                             240° / 80°  │  │
++│  ├───────────────────────────────────────────────────┤  │
++│  │ [🔥] ABS                              240° / 100° │  │
++│  ├───────────────────────────────────────────────────┤  │
++│  │ [❄️] Cool Down                          0° / 0°   │  │
++│  └───────────────────────────────────────────────────┘  │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Component Anatomy
++
++```swift
++// PreheatRow — individual button row
++HStack {
++    Image(systemName: isCoolDown ? "snowflake" : "flame.fill")
++        .font(.body)
++        .foregroundStyle(isCoolDown ? Color.pfSecondaryAccent : Color.pfWarning)
++        .frame(width: 24)
++    
++    Text(materialName)                    // "PLA", "PETG", "ABS", "Cool Down"
++        .font(.subheadline.weight(.medium))
++    
++    Spacer()
++    
++    Text("\(hotendTemp)° / \(bedTemp)°")  // "200° / 60°"
++        .font(.subheadline.monospacedDigit())
++        .foregroundStyle(Color.pfTextSecondary)
++}
++.frame(minHeight: 44)                     // HIG touch target
++.contentShape(Rectangle())               // Full row tappable
++```
++
++### Presets (v1 Locked)
++
++| Material | Hotend | Bed | Icon |
++|----------|--------|-----|------|
++| PLA | 200°C | 60°C | `flame.fill` (pfWarning) |
++| PETG | 240°C | 80°C | `flame.fill` (pfWarning) |
++| ABS | 240°C | 100°C | `flame.fill` (pfWarning) |
++| Cool Down | 0°C | 0°C | `snowflake` (pfSecondaryAccent) |
++
++### Card Styling
++
++```swift
++VStack(spacing: 0) {
++    ForEach(presets) { preset in
++        PreheatRow(preset: preset, isDisabled: isDisabled, isPending: pendingPreset == preset)
++            .onTapGesture { /* call setTemps */ }
++        
++        if preset != presets.last {
++            Divider()
++                .padding(.leading, 36)  // Align with text, not icon
++        }
++    }
++}
++.padding(.vertical, 4)
++.background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
++.overlay(
++    RoundedRectangle(cornerRadius: 12)
++        .strokeBorder(Color.pfBorder, lineWidth: 1)
++)
++```
++
++---
++
++## Home Subgroup
++
++### Layout — Horizontal Button Row
++
++Three equally-sized buttons in a single row.
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Home                                                   │
++├─────────────────────────────────────────────────────────┤
++│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐     │
++│  │   Home All   │ │   Home XY    │ │   Home Z     │     │
++│  │     [🏠]     │ │    [↔️]      │ │    [↕️]      │     │
++│  └──────────────┘ └──────────────┘ └──────────────┘     │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Component Anatomy
++
++```swift
++HStack(spacing: 10) {
++    HomeButton(label: "Home All", icon: "house.fill", action: homeAll)
++    HomeButton(label: "Home XY", icon: "arrow.left.and.right", action: homeXY)
++    HomeButton(label: "Home Z", icon: "arrow.up.and.down", action: homeZ)
++}
++```
++
++### HomeButton View
++
++```swift
++Button(action: action) {
++    VStack(spacing: 6) {
++        Image(systemName: icon)
++            .font(.title3)
++        Text(label)
++            .font(.caption.weight(.medium))
++    }
++    .frame(maxWidth: .infinity)
++    .frame(height: 60)                    // Above 44pt minimum
++}
++.buttonStyle(.bordered)
++.tint(Color.pfAccent)
++.disabled(isDisabled)
++```
++
++### Button Specifications
++
++| Button | Icon | API Call |
++|--------|------|----------|
++| Home All | `house.fill` | `POST /api/printers/{id}/home` |
++| Home XY | `arrow.left.and.right` | `POST /api/printers/{id}/homexy` |
++| Home Z | `arrow.up.and.down` | `POST /api/printers/{id}/homez` |
++
++- **Touch target:** 60pt height × flexible width (≥44pt per button)
++- **Spacing:** 10pt between buttons
++- **Button style:** `.bordered` with `.pfAccent` tint
++
++---
++
++## Jog Subgroup
++
++### Layout — Segmented Pickers + Action Buttons
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Jog                                                    │
++├─────────────────────────────────────────────────────────┤
++│                                                         │
++│  Axis                                                   │
++│  ┌─────────┬─────────┬─────────┐                        │
++│  │    X    │    Y    │    Z    │  ← Segmented Picker    │
++│  └─────────┴─────────┴─────────┘                        │
++│                                                         │
++│  Step (mm)                                              │
++│  ┌───────┬───────┬───────┬───────┐                      │
++│  │  0.1  │   1   │  10   │  100  │  ← Segmented Picker  │
++│  └───────┴───────┴───────┴───────┘                      │
++│                                                         │
++│  ┌───────────────────┐  ┌───────────────────┐           │
++│  │        −          │  │         +         │           │
++│  │  Move X −10mm     │  │   Move X +10mm    │           │
++│  └───────────────────┘  └───────────────────┘           │
++│                                                         │
++└─────────────────────────────────────────────────────────┘
++```
++
++### Component Anatomy
++
++```swift
++VStack(alignment: .leading, spacing: 16) {
++    // Axis picker
++    VStack(alignment: .leading, spacing: 6) {
++        Text("Axis")
++            .font(.caption)
++            .foregroundStyle(Color.pfTextSecondary)
++        
++        Picker("Axis", selection: $selectedAxis) {
++            Text("X").tag(Axis.x)
++            Text("Y").tag(Axis.y)
++            Text("Z").tag(Axis.z)
++        }
++        .pickerStyle(.segmented)
++    }
++    
++    // Step picker
++    VStack(alignment: .leading, spacing: 6) {
++        Text("Step (mm)")
++            .font(.caption)
++            .foregroundStyle(Color.pfTextSecondary)
++        
++        Picker("Step", selection: $selectedStep) {
++            Text("0.1").tag(0.1)
++            Text("1").tag(1.0)
++            Text("10").tag(10.0)
++            Text("100").tag(100.0)
++        }
++        .pickerStyle(.segmented)
++    }
++    
++    // Move buttons
++    HStack(spacing: 12) {
++        JogButton(direction: .minus, axis: selectedAxis, step: selectedStep)
++        JogButton(direction: .plus, axis: selectedAxis, step: selectedStep)
++    }
++}
++.padding()
++.background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
++.overlay(
++    RoundedRectangle(cornerRadius: 12)
++        .strokeBorder(Color.pfBorder, lineWidth: 1)
++)
++```
++
++### JogButton View
++
++```swift
++Button(action: action) {
++    VStack(spacing: 4) {
++        Image(systemName: direction == .minus ? "minus" : "plus")
++            .font(.title2.weight(.semibold))
++        
++        Text("Move \(axis.label) \(direction == .minus ? "−" : "+")\(Int(step))mm")
++            .font(.caption)
++            .foregroundStyle(Color.pfTextSecondary)
++    }
++    .frame(maxWidth: .infinity)
++    .frame(height: 56)                    // Above 44pt minimum
++}
++.buttonStyle(.bordered)
++.tint(Color.pfAccent)
++.disabled(isDisabled)
++```
++
++### Jog Specifications
++
++| Setting | Options | Default |
++|---------|---------|---------|
++| Axis | X, Y, Z | X |
++| Step | 0.1, 1, 10, 100 mm | 1 |
++| Feedrate XY | 3000 mm/min | (not surfaced) |
++| Feedrate Z | 600 mm/min | (not surfaced) |
++
++- **Touch target:** Jog buttons are 56pt tall
++- **Segmented pickers:** Use native `.segmented` style (HIG compliant)
++
++---
++
++## States
++
++### State Matrix
++
++| State | Preheat | Home | Jog | Section Visibility |
++|-------|---------|------|-----|-------------------|
++| **Idle** (online, not printing) | Enabled | Enabled | Enabled | Visible |
++| **Pending** (action in flight) | Spinner + dim | Spinner + dim | Spinner + dim | Visible |
++| **Printing / Paused** | Disabled | Disabled | Disabled | Visible |
++| **Offline** | — | — | — | **Hidden** |
++| **Capability missing** | See below | See below | See below | Partial |
++
++### Capability-Gated Subgroups
++
++When a printer lacks a specific capability, **hide the entire subgroup** rather than rendering disabled rows. This avoids visual clutter and confusion for printers that will never support certain features.
++
++| Capability Flag | Subgroup Affected | Behavior When `false` |
++|-----------------|-------------------|----------------------|
++| `supportsTemperatureControl` | Preheat | **Hide entire Preheat subgroup** |
++| `supportsMovement` | Home, Jog | **Hide entire Home and Jog subgroups** |
++
++**Implementation:**
++
++```swift
++// In controlsSection(printer:)
++if printer.capabilities.supportsTemperatureControl {
++    PreheatSubgroup(printer: printer, viewModel: viewModel)
++}
++
++if printer.capabilities.supportsMovement {
++    HomeSubgroup(printer: printer, viewModel: viewModel)
++    JogSubgroup(printer: printer, viewModel: viewModel)
++}
++```
++
++**Rationale:** Hiding is cleaner UX than disabled-row clutter. Users should only see controls their printer can actually use. This is distinct from the "disabled during print" state, which shows controls but blocks interaction.
++
++### Idle State
++
++- All controls interactive
++- Standard color tokens (`pfCard`, `pfAccent`, `pfTextPrimary`)
++
++### Pending State
++
++When an action is in flight (e.g., waiting for backend response):
++
++```swift
++// PreheatRow with pending state
++HStack {
++    if isPending {
++        ProgressView()
++            .frame(width: 24, height: 24)
++    } else {
++        Image(systemName: icon)
++            .frame(width: 24)
++    }
++    
++    Text(materialName)
++        .foregroundStyle(isPending ? Color.pfTextTertiary : Color.pfTextPrimary)
++    
++    Spacer()
++    
++    Text(tempLabel)
++        .foregroundStyle(Color.pfTextTertiary)
++}
++.opacity(isPending ? 0.6 : 1.0)
++.disabled(isPending)
++```
++
++**Pending visual treatment:**
++- Replace icon with `ProgressView()` spinner
++- Opacity: `0.6`
++- Text color: `pfTextTertiary`
++- Interaction: disabled
++
++### Disabled-While-Printing State
++
++When `printer.state ∈ {Printing, Pausing, Paused, Resuming, Cancelling, Heating}`:
++
++```swift
++// DisabledControlRow
++HStack {
++    Image(systemName: icon)
++        .foregroundStyle(Color.pfTextTertiary)
++        .frame(width: 24)
++    
++    Text(label)
++        .foregroundStyle(Color.pfTextTertiary)
++    
++    Spacer()
++    
++    // Add lock icon for color-blind accessibility
++    Image(systemName: "lock.fill")
++        .font(.caption2)
++        .foregroundStyle(Color.pfTextTertiary)
++}
++.opacity(0.5)
++.disabled(true)
++```
++
++**Disabled visual treatment (color-blind friendly):**
++- Opacity: `0.5`
++- Text/icon color: `pfTextTertiary`
++- **Lock icon:** Small `lock.fill` at trailing edge — provides non-color indicator
++- No interaction
++
++### Hidden-While-Offline State
++
++The entire Controls section is conditionally rendered:
++
++```swift
++// In printerContent(_:)
++if printer.isOnline {
++    controlsSection(printer)
++}
++```
++
++When `printer.isOnline == false`, the section does not render at all.
++
++---
++
++## Color Token Reference
++
++| Element | Light Mode | Dark Mode | Token |
++|---------|------------|-----------|-------|
++| Card background | #f8fafc | #0f172a | `pfCard` |
++| Border | #e2e8f0 | #243145 | `pfBorder` |
++| Primary text | #1e293b | #e5e7eb | `pfTextPrimary` |
++| Secondary text | #475569 | #9ca3af | `pfTextSecondary` |
++| Tertiary/disabled text | #64748b | #6b7280 | `pfTextTertiary` |
++| Accent (buttons) | #10b981 | #047857 | `pfAccent` / `pfButtonPrimary` |
++| Warning (flame icon) | #d97706 | #d97706 | `pfWarning` |
++| Cool icon | #1d4ed8 | #1d4ed8 | `pfSecondaryAccent` |
++
++---
++
++## Accessibility
++
++### VoiceOver Labels
++
++| Control | Label | Hint |
++|---------|-------|------|
++| PLA row | "Preheat PLA, 200 degrees hotend, 60 degrees bed" | "Double-tap to preheat" |
++| PETG row | "Preheat PETG, 240 degrees hotend, 80 degrees bed" | "Double-tap to preheat" |
++| ABS row | "Preheat ABS, 240 degrees hotend, 100 degrees bed" | "Double-tap to preheat" |
++| Cool Down | "Cool down, turn off heaters" | "Double-tap to cool down" |
++| Home All | "Home all axes" | "Double-tap to home printer" |
++| Home XY | "Home X and Y axes" | "Double-tap to home XY" |
++| Home Z | "Home Z axis" | "Double-tap to home Z" |
++| Axis picker | "Axis, currently \(axis)" | "Swipe to change axis" |
++| Step picker | "Step size, currently \(step) millimeters" | "Swipe to change step" |
++| Jog − | "Move \(axis) minus \(step) millimeters" | "Double-tap to jog" |
++| Jog + | "Move \(axis) plus \(step) millimeters" | "Double-tap to jog" |
++| Disabled control | "[label], unavailable during print" | — |
++
++### Implementation
++
++```swift
++.accessibilityLabel("Preheat PLA, 200 degrees hotend, 60 degrees bed")
++.accessibilityHint(isDisabled ? nil : "Double-tap to preheat")
++.accessibilityAddTraits(isDisabled ? .isStaticText : .isButton)
++```
++
++### Minimum Contrast Ratios
++
++All text meets WCAG 2.2 AA:
++- `pfTextPrimary` on `pfCard`: **7.2:1** (dark), **12.1:1** (light)
++- `pfTextSecondary` on `pfCard`: **4.6:1** (dark), **7.1:1** (light)
++- `pfTextTertiary` on `pfCard`: **3.8:1** — used only for disabled, meets accessibility exception
++
++### Color-Blind Friendly Disabled
++
++**Do not rely on color alone.** Disabled state uses:
++1. Reduced opacity (0.5)
++2. Tertiary text color
++3. **Lock icon** (`lock.fill`) — shape-based indicator
++
++---
++
++## HIG Compliance Checklist
++
++- [x] **Touch targets ≥44pt:** All buttons meet or exceed 44pt height
++  - Preheat rows: 44pt min height
++  - Home buttons: 60pt height
++  - Jog buttons: 56pt height
++  - Segmented pickers: native (≥44pt)
++- [x] **Dark Mode:** All colors use adaptive `pf*` tokens from `ThemeColors.swift`
++- [x] **Dynamic Type:** Use system font styles (`.headline`, `.subheadline`, `.caption`)
++- [x] **Haptics:** Use `UIImpactFeedbackGenerator(.medium)` on button press
++- [x] **Loading indicators:** Native `ProgressView()` for pending state
++
++---
++
++## File Structure
++
++```
++PrintFarmer/
++└── Views/
++    └── Components/
++        └── PrinterControls/           ← NEW DIRECTORY
++            ├── ControlsSection.swift   // Main section container
++            ├── PreheatSubgroup.swift   // Preheat list
++            ├── HomeSubgroup.swift      // Home buttons
++            └── JogSubgroup.swift       // Jog pickers + buttons
++```
++
++---
++
++## Implementation Notes
++
++1. **State management:** Add `@State` properties to `PrinterDetailViewModel`:
++   - `isPreheatPending: Bool`
++   - `pendingPreheatPreset: PreheatPreset?`
++   - `isHomePending: Bool`
++   - `isJogPending: Bool`
++   - `selectedJogAxis: Axis = .x`
++   - `selectedJogStep: Double = 1.0`
++
++2. **Print-state blocking:** Check `viewModel.isPrinting || viewModel.isPaused` (or expanded set per spike #279) to disable controls.
++
++3. **Capability gating:** Check `printer.capabilities.supportsTemperatureControl` and `printer.capabilities.supportsMovement` to conditionally render subgroups. Hide (do not render) subgroups when capability is `false`.
++
++4. **API calls:** Use existing `PrinterService` methods or add new ones for `/temps`, `/home`, `/homexy`, `/homez`, `/move`. Note: Home XY and Home Z use dedicated endpoints (`/homexy`, `/homez`) with no request body — do not send an axes array.
++
++4. **SignalR updates:** No optimistic UI — wait for `printerupdated` to confirm temp changes.
++
++---
++
++## Appendix: ASCII Reference Layouts
++
++### Phone — Full Section
++
++```
++┌──────────────────────────────────────────┐
++│ Controls                                 │
++├──────────────────────────────────────────┤
++│ Preheat                                  │
++│ ┌──────────────────────────────────────┐ │
++│ │ 🔥 PLA                    200° / 60° │ │
++│ ├──────────────────────────────────────┤ │
++│ │ 🔥 PETG                  240° / 80°  │ │
++│ ├──────────────────────────────────────┤ │
++│ │ 🔥 ABS                   240° / 100° │ │
++│ ├──────────────────────────────────────┤ │
++│ │ ❄️ Cool Down               0° / 0°   │ │
++│ └──────────────────────────────────────┘ │
++│                                          │
++│ Home                                     │
++│ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
++│ │ Home All │ │ Home XY  │ │ Home Z   │   │
++│ │   🏠     │ │   ↔️     │ │   ↕️     │   │
++│ └──────────┘ └──────────┘ └──────────┘   │
++│                                          │
++│ Jog                                      │
++│ ┌──────────────────────────────────────┐ │
++│ │ Axis                                 │ │
++│ │ [ X ] [ Y ] [ Z ]                    │ │
++│ │                                      │ │
++│ │ Step (mm)                            │ │
++│ │ [0.1] [ 1 ] [10 ] [100]              │ │
++│ │                                      │ │
++│ │ ┌────────────┐ ┌────────────┐        │ │
++│ │ │     −      │ │     +      │        │ │
++│ │ │ Move X −10 │ │ Move X +10 │        │ │
++│ │ └────────────┘ └────────────┘        │ │
++│ └──────────────────────────────────────┘ │
++└──────────────────────────────────────────┘
++```
++
++### Disabled-While-Printing
++
++```
++┌──────────────────────────────────────────┐
++│ Controls                                 │
++├──────────────────────────────────────────┤
++│ Preheat                          [🔒]    │
++│ ┌──────────────────────────────────────┐ │
++│ │ 🔥 PLA            200° / 60°    🔒   │ │  ← dimmed, lock icon
++│ ├──────────────────────────────────────┤ │
++│ │ 🔥 PETG          240° / 80°     🔒   │ │
++│ ├──────────────────────────────────────┤ │
++│ │ ...                                  │ │
++│ └──────────────────────────────────────┘ │
++└──────────────────────────────────────────┘
++```
++
++---
++
++*End of specification.*

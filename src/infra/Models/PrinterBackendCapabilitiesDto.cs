@@ -23,7 +23,8 @@ public record PrinterBackendCapabilitiesDto(
     bool SupportsTemperatureControl = false,
     bool SupportsPrinterInformation = false,
     bool SupportsHistory = false,
-    bool SupportsFilamentControl = false)
+    bool SupportsFilamentControl = false,
+    bool SupportsObjectExclusion = false)
 {
     /// <summary>
     /// Gets a summary of all supported capabilities as a formatted string.
@@ -92,6 +93,11 @@ public record PrinterBackendCapabilitiesDto(
             if (SupportsFilamentControl)
             {
                 caps.Add("FilamentControl");
+            }
+
+            if (SupportsObjectExclusion)
+            {
+                caps.Add("ObjectExclusion");
             }
 
             return caps.ToArray();

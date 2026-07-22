@@ -39,7 +39,8 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         { typeof(ISupportsHistory), BackendCapabilities.History },
         { typeof(ISupportsFileDelete), BackendCapabilities.FileDelete },
         { typeof(ISupportsFilamentControl), BackendCapabilities.FilamentControl },
-        { typeof(ISupportsUploadAndPrint), BackendCapabilities.UploadAndPrint }
+        { typeof(ISupportsUploadAndPrint), BackendCapabilities.UploadAndPrint },
+        { typeof(ISupportsObjectExclusion), BackendCapabilities.ObjectExclusion }
     };
 
     // Cache of capabilities for each backend (computed once at initialization)
@@ -305,6 +306,18 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         return false;
     }
 
+    public bool TryGetObjectExclusionClientTyped(PrinterBackend backend, out ISupportsObjectExclusion? client)
+    {
+        client = null;
+        if (TryGetClientWithCapability(backend, BackendCapabilities.ObjectExclusion, out IBackendClient? baseClient) && baseClient is ISupportsObjectExclusion objectExclusionClient)
+        {
+            client = objectExclusionClient;
+            return true;
+        }
+
+        return false;
+    }
+
     public bool TryGetCameraClientTyped(PrinterBackend backend, out ISupportsCamera? client)
     {
         client = null;
@@ -501,6 +514,9 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                         break;
                     case BackendCapabilities.FileDelete:
                         implementsRequiredInterface = client is ISupportsFileDelete;
+                        break;
+                    case BackendCapabilities.ObjectExclusion:
+                        implementsRequiredInterface = client is ISupportsObjectExclusion;
                         break;
                 }
 

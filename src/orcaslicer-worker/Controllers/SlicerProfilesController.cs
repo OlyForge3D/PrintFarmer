@@ -365,6 +365,48 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
     }
 
     /// <summary>
+    /// Get machine profiles by manufacturer name and printer model name.
+    /// Used by slicer-host to fetch profiles for a specific printer model within a manufacturer.
+    /// </summary>
+    /// <param name="manufacturer">Manufacturer name (e.g., "Elegoo")</param>
+    /// <param name="model">Printer model name (e.g., "Elegoo Centauri Carbon")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Machine profiles matching the manufacturer and model</returns>
+    [HttpGet("machine/{manufacturer}/{model}")]
+    [ProducesResponseType(typeof(List<MachineProfileDto>), 200)]
+    public async Task<ActionResult<List<MachineProfileDto>>> GetMachineProfilesByManufacturerAndModelAsync(
+        string manufacturer,
+        string model,
+        CancellationToken ct)
+    {
+        try
+        {
+            string normalizedModel = Uri.UnescapeDataString(model).Replace("_", " ", StringComparison.Ordinal);
+            string normalizedMfg = Uri.UnescapeDataString(manufacturer);
+
+            _logger.LogInformation("Fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}'", normalizedMfg, normalizedModel);
+
+            IList<MachineProfileDto> allProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
+
+            List<MachineProfileDto> result = allProfiles
+                .Where(p =>
+                    (p.Manufacturer ?? "Unknown").Equals(normalizedMfg, StringComparison.OrdinalIgnoreCase) &&
+                    ((p.PrinterModel ?? string.Empty).Equals(normalizedModel, StringComparison.OrdinalIgnoreCase) ||
+                     (p.Name ?? string.Empty).Equals(normalizedModel, StringComparison.OrdinalIgnoreCase) ||
+                     (p.Name ?? string.Empty).StartsWith(normalizedModel, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            _logger.LogInformation("Returning {Count} machine profiles for manufacturer='{Manufacturer}', model='{Model}'", result.Count, normalizedMfg, normalizedModel);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}': {Message}", manufacturer, model, ex.Message);
+            return StatusCode(500, new { error = "Failed to fetch machine profiles", message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Get process profiles compatible with a specific printer_model (OrcaSlicer alias).
     /// </summary>
     /// <param name="printerModel">The printer_model value (OrcaSlicer alias)</param>

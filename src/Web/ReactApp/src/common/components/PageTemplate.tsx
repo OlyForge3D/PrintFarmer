@@ -56,20 +56,20 @@ export function PageTemplate({
 }: PageTemplateProps) {
   return (
     <div
-      className={`min-h-screen ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
+      className={`min-h-full ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
       data-header-visible={showHeader ? 'true' : 'false'}
       aria-label={showHeader ? undefined : title}
     >
-      <div className={`${maxWidth} ${padding}`}>
+      <div className={`min-w-0 ${maxWidth} ${padding}`}>
         {/* Page Header */}
         {showHeader && (
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between lg:mr-72">
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}
-                <h2 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
+                <h1 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
                   {title}
-                </h2>
+                </h1>
                 {titleActions && <div className="shrink-0">{titleActions}</div>}
               </div>
               {subtitle && (
@@ -78,7 +78,7 @@ export function PageTemplate({
                 </p>
               )}
             </div>
-            {actions && <div className="shrink-0 self-start">{actions}</div>}
+            {actions && <div className="max-w-full self-start sm:shrink-0">{actions}</div>}
           </div>
         )}
 

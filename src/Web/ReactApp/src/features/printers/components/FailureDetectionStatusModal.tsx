@@ -76,7 +76,7 @@ function getFailureDetectionErrorNextStep(reason: string): string | null {
     || normalizedReason.includes('private to the printer lan')
     || normalizedReason.includes('printer lan')
   ) {
-    return 'Make the saved snapshot URL reachable from the Obico server network, or switch to a snapshot feed that PrintFarmer can fetch locally.';
+    return 'Make the linked camera snapshot feed reachable from the Obico server network, or switch to a camera feed that PrintFarmer can fetch locally.';
   }
 
   if (
@@ -115,7 +115,7 @@ function getFailureDetectionNextStep(
     case 'idle':
       return 'No action is needed until this printer starts a new print. Monitoring will resume automatically when a job is active.';
     case 'misconfigured':
-      return 'Add or enable a usable camera snapshot feed so failure detection can inspect frames from this printer.';
+      return 'Add and enable a usable linked camera snapshot feed so failure detection can inspect frames from this printer.';
     case 'error':
       return getFailureDetectionErrorNextStep(status.reason)
         ?? 'Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.';

@@ -48,4 +48,19 @@ public class GCodeMetadata
 
     [JsonPropertyName("gcode_end_byte")]
     public long? GcodeEndByte { get; set; }
+
+    [JsonPropertyName("object_info")]
+    public GCodeObjectInfo[] ObjectInfo { get; set; } = Array.Empty<GCodeObjectInfo>();
+}
+
+public class GCodeObjectInfo
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("center")]
+    public double[]? Center { get; set; }
+
+    [JsonPropertyName("polygon")]
+    public double[][]? Polygon { get; set; }
 }

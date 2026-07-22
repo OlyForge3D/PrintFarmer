@@ -7,10 +7,13 @@ struct PFarmApp: App {
     #endif
     @State private var router = AppRouter()
     @State private var authViewModel: AuthViewModel
+    @State private var serverRegistry: ServerRegistry
     @State private var services: ServiceContainer
     @State private var themeManager = ThemeManager()
 
     init() {
+        let registry = ServerRegistry()
+        _serverRegistry = State(initialValue: registry)
         if DemoMode.shared.isActive {
             let container = ServiceContainer.demo()
             _services = State(initialValue: container)
@@ -23,7 +26,7 @@ struct PFarmApp: App {
             } else {
                 resolvedURL = APIClient.savedBaseURL() ?? AppConfig.baseURL
             }
-            let container = ServiceContainer(baseURL: resolvedURL)
+            let container = ServiceContainer(baseURL: resolvedURL, serverRegistry: registry)
             _services = State(initialValue: container)
             _authViewModel = State(initialValue: AuthViewModel(services: container))
         }
@@ -34,6 +37,7 @@ struct PFarmApp: App {
             RootView()
                 .environment(router)
                 .environment(authViewModel)
+                .environment(serverRegistry)
                 .environment(services)
                 .environment(themeManager)
                 .tint(Color.pfAccent)

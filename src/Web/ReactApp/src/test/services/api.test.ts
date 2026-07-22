@@ -238,5 +238,477 @@ describe("ApiClient", () => {
 
       expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/enabled", { enabled: false });
     });
+
+    describe("printables endpoints", () => {
+      it("should fetch user collections from the printables collections endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "collection-1", name: "Favorites", modelCount: 12 }],
+            nextCursor: "cursor-2",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesUserCollections("ripley", { cursor: "cursor-1", limit: 8 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/collections", {
+          params: { cursor: "cursor-1", limit: 8 },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should normalize @-prefixed usernames for printables collections requests", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "collection-1", name: "Favorites", modelCount: 12 }],
+            nextCursor: null,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        await apiClient.getPrintablesUserCollections("@ripley", { limit: 8 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/collections", {
+          params: { cursor: undefined, limit: 8 },
+        });
+      });
+
+      it("should fetch user models from the printables models endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "model-1", name: "Voron clip", authorHandle: "ripley", downloadCount: 12 }],
+            nextCursor: null,
+            hasMore: false,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesUserModels("ripley", { limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/models", {
+          params: { cursor: undefined, limit: 24 },
+        });
+        expect(result).toEqual({
+          items: [{ id: "model-1", title: "Voron clip", author: "ripley", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: 12, fileCount: undefined, sourceUrl: undefined }],
+          nextCursor: null,
+          hasMore: false,
+        });
+      });
+
+      it("should normalize @-prefixed usernames for printables models requests", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "model-1", title: "Voron clip", author: "ripley" }],
+            nextCursor: null,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        await apiClient.getPrintablesUserModels("@ripley", { limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/users/ripley/models", {
+          params: { cursor: undefined, limit: 24 },
+        });
+      });
+
+      it("should query printables search endpoint with keyword and offset pagination", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "result-1", name: "tool holder", authorHandle: "maker", downloadCount: 101 }],
+            offset: 24,
+            limit: 24,
+            hasMore: true,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.searchPrintablesModels("tool holder", {
+          offset: 24,
+          limit: 24,
+        });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/search", {
+          params: { query: "tool holder", offset: 24, limit: 24 },
+        });
+        expect(result).toEqual({
+          items: [{ id: "result-1", title: "tool holder", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: 101, fileCount: undefined, sourceUrl: undefined }],
+          hasMore: true,
+          offset: 24,
+          limit: 24,
+        });
+      });
+
+      it("should fetch collection models from the printables collection endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "model-1", name: "Collection model", authorHandle: "maker" }],
+            nextCursor: "cursor-2",
+            hasMore: true,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesCollectionModels("collection-1", { cursor: "cursor-1", limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/collections/collection-1/models", {
+          params: { cursor: "cursor-1", limit: 24, query: undefined, ordering: undefined },
+        });
+        expect(result).toEqual({
+          items: [{ id: "model-1", title: "Collection model", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: undefined, fileCount: undefined, sourceUrl: undefined }],
+          nextCursor: "cursor-2",
+          hasMore: true,
+        });
+      });
+
+      it("should fetch printables oauth status", async () => {
+        const mockResponse = {
+          data: {
+            isLinked: true,
+            hasRefreshToken: true,
+            scope: "public",
+            linkedAtUtc: "2026-06-15T00:00:00Z",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesOAuthStatus();
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/oauth/status");
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should request printables oauth authorize url", async () => {
+        const mockResponse = {
+          data: {
+            authorizationUrl: "https://account.prusa3d.com/o/authorize/?foo=bar",
+          },
+        };
+
+        const mockPost = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+
+        const result = await apiClient.getPrintablesOAuthAuthorizeUrl();
+
+        expect(mockPost).toHaveBeenCalledWith("/3d-models/printables/oauth/connect");
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should complete printables oauth callback with code and state", async () => {
+        const mockResponse = {
+          data: {
+            isLinked: true,
+            hasRefreshToken: true,
+            scope: "likes history",
+            linkedAtUtc: "2026-06-15T00:00:00Z",
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.completePrintablesOAuthCallback("oauth-code", "oauth-state");
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/oauth/callback", {
+          params: { code: "oauth-code", state: "oauth-state" },
+        });
+        expect(result).toEqual(mockResponse.data);
+      });
+
+      it("should disconnect printables oauth connection", async () => {
+        const mockPost = vi.fn().mockResolvedValue({ data: undefined });
+        (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+
+        await apiClient.disconnectPrintablesOAuth();
+
+        expect(mockPost).toHaveBeenCalledWith("/3d-models/printables/oauth/disconnect");
+      });
+
+      it("should fetch liked models from private printables endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "liked-1", name: "Liked model", authorHandle: "maker", downloadCount: 41 }],
+            nextCursor: "cursor-2",
+            hasMore: true,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesLikedModels({ cursor: "cursor-1", limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/liked", {
+          params: { cursor: "cursor-1", limit: 24 },
+        });
+        expect(result).toEqual({
+          items: [{ id: "liked-1", title: "Liked model", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: 41, fileCount: undefined, sourceUrl: undefined }],
+          nextCursor: "cursor-2",
+          hasMore: true,
+        });
+      });
+
+      it("should fetch printables download history from private endpoint", async () => {
+        const mockResponse = {
+          data: {
+            items: [{ id: "history-1", name: "History model", authorHandle: "maker", downloadedAt: "2026-06-15T01:02:03Z" }],
+            nextCursor: null,
+            hasMore: false,
+          },
+        };
+
+        const mockGet = vi.fn().mockResolvedValue(mockResponse);
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+        const result = await apiClient.getPrintablesDownloadHistory({ limit: 24 });
+
+        expect(mockGet).toHaveBeenCalledWith("/3d-models/printables/history", {
+          params: { cursor: undefined, limit: 24 },
+        });
+        expect(result).toEqual({
+          items: [{ id: "history-1", title: "History model", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: undefined, fileCount: undefined, sourceUrl: undefined, downloadedAt: "2026-06-15T01:02:03Z" }],
+          nextCursor: null,
+          hasMore: false,
+        });
+      });
+    });
+  });
+
+  describe("getFilamentsPaged", () => {
+    it("sends limit and offset as query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: [], totalCount: 0 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({ limit: 50, offset: 100 });
+
+      expect(mockGet).toHaveBeenCalledWith("/spoolman/filaments", {
+        params: { limit: 50, offset: 100 },
+        signal: undefined,
+      });
+    });
+
+    it("sends sort, search, material, and vendor as query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: [], totalCount: 0 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({
+        sort: "name:asc",
+        search: "PLA",
+        material: "PLA",
+        vendor: "Bambu",
+      });
+
+      expect(mockGet).toHaveBeenCalledWith("/spoolman/filaments", {
+        params: { sort: "name:asc", search: "PLA", material: "PLA", vendor: "Bambu" },
+        signal: undefined,
+      });
+    });
+
+    it("returns items and totalCount from paginated server response", async () => {
+      const serverItems = [
+        { id: 1, name: "PLA Basic White", material: "PLA", vendor: "Bambu" },
+        { id: 2, name: "PLA Basic Black", material: "PLA", vendor: "Bambu" },
+      ];
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: serverItems, totalCount: 250 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged({ limit: 2, offset: 0 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(250);
+    });
+
+    it("falls back to plain array response for backward compatibility", async () => {
+      const serverItems = [
+        { id: 1, name: "PETG Transparent", material: "PETG" },
+      ];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(1);
+    });
+
+    it("uses offset-aware totalCount fallback for plain array responses", async () => {
+      const serverItems = [{ id: 1, name: "PETG Transparent", material: "PETG" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged({ offset: 100 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(101);
+    });
+
+    it("passes AbortSignal through to the HTTP call", async () => {
+      const controller = new AbortController();
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({ signal: controller.signal });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/spoolman/filaments",
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
+    it("omits zero offset from query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getFilamentsPaged({ limit: 50, offset: 0 });
+
+      const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
+      expect(callArgs?.params?.offset).toBeUndefined();
+    });
+
+    it("returns totalCount 0 when paginated response omits totalCount field", async () => {
+      // Simulates a server that returns { items: [...] } without totalCount
+      const serverItems = [{ id: 1, name: "PLA" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: serverItems } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual(serverItems);
+      // totalCount should fall back to 0 (not crash) when field is missing
+      expect(result.totalCount).toBe(0);
+    });
+
+    it("returns empty items array when paginated response items field is not an array", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: null, totalCount: 5 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getFilamentsPaged();
+
+      expect(result.items).toEqual([]);
+      expect(result.totalCount).toBe(5);
+    });
+  });
+
+  describe("getSpools", () => {
+    it("falls back to plain array response for backward compatibility", async () => {
+      const serverItems = [
+        { id: 1, name: "Spool A", material: "PLA", remainingWeightG: 800 },
+      ];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools();
+
+      expect(result.items).toEqual(serverItems);
+      // totalCount falls back to array length for legacy responses
+      expect(result.totalCount).toBe(1);
+    });
+
+    it("uses offset-aware totalCount fallback for plain array responses", async () => {
+      const serverItems = [{ id: 1, name: "Spool A", material: "PLA", remainingWeightG: 800 }];
+      const mockGet = vi.fn().mockResolvedValue({ data: serverItems });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools({ offset: 50 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(51);
+    });
+
+    it("returns items and totalCount from paginated server response", async () => {
+      const serverItems = [{ id: 1, name: "Spool A", material: "PLA" }];
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: serverItems, totalCount: 99 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools({ limit: 1 });
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(99);
+    });
+
+    it("returns totalCount 0 when paginated response omits totalCount field", async () => {
+      const serverItems = [{ id: 2, name: "Spool B" }];
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: serverItems } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getSpools();
+
+      expect(result.items).toEqual(serverItems);
+      expect(result.totalCount).toBe(0);
+    });
+
+    it("passes AbortSignal through to the HTTP call", async () => {
+      const controller = new AbortController();
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({ signal: controller.signal });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/spoolman/spools",
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
+    it("sends filter params as query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { items: [], totalCount: 0 },
+      });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({
+        limit: 25,
+        offset: 50,
+        sort: "remaining_weight:desc",
+        search: "bambu",
+        material: "PLA",
+        vendor: "Bambu",
+        location: "Box 1",
+      });
+
+      expect(mockGet).toHaveBeenCalledWith("/spoolman/spools", {
+        params: {
+          limit: 25,
+          offset: 50,
+          sort: "remaining_weight:desc",
+          search: "bambu",
+          material: "PLA",
+          vendor: "Bambu",
+          location: "Box 1",
+        },
+        signal: undefined,
+      });
+    });
+
+    it("omits zero offset from query params", async () => {
+      const mockGet = vi.fn().mockResolvedValue({ data: { items: [], totalCount: 0 } });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      await apiClient.getSpools({ limit: 50, offset: 0 });
+
+      const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
+      expect(callArgs?.params?.offset).toBeUndefined();
+    });
   });
 });

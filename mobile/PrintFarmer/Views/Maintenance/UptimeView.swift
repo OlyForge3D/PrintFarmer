@@ -33,6 +33,7 @@ struct UptimeView: View {
             await viewModel.loadData()
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(maintenanceService: services.maintenanceService)
             await viewModel.loadData()
         }

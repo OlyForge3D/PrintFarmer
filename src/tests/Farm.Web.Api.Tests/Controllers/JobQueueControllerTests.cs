@@ -1,10 +1,13 @@
-﻿using Farm.Infrastructure;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -43,6 +46,15 @@ public class JobQueueControllerTests
             _printerStatusCacheMock.Object,
             _telemetryServiceMock.Object,
             _loggerMock.Object);
+
+        // Set up authenticated user with valid GUID claim for ACL enforcement
+        var userId = Guid.NewGuid();
+        var claims = new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) };
+        var identity = new ClaimsIdentity(claims, "TestAuth");
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+        };
     }
 
     [Fact]
@@ -146,7 +158,7 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobDto);
 
         // Act
@@ -170,7 +182,7 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((JobQueuePrintJobDto?)null);
 
         // Act
@@ -179,6 +191,29 @@ public class JobQueueControllerTests
         // Assert
         ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         Assert.IsType<NotFoundObjectResult>(actionResult.Result);
+    }
+
+    [Fact]
+    public async Task QueueJobAsync_WithPolicyValidationError_ReturnsBadRequest()
+    {
+        // Arrange
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = Guid.NewGuid(),
+            Priority = PrintJobPriority.Normal
+        };
+
+        _queueServiceMock
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ValidationException("Deadline is required by queue policy."));
+
+        // Act
+        ActionResult<JobQueuePrintJobDto> result = await _controller.QueueJobAsync(request);
+
+        // Assert
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
+        Assert.Contains("Deadline is required by queue policy.", badRequest.Value?.ToString());
     }
 
     [Fact]
@@ -300,6 +335,29 @@ public class JobQueueControllerTests
         // Assert
         ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         Assert.IsType<NotFoundObjectResult>(actionResult.Result);
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_WithPolicyValidationError_ReturnsBadRequest()
+    {
+        // Arrange
+        var jobId = Guid.NewGuid();
+        var request = new UpdatePrintJobStatusDto
+        {
+            DeadlineAtUtc = DateTime.UtcNow.AddMinutes(30)
+        };
+
+        _queueServiceMock
+            .Setup(s => s.UpdateJobAsync(jobId, request, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ValidationException("Deadline must be at least 2 hour(s) in the future."));
+
+        // Act
+        ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, request);
+
+        // Assert
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
+        Assert.Contains("Deadline must be at least 2 hour(s) in the future.", badRequest.Value?.ToString());
     }
 
     [Fact]

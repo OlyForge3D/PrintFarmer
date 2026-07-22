@@ -124,14 +124,74 @@ public static class Program
             capabilities = WorkerConstants.Capabilities
         }));
 
-        _ = app.MapGet("/version", async (IOrcaBinaryDetector detector) =>
+        // Version endpoint handler shared by /version and /api/system/version
+        async Task<IResult> GetVersionInfoAsync(IOrcaBinaryDetector detector)
         {
             string? orcaVersion = await detector.GetVersionAsync();
+            var asm = System.Reflection.Assembly.GetEntryAssembly();
+            string? infoVersion = (asm is not null
+                ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+                    as System.Reflection.AssemblyInformationalVersionAttribute
+                : null)?.InformationalVersion;
+            string workerVersion = "1.0.0";
+            string? commit = null;
+            if (infoVersion != null)
+            {
+                string[] parts = infoVersion.Split('+', 2);
+                workerVersion = parts[0];
+                commit = parts.Length > 1 ? parts[1] : null;
+            }
+
             return Results.Ok(new
             {
+                service = "orcaslicer-worker",
+                version = workerVersion,
+                commit,
                 orcaslicerVersion = orcaVersion,
-                workerVersion = "1.0.0",
-                timestamp = DateTime.UtcNow
+                environment = app.Environment.EnvironmentName,
+                runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+                timestamp = DateTime.UtcNow,
+            });
+        }
+
+        _ = app.MapGet("/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
+        _ = app.MapGet("/api/system/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
+
+        // Diagnostic endpoint: check process profile expression evaluation results
+        _ = app.MapGet("/api/debug/process-eval/{manufacturer}", async (string manufacturer, ISlicerProfilesService profilesService) =>
+        {
+            IList<ProcessProfileDto> allProfiles = await profilesService.ListAvailableProcessProfilesAsync();
+
+            // Filter by name containing manufacturer (process profiles don't have a Manufacturer field)
+            var mfgProfiles = allProfiles.Where(p =>
+                (p.Name ?? string.Empty).Contains(manufacturer, StringComparison.OrdinalIgnoreCase) ||
+                (p.CompatiblePrinters?.Any(cp => cp.Contains(manufacturer, StringComparison.OrdinalIgnoreCase)) ?? false)).ToList();
+
+            var withCp = mfgProfiles.Where(p => p.CompatiblePrinters?.Count > 0).ToList();
+            var withoutCp = mfgProfiles.Where(p => p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0).ToList();
+
+            // Also show overall stats
+            var allWithCp = allProfiles.Count(p => p.CompatiblePrinters?.Count > 0);
+
+            return Results.Ok(new
+            {
+                manufacturer,
+                totalAllProfiles = allProfiles.Count,
+                allWithCompatiblePrinters = allWithCp,
+                allWithoutCompatiblePrinters = allProfiles.Count - allWithCp,
+                matchingProfiles = mfgProfiles.Count,
+                withCompatiblePrinters = withCp.Count,
+                withoutCompatiblePrinters = withoutCp.Count,
+                sampleWithCp = withCp.Take(5).Select(p => new
+                {
+                    p.Name,
+                    compatiblePrinters = p.CompatiblePrinters
+                }),
+                sampleWithoutCp = withoutCp.Take(10).Select(p => new
+                {
+                    p.Name,
+                    condition = p.CompatiblePrintersCondition ?? string.Empty
+                }),
             });
         });
 

@@ -97,6 +97,28 @@ public record SpoolmanSpoolRequest
 }
 
 /// <summary>
+/// Request to create a Spoolman spool by resolving a retail barcode to a filament articleNumber.
+/// </summary>
+public record SpoolmanImportSpoolByBarcodeRequest
+{
+    public string? Barcode { get; init; }
+
+    public double? RemainingWeight { get; init; }
+
+    public double? InitialWeight { get; init; }
+
+    public double? SpoolWeight { get; init; }
+
+    public string? Location { get; init; }
+
+    public string? LotNumber { get; init; }
+
+    public double? Price { get; init; }
+
+    public string? Comment { get; init; }
+}
+
+/// <summary>
 /// Request to bulk-update a set of spools in Spoolman.
 /// Only non-null fields are applied to each spool.
 /// </summary>

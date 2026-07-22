@@ -5,6 +5,7 @@ using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -68,6 +69,9 @@ public class ArtifactsController(
     /// <param name="id">The artifact ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
         var result = await _service.GetWithPathAsync(id, ct);
@@ -77,6 +81,20 @@ public class ArtifactsController(
         }
 
         var (artifact, filePath) = result.Value;
+
+        SliceJob? job = await _jobRepository.GetByIdAsync(artifact.JobId, ct);
+        if (job is null)
+        {
+            return NotFound();
+        }
+
+        string? callerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        bool isAdmin = User.IsInRole("farm_admin") || User.IsInRole("slicer_admin");
+        if (!isAdmin && (!Guid.TryParse(callerIdStr, out Guid callerId) || job.UserId != callerId))
+        {
+            return NotFound();
+        }
+
         return PhysicalFile(filePath, artifact.ContentType ?? "application/octet-stream", artifact.FileName);
     }
 
@@ -86,8 +104,24 @@ public class ArtifactsController(
     /// <param name="jobId">The slice job ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("job/{jobId}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ListByJobAsync(Guid jobId, CancellationToken ct)
     {
+        SliceJob? job = await _jobRepository.GetByIdAsync(jobId, ct);
+        if (job is null)
+        {
+            return NotFound();
+        }
+
+        string? callerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        bool isAdmin = User.IsInRole("farm_admin") || User.IsInRole("slicer_admin");
+        if (!isAdmin && (!Guid.TryParse(callerIdStr, out Guid callerId) || job.UserId != callerId))
+        {
+            return NotFound();
+        }
+
         IReadOnlyList<Artifact> artifacts = await _service.ListByJobAsync(jobId, ct);
         var response = artifacts.Select(a => new
         {
@@ -96,6 +130,7 @@ public class ArtifactsController(
             fileName = a.FileName,
             contentType = a.ContentType,
             sizeBytes = a.SizeBytes,
+            downloadUrl = $"/api/artifacts/{a.Id}",
             createdAt = a.CreatedAt,
         }).ToList();
 
@@ -103,11 +138,14 @@ public class ArtifactsController(
     }
 
     /// <summary>
-    /// Gets artifact metadata by ID.
+    /// Gets artifact metadata by ID including the download URL.
     /// </summary>
     /// <param name="id">The artifact ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id}/metadata")]
+    [ProducesResponseType(typeof(ArtifactMetadataDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetMetadataAsync(Guid id, CancellationToken ct)
     {
         Artifact? artifact = await _service.GetAsync(id, ct);
@@ -116,14 +154,27 @@ public class ArtifactsController(
             return NotFound();
         }
 
-        return Ok(new
+        SliceJob? job = await _jobRepository.GetByIdAsync(artifact.JobId, ct);
+        if (job is null)
         {
-            id = artifact.Id,
-            jobId = artifact.JobId,
-            fileName = artifact.FileName,
-            contentType = artifact.ContentType,
-            sizeBytes = artifact.SizeBytes,
-            createdAt = artifact.CreatedAt,
-        });
+            return NotFound();
+        }
+
+        string? callerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        bool isAdmin = User.IsInRole("farm_admin");
+        if (!isAdmin && (!Guid.TryParse(callerIdStr, out Guid callerId) || job.UserId != callerId))
+        {
+            return Forbid();
+        }
+
+        string downloadUrl = $"/api/artifacts/{artifact.Id}";
+        return Ok(new ArtifactMetadataDto(
+            artifact.Id,
+            artifact.FileName,
+            artifact.ContentType,
+            artifact.SizeBytes,
+            downloadUrl,
+            artifact.CreatedAt,
+            artifact.JobId));
     }
 }

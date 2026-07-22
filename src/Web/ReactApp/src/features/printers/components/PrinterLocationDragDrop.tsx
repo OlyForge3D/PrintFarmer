@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateLocationDashboardQueries } from '@/features/locations/hooks/useLocationDashboard';
 import { Location, locationService } from '@/services/locationService';
 import { Printer, printerLocationService } from '@/services/printerLocationService';
 
@@ -7,6 +9,7 @@ interface PrinterLocationDragDropProps {
 }
 
 export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = ({ locations: parentLocations }) => {
+  const queryClient = useQueryClient();
   const [locations, setLocations] = useState<Location[]>(parentLocations || []);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,6 +78,7 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
 
     try {
       const updated = await printerLocationService.assignPrinterToLocation(draggedPrinter.id, locationId);
+      invalidateLocationDashboardQueries(queryClient);
 
       // Merge authoritative server response for this printer into local state.
       // Avoid wiping the optimistic `locationId` when the server response omits it.
@@ -112,6 +116,7 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
 
     try {
       const updated = await printerLocationService.unassignPrinterFromLocation(draggedPrinter.id);
+      invalidateLocationDashboardQueries(queryClient);
 
       // Merge authoritative server response for this printer into local state.
       if (updated) {
@@ -145,7 +150,7 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold mb-2 text-pf-text-primary">Assign Printers to Locations</h1>
+        <h2 className="text-3xl font-bold mb-2 text-pf-text-primary">Assign Printers to Locations</h2>
         <p className="text-pf-text-secondary">Drag and drop printers to assign them to locations</p>
       </div>
 
@@ -256,7 +261,7 @@ const PrinterCard: React.FC<PrinterCardProps> = ({ printer, onDragStart, isDragg
       <div className="flex items-center justify-between">
         <div className="min-w-0">
           <p className="font-medium text-sm text-pf-text-primary truncate">{printer.name}</p>
-          <p className="text-xs text-pf-text-tertiary truncate">{printer.backendUrl}</p>
+          <p className="text-xs text-pf-text-tertiary truncate">{printer.serverUrl}</p>
         </div>
         {isSaving && (
           <div className="ml-3 text-xs text-pf-text-secondary">Saving...</div>

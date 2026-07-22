@@ -29,7 +29,35 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             x: p.x, y: p.y, z: p.z,
             hotendTemp: p.hotendTemp, bedTemp: p.bedTemp,
             hotendTarget: p.hotendTarget, bedTarget: p.bedTarget,
+            homedAxes: p.homedAxes,
             spoolInfo: p.spoolInfo, mmuStatus: nil)
+    }
+
+    func listCameraUrls() async throws -> [PrinterCameraUrls] {
+        printers.map { printer in
+            PrinterCameraUrls(
+                id: printer.id,
+                name: printer.name,
+                cameraStreamUrl: printer.cameraStreamUrl,
+                cameraSnapshotUrl: printer.cameraSnapshotUrl,
+                cameraAccessMode: printer.cameraAccessMode,
+                cameraStreamFormat: printer.cameraStreamFormat,
+                cameraSnapshotStrategy: printer.cameraSnapshotStrategy
+            )
+        }
+    }
+
+    func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl {
+        guard let p = printers.first(where: { $0.id == id }) else {
+            throw ServiceError.notImplemented("Printer not found")
+        }
+        return PrinterCameraUrl(
+            streamUrl: p.cameraStreamUrl,
+            snapshotUrl: p.cameraSnapshotUrl,
+            accessMode: p.cameraAccessMode,
+            streamFormat: p.cameraStreamFormat,
+            snapshotStrategy: p.cameraSnapshotStrategy
+        )
     }
 
     func getSnapshot(id: UUID) async throws -> Data {
@@ -104,4 +132,30 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     func changeFilament(printerId: UUID) async throws -> CommandResult {
         CommandResult(success: true, message: "Filament changed (demo)")
     }
+
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
+        let backend = printers.first(where: { $0.id == printerId })?.backend ?? .moonraker
+        return PrinterBackendCapabilities.fallback(for: backend)
+    }
+
+    func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
+        // Demo no-op
+    }
+
+    func home(printerId: UUID, axes: [String]) async throws {
+        // Demo no-op
+    }
+
+    func homeXY(printerId: UUID) async throws {
+        // Demo no-op
+    }
+
+    func homeZ(printerId: UUID) async throws {
+        // Demo no-op
+    }
+
+    func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
+        // Demo no-op
+    }
+
 }
