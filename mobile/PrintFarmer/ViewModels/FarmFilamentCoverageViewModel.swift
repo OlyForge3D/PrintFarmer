@@ -3,128 +3,142 @@ import Foundation
 // MARK: - Farm Filament Coverage View Model (F4-M / issue #778)
 //
 // Owns the fleet-wide coverage cache displayed on the Farm/list screen.
-// Every state transition is generation-authoritative:
-//   * A monotonic `generation` counter is bumped on each fetch dispatch.
-//     Completions carry back the generation they were issued under.
-//   * Both success and error/tombstone outcomes are tagged with the
-//     same generation, so an older in-flight success cannot overwrite a
-//     newer disabled-tombstone (or newer success).
-//   * Equal `evaluatedAtUtc` timestamps between two successes resolve
-//     in favor of the newer generation.
 //
-// SignalR wiring (from the shared #777 lifecycle):
+// TWO orthogonal authorities gate every state change:
+//
+//   1. **Request-generation authority** (per-load-in-flight).
+//      A monotonic `requestGeneration` counter is bumped on each
+//      dispatched fetch. Every commit path (success/disabled/error)
+//      refuses to write if a newer generation already committed.
+//      Equal-`evaluatedAtUtc` snapshots resolve by generation.
+//
+//   2. **Owner-epoch authority** (per-VM-configuration lifetime).
+//      A monotonic `authorityEpoch` counter is bumped on every
+//      `configure(coverageService:)`, `configureSignalR(_:)`, and
+//      `tearDownSignalR()`. Every callback captures the epoch it was
+//      registered under and drops silently if the epoch moved on;
+//      every in-flight `load()` re-checks the epoch (a) before it
+//      even bumps `requestGeneration` and (b) before it commits, so
+//      an old service's callback or in-flight GET cannot mutate the
+//      replacement owner.
+//
+// Together these authorities close the cycle-2 lifetime/service
+// blockers: a queued SignalR callback from an OLD service cannot
+// cause a GET or commit on the replacement; an in-flight GET from an
+// OLD service cannot overwrite the replacement owner's snapshot,
+// tombstone, or error; a teardown before/during any in-flight step
+// is honored.
+//
+// SignalR wiring (reuses the shared #777 lifecycle):
 //   * `filamentcoveragechanged` is treated as an INVALIDATION HINT
-//     only. On every event we dispatch a single canonical refetch of
-//     `/api/printers/filament-coverage` (no payload data is trusted).
-//   * Connection state observation: after the FIRST observed
-//     transition to `.connected` (which is the initial connect, and
-//     already covered by the `.task { load() }` in the view), we
-//     schedule EXACTLY ONE recovery refetch on each subsequent
-//     `.reconnecting -> .connected` transition. A cold initial connect
-//     never double-loads.
-//   * `configureSignalR` cancels any prior subscription tokens before
-//     re-registering, so re-entering the view or reconfiguring the
-//     same service is idempotent.
+//     only. On every valid event we dispatch exactly ONE refetch of
+//     `/api/printers/filament-coverage`.
+//   * Cold-connect classification (reviewer blocker B):
+//       - If the subscription's initial connection state is
+//         `.connected` or `.reconnecting`, we PRE-SEED the classifier
+//         as if we've already seen a `.connected`. Any subsequent
+//         `.connected` transition (including the recovery that
+//         follows a `.reconnecting` we were configured under) IS a
+//         recovery event and triggers exactly one refetch.
+//       - If the initial state is `.disconnected` or `.connecting`,
+//         the classifier starts unseeded so the first `.connected`
+//         we observe is treated as the initial cold connect and does
+//         NOT double-load with the view's `.task { load() }` call.
+//   * `configureSignalR` cancels prior subscription tokens BEFORE
+//     re-registering, so repeat configuration cannot stack handlers.
 
 @MainActor @Observable
 final class FarmFilamentCoverageViewModel {
 
-    /// Per-printer coverage snapshots keyed by stable printer id.
-    /// Reads use `coverage(for:)` so callers cannot accidentally
-    /// look up by display name.
     private(set) var coverageByPrinter: [UUID: PrinterFilamentCoverage] = [:]
-
-    /// The whole feature is disabled server-side (structured 404). Views
-    /// consult this to hide every covers/runout affordance without
-    /// showing a hard error. Once true it stays true until a newer
-    /// generation successfully loads, so an older stale success cannot
-    /// silently re-enable coverage.
     private(set) var isFeatureDisabled: Bool = false
-
-    /// Last non-`featureDisabled` error observed while loading. Purely
-    /// informational — the view keeps rendering the last-good cache.
     private(set) var lastLoadError: String?
 
     private var coverageService: (any FilamentCoverageServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
 
-    // Generation-authoritative request tracking.
-    /// Monotonic counter. Increments on every dispatched fetch.
+    // Request-generation authority.
     private var requestGeneration: UInt64 = 0
-    /// Generation of the last completion that mutated cached state.
-    /// A newer completion beats a stale one; equal-timestamp wins are
-    /// broken by generation.
     private var lastCommittedGeneration: UInt64 = 0
-    /// `evaluatedAtUtc` of the last committed success, if any. Used to
-    /// order successive successes.
     private var lastCommittedEvaluatedAt: Date?
 
-    // Subscription tokens — retained for the observation lifetime so
-    // the hub's cancel-on-deinit does not silently disable delivery.
+    // Owner-epoch authority.
+    private var authorityEpoch: UInt64 = 0
+
     @ObservationIgnored private var invalidationSubscription: SignalRSubscription?
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
-    /// Signals whether we've already observed at least one `.connected`
-    /// transition. The initial-connect refetch is done by the view via
-    /// `load()`; only subsequent transitions to `.connected` trigger a
-    /// recovery refetch.
-    @ObservationIgnored private var hasSeenInitialConnected: Bool = false
+    @ObservationIgnored private var hasSeenAnyConnected: Bool = false
 
-    /// Ordered coverage snapshots aligned with a caller-supplied
-    /// printer list. Missing entries are omitted; the caller can zip
-    /// this with its own printer array by matching `printerId`.
+    // MARK: - Public API
+
     func coverage(for printerId: UUID) -> PrinterFilamentCoverage? {
         coverageByPrinter[printerId]
     }
 
+    /// Replace the coverage service. Bumps the authority epoch so any
+    /// in-flight load or queued callback from a prior configuration
+    /// is invalidated.
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
+        bumpAuthorityEpoch()
     }
 
-    /// Registers `filamentcoveragechanged` + connection-state
-    /// subscriptions against `service`. Idempotent per instance: prior
-    /// tokens are cancelled before new registrations happen, so
-    /// repeated configuration on the same service or a view revisit
-    /// cannot accumulate handlers.
+    /// Register `filamentcoveragechanged` + connection-state
+    /// subscriptions. Idempotent per instance: prior tokens are
+    /// cancelled BEFORE new registrations happen. Bumps the authority
+    /// epoch so any queued callback from an older subscription drops
+    /// silently on delivery.
     func configureSignalR(_ service: any SignalRServiceProtocol) {
         self.signalRService = service
 
         invalidationSubscription?.cancel()
         connectionStateSubscription?.cancel()
-        hasSeenInitialConnected = false
+        bumpAuthorityEpoch()
+        let myEpoch = authorityEpoch
+        // Cold-connect classification is re-seeded from the current
+        // hub state each configure — see `seedColdConnectClassification`.
+        hasSeenAnyConnected = false
 
         invalidationSubscription = service.onFilamentCoverageChanged { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.load()
+                guard let self else { return }
+                await self.deliverInvalidationCallback(underAuthority: myEpoch)
             }
         }
 
         let (initial, subscription) = service.onConnectionStateChanged { [weak self] newState in
             Task { @MainActor [weak self] in
-                self?.handleConnectionStateChange(newState)
+                guard let self else { return }
+                await self.deliverConnectionStateCallback(newState, underAuthority: myEpoch)
             }
         }
         connectionStateSubscription = subscription
-        handleInitialConnectionState(initial)
+        seedColdConnectClassification(fromInitialState: initial)
     }
 
-    /// Cancel every SignalR subscription held by this view model.
-    /// Callers use this on view teardown to guarantee that no delivery
-    /// is dispatched to a dead handler.
+    /// Cancel every SignalR subscription and invalidate every callback
+    /// / in-flight commit from the current owner epoch.
     func tearDownSignalR() {
         invalidationSubscription?.cancel()
         invalidationSubscription = nil
         connectionStateSubscription?.cancel()
         connectionStateSubscription = nil
-        hasSeenInitialConnected = false
+        bumpAuthorityEpoch()
+        hasSeenAnyConnected = false
     }
 
-    // MARK: - Test seams (deterministic sync helpers)
+    /// Public entry: dispatch a fresh fleet-coverage fetch under the
+    /// current authority epoch.
+    func load() async {
+        await load(underAuthority: authorityEpoch)
+    }
+
+    // MARK: - Test seams (DEBUG-only, deterministic — no polling)
 
     #if DEBUG
     private var commitWaiters: [(target: UInt64, cont: CheckedContinuation<Void, Never>)] = []
-    /// Test-only: park until `lastCommittedGeneration` reaches
-    /// `target`. Deterministic — resumed inside each `commit*` path
-    /// as the counter advances. No sleeps or polling.
+    /// Park until `lastCommittedGeneration >= target`. Resumed inside
+    /// each `commit*` path as the counter advances.
     func waitForCommittedGeneration(atLeast target: UInt64) async {
         if lastCommittedGeneration >= target { return }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -135,26 +149,74 @@ final class FarmFilamentCoverageViewModel {
         let current = lastCommittedGeneration
         var remaining: [(target: UInt64, cont: CheckedContinuation<Void, Never>)] = []
         for w in commitWaiters {
-            if current >= w.target {
-                w.cont.resume()
-            } else {
-                remaining.append(w)
-            }
+            if current >= w.target { w.cont.resume() } else { remaining.append(w) }
         }
         commitWaiters = remaining
     }
+
+    /// Monotonic count of callback bodies that have run to completion
+    /// on the MainActor. Advanced by every invalidation and every
+    /// connection-state callback, on both the filter/skip path and
+    /// the dispatch path (the tick fires after the dispatched load's
+    /// commit, so a `waitForCallbackTick(atLeast: N)` also guarantees
+    /// any positive dispatch was fully processed).
+    ///
+    /// Tests use this to prove ABSENCE of a dispatched refetch
+    /// deterministically: after `waitForCallbackTick` returns, every
+    /// callback that was in flight has either dispatched (and its
+    /// load has completed to commit) or was filtered out. The
+    /// resulting `dispatchedRequestCount` is authoritative.
+    private var callbackTick: UInt64 = 0
+    private var callbackTickWaiters: [(target: UInt64, cont: CheckedContinuation<Void, Never>)] = []
+    func waitForCallbackTick(atLeast target: UInt64) async {
+        if callbackTick >= target { return }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            callbackTickWaiters.append((target, cont))
+        }
+    }
+    private func advanceCallbackTick() {
+        callbackTick &+= 1
+        let current = callbackTick
+        var remaining: [(target: UInt64, cont: CheckedContinuation<Void, Never>)] = []
+        for w in callbackTickWaiters {
+            if current >= w.target { w.cont.resume() } else { remaining.append(w) }
+        }
+        callbackTickWaiters = remaining
+    }
+
+    var authorityEpochForTesting: UInt64 { authorityEpoch }
+    var callbackTickForTesting: UInt64 { callbackTick }
+    var hasSeenAnyConnectedForTesting: Bool { hasSeenAnyConnected }
+    #else
+    private func advanceCallbackTick() {}
     #endif
 
-    /// Dispatch a fresh fleet-coverage fetch. Concurrent-safe: every
-    /// completion checks its captured generation before committing.
-    func load() async {
-        guard let coverageService else { return }
+    var dispatchedRequestCount: UInt64 { requestGeneration }
+    var lastCommittedGenerationForTesting: UInt64 { lastCommittedGeneration }
+
+    // MARK: - Internal
+
+    private func bumpAuthorityEpoch() {
+        authorityEpoch &+= 1
+    }
+
+    private func load(underAuthority epoch: UInt64) async {
+        // Owner-epoch gate #1: refuse to start under a stale epoch or
+        // when the service is not set. Capture the service reference
+        // locally so a mid-load `configure` cannot swap it out from
+        // under us.
+        guard epoch == authorityEpoch, let coverageService else { return }
+
         requestGeneration &+= 1
         let myGen = requestGeneration
         do {
             let fleet = try await coverageService.getForFleet()
+            // Owner-epoch gate #2: refuse to commit if the owner
+            // moved on while we were awaiting the network round-trip.
+            guard epoch == authorityEpoch else { return }
             commitSuccess(fleet: fleet, generation: myGen)
         } catch let error as NetworkError {
+            guard epoch == authorityEpoch else { return }
             switch error {
             case .featureDisabled:
                 commitFeatureDisabled(generation: myGen)
@@ -162,32 +224,51 @@ final class FarmFilamentCoverageViewModel {
                 commitError(error, generation: myGen)
             }
         } catch {
+            guard epoch == authorityEpoch else { return }
             commitError(error, generation: myGen)
         }
+    }
+
+    // MARK: - SignalR callback delivery (single tick per callback body)
+
+    /// Handle one `filamentcoveragechanged` delivery. Always advances
+    /// the callback tick on exit — regardless of whether the callback
+    /// filtered out, dispatched a load, or the dispatched load
+    /// committed. This makes `waitForCallbackTick` a sound absence
+    /// barrier for tests.
+    private func deliverInvalidationCallback(underAuthority epoch: UInt64) async {
+        defer { advanceCallbackTick() }
+        guard epoch == authorityEpoch else { return }
+        await load(underAuthority: epoch)
+    }
+
+    /// Handle one connection-state delivery. Same tick-on-exit
+    /// discipline as `deliverInvalidationCallback`.
+    private func deliverConnectionStateCallback(
+        _ newState: SignalRConnectionState,
+        underAuthority epoch: UInt64
+    ) async {
+        defer { advanceCallbackTick() }
+        guard epoch == authorityEpoch else { return }
+        guard newState == .connected else { return }
+        if !hasSeenAnyConnected {
+            // Cold initial connect. Do not double-load; the view
+            // owns this fetch via `.task { load() }`. Mark seen so
+            // the next transition is treated as recovery.
+            hasSeenAnyConnected = true
+            return
+        }
+        // Recovery transition — dispatch exactly one refetch under
+        // the same epoch the subscription was registered under.
+        await load(underAuthority: epoch)
     }
 
     // MARK: - Commit paths (generation-authoritative)
 
     private func commitSuccess(fleet: FleetFilamentCoverage, generation: UInt64) {
-        // A newer completion has already committed → drop.
         if generation < lastCommittedGeneration { return }
-
-        // Equal generation is impossible (each `load()` advances it),
-        // but guard defensively so we never regress state.
         if generation == lastCommittedGeneration { return }
-
-        // Older-timestamp successes that arrive AFTER a newer one must
-        // still lose. `lastCommittedGeneration` already handles the
-        // strict-newer case; when the previously-committed outcome was
-        // a tombstone or error under a newer generation, `generation <
-        // lastCommittedGeneration` above rejects the stale success.
-        //
-        // Equal-timestamp resolution: if a caller replays or the
-        // server emits two snapshots with the same `evaluatedAtUtc`,
-        // the newer generation wins (this branch, because `generation
-        // > lastCommittedGeneration`). Nothing extra to do here.
         _ = lastCommittedEvaluatedAt
-
         coverageByPrinter = Dictionary(uniqueKeysWithValues:
             fleet.printers.map { ($0.printerId, $0) }
         )
@@ -214,9 +295,6 @@ final class FarmFilamentCoverageViewModel {
 
     private func commitError(_ error: Error, generation: UInt64) {
         if generation < lastCommittedGeneration { return }
-        // Errors don't erase cached coverage — the last known-good
-        // fleet remains visible. They also don't flip the disabled
-        // tombstone, so a transient 5xx doesn't hide coverage.
         lastLoadError = error.localizedDescription
         lastCommittedGeneration = generation
         #if DEBUG
@@ -224,36 +302,27 @@ final class FarmFilamentCoverageViewModel {
         #endif
     }
 
-    // MARK: - Connection-state handling
+    // MARK: - Connection-state classification
 
-    private func handleInitialConnectionState(_ state: SignalRConnectionState) {
-        if state == .connected {
-            hasSeenInitialConnected = true
+    /// Seed the cold-connect classifier from the state the hub
+    /// reports at subscription time.
+    ///
+    /// * `.connected` — connection was already up before we
+    ///   subscribed. Not our cold connect. Any subsequent
+    ///   `.reconnecting -> .connected` will be recovery.
+    /// * `.reconnecting` — a reconnect is IN-FLIGHT (reviewer
+    ///   blocker B). The pending `.connected` transition is a
+    ///   recovery event that MUST dispatch a refetch, so we pre-seed
+    ///   the flag to true.
+    /// * `.disconnected` / `.connecting` — cold path. The first
+    ///   `.connected` we observe is the initial connect and the
+    ///   view's `.task` already covers that fetch; skip.
+    private func seedColdConnectClassification(fromInitialState state: SignalRConnectionState) {
+        switch state {
+        case .connected, .reconnecting:
+            hasSeenAnyConnected = true
+        case .disconnected, .connecting:
+            hasSeenAnyConnected = false
         }
     }
-
-    private func handleConnectionStateChange(_ newState: SignalRConnectionState) {
-        guard newState == .connected else { return }
-        if !hasSeenInitialConnected {
-            // First observed transition to `.connected`. The initial
-            // fetch is owned by the view's `.task` call; do not
-            // double-load on the cold path.
-            hasSeenInitialConnected = true
-            return
-        }
-        // A subsequent `.reconnecting -> .connected` transition:
-        // exactly one recovery refetch.
-        Task { @MainActor [weak self] in
-            await self?.load()
-        }
-    }
-
-    // MARK: - Test seams
-
-    /// Test-only introspection: number of dispatched requests.
-    var dispatchedRequestCount: UInt64 { requestGeneration }
-
-    /// Test-only introspection: generation of the last committed
-    /// (success/disabled/error) outcome.
-    var lastCommittedGenerationForTesting: UInt64 { lastCommittedGeneration }
 }

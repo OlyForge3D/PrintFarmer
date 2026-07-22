@@ -111,6 +111,13 @@ struct PrinterListView: View {
                                 "\(printer.name), \(printer.state ?? "unknown") status"
                                 + "\(printer.isOnline ? ", online" : ", offline")"
                             )
+                            // Stable-id scoping (F4-M #778 cycle-3 review
+                            // blocker D): XCUI tests scope badge / absence
+                            // assertions beneath this identifier so a
+                            // sibling printer's badge cannot satisfy a
+                            // per-card assertion. The id is the backend
+                            // printer UUID, never the display name.
+                            .accessibilityIdentifier("farm-card-\(printer.id.uuidString)")
                         }
                     }
                 } else {
@@ -124,6 +131,9 @@ struct PrinterListView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(printer.name), \(printer.state ?? "unknown") status\(printer.isOnline ? ", online" : ", offline")")
+                        // Stable-id scoping (F4-M #778 cycle-3): same as
+                        // the iPad path above.
+                        .accessibilityIdentifier("farm-card-\(printer.id.uuidString)")
                     }
                 }
             }

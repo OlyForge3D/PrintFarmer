@@ -206,6 +206,16 @@ enum UITestBootstrap {
             services.filamentCoverageService = StubFilamentCoverageService(
                 fleet: Self.filamentCoverageScenarioFleet()
             )
+            // Add a printer with a display name DUPLICATED from an
+            // existing demo printer but with a distinct UUID + a
+            // distinct coverage status. This lets XCUI prove that
+            // per-card assertions are scoped by stable UUID, never
+            // by display name (reviewer blocker D). See
+            // `filamentCoverageScenarioFleet` for the paired seed
+            // that gives the duplicate its own runout badge.
+            services.printerService = DemoPrinterService(
+                additionalPrinters: [Self.duplicateNamePrinter()]
+            )
         }
         #if DEBUG
         if mode == .authenticatedShiftTaskMutationError {
@@ -407,7 +417,72 @@ enum UITestBootstrap {
         )
 
         return FleetFilamentCoverage(
-            printers: [covers, runoutWithETA, runoutWithoutETA, unknown, voron],
+            printers: [covers, runoutWithETA, runoutWithoutETA, unknown, voron, duplicateNameCoverage()],
+            evaluatedAtUtc: evaluatedAt
+        )
+    }
+
+    // MARK: - Duplicate-name printer (reviewer blocker D)
+
+    /// Stable UUID for the scenario-only "duplicate display name"
+    /// printer. Shares the display name of `Prusa MK4 #1` but is a
+    /// completely distinct printer with its own coverage state, so
+    /// XCUI can prove that:
+    ///
+    ///   * two Farm cards with identical display names remain
+    ///     independently addressable by their stable UUID
+    ///     (`farm-card-<uuid>`);
+    ///   * tapping the duplicate lands on the correct printer's
+    ///     detail (not the demo original);
+    ///   * badge / absence assertions scoped beneath one card cannot
+    ///     be satisfied by the other.
+    static let duplicateNamePrinterID = UUID(uuidString: "10000000-0001-0000-0000-0000000000AA")!
+
+    private static func duplicateNamePrinter() -> Printer {
+        DemoData.decodePrinter(from: """
+        {
+            "id": "\(duplicateNamePrinterID.uuidString)",
+            "name": "Prusa MK4 #1",
+            "notes": "F4-M UI-test duplicate of Prusa MK4 #1 with a different UUID and status",
+            "manufacturerName": "Prusa Research",
+            "modelName": "MK4",
+            "motionType": "Cartesian",
+            "backend": "Moonraker",
+            "backendPort": 7125,
+            "frontendPort": 80,
+            "inMaintenance": false,
+            "isEnabled": true,
+            "isOnline": true,
+            "state": "idle",
+            "obicoEnabled": false
+        }
+        """)
+    }
+
+    private static func duplicateNameCoverage() -> PrinterFilamentCoverage {
+        // Distinct STATUS from Prusa MK4 #1 (which is `.covers`) —
+        // the duplicate is `.runout` without ETA, so any assertion
+        // that scopes badge lookup by stable id proves the right
+        // card was hit.
+        let evaluatedAt = ISO8601DateFormatter().date(from: "2026-07-21T18:00:00Z")!
+        return PrinterFilamentCoverage(
+            printerId: duplicateNamePrinterID,
+            printerName: "Prusa MK4 #1",
+            status: .runout,
+            toolheads: [
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 0,
+                    toolheadName: "Extruder 1",
+                    material: "PLA",
+                    remainingGrams: 8,
+                    status: .runout
+                )
+            ],
+            activeJobId: nil,
+            activeJobName: nil,
+            activeJobProgress: nil,
+            earliestPredictedRunoutAt: nil,
+            assignedQueuedJobCount: 0,
             evaluatedAtUtc: evaluatedAt
         )
     }

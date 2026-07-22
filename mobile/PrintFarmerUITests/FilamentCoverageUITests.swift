@@ -1,31 +1,52 @@
 import XCTest
 
-/// Real XCUI acceptance coverage for the F4-M iOS filament coverage
-/// contract (#778). One suite drives BOTH iPhone and iPad destinations
-/// via the standard `-destination` matrix; the same suite executes on
-/// each device the scheme is configured with, so the frozen "iPhone +
-/// iPad matrix" requirement is satisfied by running this test class
-/// against both destination classes.
+/// Real XCUI acceptance for the F4-M iOS filament coverage
+/// contract (#778) — cycle-3 edition.
+///
+/// Runs against BOTH an iPhone and an iPad destination through the
+/// same suite; each destination is provided by the xcodebuild
+/// `-destination` matrix.
 ///
 /// The app is launched with the deterministic
-/// `--uitesting-filament-coverage-scenario` mode, which swaps the
-/// demo coverage service for a pre-canned fleet spanning every
-/// contract-required state:
+/// `--uitesting-filament-coverage-scenario` mode; that swaps the
+/// demo `filamentCoverageService` for `StubFilamentCoverageService`
+/// and adds one duplicate-display-name printer to the fleet.
 ///
-///   * Prusa MK4 #1 → covers
-///   * Prusa MK4 #2 → runout with predicted ETA
-///   * Bambu X1C    → runout without predicted ETA
-///   * Bambu P1S    → unknown (must never surface a badge)
-///   * Voron 2.4    → runout with predicted ETA, three toolheads two
-///                    of which share the display name "Extruder"
+/// Seeded fleet:
 ///
-/// All assertions rely on `accessibilityIdentifier`s and
-/// `accessibilityLabel`s baked into the production views. There are
-/// NO sleeps, `Thread.sleep`, or retry loops — every wait is a
-/// bounded `waitForExistence` against a specific element that either
-/// appears once the deterministic bootstrap finishes rendering or is
-/// asserted absent under a bounded window.
+///   * Prusa MK4 #1 (UUID …000000000001) → covers
+///   * Prusa MK4 #2 (UUID …000000000002) → runout with predicted ETA
+///   * Bambu X1C    (UUID …000000000003) → runout without ETA
+///   * Bambu P1S    (UUID …000000000004) → unknown (no badge)
+///   * Voron 2.4    (UUID …000000000005) → runout w/ ETA + three
+///                                          toolheads including two
+///                                          that share display name
+///                                          "Extruder"
+///   * "Prusa MK4 #1" DUPLICATE (UUID …0000000000AA) → runout no-ETA
+///     (SAME display name as the demo original, DIFFERENT status)
+///
+/// Every badge / absence assertion is scoped BENEATH the specific
+/// `farm-card-<uuid>` element (reviewer blocker D). Reaching the
+/// wrong printer's card is not just an ambiguity error — it makes
+/// the scoped query fail outright, so sibling badges cannot satisfy
+/// a per-card assertion.
+///
+/// Deterministic-test discipline: every wait is a bounded
+/// `waitForExistence`; no `Thread.sleep`, no `Task.sleep`, no
+/// retry-until-pass, no elapsed-time gates. Absence assertions gate
+/// on a paired sibling's positive appearance (so "not rendered" is
+/// a real observation, not a race).
 final class FilamentCoverageUITests: XCTestCase {
+
+    // Stable UUIDs shared with UITestBootstrap. UI-test targets
+    // cannot `import PrintFarmer`, so we hardcode the literals —
+    // exactly matching the `DemoData.*_ID` constants.
+    private let prusaMK4_1_ID  = "10000000-0001-0000-0000-000000000001"
+    private let prusaMK4_2_ID  = "10000000-0001-0000-0000-000000000002"
+    private let bambuX1C_ID    = "10000000-0001-0000-0000-000000000003"
+    private let bambuP1S_ID    = "10000000-0001-0000-0000-000000000004"
+    private let voron24_ID     = "10000000-0001-0000-0000-000000000005"
+    private let duplicateID    = "10000000-0001-0000-0000-0000000000AA"
 
     private var app: XCUIApplication!
 
@@ -33,10 +54,6 @@ final class FilamentCoverageUITests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
-        // Contract literals — see `UITestBootstrap`. UI-test targets
-        // can't `import PrintFarmer`, so we hardcode the string,
-        // exactly like `LoginFlowUITests` does with
-        // `--uitesting-unauthenticated`.
         app.launchArguments += [
             "--uitesting",
             "--uitesting-filament-coverage-scenario"
@@ -49,173 +66,238 @@ final class FilamentCoverageUITests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - Entry helper (compact tab vs iPad sidebar)
+    // MARK: - Entry / scoping helpers
 
-    /// Enter the Farm view via the correct nav container for the
-    /// running destination.
-    ///
-    /// * Compact-width (iPhone): tap the "Farm" tab in the bottom
-    ///   TabBar.
-    /// * Regular-width (iPad): tap the `sidebar.farm` button in the
-    ///   NavigationSplitView sidebar. On iPad portrait the sidebar
-    ///   may be collapsed, so we reveal it via the system toggle
-    ///   (labelled "Sidebar" / "Toggle Sidebar" / "Show Sidebar")
-    ///   before tapping. This matches the pattern used by
-    ///   `OperatorShellUITests.selectAttentionSurface`.
+    /// Navigate into the Farm view. Compact-width uses the "Farm"
+    /// bottom-tab; regular-width uses the `sidebar.farm` button,
+    /// revealing the iPad NavigationSplitView sidebar via its
+    /// system toggle if collapsed.
     private func enterFarmView() {
-        // Compact-width fast path.
         let tabFarm = app.tabBars.buttons["Farm"]
         if tabFarm.waitForExistence(timeout: 10) {
             tabFarm.tap()
             return
         }
-
-        // iPad path: try the sidebar directly, then reveal if needed.
         let sidebarFarm = app.buttons["sidebar.farm"]
         if sidebarFarm.waitForExistence(timeout: 3) {
             sidebarFarm.tap()
             return
         }
-
-        // Sidebar may be collapsed on iPad portrait — reveal it.
         for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
             let toggle = app.navigationBars.buttons[label]
-            if toggle.exists {
-                toggle.tap()
-                break
-            }
+            if toggle.exists { toggle.tap(); break }
         }
         if sidebarFarm.waitForExistence(timeout: 3) {
             sidebarFarm.tap()
             return
         }
-
         XCTFail("Neither compact 'Farm' tab nor iPad 'sidebar.farm' was reachable within the wait window.")
     }
 
-    /// Locate a coverage badge by identifier. SwiftUI bubbles the
-    /// accessibility identifier from a badge up to its wrapping
-    /// `NavigationLink`-backed Button (because the card is a single
-    /// accessibility container), so `app.descendants[id]` sees BOTH
-    /// the outer Button (with the card's a11y label) and the inner
-    /// leaf (with the coverage a11y label). We disambiguate by
-    /// selecting the leaf whose label matches the frozen contract.
-    private func coverageBadge(identifier: String, expectedLabel: String) -> XCUIElement {
-        let matches = app.descendants(matching: .any)
+    /// The Farm card for a specific stable printer UUID. Cards carry
+    /// `accessibilityIdentifier("farm-card-<uuid>")` set on the
+    /// `NavigationLink` wrapper. Every per-card assertion in this
+    /// suite starts from this element so display-name duplication
+    /// cannot cross-satisfy the query.
+    private func card(uuid: String) -> XCUIElement {
+        app.buttons["farm-card-\(uuid)"]
+    }
+
+    /// Scope a coverage badge query beneath the specified card and
+    /// require the a11y label to equal the frozen contract value.
+    /// Because SwiftUI's a11y tree bubbles descendant identifiers
+    /// up to the wrapping `NavigationLink` Button, the card itself
+    /// also carries the badge identifier — we disambiguate by
+    /// label equality (or prefix for the ETA badge).
+    private func badgeInsideCard(
+        cardUUID: String,
+        identifier: String,
+        expectedLabel: String
+    ) -> XCUIElement {
+        card(uuid: cardUUID)
+            .descendants(matching: .any)
             .matching(identifier: identifier)
             .matching(NSPredicate(format: "label == %@", expectedLabel))
-        return matches.firstMatch
-    }
-
-    /// Same as `coverageBadge` but matches on an a11y-label prefix
-    /// (used for the runout-with-ETA badge whose label carries a
-    /// locale-formatted trailing time).
-    private func coverageBadge(identifier: String, expectedLabelPrefix: String) -> XCUIElement {
-        let matches = app.descendants(matching: .any)
-            .matching(identifier: identifier)
-            .matching(NSPredicate(format: "label BEGINSWITH %@", expectedLabelPrefix))
-        return matches.firstMatch
-    }
-
-    /// The Farm card for a printer, located by the accessibility
-    /// label PrinterListView applies to the wrapping NavigationLink.
-    /// The label format is `"<name>, <state> status[, online|offline]"`,
-    /// so we match on the `"<name>,"` prefix. SwiftUI accessibility
-    /// bubbling gives the outer Button whichever identifier its
-    /// descendant badge carries; we filter to Buttons whose label
-    /// starts with the printer name to guarantee we get the card.
-    private func card(for printerName: String) -> XCUIElement {
-        app.buttons
-            .matching(NSPredicate(format: "label BEGINSWITH %@", printerName + ","))
             .firstMatch
     }
 
-    // MARK: - Farm badge presence + accessibility labels
+    private func badgeInsideCard(
+        cardUUID: String,
+        identifier: String,
+        expectedLabelPrefix: String
+    ) -> XCUIElement {
+        card(uuid: cardUUID)
+            .descendants(matching: .any)
+            .matching(identifier: identifier)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", expectedLabelPrefix))
+            .firstMatch
+    }
+
+    /// Absence gate: waits for a KNOWN badge on a SIBLING card to
+    /// render, then returns. If the sibling has rendered, the whole
+    /// fleet snapshot has propagated end to end, so "no badge on
+    /// this card" becomes a real deterministic observation instead
+    /// of a race.
+    private func awaitFleetHasRendered() {
+        let sibling = badgeInsideCard(
+            cardUUID: prusaMK4_1_ID,
+            identifier: "filament-coverage-badge-covers",
+            expectedLabel: "Filament covers this job"
+        )
+        XCTAssertTrue(sibling.waitForExistence(timeout: 10),
+                      "Sibling covers badge must render before absence assertions become meaningful.")
+    }
+
+    // MARK: - Per-state Farm-card scoped assertions
 
     func testFarmCardShowsCoversBadgeForCoversPrinter() {
         enterFarmView()
+        XCTAssertTrue(card(uuid: prusaMK4_1_ID).waitForExistence(timeout: 10))
 
-        let card = self.card(for: "Prusa MK4 #1")
-        XCTAssertTrue(card.waitForExistence(timeout: 10),
-                      "Prusa MK4 #1 card should render in the Farm view.")
-
-        let coversBadge = coverageBadge(
+        let coversBadge = badgeInsideCard(
+            cardUUID: prusaMK4_1_ID,
             identifier: "filament-coverage-badge-covers",
             expectedLabel: "Filament covers this job"
         )
         XCTAssertTrue(coversBadge.waitForExistence(timeout: 5),
-                      "Covers badge with the contract a11y label must render for a `.covers` printer.")
+                      "Covers badge with exact a11y label must render inside the covers printer's card.")
     }
 
     func testFarmCardShowsRunoutETABadgeForRunoutWithETAPrinter() {
         enterFarmView()
+        XCTAssertTrue(card(uuid: prusaMK4_2_ID).waitForExistence(timeout: 10))
 
-        let card = self.card(for: "Prusa MK4 #2")
-        XCTAssertTrue(card.waitForExistence(timeout: 10))
-
-        // Frozen contract: label MUST begin with "Filament will run out at ".
-        // The trailing text is a locale-formatted short time — we
-        // key on the prefix so the assertion is timezone-independent.
-        let etaBadge = coverageBadge(
+        let etaBadge = badgeInsideCard(
+            cardUUID: prusaMK4_2_ID,
             identifier: "filament-coverage-badge-runout-eta",
             expectedLabelPrefix: "Filament will run out at "
         )
         XCTAssertTrue(etaBadge.waitForExistence(timeout: 5),
-                      "Runout-with-ETA badge with the contract a11y label must render for a runout printer whose fleet snapshot carries an ETA.")
+                      "Runout-ETA badge (label prefix 'Filament will run out at ') must render inside the runout-with-ETA printer's card.")
     }
 
     func testFarmCardShowsRunoutMidJobBadgeForRunoutWithoutETAPrinter() {
         enterFarmView()
+        XCTAssertTrue(card(uuid: bambuX1C_ID).waitForExistence(timeout: 10))
 
-        let card = self.card(for: "Bambu X1C")
-        XCTAssertTrue(card.waitForExistence(timeout: 10))
-
-        let noETABadge = coverageBadge(
+        let noETABadge = badgeInsideCard(
+            cardUUID: bambuX1C_ID,
             identifier: "filament-coverage-badge-runout-no-eta",
             expectedLabel: "Filament will run out before the job finishes"
         )
         XCTAssertTrue(noETABadge.waitForExistence(timeout: 5),
-                      "Runout-mid-job badge with the contract a11y label must render for a runout printer without a predicted ETA.")
+                      "Runout-mid-job badge with exact a11y label must render inside the runout-without-ETA printer's card.")
     }
 
     func testFarmCardHasNoCoverageBadgeForUnknownPrinter() {
         enterFarmView()
+        XCTAssertTrue(card(uuid: bambuP1S_ID).waitForExistence(timeout: 10),
+                      "Unknown-coverage printer's card must still render.")
 
-        let unknownCard = self.card(for: "Bambu P1S")
-        XCTAssertTrue(unknownCard.waitForExistence(timeout: 10),
-                      "Bambu P1S card must exist even though its coverage is `.unknown`.")
+        // Structural absence gate: wait for a sibling's badge before
+        // asserting this card has none. Once the fleet snapshot has
+        // rendered end to end, absence is authoritative.
+        awaitFleetHasRendered()
 
-        // Wait for a KNOWN badge (from another printer) to appear so
-        // we're guaranteed the fleet snapshot has been rendered end
-        // to end. Only then is "no badge on THIS card" a meaningful
-        // observation.
-        let coversAnywhere = coverageBadge(
+        // Every badge identifier must have ZERO matches beneath the
+        // unknown card. Scoped `.count == 0` is deterministic — no
+        // wait needed, the snapshot is already rendered.
+        let unknownCard = card(uuid: bambuP1S_ID)
+        let coversInUnknown = unknownCard.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-covers").count
+        let etaInUnknown = unknownCard.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-runout-eta").count
+        let noETAInUnknown = unknownCard.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-runout-no-eta").count
+
+        XCTAssertEqual(coversInUnknown, 0,
+                       "Unknown coverage MUST NEVER surface a covers badge inside its own card.")
+        XCTAssertEqual(etaInUnknown, 0,
+                       "Unknown coverage MUST NEVER surface a runout-ETA badge inside its own card.")
+        XCTAssertEqual(noETAInUnknown, 0,
+                       "Unknown coverage MUST NEVER surface a runout-mid-job badge inside its own card.")
+    }
+
+    // MARK: - Duplicate-display-name printers (reviewer blocker D)
+
+    /// TWO Farm cards share the display name "Prusa MK4 #1" but
+    /// have DIFFERENT stable UUIDs and DIFFERENT coverage badges
+    /// (covers vs runout-no-ETA). Each card's scoped badge query
+    /// finds ITS badge and NOT the sibling's.
+    func testDuplicateDisplayNamePrintersHaveDistinctScopedBadges() {
+        enterFarmView()
+
+        let originalCard = card(uuid: prusaMK4_1_ID)
+        let duplicateCard = card(uuid: duplicateID)
+        XCTAssertTrue(originalCard.waitForExistence(timeout: 10),
+                      "Original 'Prusa MK4 #1' card must render.")
+        XCTAssertTrue(duplicateCard.waitForExistence(timeout: 10),
+                      "Duplicate 'Prusa MK4 #1' card must render as a distinct element (keyed by UUID, not name).")
+
+        // Original: covers.
+        let originalCovers = badgeInsideCard(
+            cardUUID: prusaMK4_1_ID,
             identifier: "filament-coverage-badge-covers",
             expectedLabel: "Filament covers this job"
         )
-        XCTAssertTrue(coversAnywhere.waitForExistence(timeout: 10),
-                      "Sibling covers badge must render before we can assert unknown card has none.")
+        XCTAssertTrue(originalCovers.waitForExistence(timeout: 5),
+                      "Original 'Prusa MK4 #1' must show its covers badge.")
 
-        // The unknown card's a11y label starts with "Bambu P1S,".
-        // Any coverage badge nested under this Button would carry
-        // the same identifier as the leaf; we assert that no button
-        // labelled "Bambu P1S, ..." matches any coverage-badge id.
-        let unknownCardHasCovers = app.buttons
-            .matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier == %@", "Bambu P1S,", "filament-coverage-badge-covers"))
-            .count
-        let unknownCardHasETA = app.buttons
-            .matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier == %@", "Bambu P1S,", "filament-coverage-badge-runout-eta"))
-            .count
-        let unknownCardHasNoETA = app.buttons
-            .matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier == %@", "Bambu P1S,", "filament-coverage-badge-runout-no-eta"))
-            .count
+        // Duplicate: runout without ETA.
+        let duplicateRunout = badgeInsideCard(
+            cardUUID: duplicateID,
+            identifier: "filament-coverage-badge-runout-no-eta",
+            expectedLabel: "Filament will run out before the job finishes"
+        )
+        XCTAssertTrue(duplicateRunout.waitForExistence(timeout: 5),
+                      "Duplicate 'Prusa MK4 #1' must show its runout-mid-job badge (proves scoped query hits the intended card).")
 
-        XCTAssertEqual(unknownCardHasCovers, 0,
-                       "Unknown coverage must NEVER surface a covers badge.")
-        XCTAssertEqual(unknownCardHasETA, 0,
-                       "Unknown coverage must NEVER surface a runout-ETA badge.")
-        XCTAssertEqual(unknownCardHasNoETA, 0,
-                       "Unknown coverage must NEVER surface a runout-mid-job badge.")
+        // Cross-check absence: original has NO runout-no-eta badge,
+        // duplicate has NO covers badge. If per-card scoping were
+        // broken these would both fire.
+        let originalNoETACount = originalCard.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-runout-no-eta").count
+        let duplicateCoversCount = duplicateCard.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-covers").count
+        XCTAssertEqual(originalNoETACount, 0,
+                       "Original 'Prusa MK4 #1' card must not surface the duplicate's runout badge.")
+        XCTAssertEqual(duplicateCoversCount, 0,
+                       "Duplicate 'Prusa MK4 #1' card must not surface the original's covers badge.")
+    }
+
+    /// Tapping the DUPLICATE card (same display name as the demo
+    /// original, different UUID) reaches the DUPLICATE's detail —
+    /// proven by the runout-no-ETA aggregate badge that only the
+    /// duplicate's coverage snapshot carries. Confirms stable-id
+    /// navigation, not display-name matching.
+    func testTappingDuplicateNameCardNavigatesByStableIDToCorrectDetail() {
+        enterFarmView()
+        let duplicateCard = card(uuid: duplicateID)
+        XCTAssertTrue(duplicateCard.waitForExistence(timeout: 10))
+        duplicateCard.tap()
+
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-section").firstMatch
+        XCTAssertTrue(section.waitForExistence(timeout: 10),
+                      "Tapping the duplicate 'Prusa MK4 #1' card must navigate to A printer's detail.")
+
+        // The DUPLICATE's coverage is runout-no-ETA. The ORIGINAL's
+        // is covers. Presence of runout-no-ETA on the detail proves
+        // we arrived at the DUPLICATE (stable-id nav).
+        let noETABadge = app.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-runout-no-eta")
+            .matching(NSPredicate(format: "label == %@", "Filament will run out before the job finishes"))
+            .firstMatch
+        XCTAssertTrue(noETABadge.waitForExistence(timeout: 5),
+                      "The duplicate's runout-no-ETA badge on the detail proves we landed on the DUPLICATE, not the original.")
+
+        // Absence cross-check: the ORIGINAL's covers badge must NOT
+        // be present on this detail — proves we did NOT navigate to
+        // the demo original.
+        let coversOnDetail = app.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-covers").count
+        XCTAssertEqual(coversOnDetail, 0,
+                       "Detail must not carry the ORIGINAL's covers badge — stable-id nav landed on the duplicate.")
     }
 
     // MARK: - Detail: multi-toolhead rows keyed by stable id
@@ -223,67 +305,54 @@ final class FilamentCoverageUITests: XCTestCase {
     func testDetailShowsDistinctToolheadRowsEvenWhenDisplayNamesDuplicate() {
         enterFarmView()
 
-        // Voron 2.4 has 3 toolheads. Rows 0 and 2 share the display
-        // name "Extruder"; row 1 has a distinct backend `toolheadId`.
-        // Each row's a11y id is `filament-coverage-toolhead-<stable id>`.
-        // Backend-supplied rows get `id:<uuid>`; index-derived rows
-        // get `index:<n>`.
-        let card = self.card(for: "Voron 2.4")
-        XCTAssertTrue(card.waitForExistence(timeout: 10))
-        card.tap()
+        let voronCard = card(uuid: voron24_ID)
+        XCTAssertTrue(voronCard.waitForExistence(timeout: 10))
+        voronCard.tap()
 
-        // The coverage section exists exactly once on the detail
-        // screen. Use .firstMatch to avoid ambiguity if SwiftUI
-        // bubbles the identifier onto a parent container.
         let section = app.descendants(matching: .any)
             .matching(identifier: "filament-coverage-section").firstMatch
         XCTAssertTrue(section.waitForExistence(timeout: 10),
                       "Filament Coverage section must render on printer detail.")
 
-        // Row 0 (duplicate display name "Extruder", no backend
-        // toolheadId → index-derived stable id).
+        // Voron 2.4: 3 toolheads. Rows 0 and 2 share the display
+        // name "Extruder" but have distinct index-derived stable
+        // ids. Row 1 carries a backend UUID toolheadId.
         let rowIndex0 = app.descendants(matching: .any)
             .matching(identifier: "filament-coverage-toolhead-index:0").firstMatch
-        // Row 1 (backend UUID toolheadId).
         let rowBackendUUID = app.descendants(matching: .any)
             .matching(identifier: "filament-coverage-toolhead-id:20000000-1111-2222-3333-444444444444").firstMatch
-        // Row 2 (duplicate display name "Extruder", no backend
-        // toolheadId → index-derived stable id).
         let rowIndex2 = app.descendants(matching: .any)
             .matching(identifier: "filament-coverage-toolhead-index:2").firstMatch
 
         XCTAssertTrue(rowIndex0.waitForExistence(timeout: 5),
                       "Toolhead row at index 0 must be present with a stable index-derived id.")
         XCTAssertTrue(rowBackendUUID.waitForExistence(timeout: 5),
-                      "Toolhead row carrying a backend UUID toolheadId must be keyed by that UUID, not its display name.")
+                      "Toolhead row carrying a backend UUID toolheadId must be keyed by that UUID.")
         XCTAssertTrue(rowIndex2.waitForExistence(timeout: 5),
-                      "Toolhead row at index 2 must remain distinct from row 0 even though both share the display name 'Extruder'.")
+                      "Toolhead row at index 2 must remain distinct from row 0 despite the shared 'Extruder' display name.")
     }
 
-    // MARK: - Navigation by stable printer id (iPhone tab AND iPad split)
+    // MARK: - Stable-id navigation (iPhone + iPad)
 
     func testTappingCardNavigatesToDetailByStablePrinterId() {
         enterFarmView()
-
-        let bambuCard = self.card(for: "Bambu X1C")
+        let bambuCard = card(uuid: bambuX1C_ID)
         XCTAssertTrue(bambuCard.waitForExistence(timeout: 10))
         bambuCard.tap()
 
-        // Presence of the Filament Coverage section proves we landed
-        // on printer detail. Presence of the runout-no-ETA badge
-        // proves we landed on THIS specific printer (Bambu X1C's
-        // fleet state), not just any detail — which is the stable-id
-        // navigation contract.
         let section = app.descendants(matching: .any)
             .matching(identifier: "filament-coverage-section").firstMatch
         XCTAssertTrue(section.waitForExistence(timeout: 10),
                       "Tapping a Farm card must navigate to that printer's detail.")
 
-        let noETABadge = coverageBadge(
-            identifier: "filament-coverage-badge-runout-no-eta",
-            expectedLabel: "Filament will run out before the job finishes"
-        )
+        // Only Bambu X1C's coverage snapshot is runout-no-ETA in
+        // the seeded fleet (aside from the duplicate). Its presence
+        // here proves we landed on THIS printer.
+        let noETABadge = app.descendants(matching: .any)
+            .matching(identifier: "filament-coverage-badge-runout-no-eta")
+            .matching(NSPredicate(format: "label == %@", "Filament will run out before the job finishes"))
+            .firstMatch
         XCTAssertTrue(noETABadge.waitForExistence(timeout: 5),
-                      "Detail should render the same coverage presentation as the Farm card (runout-no-ETA for Bambu X1C).")
+                      "Detail must render Bambu X1C's runout-no-ETA presentation (stable-id nav proof).")
     }
 }
