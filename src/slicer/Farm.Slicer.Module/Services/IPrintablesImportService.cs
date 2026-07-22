@@ -55,7 +55,8 @@ public interface IPrintablesImportService
 
     /// <summary>
     /// Sets attribution metadata on an existing <see cref="Farm.Slicer.Module.Domain.Model3D"/> record
-    /// that was uploaded via <see cref="IModel3DFileService.UploadModelAsync"/>.
+    /// that was uploaded via
+    /// <see cref="IModel3DFileService.UploadModelAsync(Microsoft.AspNetCore.Http.IFormFile, System.Threading.CancellationToken)"/>.
     /// Call this after upload to associate the model with its Printables source.
     /// </summary>
     /// <param name="modelId">The ID of the already-uploaded model record.</param>
