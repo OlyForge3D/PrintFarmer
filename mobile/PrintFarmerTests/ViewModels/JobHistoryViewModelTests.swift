@@ -450,15 +450,105 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertEqual(indexA, 0)
         XCTAssertEqual(indexB, 1)
 
-        // Release out of order to prove per-call keying works.
-        await gated.release(callIndex: indexB)
+        // Release out of order to prove per-call keying works and returns
+        // `.released` for each matched continuation.
+        let outcomeB = await gated.release(callIndex: indexB)
+        XCTAssertEqual(outcomeB, .released)
         await taskB.value
-        await gated.release(callIndex: indexA)
+        let outcomeA = await gated.release(callIndex: indexA)
+        XCTAssertEqual(outcomeA, .released)
         await taskA.value
 
         let recorded = await gated.recordedCalls
         XCTAssertEqual(recorded.count, 2)
         XCTAssertEqual(recorded.map(\.offset), [30, 60])
+    }
+
+    /// Direct proof of the gate's release-lifecycle state machine. Covers
+    /// every release outcome per Hicks's remediation-delta review: valid
+    /// pre-entry buffered release, normal in-order release, duplicate
+    /// release on an already-terminal index, out-of-order release across
+    /// concurrent calls, and release of an ungated excess index. All
+    /// duplicate/invalid/excess releases return `.rejected` without
+    /// mutating actor state, so the gate is safe to invoke idempotently
+    /// (including from teardown paths) and its release-lifecycle state
+    /// remains bounded by `maxGatedCalls`.
+    func testGatedFakeReleaseLifecycleReturnsExpectedOutcomes() async {
+        let gated = GatedJobAnalyticsService(maxGatedCalls: 2)
+        gated.historyPageToReturn = QueueHistoryPage(
+            entries: [],
+            totalCount: 0,
+            currentPage: 1,
+            pageSize: 30,
+            stats: nil
+        )
+
+        // Invalid indices are rejected without state mutation, even before
+        // any calls have been made.
+        let earlyNegative = await gated.release(callIndex: -1)
+        XCTAssertEqual(earlyNegative, .rejected)
+        let earlyExcess = await gated.release(callIndex: 2)
+        XCTAssertEqual(earlyExcess, .rejected)
+
+        // Pre-entry release for a valid gated index buffers and is consumed
+        // by the matching entry. `.buffered` is a terminal outcome for that
+        // index; a second release must reject rather than double-buffer.
+        let preEntry = await gated.release(callIndex: 0)
+        XCTAssertEqual(preEntry, .buffered)
+        let preEntryDuplicate = await gated.release(callIndex: 0)
+        XCTAssertEqual(preEntryDuplicate, .rejected)
+
+        // Call A consumes the buffered release and returns immediately.
+        let taskA = Task {
+            _ = try? await gated.getHistory(
+                limit: 30, offset: 30,
+                sortBy: nil, statuses: nil, dateStart: nil, dateEnd: nil
+            )
+        }
+        await taskA.value
+        _ = await gated.awaitEntered()
+
+        // Duplicate release on the already-terminal index still rejects
+        // after entry has consumed the buffered release. No crash.
+        let postEntryDuplicate = await gated.release(callIndex: 0)
+        XCTAssertEqual(postEntryDuplicate, .rejected)
+
+        // Normal in-order release: call B enters, is released via `.released`.
+        let taskB = Task {
+            _ = try? await gated.getHistory(
+                limit: 30, offset: 60,
+                sortBy: nil, statuses: nil, dateStart: nil, dateEnd: nil
+            )
+        }
+        guard let indexB = await gated.awaitEntered() else {
+            return XCTFail("expected entry signal for call B")
+        }
+        XCTAssertEqual(indexB, 1)
+        let normalRelease = await gated.release(callIndex: indexB)
+        XCTAssertEqual(normalRelease, .released)
+        await taskB.value
+
+        // Duplicate release on the just-released index rejects.
+        let normalDuplicate = await gated.release(callIndex: indexB)
+        XCTAssertEqual(normalDuplicate, .rejected)
+
+        // An excess call (index >= maxGatedCalls) is recorded and returns
+        // immediately without gating, so a release on that index must
+        // reject rather than buffer state for a call that will never wait.
+        let taskExcess = Task {
+            _ = try? await gated.getHistory(
+                limit: 30, offset: 90,
+                sortBy: nil, statuses: nil, dateStart: nil, dateEnd: nil
+            )
+        }
+        await taskExcess.value
+        _ = await gated.awaitEntered()
+        let excessRelease = await gated.release(callIndex: 2)
+        XCTAssertEqual(excessRelease, .rejected)
+
+        // Complete request history is preserved across all outcomes.
+        let recorded = await gated.recordedCalls
+        XCTAssertEqual(recorded.map(\.offset), [30, 60, 90])
     }
     
     // MARK: - Load Timeline
@@ -672,6 +762,14 @@ final class JobHistoryViewModelTests: XCTestCase {
 /// gating, so a regression in duplicate-load suppression fails via a
 /// `callCount` assertion instead of hanging on an un-released continuation.
 ///
+/// Each valid gated call index may be released **exactly once**. Every
+/// release returns a `ReleaseOutcome` describing what happened — a
+/// duplicate release, an out-of-range/negative index, or an index for an
+/// ungated excess call all return `.rejected` without mutating actor
+/// state. Release-lifecycle state (`bufferedReleases`, `pendingReleases`,
+/// `terminated`) is therefore bounded by `maxGatedCalls` and safe to call
+/// idempotently from teardown paths.
+///
 /// No sleep, polling, `Task.yield`, or elapsed-time gates are used.
 private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sendable {
     struct RecordedCall: Sendable {
@@ -682,6 +780,21 @@ private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unch
         let statuses: String?
         let dateStart: Date?
         let dateEnd: Date?
+    }
+
+    /// Result of a single `release(callIndex:)` call. Terminal outcomes
+    /// mark the index as consumed; further releases on the same or an
+    /// invalid index return `.rejected` without buffering any state.
+    enum ReleaseOutcome: Sendable, Equatable {
+        /// Matched a pending gated continuation and resumed it.
+        case released
+        /// Arrived before the matching entry; buffered and consumed by the
+        /// upcoming entry. Marks the index terminal.
+        case buffered
+        /// Duplicate release on an already-terminal index, negative index,
+        /// or an index for an ungated excess call (>= `maxGatedCalls`).
+        /// No state mutation, safe to invoke idempotently.
+        case rejected
     }
 
     var historyPageToReturn: QueueHistoryPage?
@@ -703,7 +816,11 @@ private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unch
 
     /// Resumes the specified gated call, or buffers the release for the
     /// call at that index if the request has not reached the gate yet.
-    func release(callIndex: Int) async {
+    /// Returns a `ReleaseOutcome` describing the effect on gate state;
+    /// duplicate/invalid/excess releases return `.rejected` and never
+    /// mutate state (safe for idempotent teardown).
+    @discardableResult
+    func release(callIndex: Int) async -> ReleaseOutcome {
         await gate.release(callIndex: callIndex)
     }
 
@@ -742,6 +859,11 @@ private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unch
         private var recorded: [RecordedCall] = []
         private var pendingReleases: [Int: CheckedContinuation<Void, Never>] = [:]
         private var bufferedReleases: Set<Int> = []
+        /// Indices already consumed by a `.released` or `.buffered` outcome.
+        /// Bounded by `maxGatedCalls` (only valid gated indices are ever
+        /// inserted). Any subsequent `release(callIndex:)` on a terminal
+        /// index returns `.rejected` without further state mutation.
+        private var terminated: Set<Int> = []
         private var enteredQueue: [Int] = []
         private var enteredWaiter: CheckedContinuation<Int?, Never>?
         private let maxGatedCalls: Int
@@ -799,10 +921,12 @@ private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unch
                 // buffered release is consumed), so any concurrent
                 // `release(callIndex:)` reaching the actor after entry is
                 // observed by the test cannot race installation.
+                //
+                // Indices are unique (recorded.count is monotonic), so
+                // `pendingReleases[index]` is guaranteed nil here.
                 if bufferedReleases.remove(index) != nil {
                     continuation.resume()
                 } else {
-                    precondition(pendingReleases[index] == nil, "duplicate continuation slot for call index \(index)")
                     pendingReleases[index] = continuation
                 }
                 signalEntered(index)
@@ -810,13 +934,27 @@ private final class GatedJobAnalyticsService: JobAnalyticsServiceProtocol, @unch
             return index
         }
 
-        func release(callIndex: Int) {
-            if let continuation = pendingReleases.removeValue(forKey: callIndex) {
-                continuation.resume()
-            } else {
-                let inserted = bufferedReleases.insert(callIndex).inserted
-                precondition(inserted, "duplicate buffered release for call index \(callIndex)")
+        func release(callIndex: Int) -> ReleaseOutcome {
+            // Reject out-of-range/excess indices without mutating state.
+            // Bounds release-lifecycle state to `maxGatedCalls`.
+            guard callIndex >= 0, callIndex < maxGatedCalls else {
+                return .rejected
             }
+            // Reject duplicate releases idempotently — no crash, no state
+            // mutation, safe to call from teardown paths.
+            guard !terminated.contains(callIndex) else {
+                return .rejected
+            }
+            if let continuation = pendingReleases.removeValue(forKey: callIndex) {
+                terminated.insert(callIndex)
+                continuation.resume()
+                return .released
+            }
+            // No entry yet — buffer for the upcoming matching call and mark
+            // terminal so a second release on the same index rejects.
+            bufferedReleases.insert(callIndex)
+            terminated.insert(callIndex)
+            return .buffered
         }
     }
 }
