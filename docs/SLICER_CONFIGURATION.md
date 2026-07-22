@@ -37,6 +37,13 @@ Before configuring your slicer, you need to generate an API key in PrintFarmer:
 4. Give the key a descriptive name (e.g., "PrusaSlicer on Workstation")
 5. Copy the generated API key (you won't be able to see it again)
 
+> **Note:** API keys created here default to the **OctoPrint** purpose, which is what slicers need
+> for OctoPrint-compatible uploads. A separate **Desktop** purpose exists for the PrintFarmer
+> Desktop app; Desktop-purpose keys require explicit scopes and receive a 90-day expiry by
+> default, and are never valid for slicer uploads. The desktop key exchange endpoint and
+> authorization policies are follow-on issue #838. Provider migrations and the reserved
+> authentication, audit, expiry, scope, and redaction test tranche remain in #839.
+
 ### 2. Configure PrusaSlicer
 
 1. Open PrusaSlicer

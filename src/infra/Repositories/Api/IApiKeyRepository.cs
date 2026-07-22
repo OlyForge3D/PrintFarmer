@@ -11,14 +11,14 @@ namespace Farm.Infrastructure.Repositories.Api;
 public interface IApiKeyRepository
 {
     /// <summary>
-    /// Gets an API key by its hashed value.
+    /// Gets an active, unexpired API key by its hashed value.
     /// </summary>
     /// <param name="keyHash">The hashed API key value.</param>
     /// <returns>The API key if found; otherwise null.</returns>
     Task<ApiKey?> GetByKeyHashAsync(string keyHash);
 
     /// <summary>
-    /// Find an API key by its raw (unhashed) value. Used when hashing is disabled.
+    /// Finds an active, unexpired API key by its raw (unhashed) value. Used when hashing is disabled.
     /// </summary>
     Task<ApiKey?> GetByRawKeyAsync(string rawKey);
 

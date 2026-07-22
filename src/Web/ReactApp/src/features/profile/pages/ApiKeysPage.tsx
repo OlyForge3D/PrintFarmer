@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Toggle } from '@/common/components/ui';
+import { Button, Toggle, FormField, Select, Checkbox, Input, Badge } from '@/common/components/ui';
 import { KeyIcon, PlusIcon, DeleteIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import {
   listApiKeys,
@@ -13,12 +13,26 @@ import {
   revealApiKey,
   getApiKeySettings,
   type ApiKeyDto,
+  type ApiKeyPurpose,
+  type ApiKeyScope,
+  type CreateApiKeyRequest,
 } from '@/services/apiKeysService';
+
+const SCOPE_OPTIONS: { value: ApiKeyScope; label: string; description: string }[] = [
+  { value: 'ModelRead', label: 'Model Read', description: 'Read 3D model/library metadata and files.' },
+  { value: 'ModelWrite', label: 'Model Write', description: 'Create, update, or delete model/library entries.' },
+  { value: 'LibrarySync', label: 'Library Sync', description: 'Sync the local desktop model library with the server.' },
+];
+
+const MAX_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 
 export function ApiKeysPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyPurpose, setNewKeyPurpose] = useState<ApiKeyPurpose>('OctoPrint');
+  const [newKeyScopes, setNewKeyScopes] = useState<ApiKeyScope[]>([]);
+  const [newKeyExpiresAt, setNewKeyExpiresAt] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createdKey, setCreatedKey] = useState<{ key: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,13 +60,16 @@ export function ApiKeysPage() {
 
   // Create API key mutation
   const createMutation = useMutation({
-    mutationFn: (name: string) => {
+    mutationFn: (request: CreateApiKeyRequest) => {
       if (!userId) throw new Error('User ID required');
-      return createApiKey(userId, { name });
+      return createApiKey(userId, request);
     },
     onSuccess: (data) => {
       setCreatedKey(data);
       setNewKeyName('');
+      setNewKeyPurpose('OctoPrint');
+      setNewKeyScopes([]);
+      setNewKeyExpiresAt('');
       setShowCreateForm(false);
       setError(null);
       queryClient.invalidateQueries({ queryKey: ['apiKeys', userId] });
@@ -110,7 +127,32 @@ export function ApiKeysPage() {
       setError('API key name is required');
       return;
     }
-    createMutation.mutate(newKeyName.trim());
+    if (newKeyPurpose === 'Desktop' && newKeyScopes.length === 0) {
+      setError('Select at least one scope for a Desktop-purpose API key');
+      return;
+    }
+    if (newKeyExpiresAt) {
+      const expiry = new Date(newKeyExpiresAt);
+      const now = new Date();
+      if (Number.isNaN(expiry.getTime()) || expiry <= now) {
+        setError('API key expiry must be in the future');
+        return;
+      }
+      if (expiry.getTime() > now.getTime() + MAX_KEY_LIFETIME_MS) {
+        setError('API key expiry cannot exceed 365 days from now');
+        return;
+      }
+    }
+    createMutation.mutate({
+      name: newKeyName.trim(),
+      purpose: newKeyPurpose,
+      scopes: newKeyPurpose === 'Desktop' ? newKeyScopes.join(',') : undefined,
+      expiresAt: newKeyExpiresAt ? new Date(newKeyExpiresAt).toISOString() : undefined,
+    });
+  };
+
+  const toggleScope = (scope: ApiKeyScope) => {
+    setNewKeyScopes((prev) => (prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope]));
   };
 
   const handleToggle = (keyId: string) => {
@@ -163,7 +205,7 @@ export function ApiKeysPage() {
   return (
     <PageTemplate
       title="API Keys"
-      subtitle="Manage API keys for OctoPrint-compatible slicer integration"
+      subtitle="Manage purpose-limited credentials for slicers and PrintFarmer Desktop"
       icon={KeyIcon}
     >
       <div className="space-y-6">
@@ -171,8 +213,8 @@ export function ApiKeysPage() {
         <div className="bg-pf-info/10 border border-pf-info rounded-lg p-4">
           <h3 className="font-semibold text-pf-text-primary mb-2">What are API Keys?</h3>
           <p className="text-pf-text-secondary text-sm">
-            API keys allow slicers (PrusaSlicer, OrcaSlicer, etc.) to upload G-code files directly to PrintFarmer.
-            Configure your slicer with your PrintFarmer server URL and an API key to enable seamless integration.
+            OctoPrint keys let slicers upload G-code. Desktop keys are separate credentials with explicit model and
+            library scopes. A key created for one purpose cannot be used for the other.
           </p>
           <p className="text-pf-text-secondary text-sm mt-2">
             <strong>Security:</strong> Treat API keys like passwords. Don't share them or commit them to version control.
@@ -181,7 +223,7 @@ export function ApiKeysPage() {
 
         {/* Created Key Display */}
         {createdKey && (
-          <div className="bg-pf-success/10 border border-pf-success rounded-lg p-4">
+          <div className="bg-pf-success/10 border border-pf-success rounded-lg p-4" role="status" aria-live="polite">
             <h3 className="font-semibold text-pf-success mb-2">API Key Created Successfully</h3>
             <p className="text-pf-text-secondary text-sm mb-3">
               <strong className="text-pf-warning">Important:</strong> Copy this API key now. You won't be able to see it again!
@@ -208,7 +250,7 @@ export function ApiKeysPage() {
 
         {/* Error Display */}
         {(error || fetchError) && (
-          <div className="bg-pf-error/10 border border-pf-error rounded-lg p-4 text-pf-error">
+          <div className="bg-pf-error/10 border border-pf-error rounded-lg p-4 text-pf-error" role="alert">
             {error || (fetchError instanceof Error ? fetchError.message : 'Failed to load API keys')}
           </div>
         )}
@@ -231,32 +273,91 @@ export function ApiKeysPage() {
           {showCreateForm && (
             <div className="mb-6 p-4 bg-pf-bg-2 rounded-sm border border-pf-border">
               <h3 className="font-semibold text-pf-text-primary mb-3">Create New API Key</h3>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                  placeholder="Enter a descriptive name (e.g., 'PrusaSlicer Workstation')"
-                  className="flex-1 px-3 py-2 bg-pf-bg-1 border border-pf-border rounded-sm text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-primary"
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-                />
-                <Button
-                  variant="primary"
-                  onClick={handleCreate}
-                  disabled={createMutation.isPending}
+              <div className="space-y-4">
+                <FormField label="Name" htmlFor="apikey-name" required>
+                  <Input
+                    id="apikey-name"
+                    type="text"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    placeholder="Enter a descriptive name (e.g., 'PrusaSlicer Workstation')"
+                    maxLength={256}
+                    aria-required="true"
+                  />
+                </FormField>
+
+                <FormField label="Purpose" htmlFor="apikey-purpose" helper="Desktop keys require explicit scopes and expire automatically; OctoPrint and legacy keys never gain desktop access.">
+                  <Select
+                    id="apikey-purpose"
+                    value={newKeyPurpose}
+                    onChange={(e) => {
+                      setNewKeyPurpose(e.target.value as ApiKeyPurpose);
+                      setNewKeyScopes([]);
+                      setNewKeyExpiresAt('');
+                    }}
+                  >
+                    <option value="OctoPrint">OctoPrint (compatible slicer uploads)</option>
+                    <option value="Desktop">Desktop (PrintFarmer Desktop app)</option>
+                  </Select>
+                </FormField>
+
+                {newKeyPurpose === 'Desktop' && (
+                  <fieldset className="space-y-2">
+                    <legend className="text-sm font-medium text-pf-text-primary">
+                      Scopes <span className="text-pf-error" aria-hidden="true">*</span>
+                    </legend>
+                    <p className="text-xs text-pf-text-muted">At least one scope is required for Desktop-purpose keys.</p>
+                    <div className="space-y-2">
+                      {SCOPE_OPTIONS.map((scope) => (
+                        <Checkbox
+                          key={scope.value}
+                          id={`scope-${scope.value}`}
+                          checked={newKeyScopes.includes(scope.value)}
+                          onChange={() => toggleScope(scope.value)}
+                          label={`${scope.label} — ${scope.description}`}
+                        />
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+
+                <FormField
+                  label="Expires At"
+                  htmlFor="apikey-expiry"
+                  helper={newKeyPurpose === 'Desktop'
+                    ? 'Optional. Defaults to 90 days from creation if left blank (max 365 days).'
+                    : 'Optional. OctoPrint keys do not expire when this is left blank (max 365 days).'}
                 >
-                  {createMutation.isPending ? 'Creating...' : 'Create'}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setShowCreateForm(false);
-                    setNewKeyName('');
-                    setError(null);
-                  }}
-                >
-                  Cancel
-                </Button>
+                  <Input
+                    id="apikey-expiry"
+                    type="datetime-local"
+                    value={newKeyExpiresAt}
+                    onChange={(e) => setNewKeyExpiresAt(e.target.value)}
+                  />
+                </FormField>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={handleCreate}
+                    disabled={createMutation.isPending}
+                  >
+                    {createMutation.isPending ? 'Creating...' : 'Create'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setShowCreateForm(false);
+                      setNewKeyName('');
+                      setNewKeyPurpose('OctoPrint');
+                      setNewKeyScopes([]);
+                      setNewKeyExpiresAt('');
+                      setError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -278,7 +379,7 @@ export function ApiKeysPage() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <h3 className="font-semibold text-pf-text-primary">{apiKey.name}</h3>
                         <span
                           className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -289,11 +390,24 @@ export function ApiKeysPage() {
                         >
                           {apiKey.isActive ? 'Active' : 'Disabled'}
                         </span>
+                        <Badge variant={apiKey.purpose === 'Desktop' ? 'primary' : 'default'} size="sm">
+                          {apiKey.purpose === 'Desktop' ? 'Desktop' : 'OctoPrint'}
+                        </Badge>
+                        {apiKey.isExpired && (
+                          <Badge variant="error" size="sm">
+                            Expired
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm text-pf-text-secondary mt-1">
                         Created: {formatDate(apiKey.createdAt)}
                         {apiKey.expiresAt && ` • Expires: ${formatDate(apiKey.expiresAt)}`}
                       </p>
+                      {apiKey.purpose === 'Desktop' && apiKey.scopes && apiKey.scopes !== 'None' && (
+                        <p className="text-sm text-pf-text-secondary mt-1">
+                          Scopes: {apiKey.scopes}
+                        </p>
+                      )}
                     </div>
                     <div className="flex gap-2 items-center">
                       <Toggle
@@ -301,7 +415,7 @@ export function ApiKeysPage() {
                         onChange={() => handleToggle(apiKey.id)}
                         disabled={toggleMutation.isPending}
                         size="sm"
-                        aria-label={apiKey.isActive ? 'Disable API key' : 'Enable API key'}
+                        aria-label={`${apiKey.isActive ? 'Disable' : 'Enable'} API key ${apiKey.name}`}
                       />
                       {canRevealKeys && (
                         <Button
@@ -309,6 +423,7 @@ export function ApiKeysPage() {
                           onClick={() => handleReveal(apiKey.id)}
                           iconLeft={revealedKeys[apiKey.id] ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                           title={revealedKeys[apiKey.id] ? 'Hide API key' : 'Reveal API key'}
+                          aria-label={`${revealedKeys[apiKey.id] ? 'Hide' : 'Reveal'} API key ${apiKey.name}`}
                         />
                       )}
                       <Button
@@ -317,6 +432,7 @@ export function ApiKeysPage() {
                         disabled={rotateMutation.isPending}
                         iconLeft={<RefreshIcon className="w-4 h-4" />}
                         title="Rotate (generate new key)"
+                        aria-label={`Rotate API key ${apiKey.name}`}
                       />
                       <Button
                         variant="danger"
@@ -324,6 +440,7 @@ export function ApiKeysPage() {
                         disabled={deleteMutation.isPending}
                         iconLeft={<DeleteIcon className="w-4 h-4" />}
                         title="Delete"
+                        aria-label={`Delete API key ${apiKey.name}`}
                       />
                     </div>
                   </div>
