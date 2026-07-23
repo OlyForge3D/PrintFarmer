@@ -182,6 +182,16 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     /// `store.activate`). Lets a test park an activation mid-await and advance the
     /// auth epoch to prove the final snapshot-publication CAS (issue #816 H2, Bishop).
     var removeItemBarrier: AsyncBarrier?
+    /// E (issue #816): fires at the ENTRY of `moveIfContentEquals` — i.e. exactly
+    /// at the destructive compare-and-move boundary. Tests use this to causally gate
+    /// real move entry and prove ordering vs concurrent revoke/purge without any
+    /// sleep/yield/poll. Because `moveIfContentEquals` is synchronous, the barrier
+    /// is dispatched on a background thread and blocked on a semaphore so the caller
+    /// suspends at move entry without changing the production primitive to async.
+    var moveEntryBarrier: AsyncBarrier?
+    /// E: records the ordered sequence of significant real IO events (move-entered,
+    /// move-returned, remove-entered) so tests can assert causal order without time.
+    private(set) var eventLog: [String] = []
 
     // Exact counts.
     private(set) var readCount = 0
@@ -228,6 +238,7 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
 
     func removeItem(at url: URL) async throws {
         bump(\.removeCount)
+        appendEvent("remove-entered")
         if let barrier = removeItemBarrier {
             removeItemBarrier = nil
             await barrier.arriveAndWait()
@@ -258,8 +269,30 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
 
     func moveIfContentEquals(from: URL, to: URL, expected: Data) throws -> Bool {
         bump(\.moveCount)
+        appendEvent("move-entered")
+        // E (issue #816): if a test armed a moveEntryBarrier, park the synchronous
+        // caller at real move entry — the caller is a sync primitive so we cannot
+        // `await` here. A detached Task fires arrival for the test's `waitUntilArrived()`,
+        // then `await`s release; a semaphore hands control back to the sync caller.
+        if let barrier = moveEntryBarrier {
+            moveEntryBarrier = nil
+            let released = DispatchSemaphore(value: 0)
+            Task { [released, barrier] in
+                barrier.signal() // notify test's waitUntilArrived() observer
+                await barrier.arriveAndWait() // block until test calls release() / close()
+                released.signal() // unblock sync caller
+            }
+            released.wait()
+        }
         if failMove { throw IOFailure() }
+        defer { appendEvent("move-returned") }
         return try backing.moveIfContentEquals(from: from, to: to, expected: expected)
+    }
+
+    private func appendEvent(_ event: String) {
+        lock.lock()
+        eventLog.append(event)
+        lock.unlock()
     }
 }
 
