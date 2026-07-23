@@ -6,11 +6,16 @@ import XCTest
 final class MockURLProtocol: URLProtocol {
 
     typealias RequestHandler = (URLRequest) throws -> (HTTPURLResponse, Data)
+    /// I (issue #816): async variant of RequestHandler so tests can rendezvous
+    /// on AsyncBarrier continuations instead of DispatchSemaphore timeouts. If
+    /// set, takes precedence over the sync `requestHandler`.
+    typealias AsyncRequestHandler = @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)
 
     final class Session: @unchecked Sendable {
         private let identifier = UUID().uuidString
         private let lock = NSLock()
         private var handler: RequestHandler?
+        private var asyncHandler: AsyncRequestHandler?
         private var requests: [URLRequest] = []
 
         lazy var urlSession: URLSession = {
@@ -33,6 +38,22 @@ final class MockURLProtocol: URLProtocol {
             }
         }
 
+        /// I: an async handler that MockURLProtocol.startLoading awaits inside a
+        /// Task. Preferred over the sync `requestHandler` when the test needs to
+        /// rendezvous on an AsyncBarrier without a time-based timeout.
+        var asyncRequestHandler: AsyncRequestHandler? {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return asyncHandler
+            }
+            set {
+                lock.lock()
+                asyncHandler = newValue
+                lock.unlock()
+            }
+        }
+
         var capturedRequests: [URLRequest] {
             lock.lock()
             defer { lock.unlock() }
@@ -50,15 +71,16 @@ final class MockURLProtocol: URLProtocol {
         func reset() {
             lock.lock()
             handler = nil
+            asyncHandler = nil
             requests = []
             lock.unlock()
         }
 
-        fileprivate func capture(_ request: URLRequest) -> RequestHandler? {
+        fileprivate func capture(_ request: URLRequest) -> (sync: RequestHandler?, async: AsyncRequestHandler?) {
             lock.lock()
             defer { lock.unlock() }
             requests.append(request)
-            return handler
+            return (handler, asyncHandler)
         }
     }
 
@@ -82,8 +104,12 @@ final class MockURLProtocol: URLProtocol {
 
     override func startLoading() {
         guard let identifier = request.value(forHTTPHeaderField: Self.sessionHeader),
-              let session = Self.registeredSession(identifier: identifier),
-              let handler = session.capture(request) else {
+              let session = Self.registeredSession(identifier: identifier) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+            return
+        }
+        let (syncHandler, asyncHandler) = session.capture(request)
+        guard syncHandler != nil || asyncHandler != nil else {
             client?.urlProtocol(self, didFailWithError: URLError(.unknown))
             return
         }
@@ -92,8 +118,29 @@ final class MockURLProtocol: URLProtocol {
         // handlers cannot serialize each other when one intentionally blocks (needed to
         // prove per-session isolation deterministically in APIClientTests overlap tests).
         let capturedRequest = request
+        let capturedClient = client
+        if let asyncHandler {
+            // I (issue #816): async handler path — the test rendezvous happens
+            // on continuation-based AsyncBarriers, no dispatch semaphores.
+            let holder = ProtocolHolder(protocol: self)
+            Task {
+                do {
+                    let (response, data) = try await asyncHandler(capturedRequest)
+                    if let proto = holder.proto {
+                        capturedClient?.urlProtocol(proto, didReceive: response, cacheStoragePolicy: .notAllowed)
+                        capturedClient?.urlProtocol(proto, didLoad: data)
+                        capturedClient?.urlProtocolDidFinishLoading(proto)
+                    }
+                } catch {
+                    if let proto = holder.proto {
+                        capturedClient?.urlProtocol(proto, didFailWithError: error)
+                    }
+                }
+            }
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
+            guard let self, let handler = syncHandler else { return }
             do {
                 let (response, data) = try handler(capturedRequest)
                 self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -103,6 +150,14 @@ final class MockURLProtocol: URLProtocol {
                 self.client?.urlProtocol(self, didFailWithError: error)
             }
         }
+    }
+
+    /// Weak-holding, Sendable wrapper for MockURLProtocol so the async handler
+    /// Task can capture a reference without violating Sendable checking on the
+    /// non-Sendable URLProtocol.
+    private final class ProtocolHolder: @unchecked Sendable {
+        weak var proto: MockURLProtocol?
+        init(protocol proto: MockURLProtocol) { self.proto = proto }
     }
 
     override func stopLoading() {}

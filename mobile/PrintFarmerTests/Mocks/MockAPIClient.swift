@@ -27,6 +27,13 @@ final class MockAPIClient: @unchecked Sendable {
         set { transport.requestHandler = newValue }
     }
 
+    /// I (issue #816): async handler for deterministic AsyncBarrier rendezvous.
+    /// Preferred over the sync `requestHandler` for J/I test paths.
+    var asyncRequestHandler: MockURLProtocol.AsyncRequestHandler? {
+        get { transport.asyncRequestHandler }
+        set { transport.asyncRequestHandler = newValue }
+    }
+
     func reset() {
         transport.reset()
     }
