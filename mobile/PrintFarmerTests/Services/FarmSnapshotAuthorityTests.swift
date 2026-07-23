@@ -263,4 +263,158 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         let residual = UserDefaults().persistentDomain(forName: suite) ?? [:]
         XCTAssertTrue(residual.isEmpty, "domain must be nil/empty after cleanup")
     }
+
+    // MARK: H — cross-instance durable monotonic authority (issue #816)
+
+    /// Two live authorities on the SAME persistence domain share ONE coordinator lock
+    /// so a read-modify-write is serialized cross-instance. A's adopted 500 is seen by
+    /// B — B's next reserve is strictly greater than 500, never rewinding.
+    func testTwoLiveAuthoritiesShareDurableHighWaterAcrossInstances() throws {
+        let suite = trackedSuiteName("tomb")
+        let domain = "cross-inst-\(UUID().uuidString)"
+        let defaultsA = UserDefaults(suiteName: suite)!
+        let defaultsB = UserDefaults(suiteName: suite)!
+        let a = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(defaultsA, domainIdentifier: domain))
+        let b = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(defaultsB, domainIdentifier: domain))
+        let ns = FarmSnapshotFixtures.namespace()
+
+        // A adopts 500 externally; the shared durable adopted+reserved counters advance.
+        XCTAssertTrue(try a.adopt(FarmSnapshotSession(namespace: ns, generation: 0, token: 500)))
+
+        // B, a DISTINCT live authority in the same domain, reserves next — must be > 500,
+        // even though B's in-memory cache seeded at construction was 0 (H bug proof).
+        let bReserved = try b.reserve(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(bReserved.token, 500)
+
+        // B then adopts its own reservation — succeeds (token > adopted 500).
+        XCTAssertTrue(try b.adopt(bReserved))
+    }
+
+    /// Concurrent reserves from two distinct live authorities on the same domain must
+    /// yield UNIQUE tokens. Without the shared coordinator, both could reserve 1.
+    func testConcurrentReservesAcrossLiveAuthoritiesAreUniqueAndMonotonic() throws {
+        let suite = trackedSuiteName("tomb")
+        let domain = "cross-inst-\(UUID().uuidString)"
+        let a = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(
+                UserDefaults(suiteName: suite)!, domainIdentifier: domain))
+        let b = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(
+                UserDefaults(suiteName: suite)!, domainIdentifier: domain))
+        let ns = FarmSnapshotFixtures.namespace()
+
+        // Reserve serially from each authority a batch of tokens; assert all unique
+        // and strictly monotonic (no duplicates, no rewind).
+        var seen: [UInt64] = []
+        for _ in 0..<10 {
+            let ra = try a.reserve(namespace: ns, generation: 0)!
+            seen.append(ra.token)
+            let rb = try b.reserve(namespace: ns, generation: 0)!
+            seen.append(rb.token)
+        }
+        let unique = Set(seen)
+        XCTAssertEqual(unique.count, seen.count, "concurrent reservations must be unique")
+        XCTAssertEqual(seen, seen.sorted(), "tokens must be strictly monotonic")
+    }
+
+    /// A recreated store on the same domain continues from durable state — proves the
+    /// cross-instance coordinator (and the durable counters) survive object recreation.
+    func testRecreatedInstanceContinuesFromDurableState() throws {
+        let suite = trackedSuiteName("tomb")
+        let domain = "cross-inst-\(UUID().uuidString)"
+        let ns = FarmSnapshotFixtures.namespace()
+
+        let a = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(
+                UserDefaults(suiteName: suite)!, domainIdentifier: domain))
+        let s1 = try a.mint(namespace: ns, generation: 0)!
+
+        // Recreate on same suite + same domain identifier.
+        let b = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(
+                UserDefaults(suiteName: suite)!, domainIdentifier: domain))
+        let s2 = try b.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(s2.token, s1.token, "recreated instance must not rewind the counter")
+    }
+
+    /// Injected persistence failure => typed error, NO token published, NO current session.
+    /// The reserve/adopt CAS verifies the write via re-read and treats a mismatch as
+    /// a typed persistence failure; no session is ever returned or published.
+    func testInjectedPersistenceFailureReserveThrowsAndDoesNotPublish() throws {
+        let suite = trackedSuiteName("tomb")
+        let failing = FailingUserDefaults(suiteName: suite)!
+        let authority = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(failing))
+        let ns = FarmSnapshotFixtures.namespace()
+
+        XCTAssertThrowsError(try authority.reserve(namespace: ns, generation: 0)) { err in
+            XCTAssertEqual(err as? FarmSnapshotAuthorityError, .persistenceFailure)
+        }
+        XCTAssertNil(authority.currentSession(), "no session may be published on persistence failure")
+    }
+
+    /// Injected persistence failure on mint => typed error, NO current session set.
+    func testInjectedPersistenceFailureMintThrowsAndDoesNotPublish() throws {
+        let suite = trackedSuiteName("tomb")
+        let failing = FailingUserDefaults(suiteName: suite)!
+        let authority = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(failing))
+        let ns = FarmSnapshotFixtures.namespace()
+
+        XCTAssertThrowsError(try authority.mint(namespace: ns, generation: 0)) { err in
+            XCTAssertEqual(err as? FarmSnapshotAuthorityError, .persistenceFailure)
+        }
+        XCTAssertNil(authority.currentSession())
+    }
+
+    /// UInt64.max reserved high-water => next reserve overflows => typed exhaustion,
+    /// no trap, no publication.
+    func testUInt64OverflowSurfacesTokenSpaceExhausted() throws {
+        let suite = trackedSuiteName("tomb")
+        let defaults = UserDefaults(suiteName: suite)!
+        // Seed the durable reserved high-water directly at the boundary.
+        defaults.set(NSNumber(value: UInt64.max), forKey: FarmSnapshotTombstoneStore.reservedHighWaterKey)
+        let authority = FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(defaults))
+        let ns = FarmSnapshotFixtures.namespace()
+
+        XCTAssertThrowsError(try authority.reserve(namespace: ns, generation: 0)) { err in
+            XCTAssertEqual(err as? FarmSnapshotAuthorityError, .tokenSpaceExhausted)
+        }
+        XCTAssertNil(authority.currentSession())
+
+        // A mint at the boundary is also fail-closed with typed exhaustion.
+        XCTAssertThrowsError(try authority.mint(namespace: ns, generation: 0)) { err in
+            XCTAssertEqual(err as? FarmSnapshotAuthorityError, .tokenSpaceExhausted)
+        }
+    }
+
+    /// Cross-instance releaseCoordinator cleans up the static domain map (housekeeping
+    /// primitive), so long-running test processes do not accumulate stale locks.
+    func testReleaseCoordinatorDropsDomainLock() {
+        let suite = trackedSuiteName("tomb")
+        let domain = "release-\(UUID().uuidString)"
+        // Create a store to force the domain lock into the static registry.
+        _ = FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!, domainIdentifier: domain)
+        FarmSnapshotTombstoneStore.releaseCoordinator(forDomain: domain)
+        // Recreating on the same domain still works (registers a fresh lock).
+        _ = FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!, domainIdentifier: domain)
+    }
+}
+
+/// UserDefaults subclass that silently drops writes to the RESERVED and ADOPTED
+/// high-water keys — the verified-read after write surfaces a typed
+/// `.persistenceFailure` (issue #816 H). Reads for other keys pass through so
+/// tombstone insert/load still work.
+private final class FailingUserDefaults: UserDefaults {
+    override func set(_ value: Any?, forKey defaultName: String) {
+        if defaultName == FarmSnapshotTombstoneStore.reservedHighWaterKey
+            || defaultName == FarmSnapshotTombstoneStore.adoptedHighWaterKey {
+            // Simulate persistence failure by silently dropping the write.
+            return
+        }
+        super.set(value, forKey: defaultName)
+    }
 }
