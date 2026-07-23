@@ -15,7 +15,14 @@ final class AsyncBarrier: @unchecked Sendable {
     private var arrived = false
     private var released = false
     private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
-    private var releaseWaiter: CheckedContinuation<Void, Never>?
+    /// I (issue #816 reject, Hicks): support multiple parked
+    /// `arriveAndWait()` continuations. The previous implementation stored
+    /// ONE `releaseWaiter` and silently overwrote it when a second task
+    /// registered — the first task stranded on its continuation until
+    /// `close()` / deinit, so a "two waiters both parked, then released"
+    /// concurrency test could never prove both parked because a second
+    /// arrival destroyed the first's release path.
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
 
     func arriveAndWait() async {
         let waiters = markArrived()
@@ -31,29 +38,32 @@ final class AsyncBarrier: @unchecked Sendable {
         }
     }
 
+    /// I: resume ALL parked release waiters (was: only one). Idempotent — a
+    /// subsequent `release()` on an already-released barrier resumes any
+    /// waiters that arrived after the release.
     func release() {
-        let waiter = markReleased()
-        waiter?.resume()
+        let waiters = markReleased()
+        waiters.forEach { $0.resume() }
     }
 
-    /// I (issue #816): idempotent close that resumes BOTH arrival waiters AND the
-    /// release waiter, so tests can register `defer barrier.close()` /
-    /// `addTeardownBlock { barrier.close() }` and be certain no continuation strands
-    /// on a failed assertion path. Distinct from `release()` (which only signals
-    /// released and does not resume `waitUntilArrived()` observers) and from
-    /// `deinit` (which is only a secondary rescue — cannot be relied on when a
-    /// captured Task retains the barrier). Idempotent: safe to call any number of
-    /// times; a re-close is a no-op.
+    /// I (issue #816): idempotent close that resumes BOTH arrival waiters AND
+    /// EVERY release waiter, so tests can register `defer barrier.close()` /
+    /// `addTeardownBlock { barrier.close() }` and be certain no continuation
+    /// strands on a failed assertion path. Distinct from `release()` (which
+    /// only signals released and does not resume `waitUntilArrived()`
+    /// observers) and from `deinit` (which is only a secondary rescue —
+    /// cannot be relied on when a captured Task retains the barrier).
+    /// Idempotent: safe to call any number of times; a re-close is a no-op.
     func close() {
         lock.lock()
         released = true
         arrived = true
-        let releaseWaiterNow = releaseWaiter
-        releaseWaiter = nil
+        let releaseWaitersNow = releaseWaiters
+        releaseWaiters = []
         let arrivals = arrivalWaiters
         arrivalWaiters = []
         lock.unlock()
-        releaseWaiterNow?.resume()
+        releaseWaitersNow.forEach { $0.resume() }
         arrivals.forEach { $0.resume() }
     }
 
@@ -71,12 +81,12 @@ final class AsyncBarrier: @unchecked Sendable {
     /// and `release()`/`markReleased` are idempotent so double-release is a no-op.
     deinit {
         lock.lock()
-        let release = releaseWaiter
-        releaseWaiter = nil
+        let releases = releaseWaiters
+        releaseWaiters = []
         let arrivals = arrivalWaiters
         arrivalWaiters = []
         lock.unlock()
-        release?.resume()
+        releases.forEach { $0.resume() }
         arrivals.forEach { $0.resume() }
     }
 
@@ -97,7 +107,10 @@ final class AsyncBarrier: @unchecked Sendable {
             lock.unlock()
             continuation.resume()
         } else {
-            releaseWaiter = continuation
+            // I: append instead of overwrite so N parked arriveAndWait callers
+            // all park on their own continuation slot; release() resumes them
+            // all together.
+            releaseWaiters.append(continuation)
             lock.unlock()
         }
     }
@@ -113,13 +126,13 @@ final class AsyncBarrier: @unchecked Sendable {
         }
     }
 
-    private func markReleased() -> CheckedContinuation<Void, Never>? {
+    private func markReleased() -> [CheckedContinuation<Void, Never>] {
         lock.lock()
         defer { lock.unlock() }
         released = true
-        let waiter = releaseWaiter
-        releaseWaiter = nil
-        return waiter
+        let waiters = releaseWaiters
+        releaseWaiters = []
+        return waiters
     }
 }
 
