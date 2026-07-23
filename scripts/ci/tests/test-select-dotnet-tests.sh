@@ -827,11 +827,73 @@ case_workflow_publish_printf_option_safe() {
   fi
 }
 
+# _drift_block_rc1_violations <block>
+#
+# Emit (to stdout) the lines from <block> that classify a shell exit code
+# uniquely as `1` — the specific antipattern rejected on this branch.
+#
+# `dotnet ef migrations has-pending-model-changes` returns non-zero (including
+# `1`) for BOTH real pending model changes AND design-time / tool / provider /
+# build failures. Any construct that branches purely on the exit code being
+# `1` therefore falsely tells authors "you have drift" when the tool actually
+# failed to run. We reject the common shell forms and let the migration-drift
+# step propagate the raw rc with a single generic annotation instead.
+#
+# Covered forms (leading YAML/shell comments are stripped before checking so
+# prose like `# rc=1 means drift` in documentation does not false-trip):
+#   * `[ "$rc" -eq 1 ]`, `[ $rc -eq 1 ]`, `test "$rc" -eq 1`
+#   * `[[ "$rc" -eq 1 ]]`, `[[ "$rc" == 1 ]]`, `[[ $rc = 1 ]]`
+#   * reversed: `[ 1 -eq "$rc" ]`, `[[ 1 == $rc ]]`, `[ 1 = "$rc" ]`
+#   * arithmetic: `(( rc == 1 ))`
+#   * `$?` variants of the above (`[ $? -eq 1 ]`)
+#   * `case` arms whose pattern is literal `1`, `"1"`, or `'1'`
+#
+# Deliberately NOT flagged (legitimate constructs in the current drift step):
+#   * `[ "$rc" -eq 0 ]` — success check
+#   * `exit "$rc"` — fail-closed propagation of the tool's raw exit code
+#   * unconditional `exit 1` bailouts (e.g. missing `dotnet` binary) — these
+#     do not classify `rc`, they force an unrelated failure
+#   * annotation text that mentions `$rc` in prose
+_drift_block_rc1_violations() {
+  local block="$1"
+  # Strip pure comment lines (YAML `# …` and shell `# …`); they may reference
+  # `rc=1` in prose without classifying anything.
+  local code
+  code="$(printf '%s\n' "$block" | grep -Ev '^[[:space:]]*#' || true)"
+  # Three passes, each targeting a distinct form. `|| true` keeps `set -e`
+  # from tripping when a pass finds nothing.
+  {
+    # Forward comparison: (rc | $rc | $? ) <op> 1
+    #   op ∈ { -eq, ==, = }
+    #   trailing boundary `[^0-9]|$` rejects `10`, `100`, etc.
+    printf '%s\n' "$code" | grep -nE \
+      '(\$\?|\$?"?rc"?)[[:space:]]*(-eq|==|=)[[:space:]]*1([^0-9]|$)' || true
+    # Reversed comparison: 1 <op> (rc | $rc | $? )
+    #   leading `^|[^0-9.]` rejects matching inside `21`, `1.2`, etc.
+    printf '%s\n' "$code" | grep -nE \
+      '(^|[^0-9.])1[[:space:]]*(-eq|==|=)[[:space:]]*("?\$?rc"?|\$\?)([^A-Za-z0-9_]|$)' || true
+    # `case` arm whose pattern token is literal 1 (bare, single-, or
+    # double-quoted). Anchored to leading whitespace + token + `)` so it
+    # only matches arm headers, not arithmetic expressions.
+    printf '%s\n' "$code" | grep -nE \
+      "^[[:space:]]+('1'|\"1\"|1)\)" || true
+  }
+}
+
+# _drift_block_has_rc1_classification <block>
+# Returns 0 (true) iff _drift_block_rc1_violations produces any output.
+_drift_block_has_rc1_classification() {
+  local block="$1" out
+  out="$(_drift_block_rc1_violations "$block")"
+  [[ -n "$out" ]]
+}
+
+
 # The migration-drift matrix job is isolated from `dotnet-build` and must
 # restore its own matrix project before invoking `dotnet ef`, otherwise
-# NETSDK1004 fires because `obj/project.assets.json` doesn't exist. This test
-# reads `.github/workflows/ci.yml`, extracts the `migration-drift:` job, and
-# asserts:
+# NETSDK1004 fires because `obj/project.assets.json` doesn't exist. This
+# test reads `.github/workflows/ci.yml`, extracts the `migration-drift:`
+# job, and asserts:
 #   * a "Restore migration project" step exists and references MATRIX_PROJECT
 #   * a "Build migration project" step exists
 #   * that restore step appears BEFORE "Check EF Core migration drift"
@@ -843,9 +905,13 @@ case_workflow_publish_printf_option_safe() {
 #     drift vs. tool / design-time context / provider failures, the check
 #     must not classify rc=1 uniquely as drift.
 #   * the drift step does NOT emit the old rc=1-only annotation
-#     (`EF Core migration drift detected`) or a `1)` case arm, both of
-#     which would falsely tell authors "you have pending model changes"
-#     when the tool actually failed to run.
+#     (`EF Core migration drift detected`), which would falsely tell
+#     authors "you have pending model changes" when the tool actually
+#     failed to run.
+#   * the drift step body contains no rc==1 classification construct in
+#     any of the common shell forms (see _drift_block_rc1_violations for
+#     the full list). Independent fixture-based coverage of the detector
+#     itself lives in case_drift_detector_catches_representative_rc1_forms.
 case_workflow_migration_drift_restores_before_ef() {
   local workflow="$REPO_ROOT/.github/workflows/ci.yml"
   extract_job_block() {
@@ -890,12 +956,19 @@ case_workflow_migration_drift_restores_before_ef() {
   # a migration they don't need. Guard against regression:
   assert_not_contains "no rc=1-only drift annotation" "$block" \
     'EF Core migration drift detected' || return 1
-  # Belt-and-braces: no bare `1)` case arm anywhere in the drift job that
-  # would branch behavior purely on rc=1. We check via grep because
-  # assert_not_contains matches literal substrings, and we need a regex
-  # anchored to leading whitespace + `1)` to avoid false positives.
-  if printf '%s\n' "$block" | grep -Eq '^[[:space:]]+1\)[[:space:]]*$'; then
-    printf '  drift step must not contain a `1)` case arm (rc=1 is not uniquely drift)\n' >&2
+
+  # Belt-and-braces: no rc==1 classification anywhere in the drift job in
+  # any of the common shell forms — `[ … -eq 1 ]`, `[[ … == 1 ]]`,
+  # `test … -eq 1`, `(( rc == 1 ))`, reversed-operand variants, and `1)`
+  # case arms. This subsumes the earlier `1)`-only regex, which only
+  # caught one syntactic shape and would silently pass a regression that
+  # branched on rc==1 through, e.g., `[[ "$rc" -eq 1 ]]`. See the
+  # _drift_block_rc1_violations docstring for the full covered set and
+  # for the constructs (`[ "$rc" -eq 0 ]`, `exit "$rc"`, unconditional
+  # `exit 1` bailouts) that remain legitimate.
+  if _drift_block_has_rc1_classification "$block"; then
+    printf '  drift step must not classify rc=1 uniquely as drift; offending lines:\n' >&2
+    _drift_block_rc1_violations "$block" | sed 's/^/    /' >&2
     return 1
   fi
 
@@ -916,6 +989,84 @@ case_workflow_migration_drift_restores_before_ef() {
     return 1
   fi
 }
+
+# Fixture-based, workflow-independent proof that
+# _drift_block_has_rc1_classification actually catches the shell forms it
+# claims to. This decouples the detector's correctness from any specific
+# state of `.github/workflows/ci.yml` — if someone later replaces the
+# workflow with an rc==1-branching construct we do not yet cover, the
+# workflow-scoped test above may still trip, but this case guarantees
+# every form we've enumerated is caught in isolation. Also asserts NO
+# false positives on the legitimate constructs the drift step currently
+# uses.
+case_drift_detector_catches_representative_rc1_forms() {
+  local out="$1" ; : "$out"  # unused; keep run_case signature
+
+  local -a rejected=(
+    # POSIX test with $rc, forward and reversed
+    $'rc=$?\nif [ "$rc" -eq 1 ]; then echo drift; fi'
+    $'rc=$?\nif [ $rc -eq 1 ]; then echo drift; fi'
+    $'rc=$?\nif [ 1 -eq "$rc" ]; then echo drift; fi'
+    # `test` builtin
+    $'rc=$?\nif test "$rc" -eq 1; then echo drift; fi'
+    # Bash `[[ … ]]`, numeric and lexical
+    $'rc=$?\nif [[ "$rc" -eq 1 ]]; then echo drift; fi'
+    $'rc=$?\nif [[ $rc == 1 ]]; then echo drift; fi'
+    $'rc=$?\nif [[ $rc = 1 ]]; then echo drift; fi'
+    $'rc=$?\nif [[ 1 == "$rc" ]]; then echo drift; fi'
+    # POSIX `=` string equality
+    $'rc=$?\nif [ "$rc" = 1 ]; then echo drift; fi'
+    # Arithmetic
+    $'rc=$?\nif (( rc == 1 )); then echo drift; fi'
+    # `$?` shortcut instead of a captured `rc`
+    $'dotnet ef ...\nif [ $? -eq 1 ]; then echo drift; fi'
+    # `case` arm, bare / double- / single-quoted `1` token
+    $'case "$rc" in\n  0) echo ok ;;\n  1) echo drift ;;\nesac'
+    $'case "$rc" in\n  0) echo ok ;;\n  "1") echo drift ;;\nesac'
+    $'case "$rc" in\n  0) echo ok ;;\n  \'1\') echo drift ;;\nesac'
+  )
+  local snip idx=0
+  for snip in "${rejected[@]}"; do
+    if ! _drift_block_has_rc1_classification "$snip"; then
+      printf '  detector MISSED rejected form #%d:\n' "$idx" >&2
+      printf '%s\n' "$snip" | sed 's/^/    /' >&2
+      return 1
+    fi
+    idx=$((idx+1))
+  done
+
+  # Positive controls — must NOT trip the detector.
+  local -a accepted=(
+    # Current drift step shape: check for success, otherwise print a
+    # generic annotation and propagate the raw rc. No rc==1 classification.
+    $'rc=$?\nif [ "$rc" -eq 0 ]; then\n  echo ok\nelse\n  echo "::error::drift or tool failure"\n  exit "$rc"\nfi'
+    # Unconditional `exit 1` bailout on a precondition failure — this is
+    # not classifying `rc`, it is forcing an unrelated failure.
+    $'if ! command -v dotnet >/dev/null; then\n  echo "missing dotnet" >&2\n  exit 1\nfi'
+    # Prose comment that mentions `rc=1` — comments are stripped before
+    # the check runs, so this must not false-positive.
+    $'# real drift (rc=1 on success paths) vs. tool failure\nrc=$?\nexit "$rc"'
+    # Success check with reversed operand order — legitimate, does not
+    # classify rc==1.
+    $'rc=$?\nif [ 0 -eq "$rc" ]; then echo ok; fi'
+    # Comparison against a different value (10) that happens to contain
+    # the digit `1` — must not trigger the boundary-aware detector.
+    $'rc=$?\nif [ "$rc" -eq 10 ]; then echo weird; fi'
+  )
+  local ok
+  idx=0
+  for ok in "${accepted[@]}"; do
+    if _drift_block_has_rc1_classification "$ok"; then
+      printf '  detector FALSE-POSITIVE on accepted form #%d:\n' "$idx" >&2
+      printf '%s\n' "$ok" | sed 's/^/    /' >&2
+      printf '  matched lines:\n' >&2
+      _drift_block_rc1_violations "$ok" | sed 's/^/    /' >&2
+      return 1
+    fi
+    idx=$((idx+1))
+  done
+}
+
 
 # =============================================================================
 # Runner
@@ -971,6 +1122,7 @@ TESTS=(
   case_extract_event_block_crlf_tolerant
   case_workflow_publish_printf_option_safe
   case_workflow_migration_drift_restores_before_ef
+  case_drift_detector_catches_representative_rc1_forms
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'

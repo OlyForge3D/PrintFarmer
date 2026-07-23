@@ -216,9 +216,15 @@ given tree.
   as `dotnet-test-results-<project>` artifact. Download and inspect. The
   workflow also asserts that the TRX reports non-zero executed tests, so an
   empty test run is a hard failure rather than a silent pass.
-- `migration-drift` failed → the model on your branch drifted from the last
-  migration. Regenerate migrations per [Migrations](../src/migrations/README.md)
-  and commit them.
+- `migration-drift` failed → `dotnet ef migrations has-pending-model-changes`
+  exited non-zero for one or more `context × provider` matrix legs. That exit
+  code does **not** uniquely mean "the model drifted"; the same non-zero
+  status is also returned for EF Core tooling, design-time context, provider
+  loading, or restore/build failures. Inspect the failing leg's `dotnet ef`
+  output in the job log: if it reports pending model changes, regenerate the
+  affected migrations per [Migrations](../src/migrations/README.md) and
+  commit them; if it reports a tool / design-time / provider / build error,
+  fix that instead — no new migration is needed.
 
 ## Extending
 
