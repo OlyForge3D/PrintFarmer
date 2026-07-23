@@ -762,6 +762,49 @@ GET /api/catalog/models?manufacturerId=mfg-uuid
 ]
 ```
 
+## 3D Model Upload API
+
+### Upload a Model
+
+```http
+POST /api/3d-models/upload
+Content-Type: multipart/form-data
+```
+
+The `modelFile` form field is required. The optional `thumbnailFile` field accepts
+a decoded PNG up to 10 MiB, 4096 pixels per dimension, and 16 million pixels.
+The optional `clientUploadId` GUID makes retries idempotent within the
+authenticated user account.
+
+Successful responses include `thumbnailUrl`, `wasExisting`, `clientUploadId`,
+and `etag`. The same ETag is returned in the `ETag` response header.
+
+### Replace a Model Thumbnail
+
+```http
+PUT /api/3d-models/{id}/thumbnail
+Content-Type: multipart/form-data
+If-Match: "current-etag"
+```
+
+The required `thumbnailFile` form field uses the same PNG validation limits as
+model upload. Only the model owner or a user with the `farm_admin` role can
+replace the thumbnail. `If-Match` is optional; when supplied, a stale ETag
+returns `412 Precondition Failed`. The previous thumbnail remains available if
+validation, storage, cancellation, or database commit fails.
+
+**Response:**
+
+```json
+{
+  "id": "model-uuid",
+  "thumbnailUrl": "/api/3d-models/thumbnail/model-uuid",
+  "etag": "\"updated-etag\""
+}
+```
+
+The updated ETag is also returned in the `ETag` response header.
+
 ## Health Check API
 
 ### System Health
