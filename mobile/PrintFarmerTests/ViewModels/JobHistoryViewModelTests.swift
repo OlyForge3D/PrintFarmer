@@ -1311,12 +1311,14 @@ final class JobHistoryViewModelTests: XCTestCase {
 
         switch await service.awaitEntryOrOperationFinished(registration: registration) {
         case .entered:
+            _ = await service.release(registration: registration)
+            await task.value
+            await cleanupQueue.drain()
             XCTFail("pre-cancelled mount must not enter the history service")
         case .operationFinished:
-            break
+            await task.value
+            await cleanupQueue.drain()
         }
-        await task.value
-        await cleanupQueue.drain()
     }
 
     func testPreInstallCleanupDoesNotConsumeExactTokenCleanup() async {
