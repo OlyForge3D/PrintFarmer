@@ -977,27 +977,42 @@ extract_migration_drift_full_block() {
 
 # _check_drift_full_job_snapshot <workflow>
 #
-# R16 shape gate. Replaces R11-R15's stack of per-key invariants
-# (job-header count, canonical-if pin, strategy singleton, strategy.
-# matrix pin, strategy.fail-fast pin, job-level continue-on-error
-# zero-count, step-block snapshot, `_count_yaml_key_at` spelling
-# counters at every protected indent, `_assert_no_quoted_key_at_indents`
-# escape-encoded quoted-key sweeps) with two orthogonal checks:
+# R17 shape gate. R16 replaced R11-R15's stack of per-key invariants
+# with a full-block byte snapshot + workflow-scope shape scan. R17
+# closes the remaining gap discovered by adversarial review: appended
+# plain-unquoted `migration-drift` key variants that satisfy neither
+# the exact-line canonical count nor the indicator-character scan.
+# Three orthogonal checks:
 #
-#   (1) A canonical unquoted `  migration-drift:` job header appears
-#       exactly once at 2-space workflow indent, AND no 2-space
-#       content line begins with a YAML node-property / key indicator
-#       (`"` `'` `?` `!` `&` `*` `<` `{` `[`). Every shadow-job form
-#       — quoted `"..."` / `'...'`, escape-encoded `"migration\x2ddrift"`,
-#       tag-prefixed `!!str "..."`, anchor-prefixed `&anchor "..."`,
-#       alias `*ref`, explicit-key `? "..."`, flow-mapping `{...}:` /
-#       `[...]:` — opens with one of those indicators and is rejected
-#       before duplicate-key last-wins semantics can override the
-#       canonical job. Legitimate 2-space keys in ci.yml (`  push:`,
-#       `  pull_request:`, `  contents:`, `  group:`, `  select:`,
-#       `  ci-tools:`, `  dotnet-build:`, `  dotnet-test:`, `  summary:`,
-#       `  migration-drift:`, etc.) all open with a letter, so the
-#       zero-tolerance indicator scan is safe.
+#   (1) Three-part workflow-scope key shape gate at 2-space indent:
+#       (1a) EXACTLY-one canonical `  migration-drift:` line match
+#            (`grep -cxE '^  migration-drift:$'`). Rejects missing-
+#            canonical and plain duplicates whose whole line equals
+#            the canonical.
+#       (1c) EXACTLY-one CRLF-tolerant plain-key match
+#            (`grep -cE '^  migration-drift[[:blank:]]*:'`). Rejects
+#            `  migration-drift :` (space-before-colon), inline-comment
+#            shadow `  migration-drift: # ...`, and inline-flow shadow
+#            `  migration-drift: { ... }` — all of which resolve to
+#            the same YAML key under duplicate-key last-wins semantics
+#            but slip past (1a) because the whole line is not equal
+#            to the canonical. Prefix variants like
+#            `  migration-drift-extra:` do NOT match (the `-` breaks
+#            `[[:blank:]]*:`) so no false positives.
+#       (1b) Zero 2-space lines opening with a YAML node-property or
+#            key indicator (`"` `'` `?` `!` `&` `*` `<` `{` `[`).
+#            Every shadow-job form — quoted `"..."` / `'...'`, escape-
+#            encoded `"migration\x2ddrift"`, tag-prefixed `!!str "..."`,
+#            anchor-prefixed `&anchor "..."`, alias `*ref`, explicit-
+#            key `? "..."`, flow-mapping `{...}:` / `[...]:` — opens
+#            with one of those indicators and is rejected before
+#            duplicate-key last-wins semantics can override the
+#            canonical job. Legitimate 2-space keys in ci.yml
+#            (`  push:`, `  pull_request:`, `  contents:`, `  group:`,
+#            `  select:`, `  ci-tools:`, `  dotnet-build:`,
+#            `  dotnet-test:`, `  summary:`, `  migration-drift:`,
+#            etc.) all open with a letter, so the zero-tolerance
+#            indicator scan is safe.
 #
 #   (2) A byte-for-byte comparison of the ENTIRE migration-drift job
 #       block against the canonical snapshot heredoc below. Any change
@@ -1010,13 +1025,14 @@ extract_migration_drift_full_block() {
 #       anchor prefixes, and explicit-key forms all add or change
 #       bytes that break the diff.
 #
-# Why the switch (R16): enumerating every YAML spelling the parser
-# accepts as the same key (as R11-R15 attempted with per-key counters
-# and quoted-key sweeps) is unwinnable — every closed hole exposes
-# another (`\x2d` -> `-`, `!!str`, `&anchor`, `? "..."`, flow-mapping
-# keys, YAML 1.1 vs 1.2 reserved words, ...). A full-block snapshot
-# and a header-shape check together anchor the invariant to bytes,
-# not to enumeration of parser behaviours.
+# Why the switch (R16, refined R17): enumerating every YAML spelling
+# the parser accepts as the same key (as R11-R15 attempted with per-
+# key counters and quoted-key sweeps) is unwinnable — every closed
+# hole exposes another (`\x2d` -> `-`, `!!str`, `&anchor`, `? "..."`,
+# flow-mapping keys, YAML 1.1 vs 1.2 reserved words, ...). A full-
+# block snapshot, a canonical-header count, a plain-key CRLF-tolerant
+# count, and an indicator-shape scan together anchor the invariant
+# to bytes, not to enumeration of parser behaviours.
 #
 # Defence-in-depth: `ci-tools` already runs shellcheck (`-S warning`
 # blocking) and `bash -n` on both this test script and the selector
@@ -1048,6 +1064,39 @@ _check_drift_full_job_snapshot() {
   if [[ "$canonical_headers" != "1" ]]; then
     printf '  expected exactly one canonical `  migration-drift:` job header, found %s\n' \
       "$canonical_headers" >&2
+    return 1
+  fi
+
+  # (1c) CRLF-tolerant plain-key count. The (1a) `grep -cxE '^  migration-drift:$'`
+  # requires the WHOLE line to equal `  migration-drift:` and therefore misses
+  # plain-unquoted-key variants that still resolve to the same YAML key under
+  # duplicate-key last-wins semantics:
+  #
+  #   `  migration-drift :`                      (whitespace before colon)
+  #   `  migration-drift: # trailing comment`    (inline comment shadow)
+  #   `  migration-drift: { runs-on: ..., steps: [{run: true}] }`
+  #                                              (inline flow-mapping value)
+  #
+  # None open with an indicator character, so (1b) below also misses them.
+  # This scan matches any 2-space unquoted `migration-drift` key with
+  # optional horizontal whitespace before the colon and REGARDLESS of what
+  # follows the colon. `workflow_body` is already CR-normalised so CRLF
+  # line endings are handled transparently.
+  #
+  # Prefix variants (e.g. `  migration-drift-extra:`) do NOT match because
+  # the character following `migration-drift` is `-` before any blanks or
+  # colon — `[[:blank:]]*:` cannot bridge that. Comments and blank lines
+  # never start with `migration-drift` at column 3 and are ignored.
+  #
+  # See `case_drift_shape_rejects_space_before_colon_plain_migration_drift_job`,
+  # `case_drift_shape_rejects_inline_comment_shadow_migration_drift_job`,
+  # `case_drift_shape_rejects_inline_flow_shadow_migration_drift_job`, and
+  # the accepted fixture `case_drift_shape_accepts_migration_drift_extra_sibling_job`.
+  local plain_key_count
+  plain_key_count="$(printf '%s\n' "$workflow_body" | grep -cE '^  migration-drift[[:blank:]]*:' || true)"
+  if [[ "$plain_key_count" != "1" ]]; then
+    printf '  workflow: plain-key `migration-drift` collision — expected exactly one 2-space `migration-drift[:blank:]*:` line, found %s\n' \
+      "$plain_key_count" >&2
     return 1
   fi
 
@@ -1711,6 +1760,126 @@ case_drift_shape_rejects_explicit_key_shadow_migration_drift_job() {
     "noncanonical 2-space job-key shape" || return 1
 }
 
+# R17 plain-unquoted-key bypasses of the exact-match count (1a) and the
+# indicator scan (1b). Each appended shadow spelling opens with a letter
+# (so it passes 1b) and its whole line does NOT equal `  migration-drift:`
+# (so it passes 1a) yet the YAML parser resolves it to the same key and
+# duplicate-key last-wins would silently override the canonical job.
+# Caught by the (1c) CRLF-tolerant plain-key count.
+
+# `  migration-drift :` — plain unquoted, single space between key and
+# colon. YAML allows optional whitespace before the mapping colon; the
+# parser resolves the key to `migration-drift`. `grep -cxE '^  migration-drift:$'`
+# counts 1 (canonical only, whole-line match fails on the trailing space).
+# The indicator scan sees a leading `m` and does not fire. The (1c)
+# plain-key count sees BOTH the canonical and the shadow (both match
+# `^  migration-drift[[:blank:]]*:`), so the count is 2 and rejects.
+case_drift_shape_rejects_space_before_colon_plain_migration_drift_job() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  if ! {
+    cat "$mutant"
+    printf '\n  migration-drift :\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: "echo shadow"\n'
+  } > "${mutant}.tmp"; then
+    rm -f -- "${mutant}.tmp"
+    return 1
+  fi
+  mv -- "${mutant}.tmp" "$mutant"
+
+  _assert_shape_guard_rejects "space-before-colon plain migration-drift job" "$mutant" \
+    "plain-key \`migration-drift\` collision" || return 1
+}
+
+# `  migration-drift: # shadow ...` — plain unquoted, canonical colon
+# followed by an inline comment. The whole line is NOT equal to the
+# canonical (`# shadow ...` after the colon), so (1a) misses it. The
+# indicator scan sees a leading `m` and does not fire. Under a strict
+# YAML parser this is a duplicate key entry with a null value scalar
+# (or a mapping value on subsequent lines) — either way it collides
+# with the canonical `migration-drift`. Caught by (1c).
+case_drift_shape_rejects_inline_comment_shadow_migration_drift_job() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  if ! {
+    cat "$mutant"
+    printf '\n  migration-drift: # shadow duplicate silently overrides canonical\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: "echo shadow"\n'
+  } > "${mutant}.tmp"; then
+    rm -f -- "${mutant}.tmp"
+    return 1
+  fi
+  mv -- "${mutant}.tmp" "$mutant"
+
+  _assert_shape_guard_rejects "inline-comment shadow migration-drift job" "$mutant" \
+    "plain-key \`migration-drift\` collision" || return 1
+}
+
+# `  migration-drift: { runs-on: ubuntu-latest, steps: [{ run: true }] }`
+# — plain unquoted key with an inline flow-mapping value. A compliant
+# YAML parser accepts flow-style job bodies; the key still resolves to
+# `migration-drift` and collides with the canonical. The whole line
+# has content after the colon so (1a) misses it. The line's leading
+# `m` sails past the indicator scan (the flow-mapping opener `{` is
+# in column 21, not column 3). Caught by (1c).
+case_drift_shape_rejects_inline_flow_shadow_migration_drift_job() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  if ! {
+    cat "$mutant"
+    printf '\n  migration-drift: { runs-on: ubuntu-latest, steps: [{ run: true }] }\n'
+  } > "${mutant}.tmp"; then
+    rm -f -- "${mutant}.tmp"
+    return 1
+  fi
+  mv -- "${mutant}.tmp" "$mutant"
+
+  _assert_shape_guard_rejects "inline-flow shadow migration-drift job" "$mutant" \
+    "plain-key \`migration-drift\` collision" || return 1
+}
+
+# Accepted fixture: `  migration-drift-extra:` is a DISTINCT YAML key
+# (prefix variant) that the (1c) plain-key count must NOT flag. The
+# `-extra` suffix breaks `[[:blank:]]*:` because the character after
+# `migration-drift` is `-`, not blank or `:`. Also, `migration-drift-extra`
+# opens with a letter so (1b) does not fire. The full-job snapshot (2)
+# is unaffected because the extractor terminates at the next `/^  [^ #]/`
+# line — the canonical migration-drift block ends at `  dotnet-test:`
+# regardless of what appears further down. This case guards against the
+# obvious false-positive shape: a legitimate second job whose name begins
+# with the same substring.
+case_drift_shape_accepts_migration_drift_extra_sibling_job() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  if ! {
+    cat "$mutant"
+    printf '\n  migration-drift-extra:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: "echo distinct job with a similar name"\n'
+  } > "${mutant}.tmp"; then
+    rm -f -- "${mutant}.tmp"
+    return 1
+  fi
+  mv -- "${mutant}.tmp" "$mutant"
+
+  local stderr_output rc
+  stderr_output="$(_check_drift_full_job_snapshot "$mutant" 2>&1 >/dev/null)"
+  rc=$?
+  if (( rc != 0 )); then
+    printf '  shape guard falsely rejected legitimate prefix-variant sibling `migration-drift-extra:`\n' >&2
+    printf '    stderr: %q\n' "$stderr_output" >&2
+    return 1
+  fi
+  return 0
+}
 
 
 # R14 focused test: `_mutate` must propagate awk's real exit status
@@ -1833,6 +2002,10 @@ TESTS=(
   case_drift_shape_rejects_tagged_shadow_migration_drift_job
   case_drift_shape_rejects_anchored_shadow_migration_drift_job
   case_drift_shape_rejects_explicit_key_shadow_migration_drift_job
+  case_drift_shape_rejects_space_before_colon_plain_migration_drift_job
+  case_drift_shape_rejects_inline_comment_shadow_migration_drift_job
+  case_drift_shape_rejects_inline_flow_shadow_migration_drift_job
+  case_drift_shape_accepts_migration_drift_extra_sibling_job
   case_mutate_helper_propagates_awk_failure
 )
 
