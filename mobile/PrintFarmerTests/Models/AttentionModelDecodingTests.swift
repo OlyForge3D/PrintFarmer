@@ -150,9 +150,15 @@ final class AttentionModelDecodingTests: XCTestCase {
             laterFingerprint,
             "Distinct fractional occurredAt values within one second must produce distinct fingerprints."
         )
+        // The exact pair preserves every fractional digit — same whole
+        // second, delta of exactly 100 ns on the nanosecond field.
         XCTAssertEqual(
-            laterFingerprint.occurredAtNanoseconds
-                - earlierFingerprint.occurredAtNanoseconds,
+            earlierFingerprint.occurredAt.epochSeconds,
+            laterFingerprint.occurredAt.epochSeconds
+        )
+        XCTAssertEqual(
+            Int64(laterFingerprint.occurredAt.nanosecond)
+                - Int64(earlierFingerprint.occurredAt.nanosecond),
             100
         )
     }
@@ -183,6 +189,368 @@ final class AttentionModelDecodingTests: XCTestCase {
             AttentionOccurrenceFingerprint(item: roundTripped),
             "Whole-second occurredAt round-trip must preserve the fingerprint."
         )
+    }
+
+    // MARK: - 100 ns tick precision (.NET DateTime contract)
+    //
+    // Backend `DateTime.Ticks` are 100 ns. Two wire strings that differ
+    // by exactly one tick MUST remain distinguishable through the exact
+    // pair — this is what the pre-780 lossy Int64-total-nanoseconds
+    // scalar could not guarantee for far-from-epoch instants.
+
+    /// Two 7-digit fractional wire strings differing by 1 tick (100 ns)
+    /// at the same whole second must produce distinct fingerprints and
+    /// exactly a 100-ns delta on the pair's `nanosecond` field.
+    func testSevenDigitFractionalOneTickApartRemainsDistinct() throws {
+        let earlier = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: "2026-06-01T12:00:00.1234567Z")
+        )
+        let later = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: "2026-06-01T12:00:00.1234568Z")
+        )
+        let earlierFp = AttentionOccurrenceFingerprint(item: earlier)
+        let laterFp = AttentionOccurrenceFingerprint(item: later)
+        XCTAssertNotEqual(earlierFp, laterFp,
+            "A one-tick difference at the .NET 100-ns tick precision must not collapse to one fingerprint.")
+        XCTAssertEqual(
+            earlierFp.occurredAt.epochSeconds,
+            laterFp.occurredAt.epochSeconds
+        )
+        XCTAssertEqual(earlierFp.occurredAt.nanosecond, 123_456_700)
+        XCTAssertEqual(laterFp.occurredAt.nanosecond, 123_456_800)
+    }
+
+    // MARK: - Decode → encode string canonical stability
+
+    /// A fractional wire string with 7 digits must survive a decode →
+    /// encode → decode cycle byte-identically (with the trailing-zero
+    /// canonicalisation that preserves the numerical value) and, after
+    /// the same round-trip, produce the exact same fingerprint. This is
+    /// the strongest wire-stability guarantee the codec makes.
+    func testFractionalDecodeEncodeStringStability() throws {
+        for wire in [
+            "2026-06-01T12:00:00.1Z",
+            "2026-06-01T12:00:00.12Z",
+            "2026-06-01T12:00:00.123456789Z",
+        ] {
+            let original = try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: wire)
+            )
+            let originalFp = AttentionOccurrenceFingerprint(item: original)
+
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let encoded = try encoder.encode(original)
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+            )
+            let emittedWire = try XCTUnwrap(object["occurredAt"] as? String)
+            XCTAssertEqual(emittedWire, wire,
+                "Fractional wire string must survive decode → encode byte-identically for input \(wire).")
+
+            let roundTripped = try decoder.decode(AttentionItem.self, from: encoded)
+            XCTAssertEqual(
+                originalFp,
+                AttentionOccurrenceFingerprint(item: roundTripped),
+                "Fingerprint must survive decode → encode → decode for input \(wire)."
+            )
+        }
+    }
+
+    /// Trailing-zero canonicalisation: the codec keeps the numerical
+    /// value but trims trailing zeros on emit so `.100000000Z` becomes
+    /// `.1Z`. Fingerprint identity is preserved.
+    func testFractionalTrailingZerosCanonicaliseOnEncode() throws {
+        let original = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: "2026-06-01T12:00:00.100000000Z")
+        )
+        let originalFp = AttentionOccurrenceFingerprint(item: original)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(original)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        XCTAssertEqual(object["occurredAt"] as? String, "2026-06-01T12:00:00.1Z",
+            "Trailing zeros on a fractional block must be trimmed to the shortest equivalent form.")
+
+        let roundTripped = try decoder.decode(AttentionItem.self, from: encoded)
+        XCTAssertEqual(
+            originalFp,
+            AttentionOccurrenceFingerprint(item: roundTripped),
+            "Canonical trailing-zero trim must not change the fingerprint."
+        )
+    }
+
+    // MARK: - Year boundary safety (0001, 9999)
+
+    /// The backend .NET `DateTime` contract lower bound must decode,
+    /// fingerprint, and encode without trapping — even though its
+    /// epoch-seconds value is deeply negative and Foundation
+    /// `ISO8601DateFormatter` is unreliable at this end of the range.
+    func testYearOneOccurredAtDecodesFingerprintsAndEncodesWithoutTrap() throws {
+        let wire = "0001-01-01T00:00:00Z"
+        let item = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: wire)
+        )
+        XCTAssertEqual(item.occurredAtExact.epochSeconds, -62_135_596_800)
+        XCTAssertEqual(item.occurredAtExact.nanosecond, 0)
+
+        // Fingerprint construction must not trap on the deeply-negative
+        // epoch-seconds value.
+        let fp = AttentionOccurrenceFingerprint(item: item)
+        XCTAssertEqual(fp.occurredAt, item.occurredAtExact)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(item)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        XCTAssertEqual(object["occurredAt"] as? String, wire,
+            "Year 0001 must round-trip byte-identically.")
+    }
+
+    /// Upper .NET `DateTime` boundary. Fractional block preserved to the
+    /// 100 ns tick (.9999999) and encoded back with trailing zeros
+    /// trimmed to `.9999999`.
+    func testYearNineThousandNineHundredNinetyNineOccurredAtRoundTrips() throws {
+        let wire = "9999-12-31T23:59:59.9999999Z"
+        let item = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: wire)
+        )
+        // Sanity — the exact pair matches the wire, no overflow.
+        XCTAssertEqual(item.occurredAtExact.epochSeconds, 253_402_300_799)
+        XCTAssertEqual(item.occurredAtExact.nanosecond, 999_999_900)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(item)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        XCTAssertEqual(object["occurredAt"] as? String, wire,
+            "Year 9999 with .NET-tick fractional block must round-trip byte-identically.")
+
+        let roundTripped = try decoder.decode(AttentionItem.self, from: encoded)
+        XCTAssertEqual(
+            AttentionOccurrenceFingerprint(item: item),
+            AttentionOccurrenceFingerprint(item: roundTripped)
+        )
+    }
+
+    // MARK: - Pre-epoch and offset equivalence
+
+    /// Pre-epoch instants must decode with negative epoch seconds and
+    /// zero nanosecond, and round-trip cleanly. This proves the codec
+    /// does not depend on Foundation ranges that assume epoch-forward
+    /// dates.
+    func testPreEpochOccurredAtDecodesAndRoundTrips() throws {
+        let wire = "1969-12-31T23:59:59Z"
+        let item = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: wire)
+        )
+        XCTAssertEqual(item.occurredAtExact.epochSeconds, -1)
+        XCTAssertEqual(item.occurredAtExact.nanosecond, 0)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(item)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        XCTAssertEqual(object["occurredAt"] as? String, wire)
+    }
+
+    /// Two wire strings describing the SAME instant expressed in
+    /// different offsets must produce equal exact pairs and therefore
+    /// equal fingerprints — otherwise pagination correlation could
+    /// silently break when a server flips its emit offset.
+    func testOffsetEquivalentInstantsCanonicaliseEqual() throws {
+        let utcJson = attentionItemJSON(occurredAt: "2026-06-01T12:00:00Z")
+        let offsetJson = attentionItemJSON(occurredAt: "2026-06-01T07:00:00-05:00")
+        let plusOffsetJson = attentionItemJSON(occurredAt: "2026-06-01T17:00:00+05:00")
+
+        let utc = try decoder.decode(AttentionItem.self, from: utcJson)
+        let offset = try decoder.decode(AttentionItem.self, from: offsetJson)
+        let plusOffset = try decoder.decode(AttentionItem.self, from: plusOffsetJson)
+
+        XCTAssertEqual(utc.occurredAtExact, offset.occurredAtExact,
+            "Negative-offset instant must canonicalise to the same UTC epoch-seconds pair as its Z equivalent.")
+        XCTAssertEqual(utc.occurredAtExact, plusOffset.occurredAtExact,
+            "Positive-offset instant must canonicalise to the same UTC epoch-seconds pair as its Z equivalent.")
+        XCTAssertEqual(
+            AttentionOccurrenceFingerprint(item: utc),
+            AttentionOccurrenceFingerprint(item: offset)
+        )
+        XCTAssertEqual(
+            AttentionOccurrenceFingerprint(item: utc),
+            AttentionOccurrenceFingerprint(item: plusOffset)
+        )
+    }
+
+    // MARK: - Reject invalid / out-of-range input
+
+    /// Ten or more fractional digits exceed what the .NET wire contract
+    /// can emit. Silently truncating them would lose real precision —
+    /// reject instead with a typed decoding error.
+    func testMoreThanNineFractionalDigitsIsRejected() {
+        let wire = "2026-06-01T12:00:00.1234567890Z" // 10 digits
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: wire)
+            )
+        )
+    }
+
+    /// A calendar-invalid date (Feb 30) must be rejected — proves the
+    /// codec is validating with `daysInMonth` and not just accepting any
+    /// three-digit day.
+    func testCalendarInvalidDateIsRejected() {
+        let wire = "2026-02-30T12:00:00Z"
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: wire)
+            )
+        )
+    }
+
+    /// A year outside the backend contract (0000 or 10000) must be
+    /// rejected — the contract is 0001..9999 inclusive.
+    func testYearOutsideContractRangeIsRejected() {
+        for wire in ["0000-01-01T00:00:00Z", "10000-01-01T00:00:00Z"] {
+            XCTAssertThrowsError(
+                try decoder.decode(
+                    AttentionItem.self,
+                    from: attentionItemJSON(occurredAt: wire)
+                ),
+                "Year outside 0001-9999 must not decode: \(wire)"
+            )
+        }
+    }
+
+    /// An invalid month (13) must be rejected.
+    func testInvalidMonthIsRejected() {
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: "2026-13-01T12:00:00Z")
+            )
+        )
+    }
+
+    /// A missing timezone suffix must be rejected — the wire contract
+    /// always carries one, and accepting a naked local-looking time
+    /// would silently pick a caller-implied zone.
+    func testMissingTimezoneSuffixIsRejected() {
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: "2026-06-01T12:00:00")
+            )
+        )
+    }
+
+    /// Empty fractional block (trailing dot with no digits) must be
+    /// rejected.
+    func testEmptyFractionalBlockIsRejected() {
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: "2026-06-01T12:00:00.Z")
+            )
+        )
+    }
+
+    /// A non-digit character in the fractional block must be rejected.
+    func testFractionalBlockNonDigitIsRejected() {
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: "2026-06-01T12:00:00.12x4Z")
+            )
+        )
+    }
+
+    /// Malformed structural input (bad separators) must be rejected.
+    func testMalformedTimestampIsRejected() {
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: "not-a-timestamp")
+            )
+        )
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: "2026-06-01 12:00:00Z")
+            )
+        )
+    }
+
+    /// Offsets outside the ISO-8601 civil bound (14 hours) must be
+    /// rejected.
+    func testOffsetOutsideRangeIsRejected() {
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AttentionItem.self,
+                from: attentionItemJSON(occurredAt: "2026-06-01T12:00:00+15:00")
+            )
+        )
+    }
+
+    // MARK: - Programmatic Date initializer non-trapping
+
+    /// The programmatic `Date` initializer path must not trap for any of
+    /// the extreme dates a client-side caller could ever produce: the
+    /// distant future, the distant past, exact epoch, and dates that
+    /// would round the fractional nanoseconds up to 1e9. Instead of
+    /// trapping, `AttentionExactTimestamp.fromProgrammaticDate` clamps
+    /// into the backend contract window.
+    func testProgrammaticDateInitializerNonTrappingForExtremeDates() {
+        let cases: [Date] = [
+            Date(timeIntervalSince1970: 0),
+            Date.distantFuture,
+            Date.distantPast,
+            Date(timeIntervalSince1970: -1e30),
+            Date(timeIntervalSince1970: 1e30),
+            // Ends of the contract range.
+            Date(timeIntervalSince1970: 253_402_300_799),
+            Date(timeIntervalSince1970: -62_135_596_800),
+        ]
+        for date in cases {
+            let ts = AttentionExactTimestamp.fromProgrammaticDate(date)
+            // Never trap: nanosecond is always < 1e9.
+            XCTAssertLessThan(ts.nanosecond, 1_000_000_000)
+            // Always clamped into the contract range.
+            XCTAssertGreaterThanOrEqual(ts.epochSeconds, -62_135_596_800)
+            XCTAssertLessThanOrEqual(ts.epochSeconds, 253_402_300_799)
+            // Build the item through the memberwise init path — it must
+            // not trap and the derived `occurredAt` `Date` must be finite.
+            let item = AttentionItem(
+                id: "programmatic:test",
+                kind: .failure,
+                severity: .info,
+                printerId: UUID(),
+                printerName: "test",
+                title: "t",
+                detail: "d",
+                occurredAt: date,
+                actions: []
+            )
+            XCTAssertEqual(item.occurredAtExact, ts)
+            XCTAssertTrue(item.occurredAt.timeIntervalSince1970.isFinite)
+        }
     }
 
     /// Helper — builds a canonical single-item payload with the caller's

@@ -124,21 +124,23 @@ enum AttentionMediaState: Equatable, Sendable {
 struct AttentionOccurrenceFingerprint: Hashable, Sendable {
     let itemID: String
     let printerID: UUID
-    /// Canonical Int64 nanoseconds since the Unix epoch. Storing the
-    /// canonical scalar (rather than the source `Date`) is what guarantees
-    /// two items that decode from the same wire string produce identical
-    /// fingerprints — even after a decode → encode → decode round trip
-    /// through ``AttentionTimestampCodec``, and even when the source
-    /// `Date`'s `TimeInterval` cannot represent the nanosecond value
-    /// exactly. See the codec's header comment in ``AttentionModels.swift``.
-    let occurredAtNanoseconds: Int64
+    /// Wire-exact `(epochSeconds, nanosecond)` pair that participates in
+    /// occurrence identity. Storing the exact pair (rather than the
+    /// source `Date` or any lossy scalar) is what guarantees two items
+    /// that decode from equal wire strings produce equal fingerprints —
+    /// even after a decode → encode → decode round trip through
+    /// ``AttentionTimestampCodec``, even for pre-epoch instants, and
+    /// even at the 100 ns tick edges the backend .NET `DateTime`
+    /// contract emits. See the codec's header comment in
+    /// ``AttentionModels.swift``.
+    let occurredAt: AttentionExactTimestamp
     let jobID: UUID?
     let toolheadIndex: Int?
 
     init(item: AttentionItem) {
         itemID = item.id
         printerID = item.printerId
-        occurredAtNanoseconds = item.occurredAtUnixNanoseconds
+        occurredAt = item.occurredAtExact
         jobID = item.jobId
         toolheadIndex = item.toolheadIndex
     }
