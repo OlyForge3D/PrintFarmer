@@ -4288,10 +4288,25 @@ final class ObserverAwaitAttempt: @unchecked Sendable {
     /// Lifecycle state. Monotonic — only `.active` transitions.
     fileprivate enum State { case active, cancellationInitiated, completedNaturally }
 
+    /// Ripley Finding 4: exact per-attempt cancel-Task hop fingerprint.
+    /// Recorded synchronously inside `cancelObserver` on the actor turn
+    /// when the cancel Task hops in. Distinguishes broken-matcher
+    /// regressions (where a parked entry with matching awaitID exists
+    /// yet cancelObserver returns `.processedIgnoredMismatch`) from
+    /// legitimate race outcomes (park never happened yet, or gate
+    /// already closed). `awaitIDMatched == true` implies the receipt
+    /// MUST be `.processedMatched`; anything else is a matcher bug.
+    struct HopFingerprint: Sendable, Hashable {
+        let awaitIDMatched: Bool
+        let parkedEntryExisted: Bool
+        let closedAtHop: Bool
+    }
+
     private let lock = NSLock()
     private var _state: State = .active
     private var _outcome: Outcome?
     private var _outcomeCont: CheckedContinuation<Outcome, Never>?
+    private var _hopFingerprint: HopFingerprint?
 
     init() { self.id = UUID() }
 
@@ -4364,6 +4379,24 @@ final class ObserverAwaitAttempt: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return _outcome
     }
+
+    /// Ripley Finding 4: record cancel-Task hop fingerprint. Called
+    /// synchronously by `cancelObserver` on the actor turn when the
+    /// cancel Task hops in, BEFORE returning the receipt. Exactly-once
+    /// per attempt: a second recording is silently ignored.
+    fileprivate func recordHopFingerprint(_ fp: HopFingerprint) {
+        lock.lock(); defer { lock.unlock() }
+        if _hopFingerprint == nil { _hopFingerprint = fp }
+    }
+
+    /// Diagnostic: peek recorded hop fingerprint without consuming.
+    /// `nil` means the cancel Task's actor hop never ran (either
+    /// `onCancel` never fired or `beginCancellationIfActive` was
+    /// blocked by natural publication).
+    var hopFingerprintForTest: HopFingerprint? {
+        lock.lock(); defer { lock.unlock() }
+        return _hopFingerprint
+    }
 }
 
 /// R1 waiter analogue of `ObserverAwaitAttempt`. See there for design.
@@ -4377,10 +4410,19 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
 
     fileprivate enum State { case active, cancellationInitiated, completedNaturally }
 
+    /// Ripley Finding 4: exact per-attempt cancel-Task hop fingerprint.
+    /// See `ObserverAwaitAttempt.HopFingerprint` for full rationale.
+    struct HopFingerprint: Sendable, Hashable {
+        let awaitIDMatched: Bool
+        let parkedEntryExisted: Bool
+        let closedAtHop: Bool
+    }
+
     private let lock = NSLock()
     private var _state: State = .active
     private var _outcome: Outcome?
     private var _outcomeCont: CheckedContinuation<Outcome, Never>?
+    private var _hopFingerprint: HopFingerprint?
 
     init() { self.id = UUID() }
 
@@ -4435,6 +4477,18 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return _outcome
     }
+
+    /// Ripley Finding 4: record cancel-Task hop fingerprint. See
+    /// `ObserverAwaitAttempt.recordHopFingerprint` for full rationale.
+    fileprivate func recordHopFingerprint(_ fp: HopFingerprint) {
+        lock.lock(); defer { lock.unlock() }
+        if _hopFingerprint == nil { _hopFingerprint = fp }
+    }
+
+    var hopFingerprintForTest: HopFingerprint? {
+        lock.lock(); defer { lock.unlock() }
+        return _hopFingerprint
+    }
 }
 
 /// R2: caller-owned one-shot buffered park-ACK ticket. Constructed by
@@ -4446,13 +4500,53 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
 /// continuation that the actor resumes at resolution. Never-awaited
 /// tickets are removed from the gate at resolution and simply dropped
 /// by the caller — no gate storage survives resolution.
+///
+/// Ripley Finding 2 (identity-preserving auto-cleanup): every ticket
+/// carries a non-reusing `identity: UUID` written by the actor into
+/// the corresponding `WeakObserverParkAckTicketBox` at enter time.
+/// When the ticket is dropped WITHOUT ever being resolved (normal
+/// abandonment), its `deinit` fires an actor-hop Task that removes
+/// the specific box for this identity from
+/// `observerActiveParkAckTickets` AND decrements the pending-cleanup
+/// identity set. A gate-side `waitForNoPendingObserverTicketCleanups()`
+/// method suspends until the set is empty — deterministic (waiter is
+/// resumed exactly when the LAST deinit Task's actor call completes),
+/// no polling / sleeps / yields / timeouts. Resolve paths clear the
+/// cleanup callback so already-resolved tickets do NOT double-cleanup.
 final class ObserverParkAckTicket: @unchecked Sendable {
+    /// Ripley Finding 2: stable, non-reusing per-ticket identity.
+    /// Written into the actor-side `WeakObserverParkAckTicketBox.identityHint`
+    /// at enter time so cleanup after deinit can prune the exact box
+    /// even after `weak var ref` has been niled by the runtime.
+    let identity: UUID = UUID()
+
     private let lock = NSLock()
     private var _result: AsyncGate.ParkAckResult?
     private var _cont: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
+    /// Ripley Finding 2: deinit-driven cleanup closure. Set by
+    /// `enterObserverParkAck` for the active-branch case; cleared by
+    /// `resolve(_)` OR by `deinit` (whichever runs first). Captures
+    /// a `weak` reference to the owning actor so no retain cycle.
+    private var _pendingCleanup: (() -> Void)?
+
     init() {}
+
+    /// Ripley Finding 2: install the deinit cleanup callback. Called
+    /// synchronously by the actor at enter time for the active branch
+    /// ONLY; terminal-classification tickets are returned already-
+    /// resolved and skip this install.
+    fileprivate func attachDeinitCleanup(_ cleanup: @escaping () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        // If a resolve raced enter (impossible on a fresh ticket but
+        // defensive), skip install — cleanup would double-decrement.
+        if _result == nil { _pendingCleanup = cleanup }
+    }
+
     /// Called by the actor at park / fate seal / close. Buffers the
-    /// first outcome and resumes any queued consumer.
+    /// first outcome and resumes any queued consumer. Ripley Finding 2:
+    /// also clears `_pendingCleanup` so the subsequent `deinit` skips
+    /// the cleanup Task launch — actor already removed this ticket's
+    /// box from storage.
     fileprivate func resolve(_ r: AsyncGate.ParkAckResult) {
         var contToResume: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
         lock.lock()
@@ -4460,10 +4554,12 @@ final class ObserverParkAckTicket: @unchecked Sendable {
             _result = r
             contToResume = _cont
             _cont = nil
+            _pendingCleanup = nil
         }
         lock.unlock()
         contToResume?.resume(returning: r)
     }
+
     /// Consumer API. Returns the buffered result immediately if already
     /// resolved, else queues one continuation that the actor resumes.
     fileprivate func value() async -> AsyncGate.ParkAckResult {
@@ -4485,14 +4581,44 @@ final class ObserverParkAckTicket: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return _result != nil
     }
+
+    /// Ripley Finding 2: deinit path. Fires the cleanup callback
+    /// exactly once, and only if `resolve(_)` did not run first. The
+    /// callback captures a weak owner + tokenID + identity and
+    /// launches a `Task { await owner?.observerTicketCleanupFromDeinit(...) }`.
+    /// If owner is gone the Task no-ops (no leak). No self-strong-ref
+    /// captured; no actor-retention cycle.
+    deinit {
+        var cleanupToRun: (() -> Void)?
+        lock.lock()
+        if _result == nil {
+            cleanupToRun = _pendingCleanup
+            _pendingCleanup = nil
+        }
+        lock.unlock()
+        cleanupToRun?()
+    }
 }
 
 /// R2 waiter analogue of `ObserverParkAckTicket`.
+///
+/// Ripley Finding 2: waiter analogue of the identity-preserving
+/// deinit-driven auto-cleanup — see observer ticket docs.
 final class WaiterParkAckTicket: @unchecked Sendable {
+    let identity: UUID = UUID()
+
     private let lock = NSLock()
     private var _result: AsyncGate.ParkAckResult?
     private var _cont: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
+    private var _pendingCleanup: (() -> Void)?
+
     init() {}
+
+    fileprivate func attachDeinitCleanup(_ cleanup: @escaping () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        if _result == nil { _pendingCleanup = cleanup }
+    }
+
     fileprivate func resolve(_ r: AsyncGate.ParkAckResult) {
         var contToResume: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
         lock.lock()
@@ -4500,6 +4626,7 @@ final class WaiterParkAckTicket: @unchecked Sendable {
             _result = r
             contToResume = _cont
             _cont = nil
+            _pendingCleanup = nil
         }
         lock.unlock()
         contToResume?.resume(returning: r)
@@ -4521,6 +4648,17 @@ final class WaiterParkAckTicket: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return _result != nil
     }
+
+    deinit {
+        var cleanupToRun: (() -> Void)?
+        lock.lock()
+        if _result == nil {
+            cleanupToRun = _pendingCleanup
+            _pendingCleanup = nil
+        }
+        lock.unlock()
+        cleanupToRun?()
+    }
 }
 
 /// Hicks H2: weakly-held box for gate-side ticket storage. When the
@@ -4530,14 +4668,28 @@ final class WaiterParkAckTicket: @unchecked Sendable {
 /// enter/drop on an active token that never parks therefore stays
 /// bounded — no unbounded array growth. Live tickets remain strongly
 /// held by the caller and are lossless.
+///
+/// Ripley Finding 2: also records the ticket's `identity` so the
+/// deinit-driven cleanup Task can prune the exact box after the runtime
+/// has already niled `ref`. Without `identityHint`, cleanup could not
+/// distinguish this dead box from any other dead box in the same
+/// bucket; identity gives us structural evidence for exact removal.
 private final class WeakObserverParkAckTicketBox {
     weak var ref: ObserverParkAckTicket?
-    init(_ t: ObserverParkAckTicket) { self.ref = t }
+    let identityHint: UUID
+    init(_ t: ObserverParkAckTicket) {
+        self.ref = t
+        self.identityHint = t.identity
+    }
 }
 
 private final class WeakWaiterParkAckTicketBox {
     weak var ref: WaiterParkAckTicket?
-    init(_ t: WaiterParkAckTicket) { self.ref = t }
+    let identityHint: UUID
+    init(_ t: WaiterParkAckTicket) {
+        self.ref = t
+        self.identityHint = t.identity
+    }
 }
 
 private actor AsyncGate {
@@ -4809,6 +4961,25 @@ private actor AsyncGate {
     private var observerCancelCountAcks: [Int: [CheckedContinuation<Void, Never>]] = [:]
     private var waiterCancelCountAcks: [Int: [CheckedContinuation<Void, Never>]] = [:]
 
+    // Ripley Finding 2: identity-preserving deinit-driven ticket cleanup.
+    //
+    // `pendingXTicketCleanupIdentities` = set of ticket identities that
+    //   are currently registered in actor storage (added by enterX at
+    //   active-branch, removed either by resolve/flush/close paths OR
+    //   by a deinit-launched cleanup Task). While non-empty, at least
+    //   one ticket has active storage the actor must eventually reclaim.
+    //
+    // `pendingXTicketCleanupWaiters` = continuations awaiting an empty
+    //   identity set (drained atomically when the LAST identity leaves).
+    //   Callers await `waitForNoPendingXTicketCleanups()` for a bounded,
+    //   deterministic sync-point AFTER dropping all abandoned tickets:
+    //   the waiter resumes exactly when every deinit-launched cleanup
+    //   Task has completed its actor hop.
+    private var pendingObserverTicketCleanupIdentities: Set<UUID> = []
+    private var pendingWaiterTicketCleanupIdentities: Set<UUID> = []
+    private var pendingObserverTicketCleanupWaiters: [CheckedContinuation<Void, Never>] = []
+    private var pendingWaiterTicketCleanupWaiters: [CheckedContinuation<Void, Never>] = []
+
     // MARK: Observer (entry-side)
 
     /// Reserve an observer slot. Synchronous-in-actor.
@@ -4922,7 +5093,7 @@ private actor AsyncGate {
             // reverse the published outcome.
             guard attempt.beginCancellationIfActive() else { return }
             _ = Task<ObserverCancelReceipt, Never> {
-                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID)
+                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID, attempt: attempt)
                 attempt.resolveOutcome(.cancelled(receipt))
                 return receipt
 }
@@ -4946,9 +5117,27 @@ private actor AsyncGate {
     /// Hicks D: bumps `observerCancelInvocationCount` and flushes any
     /// ACKs waiting for a specific cancel-invocation threshold, so
     /// tests can structurally await a cancel dispatch without polling.
-    private func cancelObserver(id: UInt64, awaitID: UUID) -> ObserverCancelReceipt {
+    ///
+    /// Ripley Finding 4: also records the exact per-attempt hop
+    /// fingerprint (parked/matched/closed AT THIS ACTOR TURN) on the
+    /// caller-owned `attempt`. Tests correlate `attempt.hopFingerprintForTest`
+    /// with the returned receipt to catch broken-matcher regressions:
+    /// if `awaitIDMatched == true` the receipt MUST be `.processedMatched`;
+    /// any other receipt is definitive evidence of a matcher bug and
+    /// fails an assertion loudly instead of silently accepting a
+    /// `.processedIgnoredMismatch` + close-side drain fingerprint.
+    private func cancelObserver(id: UInt64, awaitID: UUID, attempt: ObserverAwaitAttempt) -> ObserverCancelReceipt {
         observerCancelInvocationCount += 1
         flushObserverCancelCountAcks()
+        // Ripley Finding 4: record fingerprint BEFORE mutating state,
+        // so the fingerprint reflects the state the matcher observed.
+        let entry = parkedObservers[id]
+        let hopParkedEntryExisted = (entry != nil)
+        let hopAwaitIDMatched = (entry?.awaitID == awaitID)
+        attempt.recordHopFingerprint(ObserverAwaitAttempt.HopFingerprint(
+            awaitIDMatched: hopAwaitIDMatched,
+            parkedEntryExisted: hopParkedEntryExisted,
+            closedAtHop: closed))
         // Hicks R1: close-before-processing race. If the gate closed
         // while this cancel Task was scheduled, the parked entry (if
         // any) was already drained by close() with .closedWhileParked.
@@ -4958,7 +5147,7 @@ private actor AsyncGate {
             observerCancelIgnoredCount += 1
             return .closedBeforeProcessing
         }
-        guard let entry = parkedObservers[id], entry.awaitID == awaitID else {
+        guard let entry = entry, entry.awaitID == awaitID else {
             observerCancelIgnoredCount += 1
             return .processedIgnoredMismatch
         }
@@ -5015,8 +5204,19 @@ private actor AsyncGate {
         // Hicks R2/H2: resolve and remove any active park-ACK tickets
         // for this token. Boxes are weak — dead refs are simply skipped.
         // The gate retains no per-ticket state after resolution.
+        //
+        // Ripley Finding 2: also remove each box's `identityHint` from
+        // `pendingObserverTicketCleanupIdentities`. This is safe even
+        // if the deinit-launched cleanup Task for that identity is
+        // in-flight: that Task's actor call will see the identity is
+        // no longer in the set and no-op (see
+        // `observerTicketCleanupFromDeinit`).
         if let ts = observerActiveParkAckTickets.removeValue(forKey: id) {
-            for box in ts { box.ref?.resolve(result) }
+            for box in ts {
+                box.ref?.resolve(result)
+                pendingObserverTicketCleanupIdentities.remove(box.identityHint)
+            }
+            fireObserverTicketCleanupWaitersIfEmpty()
         }
     }
 
@@ -5107,7 +5307,7 @@ private actor AsyncGate {
             // Hicks H1: atomically claim publication before launching Task.
             guard attempt.beginCancellationIfActive() else { return }
             _ = Task<WaiterCancelReceipt, Never> {
-                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID)
+                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID, attempt: attempt)
                 attempt.resolveOutcome(.cancelled(receipt))
                 return receipt
 }
@@ -5121,14 +5321,24 @@ private actor AsyncGate {
     ///
     /// Hicks R1: returns the exact per-attempt `WaiterCancelReceipt`
     /// as its function value; no gate-side receipt storage.
-    private func cancelWaiter(id: UInt64, awaitID: UUID) -> WaiterCancelReceipt {
+    ///
+    /// Ripley Finding 4: waiter analogue of the hop-fingerprint
+    /// recording — see `cancelObserver` for full rationale.
+    private func cancelWaiter(id: UInt64, awaitID: UUID, attempt: WaiterAwaitAttempt) -> WaiterCancelReceipt {
         waiterCancelInvocationCount += 1
         flushWaiterCancelCountAcks()
+        let entry = parkedWaiters[id]
+        let hopParkedEntryExisted = (entry != nil)
+        let hopAwaitIDMatched = (entry?.awaitID == awaitID)
+        attempt.recordHopFingerprint(WaiterAwaitAttempt.HopFingerprint(
+            awaitIDMatched: hopAwaitIDMatched,
+            parkedEntryExisted: hopParkedEntryExisted,
+            closedAtHop: closed))
         if closed {
             waiterCancelIgnoredCount += 1
             return .closedBeforeProcessing
         }
-        guard let entry = parkedWaiters[id], entry.awaitID == awaitID else {
+        guard let entry = entry, entry.awaitID == awaitID else {
             waiterCancelIgnoredCount += 1
             return .processedIgnoredMismatch
         }
@@ -5165,8 +5375,13 @@ private actor AsyncGate {
         if let cs = waiterParkAcks.removeValue(forKey: id) {
             for c in cs { c.resume(returning: result) }
         }
+        // Ripley Finding 2: identity-set decrement mirrors observer variant.
         if let ts = waiterActiveParkAckTickets.removeValue(forKey: id) {
-            for box in ts { box.ref?.resolve(result) }
+            for box in ts {
+                box.ref?.resolve(result)
+                pendingWaiterTicketCleanupIdentities.remove(box.identityHint)
+            }
+            fireWaiterTicketCleanupWaitersIfEmpty()
         }
     }
 
@@ -5245,6 +5460,19 @@ private actor AsyncGate {
             // before appending, so repeated enter+drop stays bounded.
             compactObserverParkAckTickets(id: token.id)
             observerActiveParkAckTickets[token.id, default: []].append(WeakObserverParkAckTicketBox(ticket))
+            // Ripley Finding 2: register cleanup identity + attach a
+            // deinit callback that hops back into the actor to prune
+            // the specific box for this identity when the caller drops
+            // the ticket without ever consuming it. Weak-self capture
+            // avoids retention cycles; capturing tokenID + identity
+            // by value avoids any actor-side ownership of caller state.
+            let identity = ticket.identity
+            let tokenID = token.id
+            pendingObserverTicketCleanupIdentities.insert(identity)
+            ticket.attachDeinitCleanup { [weak self] in
+                guard let gate = self else { return }
+                Task { await gate.observerTicketCleanupFromDeinit(tokenID: tokenID, identity: identity) }
+            }
             return ticket
         }
         if token.id >= nextObserverID {
@@ -5273,6 +5501,14 @@ private actor AsyncGate {
             }
             compactWaiterParkAckTickets(id: token.id)
             waiterActiveParkAckTickets[token.id, default: []].append(WeakWaiterParkAckTicketBox(ticket))
+            // Ripley Finding 2: see observer variant for full rationale.
+            let identity = ticket.identity
+            let tokenID = token.id
+            pendingWaiterTicketCleanupIdentities.insert(identity)
+            ticket.attachDeinitCleanup { [weak self] in
+                guard let gate = self else { return }
+                Task { await gate.waiterTicketCleanupFromDeinit(tokenID: tokenID, identity: identity) }
+            }
             return ticket
         }
         if token.id >= nextWaiterID {
@@ -5281,6 +5517,90 @@ private actor AsyncGate {
             ticket.resolve(.closedOrConsumed)
         }
         return ticket
+    }
+
+    // MARK: Ripley Finding 2 — deinit-driven ticket cleanup
+
+    /// Ripley Finding 2: deinit-launched cleanup for observer ticket.
+    /// If `identity` is still in the pending set (i.e. no resolve /
+    /// flush / close has already removed this ticket's storage),
+    /// prune the exact box carrying `identityHint == identity` from
+    /// `observerActiveParkAckTickets[tokenID]`, then fire cleanup
+    /// waiters if the pending set is now empty. Idempotent: a stale
+    /// call (identity already removed) is a no-op.
+    func observerTicketCleanupFromDeinit(tokenID: UInt64, identity: UUID) {
+        guard pendingObserverTicketCleanupIdentities.remove(identity) != nil else { return }
+        if var arr = observerActiveParkAckTickets[tokenID] {
+            arr.removeAll { $0.identityHint == identity }
+            if arr.isEmpty {
+                observerActiveParkAckTickets.removeValue(forKey: tokenID)
+            } else {
+                observerActiveParkAckTickets[tokenID] = arr
+            }
+        }
+        fireObserverTicketCleanupWaitersIfEmpty()
+    }
+
+    /// Waiter analogue of `observerTicketCleanupFromDeinit`.
+    func waiterTicketCleanupFromDeinit(tokenID: UInt64, identity: UUID) {
+        guard pendingWaiterTicketCleanupIdentities.remove(identity) != nil else { return }
+        if var arr = waiterActiveParkAckTickets[tokenID] {
+            arr.removeAll { $0.identityHint == identity }
+            if arr.isEmpty {
+                waiterActiveParkAckTickets.removeValue(forKey: tokenID)
+            } else {
+                waiterActiveParkAckTickets[tokenID] = arr
+            }
+        }
+        fireWaiterTicketCleanupWaitersIfEmpty()
+    }
+
+    private func fireObserverTicketCleanupWaitersIfEmpty() {
+        guard pendingObserverTicketCleanupIdentities.isEmpty else { return }
+        let cs = pendingObserverTicketCleanupWaiters
+        pendingObserverTicketCleanupWaiters.removeAll()
+        for c in cs { c.resume() }
+    }
+
+    private func fireWaiterTicketCleanupWaitersIfEmpty() {
+        guard pendingWaiterTicketCleanupIdentities.isEmpty else { return }
+        let cs = pendingWaiterTicketCleanupWaiters
+        pendingWaiterTicketCleanupWaiters.removeAll()
+        for c in cs { c.resume() }
+    }
+
+    /// Ripley Finding 2: deterministic barrier for tests that need to
+    /// prove backing storage returned to zero after N distinct-token
+    /// enter+drop cycles WITHOUT snapshot/close/manual prune/per-token
+    /// park. Suspends until every deinit-launched cleanup Task's actor
+    /// call has completed (identity set is empty). Rescued by close()
+    /// which drains any still-pending identities as part of terminal
+    /// teardown, so this cannot hang across a `close()`.
+    func waitForNoPendingObserverTicketCleanups() async {
+        if pendingObserverTicketCleanupIdentities.isEmpty { return }
+        await withCheckedContinuation { c in
+            pendingObserverTicketCleanupWaiters.append(c)
+        }
+    }
+
+    /// Waiter analogue of `waitForNoPendingObserverTicketCleanups`.
+    func waitForNoPendingWaiterTicketCleanups() async {
+        if pendingWaiterTicketCleanupIdentities.isEmpty { return }
+        await withCheckedContinuation { c in
+            pendingWaiterTicketCleanupWaiters.append(c)
+        }
+    }
+
+    /// Debug (test-only): number of ticket identities still pending
+    /// deinit-cleanup. `0` proves the actor holds no per-ticket
+    /// abandonment state. Non-zero indicates at least one deinit
+    /// Task has not yet completed its actor call OR a live ticket
+    /// remains registered.
+    func debugPendingObserverTicketCleanupCount() -> Int {
+        pendingObserverTicketCleanupIdentities.count
+    }
+    func debugPendingWaiterTicketCleanupCount() -> Int {
+        pendingWaiterTicketCleanupIdentities.count
     }
 
     /// Hicks H2: remove weak-boxes whose caller-owned ticket has been
@@ -5402,7 +5722,7 @@ private actor AsyncGate {
         } onCancel: {
             guard attempt.beginCancellationIfActive() else { return }
             _ = Task<ObserverCancelReceipt, Never> {
-                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID)
+                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID, attempt: attempt)
                 attempt.resolveOutcome(.cancelled(receipt))
                 return receipt
 }
@@ -5476,7 +5796,7 @@ private actor AsyncGate {
         } onCancel: {
             guard attempt.beginCancellationIfActive() else { return }
             _ = Task<WaiterCancelReceipt, Never> {
-                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID)
+                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID, attempt: attempt)
                 attempt.resolveOutcome(.cancelled(receipt))
                 return receipt
 }
@@ -5561,7 +5881,7 @@ private actor AsyncGate {
             // path (already `.completedNaturally`); no cancel Task launched.
             guard attempt.beginCancellationIfActive() else { return }
             _ = Task<ObserverCancelReceipt, Never> {
-                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID)
+                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID, attempt: attempt)
                 attempt.resolveOutcome(.cancelled(receipt))
                 return receipt
             }
@@ -5625,7 +5945,7 @@ private actor AsyncGate {
         } onCancel: {
             guard attempt.beginCancellationIfActive() else { return }
             _ = Task<WaiterCancelReceipt, Never> {
-                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID)
+                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID, attempt: attempt)
                 attempt.resolveOutcome(.cancelled(receipt))
                 return receipt
             }
@@ -5735,12 +6055,39 @@ private actor AsyncGate {
         // `observerActiveParkAckTickets`. Callers may still consume
         // the buffered result via `ticket.value()` — the gate holds
         // no remaining per-ticket state. Weak boxes: skip dead refs.
+        //
+        // Ripley Finding 2: also drain
+        // `pendingXTicketCleanupIdentities` and fire any still-queued
+        // `waitForNoPendingXTicketCleanups` waiters, so terminal
+        // teardown always releases them (bounded even if some deinit
+        // Task is still in flight — its later actor call will see the
+        // identity gone and no-op).
         let obsTix = observerActiveParkAckTickets
         observerActiveParkAckTickets.removeAll()
-        for (_, ts) in obsTix { for box in ts { box.ref?.resolve(.closedOrConsumed) } }
+        for (_, ts) in obsTix {
+            for box in ts {
+                box.ref?.resolve(.closedOrConsumed)
+                pendingObserverTicketCleanupIdentities.remove(box.identityHint)
+            }
+        }
         let watTix = waiterActiveParkAckTickets
         waiterActiveParkAckTickets.removeAll()
-        for (_, ts) in watTix { for box in ts { box.ref?.resolve(.closedOrConsumed) } }
+        for (_, ts) in watTix {
+            for box in ts {
+                box.ref?.resolve(.closedOrConsumed)
+                pendingWaiterTicketCleanupIdentities.remove(box.identityHint)
+            }
+        }
+        // Final rescue: any pending identities that had NO live box
+        // (deinit Task already niled ref before close ran but hasn't
+        // yet decremented the set) — clear them too, and fire waiters.
+        // The stale deinit Task's later actor call will find identity
+        // gone and no-op. This makes `close()` an unconditional
+        // barrier for `waitForNoPendingXTicketCleanups`.
+        pendingObserverTicketCleanupIdentities.removeAll()
+        pendingWaiterTicketCleanupIdentities.removeAll()
+        fireObserverTicketCleanupWaitersIfEmpty()
+        fireWaiterTicketCleanupWaitersIfEmpty()
     }
 
     // MARK: Introspection (test-only)
