@@ -13,6 +13,26 @@ public class CreateTagDto
 }
 
 /// <summary>
+/// Request to update an existing tag's metadata with optimistic concurrency (#844).
+/// <see cref="ExpectedRevision"/> must match the tag's current revision or the update is
+/// rejected with a concurrency conflict (HTTP 409).
+/// </summary>
+public class UpdateTagDto
+{
+    /// <summary>New tag name (normalized to PascalCase). Optional; unchanged when null.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>New hex color for UI display. Optional; unchanged when null.</summary>
+    public string? Color { get; set; }
+
+    /// <summary>New description. Optional; unchanged when null.</summary>
+    public string? Description { get; set; }
+
+    /// <summary>The revision the caller believes is current; enforced for optimistic concurrency.</summary>
+    public long ExpectedRevision { get; set; }
+}
+
+/// <summary>
 /// Request to assign tags to an object (generic - works for models, gcode files, etc.)
 /// </summary>
 public class AssignTagsDto

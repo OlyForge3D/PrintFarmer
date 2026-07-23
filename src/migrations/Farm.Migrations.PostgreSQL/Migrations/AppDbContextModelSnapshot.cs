@@ -2221,6 +2221,86 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Model3DTag", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<bool>("IsShared")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("ModelCollections", (string)null);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollectionMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ModelId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.HasIndex("CollectionId", "ModelId")
+                        .IsUnique();
+
+                    b.ToTable("ModelCollectionMemberships", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4409,6 +4489,52 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("SpoolmanConfigs");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Sync.LibrarySyncChange", b =>
+                {
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Revision"));
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Revision");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("Timestamp");
+
+                    b.HasIndex("EntityType", "EntityId");
+
+                    b.ToTable("LibrarySyncChanges", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.SystemLog", b =>
                 {
                     b.Property<int>("Id")
@@ -4470,6 +4596,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(7)
                         .HasColumnType("character varying(7)");
 
+                    b.Property<Guid>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -4486,6 +4616,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -5580,6 +5715,17 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Tag");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollectionMembership", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.ModelCollection", "Collection")
+                        .WithMany("Memberships")
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Collection");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
@@ -6344,6 +6490,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialCluster", b =>
                 {
                     b.Navigation("Members");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
+                {
+                    b.Navigation("Memberships");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>

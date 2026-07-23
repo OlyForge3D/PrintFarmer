@@ -5,9 +5,11 @@ import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusI
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Input, FormField, Alert, Tabs } from '@/common/components/ui';
+import { RevisionConflictDialog, type RevisionConflictField } from '@/common/components/RevisionConflictDialog';
+import { getRevisionConflict, getErrorMessage } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
 import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
-import type { TagOption, EditingTag } from '@/types/admin';
+import type { TagOption, EditingTag, UpdateTagRequest } from '@/types/admin';
 
 /**
  * Generate a visually distinct color using the golden angle.
@@ -189,6 +191,27 @@ export const TagAdminPage: React.FC = () => {
         }
     });
 
+    // Update tag mutation - uses the revision/concurrency contract added in #844.
+    // expectedRevision must match the tag's current server revision or the request is
+    // rejected with a structured HTTP 409 conflict, handled in handleSaveEdit below.
+    const updateTagMutation = useMutation({
+        mutationFn: async ({ id, dto }: { id: string; dto: UpdateTagRequest }) =>
+            apiClient.updateTag(id, dto),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
+            queryClient.invalidateQueries({ queryKey: ['model-tags'] });
+            queryClient.invalidateQueries({ queryKey: ['tagAnalytics'] });
+        }
+    });
+
+    // Revision conflict state: when a save is rejected with HTTP 409/412, we capture both
+    // the user's attempted values (still live in `editingTag`, never cleared) and the fresh
+    // server-side tag so RevisionConflictDialog can show a non-destructive diff.
+    const [conflictServerTag, setConflictServerTag] = useState<TagOption | null>(null);
+    const [isReloadingConflict, setIsReloadingConflict] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+
+
     // Handle delete with optimistic UI update
     const handleDeleteTag = (tagId: string) => {
         startTransition(async () => {
@@ -212,8 +235,11 @@ export const TagAdminPage: React.FC = () => {
             id: tag.id,
             name: tag.name,
             color: tag.color,
-            description: tag.description
+            description: tag.description,
+            revision: tag.revision
         });
+        setSaveError(null);
+        setConflictServerTag(null);
         // Focus the name input after React renders the input
         requestAnimationFrame(() => {
             editNameInputRef.current?.focus();
@@ -224,19 +250,93 @@ export const TagAdminPage: React.FC = () => {
     const handleCancelEdit = () => {
         setEditingTagId(null);
         setEditingTag(null);
+        setSaveError(null);
+        setConflictServerTag(null);
     };
 
     const handleSaveEdit = async () => {
-        if (!editingTag || !editingTag.name.trim()) {
+        if (!editingTag || !editingTag.name.trim() || !editingTag.id) {
+            return;
+        }
+        if (editingTag.revision == null) {
+            // No revision baseline to send as expectedRevision - guessing 0 would either
+            // spuriously conflict on every save (trapping the user in a reload loop) or,
+            // worse, silently match an unrelated revision 0. Block the save and ask the
+            // user to refresh instead of sending an unsafe guess.
+            setSaveError('This tag is missing its revision info. Please refresh the page and try again.');
             return;
         }
 
-        // For now, we'll just invalidate and close since the API endpoint for update
-        // would need to be added to the backend
-        setEditingTagId(null);
-        setEditingTag(null);
-        // In a full implementation, you'd call an update mutation here
+        setSaveError(null);
+        try {
+            await updateTagMutation.mutateAsync({
+                id: editingTag.id,
+                dto: {
+                    name: editingTag.name.trim(),
+                    color: editingTag.color,
+                    description: editingTag.description,
+                    expectedRevision: editingTag.revision
+                }
+            });
+            setEditingTagId(null);
+            setEditingTag(null);
+        } catch (error) {
+            const revisionConflict = getRevisionConflict(error);
+            if (revisionConflict) {
+                // Never silently overwrite: keep editingTag (the user's attempted values)
+                // untouched, and fetch the current server state so the conflict dialog can
+                // show both sides of the diff.
+                try {
+                    const freshTag = await apiClient.getTag(editingTag.id);
+                    setConflictServerTag(
+                        freshTag ?? {
+                            // Tag not found (e.g. deleted by someone else) - use a neutral
+                            // placeholder rather than echoing the user's own attempted name,
+                            // which would misleadingly appear as if it were the server state.
+                            id: editingTag.id,
+                            name: '(tag not found - it may have been deleted)',
+                            revision: revisionConflict.actualRevision
+                        }
+                    );
+                } catch {
+                    setConflictServerTag({
+                        id: editingTag.id,
+                        name: '(unable to load current version)',
+                        revision: revisionConflict.actualRevision
+                    });
+                }
+                return;
+            }
+            setSaveError(getErrorMessage(error, 'Failed to update tag'));
+        }
     };
+
+    // Reloads the fresh server tag into the edit form's revision baseline so a retry can
+    // succeed, without discarding the name/color/description the user already typed.
+    const handleReloadConflict = async () => {
+        if (!editingTag?.id) return;
+        setIsReloadingConflict(true);
+        try {
+            const freshTag = await apiClient.getTag(editingTag.id);
+            if (freshTag) {
+                setEditingTag((prev) => (prev ? { ...prev, revision: freshTag.revision } : prev));
+            }
+            setConflictServerTag(null);
+            setSaveError(null);
+        } catch (error) {
+            setSaveError(getErrorMessage(error, 'Failed to reload the latest version.'));
+        } finally {
+            setIsReloadingConflict(false);
+        }
+    };
+
+    const conflictFields: RevisionConflictField[] = conflictServerTag && editingTag
+        ? [
+            { label: 'Name', yourValue: editingTag.name, serverValue: conflictServerTag.name },
+            { label: 'Description', yourValue: editingTag.description ?? '', serverValue: conflictServerTag.description ?? '' },
+            { label: 'Color', yourValue: editingTag.color ?? '', serverValue: conflictServerTag.color ?? '' }
+        ]
+        : [];
 
     // Extract keyboard handler with useEffectEvent to access latest state without retriggers
     const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
@@ -367,6 +467,13 @@ export const TagAdminPage: React.FC = () => {
 
                 {/* Tags List */}
                 <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto">
+                    {saveError && (
+                        <div className="p-3 border-b border-pf-border">
+                            <Alert type="error" title="Couldn't save tag">
+                                {saveError}
+                            </Alert>
+                        </div>
+                    )}
                     <table className="w-full min-w-max">
                         <thead>
                             <tr className="border-b border-pf-border bg-pf-bg-2">
@@ -466,8 +573,14 @@ export const TagAdminPage: React.FC = () => {
                                                         size="sm"
                                                         className="!p-2 !h-auto"
                                                         title="Save changes"
+                                                        disabled={updateTagMutation.isPending}
+                                                        aria-busy={updateTagMutation.isPending}
                                                     >
-                                                        <CheckIcon className="w-4 h-4" />
+                                                        {updateTagMutation.isPending ? (
+                                                            <LoadingIcon className="w-4 h-4" />
+                                                        ) : (
+                                                            <CheckIcon className="w-4 h-4" />
+                                                        )}
                                                     </Button>
                                                     <Button
                                                         type="button"
@@ -476,6 +589,7 @@ export const TagAdminPage: React.FC = () => {
                                                         size="sm"
                                                         className="!p-2 !h-auto"
                                                         title="Cancel editing"
+                                                        disabled={updateTagMutation.isPending}
                                                     >
                                                         <CloseIcon className="w-4 h-4" />
                                                     </Button>
@@ -693,6 +807,17 @@ export const TagAdminPage: React.FC = () => {
                     </div>
                 </div>
             </Modal>
+
+            {/* Revision conflict dialog for tag edits (#844/#846) */}
+            <RevisionConflictDialog
+                isOpen={!!conflictServerTag}
+                entityLabel="tag"
+                entityName={editingTag?.name}
+                fields={conflictFields}
+                isReloading={isReloadingConflict}
+                onReloadLatest={handleReloadConflict}
+                onCancel={() => setConflictServerTag(null)}
+            />
         </PageTemplate>
     );
 };

@@ -22,4 +22,13 @@ public class TagDto
 
     /// <summary>Gets or sets the tag description.</summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Monotonic per-tag revision, bumped on every mutation. Sync clients use it as the base
+    /// revision / ETag for optimistic-concurrency updates (#844/#845).
+    /// </summary>
+    public long Revision { get; set; }
+
+    /// <summary>Optimistic-concurrency token regenerated on every mutation.</summary>
+    public Guid ConcurrencyToken { get; set; }
 }

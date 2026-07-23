@@ -41,6 +41,10 @@ export interface TagOption {
   color?: string;
   description?: string;
   usageCount?: number; // Number of models with this tag
+  /** Monotonic per-tag revision, bumped on every mutation (#844). Used for optimistic concurrency. */
+  revision?: number;
+  /** Optimistic-concurrency token regenerated on every mutation. */
+  concurrencyToken?: string;
 }
 
 /**
@@ -51,6 +55,20 @@ export interface EditingTag {
   name: string;
   color?: string;
   description?: string;
+  /** The revision the edit was started from; sent back as `expectedRevision` on save. */
+  revision?: number;
+}
+
+/**
+ * Request payload to update a tag's metadata with optimistic concurrency (#844).
+ * `expectedRevision` must match the tag's current revision or the update is rejected
+ * with a structured HTTP 409 conflict.
+ */
+export interface UpdateTagRequest {
+  name?: string;
+  color?: string;
+  description?: string;
+  expectedRevision: number;
 }
 
 /**
