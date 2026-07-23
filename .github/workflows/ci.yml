@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main, development]
+    # No path filter: every trusted-branch push must dispatch, then the selector
+    # forces the full-safe matrix before considering the changed-path set.
   pull_request:
     types: [opened, synchronize, reopened]
     # No `paths:` filter here — every PR must produce the required CI check.
@@ -102,6 +104,10 @@ jobs:
           WANT_MIG_DRIFT: ${{ steps.selector.outputs.want_mig_drift }}
           FULL_MATRIX: ${{ steps.selector.outputs.full_matrix }}
         run: |
+          # Every `printf` whose format string begins with `-` uses the POSIX
+          # `--` end-of-options terminator so Bash's `printf` builtin (and any
+          # coreutils `printf` on the runner) never interprets the leading dash
+          # as an option flag under `set -e`.
           {
             echo "## CI selection"
             printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
@@ -255,11 +261,22 @@ jobs:
           dotnet tool install -g dotnet-ef
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # Restore + build the specific migration project so its
+      # `obj/project.assets.json` and compiled assemblies exist before
+      # `dotnet ef` reflects over them. Without this step EF fails with
+      # NETSDK1004 because the migration-drift job is isolated from
+      # dotnet-build and never restores the matrix project itself.
       - name: Restore migration project
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
         run: dotnet restore "./$MATRIX_PROJECT"
+
+      - name: Build migration project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore
 
       - name: Check EF Core migration drift
         working-directory: src
@@ -268,15 +285,34 @@ jobs:
           MATRIX_PROJECT: ${{ matrix.project }}
           MATRIX_CONTEXT: ${{ matrix.context }}
           DB_PROVIDER: ${{ matrix.provider }}
+        # `dotnet ef migrations has-pending-model-changes` returns 0 when the
+        # snapshot matches the current model. Any non-zero exit code means the
+        # check did not confirm "no drift", but the tool does NOT distinguish
+        # real drift (rc=1 on success paths) from design-time failures
+        # (missing/failed context factory, provider load errors, tool/version
+        # mismatches, restore/build errors surfaced through the tool) — those
+        # also exit non-zero, including 1, across supported EF Core versions.
+        # Because we cannot classify the cause purely from the exit code, we
+        # emit a single truthful annotation for any non-zero rc and direct the
+        # reader to the tool output already streamed to the Actions log. The
+        # job stays fail-closed either way: both drift and tool failures block
+        # the workflow.
         run: |
-          set -e
+          set -u
           echo "Checking $MATRIX_LABEL for pending EF Core model changes..."
-          if ! dotnet ef migrations has-pending-model-changes \
-              --project "./$MATRIX_PROJECT" \
-              --startup-project "./$MATRIX_PROJECT" \
-              --context "$MATRIX_CONTEXT"; then
-            echo "::error title=EF Core migration drift detected::$MATRIX_LABEL has pending model changes. Add a migration for $MATRIX_CONTEXT using DB_PROVIDER=$DB_PROVIDER."
-            exit 1
+          set +e
+          dotnet ef migrations has-pending-model-changes \
+            --project "./$MATRIX_PROJECT" \
+            --startup-project "./$MATRIX_PROJECT" \
+            --context "$MATRIX_CONTEXT" \
+            --no-build
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "$MATRIX_LABEL: no pending model changes."
+          else
+            echo "::error title=EF Core migration drift check failed::$MATRIX_LABEL: 'dotnet ef migrations has-pending-model-changes' exited with $rc. This may indicate pending model changes (add a migration for $MATRIX_CONTEXT using DB_PROVIDER=$DB_PROVIDER) OR an EF Core tool / design-time context / provider failure. Inspect the tool output above to determine which."
+            exit "$rc"
           fi
 
   # ---------------------------------------------------------------------------
@@ -310,7 +346,7 @@ jobs:
           if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
             integration_args+=("-p:RunIntegrationTests=true")
           fi
-          dotnet restore "./$MATRIX_PROJECT" "${integration_args[@]}"
+          dotnet restore "./$MATRIX_PROJECT" ${integration_args[@]+"${integration_args[@]}"}
 
       - name: Build test project
         working-directory: src
@@ -323,7 +359,7 @@ jobs:
           if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
             integration_args+=("-p:RunIntegrationTests=true")
           fi
-          dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore "${integration_args[@]}"
+          dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore ${integration_args[@]+"${integration_args[@]}"}
 
       - name: Test
         working-directory: src
@@ -344,7 +380,7 @@ jobs:
             integration_args+=("-p:RunIntegrationTests=true")
           fi
           dotnet test "./$MATRIX_PROJECT" -c Debug --no-build \
-            "${integration_args[@]}" \
+            ${integration_args[@]+"${integration_args[@]}"} \
             --logger "trx;LogFileName=$MATRIX_NAME.trx" \
             --results-directory TestResults \
             --filter "Category!=DbHeavy&Category!=Docker"
@@ -418,6 +454,10 @@ jobs:
           WANT_MIG_DRIFT: ${{ needs.select.outputs.want_mig_drift }}
           SELECTOR_REASON: ${{ needs.select.outputs.reason }}
         run: |
+          # Every leading-dash format string is passed after the POSIX `--`
+          # end-of-options marker so `set -e` never trips on a Bash `printf`
+          # builtin that misreads the dash as an option (belt-and-braces even
+          # though the current builtin only accepts `-v`).
           {
             echo "## CI summary"
             printf -- '- reason: `%s`\n' "$SELECTOR_REASON"

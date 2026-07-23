@@ -6,8 +6,7 @@
 # <remote sha>\n`). For every non-delete ref, computes the .NET-relevant
 # path diff between the outgoing tip and the previous known state, extracts
 # the exact outgoing tree into a detached temporary worktree, and runs
-# an explicit restore followed by
-# `dotnet format ./farm-web.sln --verify-no-changes --no-restore` inside it.
+# `dotnet format ./farm-web.sln --verify-no-changes` inside it.
 #
 # Fail-closed principles:
 #   - Missing `dotnet` binary → refuse the push (rc=1). Never "skip" silently.
@@ -75,10 +74,53 @@ is_hex64() {
   [[ "$1" =~ ^[0-9a-f]{64}$ ]]
 }
 
+# Resolve git-common-dir without treating Git for Windows drive-letter or UNC
+# paths as relative. The result is lexical; the caller canonicalizes it by
+# changing into the already-existing common directory.
+resolve_git_common_dir_path() {
+  local common_dir="$1"
+  local toplevel="$2"
+
+  # Git normally emits forward slashes on Windows, but accept native
+  # backslashes too so wrappers and older Git builds cannot corrupt the path.
+  case "$common_dir" in
+    [A-Za-z]:\\*|\\\\*)
+      common_dir="${common_dir//\\//}"
+      ;;
+  esac
+  toplevel="${toplevel//\\//}"
+
+  case "$common_dir" in
+    /*|[A-Za-z]:/*)
+      printf '%s' "$common_dir"
+      ;;
+    *)
+      printf '%s/%s' "${toplevel%/}" "${common_dir#./}"
+      ;;
+  esac
+}
+
+array_contains() {
+  local needle="$1"
+  shift
+  local value
+  for value in "$@"; do
+    if [[ "$value" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ---------------------------------------------------------------------------
-# Are any of the changed paths .NET-relevant? Source, project/solution files,
-# SDK/tool manifests, package configuration, VERSION, editor configuration,
-# and any MSBuild props/targets all affect restore, formatting, or compilation.
+# Are any of the changed paths .NET-relevant? We enforce format on:
+#   - src/**/*.cs
+#   - src/**/*.csproj
+#   - src/**/Directory.Build.*
+#   - src/farm-web.sln
+#   - src/.editorconfig
+# We do NOT enforce format on non-src *.cs (there shouldn't be any) or on
+# mobile/*.swift (the mobile tree is outside .NET formatting scope).
 #
 # Uses `git diff -z --no-renames` and Bash read -r -d '' for NUL safety.
 # Renames are decomposed into old-name delete + new-name add so both sides
@@ -88,6 +130,29 @@ is_hex64() {
 # the caller MUST treat that as fail-closed.
 # ---------------------------------------------------------------------------
 DOTNET_RELEVANT=0
+
+# _entry_is_dotnet_relevant <path>
+# Returns 0 (true) when the path is one dotnet format cares about. Uses
+# bash regex for arbitrary depth under src/ so we avoid the ShellCheck
+# SC2221/SC2222 false positives triggered by an enumeration of
+# `src/*.cs|src/*/*.cs|…` glob unions (bash case globs don't cross `/`,
+# but ShellCheck flags the union as overlapping).
+_entry_is_dotnet_relevant() {
+  local p="$1"
+  case "$p" in
+    src/farm-web.sln|src/.editorconfig|src/Directory.Build.props|src/Directory.Build.targets)
+      return 0 ;;
+  esac
+  # Any-depth src/**/*.cs or src/**/*.csproj.
+  if [[ "$p" =~ ^src/([^/]+/)*[^/]+\.(cs|csproj)$ ]]; then
+    return 0
+  fi
+  # Any-depth src/**/Directory.Build.{props,targets}.
+  if [[ "$p" =~ ^src/([^/]+/)+Directory\.Build\.(props|targets)$ ]]; then
+    return 0
+  fi
+  return 1
+}
 
 diff_dotnet_paths_z() {
   local from="$1" to="$2"
@@ -108,15 +173,11 @@ diff_dotnet_paths_z() {
   local entry relevant=0
   while IFS= read -r -d '' entry; do
     [[ -z "$entry" ]] && continue
-    case "$entry" in
-      *.cs|*.csproj|*.sln|*.slnx|*.props|*.targets|\
-      .editorconfig|*/.editorconfig|\
-      VERSION|global.json|dotnet-tools.json|\
-      NuGet.Config|NuGet.config|nuget.config|\
-      packages.lock.json|*/packages.lock.json)
-        relevant=1 ;;
-    esac
+    if _entry_is_dotnet_relevant "$entry"; then
+      relevant=1
+    fi
   done < "$tmp"
+
   DOTNET_RELEVANT=$relevant
   return 0
 }
@@ -206,17 +267,10 @@ verify_extracted_tree() {
     return 0
   fi
 
-  info "cache miss — restoring and verifying formatting on tree $tree_sha"
-  # Cache hits skip both operations. On a miss, restore explicitly into the
-  # machine's normal NuGet package cache, then prevent dotnet format from doing
-  # an implicit second restore.
+  info "cache miss — running dotnet format --verify-no-changes on tree $tree_sha"
+  # Run from src/ so relative solution path resolves.
   local rc=0
-  ( cd src && dotnet restore ./farm-web.sln --nologo ) || rc=$?
-  if (( rc != 0 )); then
-    fail "dotnet restore failed for the outgoing tree (rc=$rc)."
-    return 1
-  fi
-  ( cd src && dotnet format ./farm-web.sln --verify-no-changes --no-restore ) || rc=$?
+  ( cd src && dotnet format ./farm-web.sln --verify-no-changes ) || rc=$?
   if (( rc != 0 )); then
     fail "dotnet format --verify-no-changes failed (rc=$rc)."
     fail "Run 'cd src && dotnet format ./farm-web.sln' locally, commit the changes, and push again."
@@ -231,47 +285,6 @@ verify_extracted_tree() {
   mv -f "$tmp" "$marker" || { rm -f "$tmp" ; return 1; }
   info "cache stamped ($key)."
   return 0
-}
-
-# Resolve Git's shared metadata directory before entering extracted trees.
-# Git for Windows may return either /d/... or drive-qualified D:/... paths for
-# linked worktrees. Drive-qualified paths must go through cygpath rather than
-# being mistaken for paths relative to the current worktree.
-resolve_git_common_dir() {
-  local common_dir
-  common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || {
-    fail "Not inside a git repository."
-    return 1
-  }
-
-  case "$common_dir" in
-    /*)
-      ;;
-    [A-Za-z]:[/\\]*)
-      if ! command -v cygpath >/dev/null 2>&1; then
-        fail "Git returned drive-qualified common dir '$common_dir', but cygpath is unavailable."
-        return 1
-      fi
-      common_dir="$(cygpath -u "$common_dir" 2>/dev/null)" || {
-        fail "Could not normalize Git common dir '$common_dir'."
-        return 1
-      }
-      ;;
-    *)
-      local toplevel
-      toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-        fail "Not inside a git worktree."
-        return 1
-      }
-      common_dir="$toplevel/$common_dir"
-      ;;
-  esac
-
-  if [[ ! -d "$common_dir" ]]; then
-    fail "Git common dir '$common_dir' does not exist."
-    return 1
-  fi
-  (cd "$common_dir" && pwd -P)
 }
 
 # ---------------------------------------------------------------------------
@@ -313,7 +326,25 @@ main() {
   # Establish cache directory once. Resolve to an absolute path — we later
   # `cd` into the extracted worktree and relative paths would break.
   local common_dir
-  common_dir="$(resolve_git_common_dir)" || exit 1
+  common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || {
+    fail "Not inside a git repository."
+    exit 1
+  }
+  # `git rev-parse --git-common-dir` may return `.git`, a POSIX absolute path,
+  # or a drive-letter path such as `D:/repo/.git` in Git for Windows.
+  local toplevel
+  toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    fail "Not inside a git worktree."
+    exit 1
+  }
+  common_dir="$(resolve_git_common_dir_path "$common_dir" "$toplevel")" || {
+    fail "Cannot resolve git common dir."
+    exit 1
+  }
+  common_dir="$(cd "$common_dir" 2>/dev/null && pwd -P)" || {
+    fail "Cannot access git common dir $common_dir."
+    exit 1
+  }
   CACHE_DIR="$common_dir/pre-push-fmt-cache"
   mkdir -p "$CACHE_DIR" || {
     fail "Cannot create cache dir $CACHE_DIR."
@@ -401,17 +432,31 @@ main() {
   head "pre-push .NET format gate"
   info "outgoing refs with .NET changes: ${#tips[@]}"
 
-  # Dedup tips (multiple refs may push the same commit).
-  local -A seen=() ; local -a uniq=() ; local t
-  for t in "${tips[@]}"; do
-    if [[ -z "${seen[$t]:-}" ]]; then
-      seen[$t]=1
+  # Probe dotnet once at the top so failures fail early with a clear message.
+  # We re-probe inside each extracted worktree (global.json may pin an SDK).
+  if ! probe_dotnet_identity; then
+    exit 1
+  fi
+
+  # Dedup tips (multiple refs may push the same commit). Use a linear indexed
+  # array scan because macOS ships Bash 3.2 without associative arrays.
+  #
+  # Bash 3.2 with `set -u` errors when expanding `"${empty_array[@]}"` (fixed
+  # in 4.4). We guard every possibly-empty expansion with
+  # `${arr[@]+"${arr[@]}"}`, which expands to nothing when the array is
+  # empty or unset and to the quoted elements otherwise. Applies to the
+  # `array_contains` call on the first iteration (uniq empty) and to the
+  # subsequent for-loops if `tips`/`uniq` are empty.
+  local -a uniq=()
+  local t
+  for t in ${tips[@]+"${tips[@]}"}; do
+    if ! array_contains "$t" ${uniq[@]+"${uniq[@]}"}; then
       uniq+=("$t")
     fi
   done
 
   local rc=0
-  for t in "${uniq[@]}"; do
+  for t in ${uniq[@]+"${uniq[@]}"}; do
     if ! verify_tip_sha "$t" "$hook_hash"; then
       rc=1
     fi
@@ -425,4 +470,6 @@ main() {
   exit "$rc"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

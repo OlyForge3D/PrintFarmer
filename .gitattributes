@@ -18,4 +18,3 @@ install.sh text eol=lf
 # Git hooks must always use LF line endings
 .githooks/pre-commit text eol=lf
 .githooks/pre-push text eol=lf
-

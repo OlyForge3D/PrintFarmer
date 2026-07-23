@@ -32,9 +32,9 @@
 #   full_matrix
 #         — "true" when the full safe fallback was chosen.
 #   matrix
-#         — JSON object with `include` list of
-#           {name, project, label, run_integration} for the .NET test matrix.
-#           Always contains at least one element (or want_dotnet_test=false).
+#         — JSON object with `include` list of {name, project, label} for the
+#           .NET test matrix. Always contains at least one element (or
+#           want_dotnet_test=false).
 #   mig_matrix
 #         — JSON object with `include` list of {name, project, context,
 #           provider} for the migration-drift matrix. May be empty when
@@ -48,12 +48,13 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.2.1"
 
 # ---------------------------------------------------------------------------
-# Required CI test projects. The final field opts the integration project into
-# its existing RunIntegrationTests convention during restore, build, and test.
-# Two projects intentionally live outside farm-web.sln and are still mandatory.
+# Required CI test projects. The final field opts projects into special MSBuild
+# properties during restore, build, and test. Farm.Web.IntegrationTests
+# intentionally lives outside farm-web.sln and must be invoked directly with
+# RunIntegrationTests=true because its csproj disables test discovery otherwise.
 # ---------------------------------------------------------------------------
 readonly ALL_TEST_PROJECTS=(
   "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false"
@@ -203,48 +204,53 @@ load_changed_files() {
 # the affected-tests table so callers can print human-readable reasons.
 #
 # Tokens (order matters only for readability):
-#   shared_config   — VERSION, SDK/tool manifests, solutions, package/build
-#                     configuration, and any *.props/*.targets
+#   shared_config   — global.json, *.sln, Directory.Build.*,
+#                     Directory.Packages.props, NuGet.Config
 #   ci_selector     — .github/workflows/**, scripts/ci/**, .githooks/**,
 #                     .devcontainer/**
 #   docs            — docs/**, *.md, LICENSE, .editorconfig outside src/
 #   frontend        — src/Web/**
 #   api             — src/api/**
-#   infra           — src/infra/**
+#   infra           — src/infra/** (conservatively includes App model drift)
 #   backend_core    — src/backends/Farm.Backend.Plugin.Core/**
-#   backend_plugin  — other src/backends/**
+#                     (referenced by Farm.Slicer.Module in addition to the
+#                     concrete plugins, so both test projects are affected).
+#   backend_plugin  — every other src/backends/** path (concrete plugin
+#                     projects: Moonraker, PrusaLink, OctoPrint, Sdcp,
+#                     FlashForge, TestEmulator). Farm.Web.Api.Tests and
+#                     Farm.Web.IntegrationTests both exercise the assembled
+#                     Farm.Web.Api graph that references these.
 #   slicer          — src/slicer/**, src/Slicers/**, src/worker-shared/**
 #   orca_worker     — src/orcaslicer-worker/**
 #   discovery       — src/discovery/**, src/printer-discovery/**
 #   settings        — src/settings/**
-#   migrations_app  — src/migrations/Farm.Migrations.**
-#   migrations_slcr — src/migrations/Farm.Slicer.Migrations.**
+#   migrations_app  — src/migrations/Farm.Migrations.*/**
+#   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
 #   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
 #   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
 #   tests_integration — src/tests/Farm.Web.IntegrationTests/**
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
+#   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
 #   mobile          — mobile/** (does not force any .NET action)
 #   unknown_src     — any other src/**
 #   unclassified    — anything else outside the buckets above
 # ---------------------------------------------------------------------------
 classify_path() {
   local p="$1"
-  if [[ "$p" != */* && "$p" == *.md ]]; then
-    printf 'docs' ; return
-  fi
-
   # Reject anything that could be shell-metacharacter-injected before we act.
   # The reason sanitizer will scrub the final string; classifier itself is
   # data-only.
   case "$p" in
     # Shared configuration that affects every project.
-    VERSION|global.json|dotnet-tools.json|NuGet.Config|NuGet.config|nuget.config)
+    global.json|NuGet.Config|NuGet.config|nuget.config|Directory.Build.props|Directory.Build.targets|Directory.Packages.props)
       printf 'shared_config' ; return ;;
-    *.sln|*.slnx|*.props|*.targets|packages.lock.json|*/packages.lock.json)
+    */Directory.Build.props|*/Directory.Build.targets|*/Directory.Packages.props)
       printf 'shared_config' ; return ;;
-    src/.editorconfig)
+    src/farm-web.sln|src/.editorconfig)
+      printf 'shared_config' ; return ;;
+    *.sln)
       printf 'shared_config' ; return ;;
 
     # CI selector, workflows, hooks, devcontainer post-create integration.
@@ -257,13 +263,14 @@ classify_path() {
     .devcontainer/*)
       printf 'ci_selector' ; return ;;
 
-    # iOS/macOS surface — Parker never touches this and never triggers .NET
-    # work from it.
+    # iOS/macOS surface — does not trigger .NET work.
     mobile/*)
       printf 'mobile' ; return ;;
 
-    # Documentation and markdown outside src/.
-    docs/*|LICENSE|.gitignore|.gitattributes|.editorconfig)
+    # Documentation and markdown outside src/. `LICENSE.md` is intentionally
+    # not listed separately because `*.md` already covers it (ShellCheck
+    # SC2221 flagged the redundancy in an earlier iteration).
+    docs/*|*.md|LICENSE|.gitignore|.gitattributes|.editorconfig)
       printf 'docs' ; return ;;
 
     # Frontend.
@@ -274,6 +281,13 @@ classify_path() {
   case "$p" in
     src/api/*)               printf 'api' ; return ;;
     src/infra/*)             printf 'infra' ; return ;;
+    # Farm.Backend.Plugin.Core is the shared plugin abstraction referenced by
+    # BOTH `Farm.Slicer.Module` (via ../../backends/Farm.Backend.Plugin.Core)
+    # and every concrete backend plugin. Because Farm.Slicer.Module.Tests
+    # transitively depends on it through Farm.Slicer.Module, any Core edit
+    # affects the slicer test project too. Match this bucket BEFORE the more
+    # general `src/backends/*` case so concrete plugins keep their narrower
+    # API-tests-only classification. See docs/CI.md for the mapping table.
     src/backends/Farm.Backend.Plugin.Core/*) printf 'backend_core' ; return ;;
     src/backends/*)          printf 'backend_plugin' ; return ;;
     src/slicer/*)            printf 'slicer' ; return ;;
@@ -285,10 +299,10 @@ classify_path() {
     src/settings/*)          printf 'settings' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
-    src/tests/Farm.Web.Api.Tests/*)      printf 'tests_api' ; return ;;
-    src/tests/Farm.Slicer.Module.Tests/*) printf 'tests_slicer' ; return ;;
-    src/tests/Farm.OrcaSlicer.Worker.Tests/*) printf 'tests_orca' ; return ;;
-    src/tests/Farm.Web.IntegrationTests/*) printf 'tests_integration' ; return ;;
+    src/tests/Farm.Web.Api.Tests/*)             printf 'tests_api' ; return ;;
+    src/tests/Farm.Slicer.Module.Tests/*)       printf 'tests_slicer' ; return ;;
+    src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
+    src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -307,6 +321,9 @@ finish() {
   local want_mig_drift="$4" full_matrix="$5" reason_raw="$6"
   shift 6
   # Remaining args: test project names, then a "---" separator, then mig entry names.
+  # `"$@"` is safe with 0 args; we defensively guard subsequent array
+  # expansions with `${arr[@]+"${arr[@]}"}` for Bash 3.2 + `set -u`
+  # (macOS default), which errors on `"${empty_arr[@]}"`.
   local test_selected=() mig_selected=() sawsep=0
   local a
   for a in "$@"; do
@@ -349,12 +366,11 @@ finish() {
   # Build mig matrix JSON.
   local mig_json='{"include":[]}'
   if (( ${#mig_selected[@]} > 0 )); then
-    local items="" first=1 entry name label project
+    local items="" first=1 entry name
     for name in "${mig_selected[@]}"; do
       for entry in "${ALL_MIG_ENTRIES[@]}"; do
         IFS='|' read -r ename elabel eproject econtext eprovider <<< "$entry"
         if [[ "$ename" == "$name" ]]; then
-          label="$elabel" ; project="$eproject"
           if (( first == 0 )); then items+=","; fi
           first=0
           items+='{"name":"'"$ename"'","label":"'"$elabel"'","project":"'"$eproject"'","context":"'"$econtext"'","provider":"'"$eprovider"'"}'
@@ -409,6 +425,9 @@ finish() {
 
 # ---------------------------------------------------------------------------
 # Produce every test project + every mig entry (used by full-safe fallback).
+# `ALL_TEST_PROJECTS`/`ALL_MIG_ENTRIES` are non-empty constants but we still
+# guard the `finish` invocation with `${arr[@]+…}` so a future refactor that
+# empties them cannot regress into the Bash 3.2 empty-array crash path.
 # ---------------------------------------------------------------------------
 emit_full_safe() {
   local reason="$1"
@@ -416,7 +435,7 @@ emit_full_safe() {
   for entry in "${ALL_TEST_PROJECTS[@]}"; do all_tests+=("${entry%%|*}"); done
   for entry in "${ALL_MIG_ENTRIES[@]}"; do all_migs+=("${entry%%|*}"); done
   finish "true" "true" "true" "true" "true" "$reason" \
-    "${all_tests[@]}" "---" "${all_migs[@]}"
+    ${all_tests[@]+"${all_tests[@]}"} "---" ${all_migs[@]+"${all_migs[@]}"}
 }
 
 # ---------------------------------------------------------------------------
@@ -460,7 +479,7 @@ main() {
 
   # Bucket flags.
   local has_shared_config=0 has_ci_selector=0 has_frontend=0
-  local has_api=0 has_infra=0 has_backend_core=0 has_backend=0 has_slicer=0
+  local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
@@ -476,8 +495,8 @@ main() {
       frontend)        has_frontend=1 ;;
       api)             has_api=1 ;;
       infra)           has_infra=1 ;;
-      backend_core)    has_backend_core=1 ;;
       backend_plugin)  has_backend=1 ;;
+      backend_core)    has_backend_core=1 ;;
       slicer)          has_slicer=1 ;;
       orca_worker)     has_orca=1 ;;
       discovery)       has_discovery=1 ;;
@@ -517,7 +536,7 @@ main() {
   if (( has_settings )); then
     emit_full_safe "full-safe: settings abstractions changed"
   fi
-  # Unknown future test projects are ambiguous and therefore fail safe.
+  # tests_other = a future unmapped test project. Do not silently ignore.
   if (( has_tests_other )); then
     emit_full_safe "full-safe: unmapped test project changed"
   fi
@@ -533,7 +552,7 @@ main() {
 
   # Any .NET-relevant bucket forces a full solution build to preserve compile
   # coverage across the whole graph.
-  if (( has_api || has_infra || has_backend_core || has_backend || has_slicer ||
+  if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
         has_orca ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
@@ -543,48 +562,36 @@ main() {
 
   # tools alone → build only, no tests.
   local net_test_bucket_hit=0
-  if (( has_api )); then
-    test_names+=(
-      "Farm.Web.Api.Tests"
-      "Farm.Slicer.Module.Tests"
-      "Farm.Web.IntegrationTests"
-    )
+  if (( has_api || has_infra )); then
+    # api / infra sit under both tests. Both are affected.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
     net_test_bucket_hit=1
   fi
   if (( has_infra )); then
-    # Orca worker directly references infra, while the other suites consume it
-    # through their API and slicer dependencies.
-    test_names+=(
-      "Farm.Web.Api.Tests"
-      "Farm.Slicer.Module.Tests"
-      "Farm.OrcaSlicer.Worker.Tests"
-      "Farm.Web.IntegrationTests"
-    )
-    net_test_bucket_hit=1
-  fi
-  if (( has_backend_core )); then
-    # Backend Core is transitively consumed by infra, slicer, and the Orca
-    # worker. Keep concrete backend plugins in their narrower bucket below.
-    test_names+=(
-      "Farm.Web.Api.Tests"
-      "Farm.Slicer.Module.Tests"
-      "Farm.OrcaSlicer.Worker.Tests"
-      "Farm.Web.IntegrationTests"
-    )
+    # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
+    test_names+=("Farm.OrcaSlicer.Worker.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
-    # Backends are referenced by Api.Tests only (per csproj graph).
-    test_names+=("Farm.Web.Api.Tests")
+    # Concrete backend plugins (Moonraker/PrusaLink/OctoPrint/Sdcp/FlashForge/
+    # TestEmulator) are referenced by Farm.Web.Api. IntegrationTests targets the
+    # assembled API, so run it alongside Api.Tests; they are NOT referenced by
+    # Farm.Slicer.Module or Farm.Slicer.Module.Tests.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_backend_core )); then
+    # Farm.Backend.Plugin.Core is referenced directly by Farm.Web.Api.Tests
+    # AND transitively by Farm.Slicer.Module.Tests through Farm.Slicer.Module
+    # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
+    # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj).
+    # A Core edit must therefore run both test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
     net_test_bucket_hit=1
   fi
   if (( has_slicer )); then
-    test_names+=(
-      "Farm.Web.Api.Tests"
-      "Farm.Slicer.Module.Tests"
-      "Farm.OrcaSlicer.Worker.Tests"
-      "Farm.Web.IntegrationTests"
-    )
+    # slicer projects are referenced by both test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
     net_test_bucket_hit=1
   fi
   if (( has_orca )); then
@@ -592,22 +599,30 @@ main() {
     net_test_bucket_hit=1
   fi
   if (( has_mig_app )); then
-    # Api.Tests references migrations directly.
-    test_names+=("Farm.Web.Api.Tests")
+    # Api.Tests and IntegrationTests cover the assembled API graph that includes
+    # the App migration projects.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
     mig_names+=("AppPg" "AppSqlServer")
     want_mig_drift="true"
     net_test_bucket_hit=1
   fi
   if (( has_mig_slcr )); then
-    # Slicer.Module.Tests transitively via slicer/*.
-    test_names+=("Farm.Slicer.Module.Tests")
+    # Farm.Web.Api references slicer migrations directly, IntegrationTests
+    # targets the assembled API, and Slicer.Module.Tests covers the slicer graph.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
     mig_names+=("SlicerPg" "SlicerSqlServer")
     want_mig_drift="true"
     net_test_bucket_hit=1
   fi
-  # AppDbContext and its model live under infra/Data. Conservatively treat all
-  # infra changes as App model-affecting so both providers are always checked.
-  if (( has_api || has_infra )); then
+  # Api changes also imply App migration drift (Api owns AppDbContext model).
+  if (( has_api )); then
+    mig_names+=("AppPg" "AppSqlServer")
+    want_mig_drift="true"
+  fi
+  # AppDbContext, domain entities, and IEntityTypeConfiguration classes all
+  # live under src/infra. Conservatively run both App providers for any infra
+  # change rather than risk missing model drift when those files move.
+  if (( has_infra )); then
     mig_names+=("AppPg" "AppSqlServer")
     want_mig_drift="true"
   fi
@@ -643,9 +658,10 @@ main() {
   if (( has_frontend )); then reason+="frontend "; fi
   if (( has_api )); then reason+="api "; fi
   if (( has_infra )); then reason+="infra "; fi
+  if (( has_backend )); then reason+="backend-plugin "; fi
   if (( has_backend_core )); then reason+="backend-core "; fi
-  if (( has_backend )); then reason+="backend "; fi
   if (( has_slicer )); then reason+="slicer "; fi
+  if (( has_orca )); then reason+="orcaslicer-worker "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
@@ -666,29 +682,48 @@ main() {
     reason="scoped: $reason"
   fi
 
-  # Dedup test/mig names (deterministic order preserved via associative array).
-  local -A seen=() ; local out=() ; local nm
-  for nm in "${test_names[@]}"; do
-    if [[ -z "${seen[$nm]:-}" ]]; then
-      seen[$nm]=1
+  # Dedup test/mig names with indexed arrays so the selector remains runnable
+  # under macOS's Bash 3.2 as well as CI's newer Bash. Bash 3.2 + `set -u`
+  # errors on `"${empty_arr[@]}"`; the `${arr[@]+"${arr[@]}"}` form is safe
+  # on the first-item iteration when `out`/`out2` are still empty.
+  local -a out=()
+  local nm existing duplicate
+  for nm in ${test_names[@]+"${test_names[@]}"}; do
+    duplicate=0
+    for existing in ${out[@]+"${out[@]}"}; do
+      if [[ "$existing" == "$nm" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if (( duplicate == 0 )); then
       out+=("$nm")
     fi
   done
-  test_names=("${out[@]}")
+  test_names=(${out[@]+"${out[@]}"})
 
-  local -A seen2=() ; local out2=() ; local nm2
-  for nm2 in "${mig_names[@]}"; do
-    if [[ -z "${seen2[$nm2]:-}" ]]; then
-      seen2[$nm2]=1
+  local -a out2=()
+  local nm2 existing2
+  for nm2 in ${mig_names[@]+"${mig_names[@]}"}; do
+    duplicate=0
+    for existing2 in ${out2[@]+"${out2[@]}"}; do
+      if [[ "$existing2" == "$nm2" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if (( duplicate == 0 )); then
       out2+=("$nm2")
     fi
   done
-  mig_names=("${out2[@]}")
+  mig_names=(${out2[@]+"${out2[@]}"})
 
   # When nothing at all is wanted, still return a well-formed set of outputs.
+  # `test_names`/`mig_names` may be empty here (e.g. pure-frontend scoped run);
+  # guard both expansions so the final `finish` call is safe on Bash 3.2.
   finish "$want_frontend" "$want_dotnet_build" "$want_dotnet_test" \
          "$want_mig_drift" "false" "$reason" \
-         "${test_names[@]}" "---" "${mig_names[@]}"
+         ${test_names[@]+"${test_names[@]}"} "---" ${mig_names[@]+"${mig_names[@]}"}
 }
 
 main "$@"
