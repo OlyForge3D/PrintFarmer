@@ -493,6 +493,70 @@ final class AttentionInteractionTests: XCTestCase {
         XCTAssertEqual(vm.actionState(for: item.id), .idle)
     }
 
+    func testCompleteOmissionClearsRefreshRequirementWithNewerEvent() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:complete-refresh-requirement",
+            printerID: printerA,
+            actions: [action]
+        )
+        let completeFeedGate = AttentionResultGate<AttentionFeed>()
+        defer { completeFeedGate.cancel() }
+        let callbackQueue = AttentionCallbackQueue()
+        let signalR = MockSignalRService()
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .failure(.network("Action refresh failed")),
+                .gated(completeFeedGate),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = AttentionFeedViewModel(
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+        let mutationSucceeded = await vm.performAction(action, for: item.id)
+        XCTAssertTrue(mutationSucceeded)
+        guard case .refreshPending(let pending) = vm.actionState(for: item.id) else {
+            return XCTFail("Failed action refresh must retain authority")
+        }
+
+        let retryTask = Task {
+            await vm.retryActionRefresh(pendingID: pending.id)
+        }
+        await service.waitForLoadCount(3)
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: item.id,
+                changeKind: .resolved,
+                occurredAt: fixedNow
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+
+        await completeFeedGate.succeed(makeAttentionFeed())
+        let retrySucceeded = await retryTask.value
+        XCTAssertTrue(retrySucceeded)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        let loadCount = await service.loadCallCount
+        XCTAssertEqual(loadCount, 3)
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
     func testDeactivationPreservesPOSTOwnershipUntilReentryCanonicalApply() async {
         let action = AttentionAction(
             kind: .harvest,
@@ -803,6 +867,9 @@ final class AttentionInteractionTests: XCTestCase {
             signalRService: newSignalR,
             attentionEnabled: true
         )
+        let bInitialSequence = vm.eventSequenceSnapshotForTesting()
+        XCTAssertEqual(bInitialSequence.sequence, 0)
+        XCTAssertEqual(bInitialSequence.itemSequences, [:])
         let initialLoadSucceeded = await vm.refresh()
         XCTAssertTrue(initialLoadSucceeded)
 
@@ -821,6 +888,10 @@ final class AttentionInteractionTests: XCTestCase {
 
         oldSignalR.simulateCapturedAttentionChanged(at: 0, event: staleEvent)
         XCTAssertEqual(
+            vm.eventSequenceSnapshotForTesting(),
+            bInitialSequence
+        )
+        XCTAssertEqual(
             callbackQueue.count,
             1,
             "Post-reset stale delivery must not enqueue or advance B"
@@ -832,9 +903,17 @@ final class AttentionInteractionTests: XCTestCase {
         XCTAssertTrue(actionSucceeded)
         let loadsAfterAction = await newService.loadCallCount
         XCTAssertEqual(loadsAfterAction, 2)
+        XCTAssertEqual(
+            vm.eventSequenceSnapshotForTesting(),
+            bInitialSequence
+        )
 
         await callbackQueue.runNext()
         XCTAssertEqual(callbackQueue.count, 0)
+        XCTAssertEqual(
+            vm.eventSequenceSnapshotForTesting(),
+            bInitialSequence
+        )
         let loadsAfterStaleDrain = await newService.loadCallCount
         XCTAssertEqual(loadsAfterStaleDrain, 2)
 
@@ -846,6 +925,9 @@ final class AttentionInteractionTests: XCTestCase {
                 occurredAt: fixedNow
             )
         )
+        let bEventSequence = vm.eventSequenceSnapshotForTesting()
+        XCTAssertEqual(bEventSequence.sequence, 1)
+        XCTAssertEqual(bEventSequence.itemSequences[item.id], 1)
         await callbackQueue.waitForCount(1)
         await callbackQueue.runNext()
         await newService.finishLoadProducer(eventLoadTicket)

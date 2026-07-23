@@ -138,7 +138,7 @@ struct AttentionOccurrenceFingerprint: Hashable, Sendable {
     init(item: AttentionItem) {
         itemID = item.id
         printerID = item.printerId
-        occurredAtNanoseconds = AttentionTimestampCodec.nanoseconds(item.occurredAt)
+        occurredAtNanoseconds = item.occurredAtUnixNanoseconds
         jobID = item.jobId
         toolheadIndex = item.toolheadIndex
     }
@@ -190,6 +190,12 @@ struct AttentionLifecycleToken: Equatable, Sendable {
 /// The class is `Sendable` so it can be captured by closures that
 /// straddle the signalR delivery queue and MainActor. The lock is
 /// sufficient — reads and writes are all short scalar copies.
+struct AuthorityEventSequenceSnapshot: Equatable, Sendable {
+    let authority: UInt64
+    let sequence: UInt64
+    let itemSequences: [String: UInt64]
+}
+
 final class AuthorityEventSequencer: @unchecked Sendable {
     private let lock = NSLock()
     private var authority: UInt64
@@ -237,6 +243,16 @@ final class AuthorityEventSequencer: @unchecked Sendable {
         defer { lock.unlock() }
         guard self.authority == authority else { return nil }
         return itemSequences[itemID] ?? 0
+    }
+
+    func snapshot() -> AuthorityEventSequenceSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return AuthorityEventSequenceSnapshot(
+            authority: authority,
+            sequence: sequence,
+            itemSequences: itemSequences
+        )
     }
 }
 
@@ -378,6 +394,7 @@ final class AttentionFeedViewModel {
     /// watermark reaches it. Drives the follow-up decision at refresh
     /// completion and the drain decision at reactivation.
     @ObservationIgnored private var pendingCoverageEventSequence: UInt64?
+    @ObservationIgnored private var pendingCoverageByItem: [String: UInt64] = [:]
     /// Authority-scoped ownership set of currently in-flight canonical
     /// refreshes. Every refresh generates a unique `UUID` token at
     /// start and registers it here; only same-authority completions
@@ -568,10 +585,11 @@ final class AttentionFeedViewModel {
         // its own cover watermark. Setting it here is safe even if
         // we ultimately end up dispatching immediately (redundant with
         // the dispatched refresh's cover snapshot).
-        pendingCoverageEventSequence = max(
-            pendingCoverageEventSequence ?? 0,
+        pendingCoverageByItem[itemID] = max(
+            pendingCoverageByItem[itemID] ?? 0,
             eventSeq
         )
+        recomputePendingCoverage()
 
         if let fingerprint = actionOperationTokens.keys.first(where: {
             $0.itemID == itemID
@@ -664,6 +682,12 @@ final class AttentionFeedViewModel {
     func currentLifecycleToken() -> AttentionLifecycleToken {
         AttentionLifecycleToken(value: lifecycleToken)
     }
+
+    #if DEBUG
+    func eventSequenceSnapshotForTesting() -> AuthorityEventSequenceSnapshot {
+        eventSequencer.snapshot()
+    }
+    #endif
 
     /// Called when the view re-appears. If a `pendingReloadOnActivate`
     /// flag was set (typically by a signalR event that arrived while the
@@ -945,10 +969,10 @@ final class AttentionFeedViewModel {
             // Advance coverage. Any event with sequence ≤ startCover is
             // now proven covered by an applied successful refresh.
             lastCoveredEventSequence = max(lastCoveredEventSequence, startCoverSnapshot)
-            if let pending = pendingCoverageEventSequence,
-               pending <= lastCoveredEventSequence {
-                pendingCoverageEventSequence = nil
+            pendingCoverageByItem = pendingCoverageByItem.filter {
+                $0.value > lastCoveredEventSequence
             }
+            recomputePendingCoverage()
             pruneCoveredMutationInvalidations()
             let needsMutationFollowup = reconcileMutationRequirementsAfterCanonicalApply(
                 refreshOrdinal: requestOrdinal,
@@ -1181,6 +1205,15 @@ final class AttentionFeedViewModel {
         }
         return actionStates.first(where: { $0.key.itemID == itemID })?.value
             ?? .idle
+    }
+
+    func shouldPreserveActionAuthority(
+        for fingerprint: AttentionOccurrenceFingerprint
+    ) -> Bool {
+        if let item = liveItem(id: fingerprint.itemID) {
+            return AttentionOccurrenceFingerprint(item: item) == fingerprint
+        }
+        return snapshot?.nextCursor != nil
     }
 
     @discardableResult
@@ -1676,6 +1709,15 @@ final class AttentionFeedViewModel {
         mutationRefreshRequirements[fingerprint] = nil
     }
 
+    private func recomputePendingCoverage() {
+        pendingCoverageEventSequence = pendingCoverageByItem.values.max()
+    }
+
+    private func discardPendingCoverage(itemID: String) {
+        pendingCoverageByItem[itemID] = nil
+        recomputePendingCoverage()
+    }
+
     private func matchesActionOperation(
         fingerprint: AttentionOccurrenceFingerprint,
         token: UUID,
@@ -1889,8 +1931,8 @@ final class AttentionFeedViewModel {
                liveFingerprint != fingerprint {
                 revokeActionAuthority(for: fingerprint)
             } else if liveFingerprintsByID[fingerprint.itemID] == nil,
-                      !hasMorePages,
-                      mutationRefreshRequirements[fingerprint] == nil {
+                      !hasMorePages {
+                discardPendingCoverage(itemID: fingerprint.itemID)
                 revokeActionAuthority(for: fingerprint)
             }
         }
@@ -2020,6 +2062,7 @@ final class AttentionFeedViewModel {
         // coverage from the old authority is meaningless once the
         // service/signalR pair has been replaced.
         pendingCoverageEventSequence = nil
+        pendingCoverageByItem = [:]
         lastCoveredEventSequence = 0
         activeRequestTokens = []
 

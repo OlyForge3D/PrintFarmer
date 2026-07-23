@@ -293,6 +293,9 @@ struct AttentionView: View {
                     feedContent
                 }
             }
+            .onChange(of: feedViewModel.mediaGeneration) { _, _ in
+                reconcilePendingAction()
+            }
             .navigationTitle("Attention")
             .toolbar { toolbarContent }
             .refreshable {
@@ -405,6 +408,15 @@ struct AttentionView: View {
 
     private var feedItemCount: Int {
         feedViewModel.snapshot?.items.count ?? 0
+    }
+
+    private func reconcilePendingAction() {
+        if let pendingAction,
+           !feedViewModel.shouldPreserveActionAuthority(
+               for: pendingAction.fingerprint
+           ) {
+            self.pendingAction = nil
+        }
     }
 
     /// Recovery orchestration that runs with EXPLICIT owner

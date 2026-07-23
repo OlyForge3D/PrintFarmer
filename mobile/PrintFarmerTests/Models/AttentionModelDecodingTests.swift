@@ -112,10 +112,10 @@ final class AttentionModelDecodingTests: XCTestCase {
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
         let emittedOccurredAt = try XCTUnwrap(object["occurredAt"] as? String)
-        XCTAssertTrue(emittedOccurredAt.contains("."),
-            "Fractional occurredAt must survive encoding — got \(emittedOccurredAt).")
-        XCTAssertTrue(emittedOccurredAt.hasSuffix("Z"),
-            "Attention timestamps must be emitted as UTC (Z) — got \(emittedOccurredAt).")
+        XCTAssertEqual(
+            emittedOccurredAt,
+            "2026-06-01T12:00:00.123456789Z"
+        )
 
         let roundTripped = try decoder.decode(AttentionItem.self, from: encoded)
         let roundTrippedFingerprint = AttentionOccurrenceFingerprint(item: roundTripped)
@@ -133,8 +133,8 @@ final class AttentionModelDecodingTests: XCTestCase {
     /// occurrence to inherit the prior occurrence's action state — the
     /// exact hazard Hicks blocker #2 flags.
     func testDistinctFractionalOccurrencesWithinOneSecondHaveDistinctFingerprints() throws {
-        let earlierJson = attentionItemJSON(occurredAt: "2026-06-01T12:00:00.100000000Z")
-        let laterJson = attentionItemJSON(occurredAt: "2026-06-01T12:00:00.200000000Z")
+        let earlierJson = attentionItemJSON(occurredAt: "2026-06-01T12:00:00.000000100Z")
+        let laterJson = attentionItemJSON(occurredAt: "2026-06-01T12:00:00.000000200Z")
 
         let earlier = try decoder.decode(AttentionItem.self, from: earlierJson)
         let later = try decoder.decode(AttentionItem.self, from: laterJson)
@@ -143,10 +143,17 @@ final class AttentionModelDecodingTests: XCTestCase {
         XCTAssertEqual(earlier.printerId, later.printerId)
         XCTAssertEqual(earlier.jobId, later.jobId)
         XCTAssertEqual(earlier.toolheadIndex, later.toolheadIndex)
+        let earlierFingerprint = AttentionOccurrenceFingerprint(item: earlier)
+        let laterFingerprint = AttentionOccurrenceFingerprint(item: later)
         XCTAssertNotEqual(
-            AttentionOccurrenceFingerprint(item: earlier),
-            AttentionOccurrenceFingerprint(item: later),
+            earlierFingerprint,
+            laterFingerprint,
             "Distinct fractional occurredAt values within one second must produce distinct fingerprints."
+        )
+        XCTAssertEqual(
+            laterFingerprint.occurredAtNanoseconds
+                - earlierFingerprint.occurredAtNanoseconds,
+            100
         )
     }
 
