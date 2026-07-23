@@ -140,6 +140,39 @@ final class ServerRegistry {
         persist()
     }
 
+    /// J1 (issue #816 reject, Hicks): rollback of an `add()` that happened
+    /// as part of a login that later failed to publish credentials /
+    /// activate. The removal is safe ONLY when the exact entry we added is
+    /// still present (matched by `id`, `createdAt`, and `updatedAt` — a
+    /// concurrent update would advance updatedAt) AND when we did NOT
+    /// activate it. The caller MUST have ensured no credentials were saved
+    /// and no snapshot bytes exist for this server before invoking; this
+    /// method does NOT invoke the snapshot purge handler because there is
+    /// nothing to purge (login failed before publishing anything durable).
+    /// Fails silently (returns false) when the entry no longer matches —
+    /// preserves any concurrent state a peer operation may have written.
+    @discardableResult
+    func rollbackAdd(_ candidate: RegisteredServer) -> Bool {
+        guard let index = servers.firstIndex(where: { $0.id == candidate.id }) else {
+            return false
+        }
+        let existing = servers[index]
+        // Match id + createdAt + updatedAt so an intervening update or
+        // concurrent re-registration is not clobbered.
+        guard existing.createdAt == candidate.createdAt,
+              existing.updatedAt == candidate.updatedAt,
+              existing.normalizedURLString == candidate.normalizedURLString else {
+            return false
+        }
+        // Refuse removal if this login somehow activated the server (should
+        // not happen: our resolveActiveServer passes makeActiveIfNeeded=false,
+        // and only `activate()` sets it active). Defense in depth.
+        if activeServerID == candidate.id { return false }
+        servers.remove(at: index)
+        persist()
+        return true
+    }
+
     /// Remove a server only after its snapshot namespace has been fully purged.
     /// Fails closed: without a wired purge handler, or when the purge reports a
     /// failure, the server is retained so its cached bytes cannot be orphaned.

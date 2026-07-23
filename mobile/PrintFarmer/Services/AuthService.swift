@@ -112,7 +112,13 @@ actor AuthService: AuthServiceProtocol {
               let url = URL(string: normalizedURL) else {
             throw NetworkError.invalidURL(serverURL)
         }
-        let server = try await resolveActiveServer(for: url, normalizedURLString: normalizedURL)
+        // J1 (issue #816 reject, Hicks): track whether resolveActiveServer had
+        // to CREATE a new registry entry for this login. If any downstream
+        // step fails (network, /me verification, apiClient CAS, activate),
+        // we rollback the add so a failed login does not leave orphan
+        // registry entries.
+        let resolved = try await resolveActiveServer(for: url, normalizedURLString: normalizedURL)
+        let server = resolved.server
         let loginClient = await apiClient.unauthenticatedClient(baseURL: url)
 
         let request = LoginRequest(
@@ -120,12 +126,24 @@ actor AuthService: AuthServiceProtocol {
             password: password,
             rememberMe: true
         )
-        let response: AuthResponse = try await loginClient.post("/api/auth/login", body: request)
+        let response: AuthResponse
+        do {
+            response = try await loginClient.post("/api/auth/login", body: request)
+        } catch {
+            // J1: network / decode failure before any publication. Roll back a
+            // newly-added registry entry so a failed first-time login does
+            // not leave the server in the registry.
+            await rollbackNewlyAddedServer(resolved)
+            throw error
+        }
 
         guard response.success, let token = response.token else {
             // H2/J: a superseded/stale failed login must not clear a newer login's
             // stored credentials — fence the clear atomically on exactly this operation.
             fencedMutation(operation) { credentialsStore.clear(serverId: server.id) }
+            // J1: roll back a newly-added registry entry so a failed first-time
+            // login does not leave an orphan entry.
+            await rollbackNewlyAddedServer(resolved)
             throw NetworkError.authFailed(response.error ?? "Login failed")
         }
 
@@ -154,12 +172,20 @@ actor AuthService: AuthServiceProtocol {
                 // credentials are not saved, apiClient is not repointed. A
                 // supersession that also happened during the failing /me is
                 // still handled by the guard below (would have been superseded
-                // anyway). Surface the explicit failure to the caller.
+                // anyway). J1: roll back a newly-added registry entry.
+                await rollbackNewlyAddedServer(resolved)
                 throw NetworkError.authFailed("Identity verification failed: \(String(describing: error))")
             }
         }
         // After the verification await, if we've been superseded, publish nothing.
-        guard isCurrentOperation(operation) else { return .superseded }
+        guard isCurrentOperation(operation) else {
+            // J1: superseded before any publication — rollback our newly-added
+            // registry entry so a superseded first-time login does not leave
+            // an orphan server. A newer T2 login for the same URL will have
+            // registered its own entry.
+            await rollbackNewlyAddedServer(resolved)
+            return .superseded
+        }
 
         // J2: at this point verifiedUser is guaranteed non-nil (either the login
         // response carried it, or /me returned it — a failure would have thrown
@@ -167,25 +193,48 @@ actor AuthService: AuthServiceProtocol {
         // nil owner via the previous "if let user else clearOwner" pattern.
         guard let identity = verifiedUser else {
             // Defensive: unreachable per the guarantee above.
+            await rollbackNewlyAddedServer(resolved)
             throw NetworkError.authFailed("Identity verification produced no user")
         }
 
         // Publication phase — every step is fenced or CAS, and rolls back prior
         // published steps in reverse order on failure so no destination is left
         // holding this superseded operation's state at any await boundary.
+        //
+        // J1 (issue #816 reject, Hicks): each destination's publication returns
+        // the PRIOR verified state, so a rollback RESTORES that state rather
+        // than clearing — no equal-user T2 relogin can lose its own
+        // publication, and no legitimate prior owner is destroyed by a
+        // failed rollback. Owner writes carry the operation token so the
+        // rollback CAS is on operation identity (ABA-safe) instead of on
+        // userID equality.
 
-        // Step 1: credentials + owner (single synchronous fenced block).
+        // Step 1: credentials + owner (single synchronous fenced block that
+        // atomically captures prior state).
+        var priorCredentials: ServerCredentials?
+        var priorOwner: FarmSnapshotOwnerPriorState = FarmSnapshotOwnerPriorState(userID: nil, operationToken: nil)
         let published = fencedMutation(operation) {
-            credentialsStore.save(
+            priorCredentials = credentialsStore.saveCapturingPrior(
                 ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
                 serverId: server.id
             )
-            // J2: publish the VERIFIED owner unconditionally. There is no
-            // "clear owner because verification is missing" branch anymore —
-            // a missing verification would have thrown before reaching here.
-            snapshotOwnerStore.setOwner(userID: identity.id, serverID: server.id)
+            // J2: publish the VERIFIED owner unconditionally.
+            // J1: tag with the operation token so an equal-user T2 rollback
+            // CAS is safe (compare on the token, not on userID equality).
+            let opTokenForTag = operation == .unspecified ? Int.min : operation.value
+            priorOwner = snapshotOwnerStore.setOwnerCapturingPrior(
+                userID: identity.id,
+                serverID: server.id,
+                operationToken: opTokenForTag
+            )
         }
-        guard published else { return .superseded }
+        guard published else {
+            // We never actually wrote here (fencedMutation short-circuited),
+            // so no rollback needed for credentials/owner. Roll back a
+            // newly-added registry entry.
+            await rollbackNewlyAddedServer(resolved)
+            return .superseded
+        }
 
         // Step 2: apiClient shared session (CAS on the epoch — carries stable
         // serverID so a later logout snapshot cannot separate baseURL from
@@ -203,9 +252,20 @@ actor AuthService: AuthServiceProtocol {
                 epoch: authEpoch, token: operation.value
             )
             guard applied else {
-                // Rollback step 1: our exact credentials + owner.
-                credentialsStore.clearIfAccessTokenMatches(serverId: server.id, expectedAccessToken: token)
-                snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: identity.id)
+                // J1: rollback restores the exact prior credentials + owner
+                // rather than clearing them. Owner rollback is CAS on the
+                // operation token — an equal-user T2 that landed here is
+                // preserved because its operation token differs.
+                credentialsStore.restoreIfAccessTokenMatches(
+                    serverId: server.id, expectedAccessToken: token,
+                    prior: priorCredentials
+                )
+                snapshotOwnerStore.restoreOwnerIfOperationMatches(
+                    serverID: server.id,
+                    expectedOperationToken: operation.value,
+                    prior: priorOwner
+                )
+                await rollbackNewlyAddedServer(resolved)
                 return .superseded
             }
         }
@@ -214,15 +274,30 @@ actor AuthService: AuthServiceProtocol {
         // Step 3: registry activate (fenced on operation).
         let activated = await activate(server, operation: operation)
         guard activated else {
-            // Rollback steps 1-2: our exact credentials + owner + apiClient session.
-            credentialsStore.clearIfAccessTokenMatches(serverId: server.id, expectedAccessToken: token)
-            snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: identity.id)
+            // J1: rollback steps 1-2 with prior-state restoration.
+            credentialsStore.restoreIfAccessTokenMatches(
+                serverId: server.id, expectedAccessToken: token,
+                prior: priorCredentials
+            )
             if operation != .unspecified {
+                snapshotOwnerStore.restoreOwnerIfOperationMatches(
+                    serverID: server.id,
+                    expectedOperationToken: operation.value,
+                    prior: priorOwner
+                )
                 await apiClient.clearSessionIfMatches(
                     expectedAccessToken: token,
                     expectedAuthSessionToken: operation.value
                 )
+            } else {
+                // `.unspecified` cannot CAS on operation token; fall back to
+                // clearIfMatches which is at least token/user-safe against a
+                // different-value T2.
+                snapshotOwnerStore.clearOwnerIfMatches(
+                    serverID: server.id, expectedUserID: identity.id
+                )
             }
+            await rollbackNewlyAddedServer(resolved)
             return .superseded
         }
         // Carry the VERIFIED user back to the caller (not the original nil).
@@ -430,18 +505,28 @@ actor AuthService: AuthServiceProtocol {
         }
     }
 
-    private func resolveActiveServer(for url: URL, normalizedURLString: String) async throws -> RegisteredServer {
+    /// J1 (issue #816 reject, Hicks): the outcome of `resolveActiveServer`,
+    /// distinguishing whether the login had to CREATE a new registry entry
+    /// (rollback required on failure) from reusing an existing one (no
+    /// rollback of the entry, though credentials/owner rollback still runs).
+    private struct ResolvedServer {
+        let server: RegisteredServer
+        let wasCreatedByThisLogin: Bool
+    }
+
+    private func resolveActiveServer(for url: URL, normalizedURLString: String) async throws -> ResolvedServer {
         if let serverRegistry {
             return try await MainActor.run {
                 if let matching = serverRegistry.servers.first(where: { $0.normalizedURLString == normalizedURLString }) {
-                    return matching
+                    return ResolvedServer(server: matching, wasCreatedByThisLogin: false)
                 }
 
                 if let active = serverRegistry.activeServer, active.normalizedURLString == normalizedURLString {
-                    return active
+                    return ResolvedServer(server: active, wasCreatedByThisLogin: false)
                 }
 
-                return try serverRegistry.add(displayName: url.host ?? "PrintFarmer", baseURL: url, makeActiveIfNeeded: false)
+                let created = try serverRegistry.add(displayName: url.host ?? "PrintFarmer", baseURL: url, makeActiveIfNeeded: false)
+                return ResolvedServer(server: created, wasCreatedByThisLogin: true)
             }
         }
 
@@ -453,15 +538,42 @@ actor AuthService: AuthServiceProtocol {
                 migrateLegacyServerURL: migrateLegacyServerURL
             )
             if let matching = registry.servers.first(where: { $0.normalizedURLString == normalizedURLString }) {
-                return matching
+                return ResolvedServer(server: matching, wasCreatedByThisLogin: false)
             }
 
             if let active = registry.activeServer, active.normalizedURLString == normalizedURLString {
-                return active
+                return ResolvedServer(server: active, wasCreatedByThisLogin: false)
             }
 
             let server = try registry.add(displayName: url.host ?? "PrintFarmer", baseURL: url, makeActiveIfNeeded: false)
-            return server
+            return ResolvedServer(server: server, wasCreatedByThisLogin: true)
+        }
+    }
+
+    /// J1 (issue #816 reject, Hicks): remove a registry entry that this login
+    /// just added but never finished publishing credentials/owner/activate
+    /// for. Safe because `resolveActiveServer` passes
+    /// `makeActiveIfNeeded=false` — a rollback here can never remove the
+    /// currently-active server. Uses the registry's `rollbackAdd` CAS which
+    /// compares (id, createdAt, updatedAt, normalizedURLString) so a
+    /// concurrent update/re-registration is preserved untouched.
+    private func rollbackNewlyAddedServer(_ resolved: ResolvedServer) async {
+        guard resolved.wasCreatedByThisLogin else { return }
+        let server = resolved.server
+        if let serverRegistry {
+            await MainActor.run {
+                _ = serverRegistry.rollbackAdd(server)
+            }
+            return
+        }
+        let userDefaultsBox = userDefaultsBox
+        let migrateLegacyServerURL = migrateLegacyServerURL
+        await MainActor.run {
+            let registry = ServerRegistry(
+                userDefaults: userDefaultsBox.userDefaults,
+                migrateLegacyServerURL: migrateLegacyServerURL
+            )
+            _ = registry.rollbackAdd(server)
         }
     }
 

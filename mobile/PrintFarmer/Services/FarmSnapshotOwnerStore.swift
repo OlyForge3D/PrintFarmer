@@ -18,9 +18,24 @@ import Foundation
 //     network failure must never call `clear`, so the last verified owner
 //     survives to drive cold-offline restore.
 
+/// J1 (issue #816 reject, Hicks): the prior verified owner captured immediately
+/// before this operation published its own owner. Rollback restores this
+/// exact prior state (rather than clearing) so an equal-user T2 relogin that
+/// happens between T1's write and T1's rollback does not lose its own
+/// publication.
+struct FarmSnapshotOwnerPriorState: Sendable, Equatable {
+    let userID: UUID?
+    let operationToken: Int?
+}
+
 /// Records who is verified on each server, keyed strictly by the stable server UUID.
 final class FarmSnapshotOwnerStore: @unchecked Sendable {
     static let keyPrefix = "pf_snapshot_owner_"
+    /// J1 (issue #816 reject, Hicks): storage key suffix carrying the exact
+    /// AuthOperationToken.value that most recently wrote the owner. Enables
+    /// operation-tagged CAS so an equal-user T2 that reused the same userID
+    /// but under a newer operation is distinguishable from T1's own write.
+    static let operationKeySuffix = "_op"
 
     private let userDefaults: UserDefaults
     private let lock = NSLock()
@@ -34,12 +49,37 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
         "\(Self.keyPrefix)\(serverID.uuidString)"
     }
 
+    /// J1: storage key for the AuthOperationToken.value that most recently
+    /// wrote the owner for `serverID`.
+    func operationTokenKey(serverID: UUID) -> String {
+        "\(ownerKey(serverID: serverID))\(Self.operationKeySuffix)"
+    }
+
     /// Persist the verified owner for a server. Overwrites any prior owner (a new
     /// verified login on the same server legitimately replaces the previous one).
     func setOwner(userID: UUID, serverID: UUID) {
         lock.lock()
         defer { lock.unlock() }
         userDefaults.set(userID.uuidString, forKey: ownerKey(serverID: serverID))
+    }
+
+    /// J1 (issue #816 reject, Hicks): publish this operation's verified owner
+    /// AND tag the write with the operation token, atomically returning the
+    /// PRIOR verified state (userID + operationToken). Callers use the
+    /// returned state to compare-and-RESTORE on rollback instead of clearing —
+    /// so a rollback preserves the previous verified owner rather than
+    /// destroying it, and the operation-token CAS makes the rollback
+    /// ABA-safe against an equal-user T2 relogin.
+    @discardableResult
+    func setOwnerCapturingPrior(userID: UUID, serverID: UUID, operationToken: Int) -> FarmSnapshotOwnerPriorState {
+        lock.lock()
+        defer { lock.unlock() }
+        let priorUserRaw = userDefaults.string(forKey: ownerKey(serverID: serverID))
+        let priorUser = priorUserRaw.flatMap(UUID.init(uuidString:))
+        let priorOp = (userDefaults.object(forKey: operationTokenKey(serverID: serverID)) as? NSNumber)?.intValue
+        userDefaults.set(userID.uuidString, forKey: ownerKey(serverID: serverID))
+        userDefaults.set(NSNumber(value: operationToken), forKey: operationTokenKey(serverID: serverID))
+        return FarmSnapshotOwnerPriorState(userID: priorUser, operationToken: priorOp)
     }
 
     /// The verified owner user id for a server, or `nil` when none has ever been
@@ -53,12 +93,23 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
         return UUID(uuidString: raw)
     }
 
+    /// J1: read-only view of the operation-token tag on the current owner
+    /// write. Returns nil for legacy owners written before J1 (no tag) or
+    /// when no owner exists. Used by tests to prove ABA-safe rollback
+    /// behavior.
+    func ownerOperationToken(serverID: UUID) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        return (userDefaults.object(forKey: operationTokenKey(serverID: serverID)) as? NSNumber)?.intValue
+    }
+
     /// Clear the owner for a server. Call this ONLY on explicit logout / server
     /// removal — never on transient offline/network failures.
     func clearOwner(serverID: UUID) {
         lock.lock()
         defer { lock.unlock() }
         userDefaults.removeObject(forKey: ownerKey(serverID: serverID))
+        userDefaults.removeObject(forKey: operationTokenKey(serverID: serverID))
     }
 
     /// J (issue #816 reject, Hicks): compare-and-clear the owner IFF the
@@ -69,6 +120,12 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
     /// login has already written its own owner, the compare fails and T2's
     /// owner is preserved. Returns whether the clear happened (an equal
     /// nil-nil match returns true with no side effects).
+    ///
+    /// J1: this variant is SUPERSEDED by `restoreOwnerIfOperationMatches`
+    /// for login rollback paths because it (a) clears instead of restoring
+    /// the prior verified owner and (b) is ABA-unsafe when T1 and T2 share
+    /// the same userID. Preserved for callers that legitimately want
+    /// clear-semantics.
     @discardableResult
     func clearOwnerIfMatches(serverID: UUID, expectedUserID: UUID?) -> Bool {
         lock.lock()
@@ -77,6 +134,39 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
         let current = currentRaw.flatMap(UUID.init(uuidString:))
         guard current == expectedUserID else { return false }
         userDefaults.removeObject(forKey: ownerKey(serverID: serverID))
+        userDefaults.removeObject(forKey: operationTokenKey(serverID: serverID))
+        return true
+    }
+
+    /// J1 (issue #816 reject, Hicks): compare-and-RESTORE the prior owner
+    /// state IFF the currently-persisted owner-operation-token equals
+    /// `expectedOperationToken`. Used to roll back a login's owner
+    /// publication: if this operation still owns the destination, the
+    /// captured prior state is restored (an existing prior owner is put
+    /// back, or the owner is cleared if there was none). If a newer T2
+    /// has already written its own owner-operation-token, the compare
+    /// fails and T2's state is preserved untouched. Returns whether the
+    /// restore happened.
+    @discardableResult
+    func restoreOwnerIfOperationMatches(
+        serverID: UUID,
+        expectedOperationToken: Int,
+        prior: FarmSnapshotOwnerPriorState
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let currentOp = (userDefaults.object(forKey: operationTokenKey(serverID: serverID)) as? NSNumber)?.intValue
+        guard currentOp == expectedOperationToken else { return false }
+        if let priorUser = prior.userID {
+            userDefaults.set(priorUser.uuidString, forKey: ownerKey(serverID: serverID))
+        } else {
+            userDefaults.removeObject(forKey: ownerKey(serverID: serverID))
+        }
+        if let priorOp = prior.operationToken {
+            userDefaults.set(NSNumber(value: priorOp), forKey: operationTokenKey(serverID: serverID))
+        } else {
+            userDefaults.removeObject(forKey: operationTokenKey(serverID: serverID))
+        }
         return true
     }
 }
