@@ -30,9 +30,10 @@ flowchart LR
   G --> H
 ```
 
-Every PR triggers the `select` job, which classifies changed paths and emits
-outputs consumed by downstream jobs. This produces a required, stable check
-name even when no downstream work runs (e.g. docs-only or React-only PRs).
+Every PR triggers `select` and `ci-tools`. The selector classifies changed
+paths and emits outputs consumed by the conditional jobs. This produces a
+required, stable check name even when no application build runs, such as a
+docs-only PR.
 
 ## Jobs
 
@@ -40,7 +41,7 @@ name even when no downstream work runs (e.g. docs-only or React-only PRs).
 | ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `select`         | always                                                       | Classifies changed paths; emits `want_*`, `matrix`, `mig_matrix`.     |
 | `ci-tools`       | always                                                       | Runs `bash -n` + selector + hook tests; gates changes to selector.    |
-| `frontend`       | React inputs changed OR full-safe                            | `npm ci`, lint, test:run, build in `src/Web/ReactApp/`.               |
+| `frontend`       | React inputs changed OR full-safe                            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`. |
 | `dotnet-build`   | any .NET input changed OR full-safe                          | `dotnet restore && dotnet build` on the whole solution.               |
 | `migration-drift`| App or Slicer schema-relevant inputs changed OR full-safe    | `has-pending-model-changes` per provider (App×Pg/SqlServer, Slicer×Pg/SqlServer). |
 | `dotnet-test`    | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per affected test project.                       |
@@ -60,23 +61,31 @@ classify.
 
 ### Bucket → downstream mapping
 
-| Bucket                                        | want_frontend | want_dotnet_build | want_dotnet_test | want_mig_drift | full_matrix | Notes                              |
-| --------------------------------------------- | :-----------: | :---------------: | :--------------: | :------------: | :---------: | ---------------------------------- |
-| `frontend` (`src/Web/ReactApp/**`)            | ✓             |                   |                  |                |             | React-only PRs run zero .NET.      |
-| `api` (`src/api/**`)                          |               | ✓                 | Api.Tests, Slicer.Tests (both ref api) | App drift ✓  |             |                                    |
-| `infra` (`src/infra/**`, `src/config/**`)     |               | ✓                 | Api.Tests, Slicer.Tests               |                |             | Both test projects ref infra.      |
-| `backends` (`src/backends/**`)                |               | ✓                 | Api.Tests only                        |                |             | Slicer.Tests does not ref backends.|
-| `slicer` (`src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**`) |    | ✓ | Api.Tests, Slicer.Tests | Slicer drift ✓ |             |                                    |
-| `migrations_app` (`src/migrations/Farm.Migrations.*/**`)             |    | ✓ | Api.Tests, Slicer.Tests | App drift ✓  |             |                                    |
-| `migrations_slcr` (`src/migrations/Farm.Slicer.Migrations.*/**`)     |    | ✓ | Slicer.Tests            | Slicer drift ✓ |             |                                    |
-| `tests_api` (`src/tests/Farm.Web.Api.Tests/**`)      |               | ✓                 | Api.Tests             |                |             |                                    |
-| `tests_slicer` (`src/tests/Farm.Slicer.Module.Tests/**`) |            | ✓                 | Slicer.Tests          |                |             |                                    |
-| `tests_other` (`src/tests/Farm.Web.IntegrationTests/**`, `src/tests/Farm.OrcaSlicer.Worker.Tests/**`) |    | ✓ | full matrix ✓        | full ✓          | ✓          | These test projects are not in the current sln; treat as full-safe rather than silently drop. |
-| `orca_worker` (`src/orcaslicer-worker/**`), `discovery` (`src/discovery/**`), `settings` (`src/settings/**`) |    | ✓ | full ✓                | full ✓          | ✓          | Foundational or non-sln; full-safe. |
-| `shared_config` (Directory.Build.*, .editorconfig, farm-web.sln, global.json, NuGet.Config, Directory.Packages.props) |   | ✓ | full ✓                | full ✓          | ✓          | Config/graph inputs affect everything. |
-| `ci_selector` (workflows/.githooks/scripts/ci changes)               |    | ✓                 | full ✓                | full ✓          | ✓          | CI/selector edits verify themselves against everything. |
-| `unknown_src` (`src/**` didn't match any bucket)                     |    | ✓                 | full ✓                | full ✓          | ✓          | Fail-safe.                          |
-| `docs_only`, `mobile`, `tools_only`                                  |    |                   |                       |                 |             | Nothing changes downstream.         |
+| Bucket and exact path selector | Frontend | .NET build | .NET tests | Migration drift | Full-safe |
+| --- | :---: | :---: | --- | --- | :---: |
+| `frontend`: `src/Web/**` | ✓ | | | | |
+| `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `AppPg`, `AppSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `AppPg`, `AppSqlServer` | |
+| `backend_plugin`: `src/backends/**` | | ✓ | `Farm.Web.Api.Tests` | | |
+| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `SlicerPg`, `SlicerSqlServer` | |
+| `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests` | `AppPg`, `AppSqlServer` | |
+| `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Slicer.Module.Tests` | `SlicerPg`, `SlicerSqlServer` | |
+| `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests` | | |
+| `tests_slicer`: `src/tests/Farm.Slicer.Module.Tests/**` | | ✓ | `Farm.Slicer.Module.Tests` | | |
+| `tests_other`: every other `src/tests/**` path | ✓ | ✓ | all | all | ✓ |
+| `orca_worker`: `src/orcaslicer-worker/**` | ✓ | ✓ | all | all | ✓ |
+| `discovery`: `src/discovery/**`, `src/printer-discovery/**` | ✓ | ✓ | all | all | ✓ |
+| `settings`: `src/settings/**` | ✓ | ✓ | all | all | ✓ |
+| `shared_config`: `global.json`, any `*.sln`, `Directory.Build.*`, `Directory.Packages.props`, `NuGet.Config`, `src/.editorconfig` | ✓ | ✓ | all | all | ✓ |
+| `ci_selector`: `.github/workflows/**`, `scripts/ci/**`, `.githooks/**`, `.devcontainer/**` | ✓ | ✓ | all | all | ✓ |
+| `unknown_src`: every other `src/**` path | ✓ | ✓ | all | all | ✓ |
+| `tools`: `src/tools/**` | | ✓ | | | |
+| `docs`: `docs/**`, root `*.md`, `LICENSE*`, root `.editorconfig`, `.gitignore`, `.gitattributes` | | | | | |
+| `mobile`: `mobile/**` | | | | | |
+| `unclassified`: every other repository path | | | | | |
+
+`ci-tools` is unconditional and therefore runs for every bucket, including
+`docs`, `mobile`, and `unclassified`.
 
 ### Full-safe (`full_matrix=1`) triggers
 
@@ -86,6 +95,10 @@ classify.
 - Caller sets `FORCE_FULL_SAFE=1`.
 - NUL-parse failure of the `_Z` file.
 - Git-quoted path detected in newline-form input (non-ASCII name → forces full-safe).
+
+The workflow intentionally has no `push.paths` filter. Every push to `main` or
+`development` dispatches CI, and the selector forces full-safe before reading
+the changed-path set.
 
 ### Exclusions
 
@@ -125,7 +138,7 @@ where `<key>` is:
 
 ```
 sha256(
-  "pre-push-format-v1" ||
+  "pre-push-format-v2" ||
   sha256(hook_script) ||
   <tree_sha> ||
   <dotnet --version> ||
@@ -158,9 +171,8 @@ This skips all local pre-push hooks (including this one) exactly once, per
 Git's design. Use it in genuine emergencies only.
 
 **Local hooks are not server-enforceable.** Anyone can bypass or delete their
-copy. The authoritative gate is the required CI check on the pull request.
-Branch protection on `main`/`development` — not the hook — is what actually
-enforces formatting for merges.
+copy. CI no longer reruns `dotnet format`, so branch protection enforces the
+build/test/drift checks but does not independently enforce formatting.
 
 ## Install the hooks
 
@@ -181,7 +193,7 @@ Baselines are approximate and depend on runner load, warm caches, and PR size.
 | Scenario                                             | Before (single job)          | After (this workflow)          |
 | ---------------------------------------------------- | ---------------------------- | ------------------------------ |
 | React-only PR                                        | ~20-30 min (built everything) | ~2-3 min (frontend only)       |
-| Docs-only PR                                         | ~20-30 min                    | ~30 s (select + summary only)  |
+| Docs-only PR                                         | ~20-30 min                    | ~1-2 min (select + ci-tools + summary) |
 | Single-project .NET change (api or slicer only)      | ~20-30 min                    | ~8-12 min (build + 1 test leg) |
 | Two-project .NET change (both test projects)         | ~20-30 min                    | ~10-14 min (build + 2 test legs parallel) |
 | Shared config / selector / unknown-path change       | ~20-30 min                    | ~20-30 min (full-safe)         |

@@ -4,20 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main, development]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '*.sln'
-      - 'global.json'
-      - 'Directory.Build.props'
-      - 'Directory.Build.targets'
-      - 'NuGet.config'
-      - 'src/Web/ReactApp/package.json'
-      - 'src/Web/ReactApp/package-lock.json'
-      - '.github/workflows/ci.yml'
-      - 'scripts/ci/**'
-      - '.githooks/**'
-      - '.devcontainer/**'
+    # No path filter: every trusted-branch push must dispatch, then the selector
+    # forces the full-safe matrix before considering the changed-path set.
   pull_request:
     types: [opened, synchronize, reopened]
     # No `paths:` filter here — every PR must produce the required CI check.

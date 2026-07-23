@@ -156,13 +156,14 @@ teardown_repo() {
 # /mingw64/bin, /cmd, etc.) is still reachable. `env -i` is only used for the
 # "missing dotnet" cases, which are gated behind $HERMETIC_NO_DOTNET_BIN and
 # therefore skipped on hosts where hermeticity can't be established.
-run_hook() {
-  local with_dotnet="$1"
-  local stdin_list="$2"
+run_hook_in_repo() {
+  local repo="$1"
+  local with_dotnet="$2"
+  local stdin_list="$3"
   local path
   if [[ "$with_dotnet" == "yes" ]]; then
     path="$PATH_BIN:$PATH"
-    ( cd "$REPO"
+    ( cd "$repo"
       printf '%s' "$stdin_list" \
         | PATH="$path" \
             FAKE_LOG="$FAKE_LOG" \
@@ -188,7 +189,7 @@ run_hook() {
     echo "FATAL per-run: git=$ck1 dotnet=$ck2" >&2
     return 99
   fi
-  ( cd "$REPO"
+  ( cd "$repo"
     printf '%s' "$stdin_list" \
       | env -i \
           PATH="$path" \
@@ -196,6 +197,10 @@ run_hook() {
           FAKE_LOG="$FAKE_LOG" \
           bash .githooks/pre-push
   )
+}
+
+run_hook() {
+  run_hook_in_repo "$REPO" "$1" "$2"
 }
 
 # assert_rc <label> <actual> <expected>
@@ -206,6 +211,21 @@ assert_rc() {
     return 1
   fi
   return 0
+}
+
+assert_eq() {
+  local label="$1" actual="$2" expected="$3"
+  if [[ "$actual" != "$expected" ]]; then
+    printf '  MISMATCH %s: expected %q got %q\n' "$label" "$expected" "$actual" >&2
+    return 1
+  fi
+  return 0
+}
+
+resolve_common_dir_for_test() {
+  local common_dir="$1" toplevel="$2"
+  bash -c 'source "$1"; resolve_git_common_dir_path "$2" "$3"' \
+    _ "$HOOK" "$common_dir" "$toplevel"
 }
 
 # make_commit <path> <content>
@@ -390,6 +410,79 @@ case_multi_ref_dedup() {
   verify_count="$(grep -Ec '^format .*--verify-no-changes' "$FAKE_LOG" || true)"
   if [[ "$verify_count" != "1" ]]; then
     printf '  expected 1 verify invocation for dedup, got %s\n' "$verify_count" >&2
+    return 1
+  fi
+}
+
+case_relative_common_dir_resolved_from_toplevel() {
+  local actual
+  actual="$(resolve_common_dir_for_test ".git" "/worktrees/revision")" || return 1
+  assert_eq "relative common dir" "$actual" "/worktrees/revision/.git"
+}
+
+case_posix_absolute_common_dir_preserved() {
+  local actual
+  actual="$(resolve_common_dir_for_test "/repos/main/.git" "/worktrees/revision")" || return 1
+  assert_eq "POSIX absolute common dir" "$actual" "/repos/main/.git"
+}
+
+case_windows_absolute_common_dir_preserved() {
+  local actual
+  actual="$(resolve_common_dir_for_test "D:/repos/main/.git" "D:/worktrees/revision")" || return 1
+  assert_eq "Windows absolute common dir" "$actual" "D:/repos/main/.git" || return 1
+
+  actual="$(resolve_common_dir_for_test 'D:\repos\main\.git' 'D:\worktrees\revision')" || return 1
+  assert_eq "Windows native common dir" "$actual" "D:/repos/main/.git"
+}
+
+case_linked_worktree_uses_real_common_cache() {
+  local worktree
+  worktree="$(mktemp -d)"
+  rmdir "$worktree"
+
+  local result=0
+  if ! git -C "$REPO" worktree add -q -b linked-cache-test "$worktree"; then
+    printf '  failed to create linked worktree\n' >&2
+    return 1
+  fi
+
+  local sha0 sha1
+  sha0="$(git -C "$REPO" rev-parse HEAD)"
+  (
+    cd "$worktree"
+    printf 'class Linked { }\n' > src/api/Program.cs
+    git add src/api/Program.cs
+    git commit -q -m "linked worktree change"
+  ) || result=1
+  sha1="$(git -C "$worktree" rev-parse HEAD)" || result=1
+
+  local rc=0
+  if (( result == 0 )); then
+    FAKE_FORMAT_RC=0 run_hook_in_repo "$worktree" yes \
+      "$(push_line "$sha1" "$sha0")" >/dev/null 2>&1 || rc=$?
+    assert_rc "linked worktree hook" "$rc" "0" || result=1
+  fi
+
+  local expected_common marker_count
+  expected_common="$(cd "$REPO/.git" && pwd -P)" || result=1
+  marker_count="0"
+  if [[ -d "$expected_common/pre-push-fmt-cache" ]]; then
+    marker_count="$(find "$expected_common/pre-push-fmt-cache" -type f | wc -l | tr -d ' ')"
+  fi
+  if [[ "$marker_count" == "0" ]]; then
+    printf '  linked worktree did not stamp the real common-dir cache: %s\n' \
+      "$expected_common/pre-push-fmt-cache" >&2
+    result=1
+  fi
+
+  git -C "$REPO" worktree remove --force "$worktree" >/dev/null 2>&1 || result=1
+  rm -rf -- "$worktree"
+  return "$result"
+}
+
+case_hook_uses_bash32_compatible_dedup() {
+  if grep -Eq '(^|[[:space:]])(local|declare)[[:space:]]+-A([[:space:]]|$)' "$HOOK"; then
+    printf '  hook must not use Bash 4 associative arrays\n' >&2
     return 1
   fi
 }
@@ -594,6 +687,11 @@ TESTS=(
   case_delete_ref_skipped
   case_new_branch_verifies
   case_multi_ref_dedup
+  case_relative_common_dir_resolved_from_toplevel
+  case_posix_absolute_common_dir_preserved
+  case_windows_absolute_common_dir_preserved
+  case_linked_worktree_uses_real_common_cache
+  case_hook_uses_bash32_compatible_dedup
   case_non_dotnet_change_skipped
   case_missing_sln_fails_closed
   case_empty_dotnet_version_rejected

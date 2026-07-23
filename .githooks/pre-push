@@ -38,7 +38,7 @@ set -uo pipefail
 # Gate version — increment when the hook logic changes materially so old
 # cache entries no longer match new logic. Keep in lockstep with tests.
 # ---------------------------------------------------------------------------
-readonly GATE_VERSION="pre-push-format-v1"
+readonly GATE_VERSION="pre-push-format-v2"
 
 # ---------------------------------------------------------------------------
 # Colored helpers (only when stderr is a terminal).
@@ -74,6 +74,44 @@ is_hex64() {
   [[ "$1" =~ ^[0-9a-f]{64}$ ]]
 }
 
+# Resolve git-common-dir without treating Git for Windows drive-letter or UNC
+# paths as relative. The result is lexical; the caller canonicalizes it by
+# changing into the already-existing common directory.
+resolve_git_common_dir_path() {
+  local common_dir="$1"
+  local toplevel="$2"
+
+  # Git normally emits forward slashes on Windows, but accept native
+  # backslashes too so wrappers and older Git builds cannot corrupt the path.
+  case "$common_dir" in
+    [A-Za-z]:\\*|\\\\*)
+      common_dir="${common_dir//\\//}"
+      ;;
+  esac
+  toplevel="${toplevel//\\//}"
+
+  case "$common_dir" in
+    /*|[A-Za-z]:/*)
+      printf '%s' "$common_dir"
+      ;;
+    *)
+      printf '%s/%s' "${toplevel%/}" "${common_dir#./}"
+      ;;
+  esac
+}
+
+array_contains() {
+  local needle="$1"
+  shift
+  local value
+  for value in "$@"; do
+    if [[ "$value" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Are any of the changed paths .NET-relevant? We enforce format on:
 #   - src/**/*.cs
@@ -82,7 +120,7 @@ is_hex64() {
 #   - src/farm-web.sln
 #   - src/.editorconfig
 # We do NOT enforce format on non-src *.cs (there shouldn't be any) or on
-# mobile/*.swift (Parker is forbidden from touching mobile/).
+# mobile/*.swift (the mobile tree is outside .NET formatting scope).
 #
 # Uses `git diff -z --no-renames` and Bash read -r -d '' for NUL safety.
 # Renames are decomposed into old-name delete + new-name add so both sides
@@ -280,16 +318,21 @@ main() {
     fail "Not inside a git repository."
     exit 1
   }
-  # `git rev-parse --git-common-dir` may return a relative path (e.g. `.git`).
-  # Convert to absolute by cd'ing to $(git rev-parse --show-toplevel) first.
+  # `git rev-parse --git-common-dir` may return `.git`, a POSIX absolute path,
+  # or a drive-letter path such as `D:/repo/.git` in Git for Windows.
   local toplevel
   toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || {
     fail "Not inside a git worktree."
     exit 1
   }
-  if [[ "$common_dir" != /* ]]; then
-    common_dir="$toplevel/$common_dir"
-  fi
+  common_dir="$(resolve_git_common_dir_path "$common_dir" "$toplevel")" || {
+    fail "Cannot resolve git common dir."
+    exit 1
+  }
+  common_dir="$(cd "$common_dir" 2>/dev/null && pwd -P)" || {
+    fail "Cannot access git common dir $common_dir."
+    exit 1
+  }
   CACHE_DIR="$common_dir/pre-push-fmt-cache"
   mkdir -p "$CACHE_DIR" || {
     fail "Cannot create cache dir $CACHE_DIR."
@@ -383,11 +426,12 @@ main() {
     exit 1
   fi
 
-  # Dedup tips (multiple refs may push the same commit).
-  local -A seen=() ; local -a uniq=() ; local t
+  # Dedup tips (multiple refs may push the same commit). Use a linear indexed
+  # array scan because macOS ships Bash 3.2 without associative arrays.
+  local -a uniq=()
+  local t
   for t in "${tips[@]}"; do
-    if [[ -z "${seen[$t]:-}" ]]; then
-      seen[$t]=1
+    if ! array_contains "$t" "${uniq[@]}"; then
       uniq+=("$t")
     fi
   done
@@ -407,4 +451,6 @@ main() {
   exit "$rc"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

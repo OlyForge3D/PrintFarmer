@@ -72,4 +72,4 @@ check_tool node       "install Node.js 24+ from https://nodejs.org"
 check_tool dotnet     "install .NET 10 SDK from https://dot.net"
 
 echo ""
-info "Done — pre-commit hook is active for this repo."
+info "Done — pre-commit and pre-push hooks are active for this repo."

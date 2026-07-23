@@ -48,7 +48,7 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.1"
 
 # ---------------------------------------------------------------------------
 # Test projects that live in farm-web.sln. Keep this list in lockstep with
@@ -204,20 +204,21 @@ load_changed_files() {
 # the affected-tests table so callers can print human-readable reasons.
 #
 # Tokens (order matters only for readability):
-#   shared_config   — global.json, *.sln, Directory.Build.*, NuGet.config
+#   shared_config   — global.json, *.sln, Directory.Build.*,
+#                     Directory.Packages.props, NuGet.Config
 #   ci_selector     — .github/workflows/**, scripts/ci/**, .githooks/**,
 #                     .devcontainer/**
 #   docs            — docs/**, *.md, LICENSE, .editorconfig outside src/
 #   frontend        — src/Web/**
 #   api             — src/api/**
-#   infra           — src/infra/**
+#   infra           — src/infra/** (conservatively includes App model drift)
 #   backend_plugin  — src/backends/**
 #   slicer          — src/slicer/**, src/Slicers/**, src/worker-shared/**
 #   orca_worker     — src/orcaslicer-worker/**
 #   discovery       — src/discovery/**, src/printer-discovery/**
 #   settings        — src/settings/**
-#   migrations_app  — src/migrations/Farm.Migrations.**
-#   migrations_slcr — src/migrations/Farm.Slicer.Migrations.**
+#   migrations_app  — src/migrations/Farm.Migrations.*/**
+#   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
 #   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
 #   tests_other     — any other src/tests/**
@@ -234,9 +235,11 @@ classify_path() {
   # data-only.
   case "$p" in
     # Shared configuration that affects every project.
-    global.json|NuGet.config|nuget.config|Directory.Build.props|Directory.Build.targets)
+    global.json|NuGet.Config|NuGet.config|nuget.config|Directory.Build.props|Directory.Build.targets|Directory.Packages.props)
       printf 'shared_config' ; return ;;
-    src/farm-web.sln|src/Directory.Build.props|src/Directory.Build.targets|src/.editorconfig)
+    */Directory.Build.props|*/Directory.Build.targets|*/Directory.Packages.props)
+      printf 'shared_config' ; return ;;
+    src/farm-web.sln|src/.editorconfig)
       printf 'shared_config' ; return ;;
     *.sln)
       printf 'shared_config' ; return ;;
@@ -251,8 +254,7 @@ classify_path() {
     .devcontainer/*)
       printf 'ci_selector' ; return ;;
 
-    # iOS/macOS surface — Parker never touches this and never triggers .NET
-    # work from it.
+    # iOS/macOS surface — does not trigger .NET work.
     mobile/*)
       printf 'mobile' ; return ;;
 
@@ -566,6 +568,13 @@ main() {
     mig_names+=("AppPg" "AppSqlServer")
     want_mig_drift="true"
   fi
+  # AppDbContext, domain entities, and IEntityTypeConfiguration classes all
+  # live under src/infra. Conservatively run both App providers for any infra
+  # change rather than risk missing model drift when those files move.
+  if (( has_infra )); then
+    mig_names+=("AppPg" "AppSqlServer")
+    want_mig_drift="true"
+  fi
   # Slicer changes also imply Slicer migration drift (slicer owns SlicerDbContext).
   if (( has_slicer )); then
     mig_names+=("SlicerPg" "SlicerSqlServer")
@@ -610,20 +619,35 @@ main() {
     reason="scoped: $reason"
   fi
 
-  # Dedup test/mig names (deterministic order preserved via associative array).
-  local -A seen=() ; local out=() ; local nm
+  # Dedup test/mig names with indexed arrays so the selector remains runnable
+  # under macOS's Bash 3.2 as well as CI's newer Bash.
+  local -a out=()
+  local nm existing duplicate
   for nm in "${test_names[@]}"; do
-    if [[ -z "${seen[$nm]:-}" ]]; then
-      seen[$nm]=1
+    duplicate=0
+    for existing in "${out[@]}"; do
+      if [[ "$existing" == "$nm" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if (( duplicate == 0 )); then
       out+=("$nm")
     fi
   done
   test_names=("${out[@]}")
 
-  local -A seen2=() ; local out2=() ; local nm2
+  local -a out2=()
+  local nm2 existing2
   for nm2 in "${mig_names[@]}"; do
-    if [[ -z "${seen2[$nm2]:-}" ]]; then
-      seen2[$nm2]=1
+    duplicate=0
+    for existing2 in "${out2[@]}"; do
+      if [[ "$existing2" == "$nm2" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if (( duplicate == 0 )); then
       out2+=("$nm2")
     fi
   done

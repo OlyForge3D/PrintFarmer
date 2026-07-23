@@ -88,6 +88,18 @@ assert_not_contains() {
   return 0
 }
 
+# assert_app_migration_drift <output path>
+assert_app_migration_drift() {
+  local out="$1"
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "true" || return 1
+  local mig
+  mig="$(get_output "$out" mig_matrix)"
+  assert_contains "mig app pg" "$mig" '"name":"AppPg"' || return 1
+  assert_contains "mig app sql" "$mig" '"name":"AppSqlServer"' || return 1
+  assert_not_contains "no slicer mig" "$mig" '"name":"SlicerPg"' || return 1
+  assert_not_contains "no slicer sql mig" "$mig" '"name":"SlicerSqlServer"' || return 1
+}
+
 # run_case <name> <function>
 run_case() {
   local name="$1" fn="$2"
@@ -160,7 +172,7 @@ case_api_change() {
 
 case_infra_change() {
   local out="$1"
-  CHANGED_FILES="src/infra/PrintersRepository.cs"
+  CHANGED_FILES="src/infra/Data/AppDbContext.cs"
   EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
@@ -168,6 +180,25 @@ case_infra_change() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_app_migration_drift "$out" || return 1
+}
+
+case_infra_entity_change_selects_app_drift() {
+  local out="$1"
+  CHANGED_FILES="src/infra/Domain/Printer.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_app_migration_drift "$out"
+}
+
+case_infra_configuration_change_selects_app_drift() {
+  local out="$1"
+  CHANGED_FILES="src/infra/Data/Configurations/PrinterConfiguration.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_app_migration_drift "$out"
 }
 
 case_backend_plugin_change() {
@@ -297,6 +328,15 @@ case_shared_config_change() {
   assert_contains "reason shared" "$reason" "shared" || return 1
 }
 
+case_shared_package_config_change() {
+  local out="$1"
+  CHANGED_FILES="Directory.Packages.props"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+}
+
 case_ci_workflow_change() {
   local out="$1"
   CHANGED_FILES=".github/workflows/ci.yml"
@@ -365,6 +405,28 @@ case_push_to_main_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+}
+
+case_workflow_trusted_pushes_unfiltered() {
+  local workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  extract_event_block() {
+    local event="$1"
+    awk -v marker="  ${event}:" '
+      $0 == marker { inside = 1; next }
+      inside && (/^[^ ]/ || /^  [A-Za-z_][A-Za-z0-9_-]*:/) { exit }
+      inside { print }
+    ' "$workflow"
+  }
+
+  local push_block pull_block
+  push_block="$(extract_event_block push)"
+  pull_block="$(extract_event_block pull_request)"
+  assert_contains "push branches" "$push_block" "branches: [main, development]" || return 1
+  if printf '%s\n%s\n' "$push_block" "$pull_block" \
+      | grep -Eq '^[[:space:]]+(paths|paths-ignore):'; then
+    printf '  push/pull_request workflow events must not define path filters\n' >&2
+    return 1
+  fi
 }
 
 case_workflow_dispatch_full_safe() {
@@ -530,6 +592,13 @@ case_mixed_react_and_dotnet() {
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
 }
 
+case_selector_uses_bash32_compatible_dedup() {
+  if grep -Eq '(^|[[:space:]])(local|declare)[[:space:]]+-A([[:space:]]|$)' "$SELECTOR"; then
+    printf '  selector must not use Bash 4 associative arrays\n' >&2
+    return 1
+  fi
+}
+
 # =============================================================================
 # Runner
 # =============================================================================
@@ -539,6 +608,8 @@ TESTS=(
   case_docs_only
   case_api_change
   case_infra_change
+  case_infra_entity_change_selects_app_drift
+  case_infra_configuration_change_selects_app_drift
   case_backend_plugin_change
   case_slicer_change
   case_orca_worker_change
@@ -549,6 +620,7 @@ TESTS=(
   case_tests_other_full_safe
   case_unknown_src_path
   case_shared_config_change
+  case_shared_package_config_change
   case_ci_workflow_change
   case_hook_file_change
   case_ci_script_change
@@ -556,6 +628,7 @@ TESTS=(
   case_mobile_change_no_dotnet
   case_push_to_development_full_safe
   case_push_to_main_full_safe
+  case_workflow_trusted_pushes_unfiltered
   case_workflow_dispatch_full_safe
   case_force_full_safe_from_caller
   case_empty_changes
@@ -569,6 +642,7 @@ TESTS=(
   case_discovery_full_safe
   case_settings_full_safe
   case_mixed_react_and_dotnet
+  case_selector_uses_bash32_compatible_dedup
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'
