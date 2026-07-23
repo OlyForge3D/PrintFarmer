@@ -233,7 +233,7 @@ public class UserApiKeysController : ControllerBase
             return true;
         }
 
-        return User.IsInRole("Admin") || User.IsInRole("Administrator");
+        return User.IsInRole("farm_admin");
     }
 
     /// <summary>
