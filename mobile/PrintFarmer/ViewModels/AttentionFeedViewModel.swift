@@ -183,49 +183,53 @@ struct AttentionLifecycleToken: Equatable, Sendable {
 /// The class is `Sendable` so it can be captured by closures that
 /// straddle the signalR delivery queue and MainActor. The lock is
 /// sufficient — reads and writes are all short scalar copies.
-final class EventSequenceBox: @unchecked Sendable {
+final class AuthorityEventSequencer: @unchecked Sendable {
     private let lock = NSLock()
-    private var _value: UInt64 = 0
+    private var authority: UInt64
+    private var sequence: UInt64 = 0
+    private var itemSequences: [String: UInt64] = [:]
 
-    /// Latest issued sequence, or 0 if none have been issued. Read
-    /// on MainActor at refresh start to snapshot the "cover watermark".
-    var currentValue: UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        return _value
+    init(authority: UInt64) {
+        self.authority = authority
     }
 
-    /// Atomically increment and return the new sequence. Called on the
-    /// signalR delivery queue when an `attentionchanged` event
-    /// arrives, giving every event a unique strictly-increasing id.
-    func issueNext() -> UInt64 {
+    func installNextAuthority() -> UInt64 {
         lock.lock()
-        defer { lock.unlock() }
-        _value &+= 1
-        return _value
-    }
-}
-
-final class ItemEventSequenceBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var values: [String: UInt64] = [:]
-
-    func record(itemID: String, sequence: UInt64) {
-        lock.lock()
-        values[itemID] = max(values[itemID] ?? 0, sequence)
+        authority &+= 1
+        sequence = 0
+        itemSequences = [:]
+        let installedAuthority = authority
         lock.unlock()
+        return installedAuthority
     }
 
-    func currentValue(for itemID: String) -> UInt64 {
+    func recordIfCurrent(
+        authority: UInt64,
+        itemID: String
+    ) -> UInt64? {
         lock.lock()
         defer { lock.unlock() }
-        return values[itemID] ?? 0
+        guard self.authority == authority else { return nil }
+        sequence &+= 1
+        itemSequences[itemID] = max(itemSequences[itemID] ?? 0, sequence)
+        return sequence
     }
 
-    func reset() {
+    func currentSequence(authority: UInt64) -> UInt64? {
         lock.lock()
-        values = [:]
-        lock.unlock()
+        defer { lock.unlock() }
+        guard self.authority == authority else { return nil }
+        return sequence
+    }
+
+    func currentSequence(
+        authority: UInt64,
+        itemID: String
+    ) -> UInt64? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.authority == authority else { return nil }
+        return itemSequences[itemID] ?? 0
     }
 }
 
@@ -353,8 +357,8 @@ final class AttentionFeedViewModel {
     /// the current sequence at request-start as its "cover watermark"
     /// — the refresh covers exactly the events whose sequence is ≤
     /// that watermark.
-    @ObservationIgnored private let eventSequenceBox = EventSequenceBox()
-    @ObservationIgnored private let itemEventSequenceBox = ItemEventSequenceBox()
+    @ObservationIgnored private let eventSequencer =
+        AuthorityEventSequencer(authority: 0)
     /// The highest event sequence that has been covered by an APPLIED
     /// successful canonical refresh. Advanced only on `applySnapshot`
     /// success; failures and disabled outcomes do NOT advance it, so
@@ -493,15 +497,14 @@ final class AttentionFeedViewModel {
 
         let capturedEpoch = authorityEpoch
         let enqueue = callbackEnqueuer
-        let sequenceBox = eventSequenceBox
-        let itemSequenceBox = itemEventSequenceBox
+        let sequencer = eventSequencer
         attentionSubscription = signalRService.onAttentionChanged { [weak self] event in
-            // Issue the event's monotonic sequence at signalR delivery
-            // time. This gives a strict ordering between events and
-            // subsequent refresh-start "cover watermarks", regardless
-            // of when the callback drains on MainActor.
-            let eventSeq = sequenceBox.issueNext()
-            itemSequenceBox.record(itemID: event.itemId, sequence: eventSeq)
+            guard let eventSeq = sequencer.recordIfCurrent(
+                authority: capturedEpoch,
+                itemID: event.itemId
+            ) else {
+                return
+            }
             enqueue { [weak self] in
                 guard let self,
                       self.matchesAuthorityIgnoringActive(
@@ -857,7 +860,8 @@ final class AttentionFeedViewModel {
         // whose sequence is ≤ this watermark. Events issued after this
         // point are NOT covered — the completion path will schedule a
         // follow-up refresh for any such pending coverage.
-        let startCoverSnapshot = eventSequenceBox.currentValue
+        let startCoverSnapshot =
+            eventSequencer.currentSequence(authority: authorityEpoch) ?? 0
 
         // Authority-scoped ownership: register this refresh in the
         // current authority's token set. Cross-authority completions
@@ -1302,7 +1306,10 @@ final class AttentionFeedViewModel {
                 requiredAfterRefreshOrdinal: refreshRequestOrdinal,
                 requiredEventSequence: max(
                     deferredMutationInvalidationSequences[fingerprint] ?? 0,
-                    itemEventSequenceBox.currentValue(for: itemID)
+                    eventSequencer.currentSequence(
+                        authority: authorityEpoch,
+                        itemID: itemID
+                    ) ?? 0
                 ),
                 awaitingPaginationRefreshOrdinal: nil,
                 message: nil
@@ -1687,7 +1694,10 @@ final class AttentionFeedViewModel {
             .map { requirement in
                 max(
                     requirement.requiredEventSequence,
-                    itemEventSequenceBox.currentValue(for: requirement.itemID)
+                    eventSequencer.currentSequence(
+                        authority: authorityEpoch,
+                        itemID: requirement.itemID
+                    ) ?? 0
                 )
             }
             .max()
@@ -1745,7 +1755,10 @@ final class AttentionFeedViewModel {
 
             requirement.requiredEventSequence = max(
                 requirement.requiredEventSequence,
-                itemEventSequenceBox.currentValue(for: fingerprint.itemID)
+                eventSequencer.currentSequence(
+                    authority: authorityEpoch,
+                    itemID: fingerprint.itemID
+                ) ?? 0
             )
             requirement.message = nil
 
@@ -1784,7 +1797,10 @@ final class AttentionFeedViewModel {
             }
             requirement.requiredEventSequence = max(
                 requirement.requiredEventSequence,
-                itemEventSequenceBox.currentValue(for: fingerprint.itemID)
+                eventSequencer.currentSequence(
+                    authority: authorityEpoch,
+                    itemID: fingerprint.itemID
+                ) ?? 0
             )
             requirement.awaitingPaginationRefreshOrdinal = nil
             requirement.message = message
@@ -1808,7 +1824,10 @@ final class AttentionFeedViewModel {
 
             requirement.requiredEventSequence = max(
                 requirement.requiredEventSequence,
-                itemEventSequenceBox.currentValue(for: fingerprint.itemID)
+                eventSequencer.currentSequence(
+                    authority: authorityEpoch,
+                    itemID: fingerprint.itemID
+                ) ?? 0
             )
             guard coverSequence >= requirement.requiredEventSequence else {
                 requirement.awaitingPaginationRefreshOrdinal = nil
@@ -1861,6 +1880,10 @@ final class AttentionFeedViewModel {
         for fingerprint in ownedFingerprints {
             if let liveFingerprint = liveFingerprintsByID[fingerprint.itemID],
                liveFingerprint != fingerprint {
+                revokeActionAuthority(for: fingerprint)
+            } else if liveFingerprintsByID[fingerprint.itemID] == nil,
+                      !hasMorePages,
+                      mutationRefreshRequirements[fingerprint] == nil {
                 revokeActionAuthority(for: fingerprint)
             }
         }
@@ -1925,7 +1948,6 @@ final class AttentionFeedViewModel {
         refreshRequestOrdinal = 0
         currentSnapshotRefreshOrdinal = nil
         currentSnapshotCoverSequence = nil
-        itemEventSequenceBox.reset()
         invalidateMediaState(clearTerminalStates: clearTerminalMedia)
     }
 
@@ -1956,8 +1978,8 @@ final class AttentionFeedViewModel {
     }
 
     private func invalidateAuthority(resetState: Bool) {
+        authorityEpoch = eventSequencer.installNextAuthority()
         resetItemScopedState(clearTerminalMedia: true)
-        authorityEpoch &+= 1
         activationEpoch &+= 1
         lifecycleToken &+= 1
         loadStamp &+= 1

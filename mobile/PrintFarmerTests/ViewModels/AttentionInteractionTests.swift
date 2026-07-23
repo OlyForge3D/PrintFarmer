@@ -99,8 +99,74 @@ final class AttentionInteractionTests: XCTestCase {
         _ = try? await entered.wait()
         task.cancel()
 
-        let reachedTarget = await task.value
-        XCTAssertFalse(reachedTarget)
+        let result = await task.value
+        XCTAssertEqual(result, .cancelled)
+        XCTAssertEqual(barrier.pendingWaiterCount, 0)
+        XCTAssertEqual(barrier.pendingCompletionCount, 0)
+    }
+
+    func testCountBarrierReturnsReached() async {
+        let barrier = AttentionCountBarrier()
+        defer { barrier.close() }
+        let ticket = barrier.register(target: 2)
+        barrier.advance(to: 2)
+
+        let result = await barrier.wait(for: ticket)
+        XCTAssertEqual(result, .reached)
+        XCTAssertEqual(barrier.pendingWaiterCount, 0)
+        XCTAssertEqual(barrier.pendingCompletionCount, 0)
+    }
+
+    func testCountBarrierReturnsProducerFinishedWithoutCount() async {
+        let barrier = AttentionCountBarrier()
+        defer { barrier.close() }
+        let ticket = barrier.register(target: 2)
+        barrier.advance(to: 1)
+        barrier.producerFinished(ticket)
+
+        let result = await barrier.wait(for: ticket)
+        XCTAssertEqual(result, .producerFinishedWithoutCount)
+        XCTAssertEqual(barrier.pendingWaiterCount, 0)
+        XCTAssertEqual(barrier.pendingCompletionCount, 0)
+    }
+
+    func testCountBarrierExplicitCancelAndCloseReleaseTickets() async {
+        let barrier = AttentionCountBarrier()
+        let cancelledTicket = barrier.register(target: 1)
+        let closedTicket = barrier.register(target: 2)
+        barrier.cancel(cancelledTicket)
+        barrier.close()
+
+        let cancelled = await barrier.wait(for: cancelledTicket)
+        let closed = await barrier.wait(for: closedTicket)
+        XCTAssertEqual(cancelled, .cancelled)
+        XCTAssertEqual(closed, .closed)
+        XCTAssertEqual(barrier.pendingWaiterCount, 0)
+        XCTAssertEqual(barrier.pendingCompletionCount, 0)
+    }
+
+    func testCountBarrierWatchdogTimesOutAndCleansWaiter() async {
+        let barrier = AttentionCountBarrier()
+        defer { barrier.close() }
+        let ticket = barrier.register(target: 1)
+
+        let result = await barrier.wait(
+            for: ticket,
+            timeout: .milliseconds(10)
+        )
+        XCTAssertEqual(result, .timedOut)
+        XCTAssertEqual(barrier.pendingWaiterCount, 0)
+        XCTAssertEqual(barrier.pendingCompletionCount, 0)
+    }
+
+    func testScriptedServiceLoadTicketPropagatesProducerFinished() async {
+        let service = ScriptedAttentionService()
+        let ticket = await service.registerLoadCount(1)
+        await service.finishLoadProducer(ticket)
+
+        let result = await service.waitForLoadCount(ticket)
+        XCTAssertEqual(result, .producerFinishedWithoutCount)
+        await service.closeWaiters()
     }
 
     func testActionDispatchBlocksDuplicateAndRefreshesExactlyOnce() async {
@@ -687,6 +753,110 @@ final class AttentionInteractionTests: XCTestCase {
         XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
     }
 
+    func testStaleAuthorityEventsCannotAdvanceNewAuthoritySequences() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:authority-sequence",
+            printerID: printerA,
+            actions: [action]
+        )
+        let callbackQueue = AttentionCallbackQueue()
+        let oldSignalR = MockSignalRService()
+        let newSignalR = MockSignalRService()
+        let oldService = ScriptedAttentionService()
+        let actionRefreshGate = AttentionResultGate<AttentionFeed>()
+        defer { actionRefreshGate.cancel() }
+        let newService = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .gated(actionRefreshGate),
+                .value(makeAttentionFeed()),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = AttentionFeedViewModel(
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(
+            attentionService: oldService,
+            signalRService: oldSignalR,
+            attentionEnabled: true
+        )
+        XCTAssertEqual(oldSignalR.capturedAttentionHandlerCount, 1)
+
+        let staleEvent = AttentionChangedEvent(
+            itemId: item.id,
+            changeKind: .updated,
+            occurredAt: fixedNow
+        )
+        oldSignalR.simulateCapturedAttentionChanged(at: 0, event: staleEvent)
+        await callbackQueue.waitForCount(1)
+
+        vm.configure(
+            attentionService: newService,
+            signalRService: newSignalR,
+            attentionEnabled: true
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionLoadTicket = await newService.registerLoadCount(2)
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        let actionProducerFinished = Task {
+            _ = await actionTask.value
+            await newService.finishLoadProducer(actionLoadTicket)
+        }
+        let actionLoadResult = await newService.waitForLoadCount(
+            actionLoadTicket
+        )
+        XCTAssertEqual(actionLoadResult, .reached)
+
+        oldSignalR.simulateCapturedAttentionChanged(at: 0, event: staleEvent)
+        XCTAssertEqual(
+            callbackQueue.count,
+            1,
+            "Post-reset stale delivery must not enqueue or advance B"
+        )
+
+        await actionRefreshGate.succeed(makeAttentionFeed())
+        let actionSucceeded = await actionTask.value
+        _ = await actionProducerFinished.value
+        XCTAssertTrue(actionSucceeded)
+        let loadsAfterAction = await newService.loadCallCount
+        XCTAssertEqual(loadsAfterAction, 2)
+
+        await callbackQueue.runNext()
+        XCTAssertEqual(callbackQueue.count, 0)
+        let loadsAfterStaleDrain = await newService.loadCallCount
+        XCTAssertEqual(loadsAfterStaleDrain, 2)
+
+        let eventLoadTicket = await newService.registerLoadCount(3)
+        newSignalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: item.id,
+                changeKind: .updated,
+                occurredAt: fixedNow
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        await newService.finishLoadProducer(eventLoadTicket)
+        let eventLoadResult = await newService.waitForLoadCount(
+            eventLoadTicket
+        )
+        XCTAssertEqual(eventLoadResult, .reached)
+        let loadsAfterCurrentEvent = await newService.loadCallCount
+        XCTAssertEqual(loadsAfterCurrentEvent, 3)
+    }
+
     func testActionRefreshFailurePreservesEventForRefreshOnlyRetry() async {
         let action = AttentionAction(
             kind: .resume,
@@ -955,6 +1125,89 @@ final class AttentionInteractionTests: XCTestCase {
         )
         let snoozeCallCount = await service.snoozeCallCount
         XCTAssertEqual(snoozeCallCount, 2)
+    }
+
+    func testCompleteCanonicalOmissionDropsLatePOSTFailure() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:complete-omission",
+            printerID: printerA,
+            actions: [action]
+        )
+        let actionGate = AttentionResultGate<AttentionActionResult>()
+        defer { actionGate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed()),
+            ],
+            actionSteps: [.gated(actionGate)]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForActionCount(1)
+        let omissionSucceeded = await vm.refresh()
+        XCTAssertTrue(omissionSucceeded)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+
+        await actionGate.fail(.network("Old POST failed after omission"))
+        let actionSucceeded = await actionTask.value
+        XCTAssertFalse(actionSucceeded)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        let actionCallCount = await service.actionCallCount
+        XCTAssertEqual(actionCallCount, 1)
+    }
+
+    func testFinalPaginationOmissionClearsPreservedFailure() async throws {
+        let action = AttentionAction(
+            kind: .snooze,
+            label: "Snooze",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "runout:final-omission",
+            kind: .runout,
+            printerID: printerA,
+            actions: [action]
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed(nextCursor: "final-page")),
+                .value(makeAttentionFeed()),
+            ],
+            snoozeSteps: [
+                .failure(.network("Snooze failed before pagination")),
+            ]
+        )
+        let vm = configuredViewModel(service: service, now: fixedNow)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+        let snoozeSucceeded = await vm.performAction(action, for: item.id)
+        XCTAssertFalse(snoozeSucceeded)
+        let failure = try actionFailure(vm.actionState(for: item.id))
+
+        let omissionSucceeded = await vm.refresh()
+        XCTAssertTrue(omissionSucceeded)
+        let preserved = try actionFailure(vm.actionState(for: item.id))
+        XCTAssertEqual(preserved.id, failure.id)
+
+        let finalPageSucceeded = await vm.loadMore()
+        XCTAssertTrue(finalPageSucceeded)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        let staleRetryAccepted = await vm.retryAction(failureID: failure.id)
+        XCTAssertFalse(staleRetryAccepted)
+        let snoozeCallCount = await service.snoozeCallCount
+        XCTAssertEqual(snoozeCallCount, 1)
     }
 
     func testSameIDNewOccurrenceClearsOldActionFailure() async throws {

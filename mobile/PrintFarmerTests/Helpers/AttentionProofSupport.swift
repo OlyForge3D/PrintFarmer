@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 @testable import PrintFarmer
 
 // MARK: - Errors
@@ -14,49 +15,136 @@ enum AttentionProofError: LocalizedError, Sendable, Equatable {
     }
 }
 
+enum AttentionCountWaitResult: Equatable, Sendable {
+    case reached
+    case producerFinishedWithoutCount
+    case closed
+    case cancelled
+    case timedOut
+}
+
+struct AttentionCountTicket: Hashable, Sendable {
+    fileprivate let id: UUID
+}
+
 final class AttentionCountBarrier: @unchecked Sendable {
     private struct Waiter {
         let target: Int
-        let continuation: CheckedContinuation<Bool, Never>
+        var continuation: CheckedContinuation<
+            AttentionCountWaitResult,
+            Never
+        >?
     }
 
     private let lock = NSLock()
     private var count = 0
     private var isClosed = false
     private var waiters: [UUID: Waiter] = [:]
+    private var completed: [UUID: AttentionCountWaitResult] = [:]
+
+    var pendingWaiterCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return waiters.count
+    }
+
+    var pendingCompletionCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return completed.count
+    }
+
+    func register(target: Int) -> AttentionCountTicket {
+        let ticket = AttentionCountTicket(id: UUID())
+        lock.lock()
+        if isClosed {
+            completed[ticket.id] = .closed
+        } else if count >= target {
+            completed[ticket.id] = .reached
+        } else {
+            waiters[ticket.id] = Waiter(
+                target: target,
+                continuation: nil
+            )
+        }
+        lock.unlock()
+        return ticket
+    }
 
     func advance(to newCount: Int) {
         lock.lock()
         count = newCount
         let ready = waiters.filter { count >= $0.value.target }
         ready.keys.forEach { waiters[$0] = nil }
+        var continuations: [
+            CheckedContinuation<AttentionCountWaitResult, Never>
+        ] = []
+        for (id, waiter) in ready {
+            if let continuation = waiter.continuation {
+                continuations.append(continuation)
+            } else {
+                completed[id] = .reached
+            }
+        }
         lock.unlock()
-        ready.values.forEach { $0.continuation.resume(returning: true) }
+        continuations.forEach { $0.resume(returning: .reached) }
     }
 
     @discardableResult
-    func wait(for target: Int) async -> Bool {
-        let waiterID = UUID()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                lock.lock()
-                if count >= target {
-                    lock.unlock()
-                    continuation.resume(returning: true)
-                } else if isClosed || Task.isCancelled {
-                    lock.unlock()
-                    continuation.resume(returning: false)
-                } else {
-                    waiters[waiterID] = Waiter(
-                        target: target,
-                        continuation: continuation
-                    )
-                    lock.unlock()
+    func wait(
+        for target: Int,
+        timeout: Duration = .seconds(5)
+    ) async -> AttentionCountWaitResult {
+        let ticket = register(target: target)
+        return await wait(for: ticket, timeout: timeout)
+    }
+
+    func wait(
+        for ticket: AttentionCountTicket,
+        timeout: Duration = .seconds(5)
+    ) async -> AttentionCountWaitResult {
+        await withTaskGroup(
+            of: AttentionCountWaitResult.self
+        ) { group in
+            group.addTask {
+                await self.awaitResolution(for: ticket)
+            }
+            group.addTask {
+                do {
+                    try await ContinuousClock().sleep(for: timeout)
+                    return .timedOut
+                } catch {
+                    return .cancelled
                 }
             }
-        } onCancel: {
-            self.cancel(waiterID: waiterID)
+            let first = await group.next() ?? .cancelled
+            if first == .timedOut {
+                resolve(ticket: ticket, result: .timedOut)
+            }
+            group.cancelAll()
+            return first
         }
+    }
+
+    func producerFinished(_ ticket: AttentionCountTicket) {
+        lock.lock()
+        guard completed[ticket.id] == nil,
+              let waiter = waiters.removeValue(forKey: ticket.id) else {
+            lock.unlock()
+            return
+        }
+        let result: AttentionCountWaitResult =
+            count >= waiter.target ? .reached : .producerFinishedWithoutCount
+        if waiter.continuation == nil {
+            completed[ticket.id] = result
+        }
+        let continuation = waiter.continuation
+        lock.unlock()
+        continuation?.resume(returning: result)
+    }
+
+    func cancel(_ ticket: AttentionCountTicket) {
+        resolve(ticket: ticket, result: .cancelled)
     }
 
     func close() {
@@ -66,17 +154,70 @@ final class AttentionCountBarrier: @unchecked Sendable {
             return
         }
         isClosed = true
-        let pending = Array(waiters.values)
+        let pending = waiters
         waiters = [:]
+        var continuations: [
+            CheckedContinuation<AttentionCountWaitResult, Never>
+        ] = []
+        for (id, waiter) in pending {
+            if let continuation = waiter.continuation {
+                continuations.append(continuation)
+            } else {
+                completed[id] = .closed
+            }
+        }
         lock.unlock()
-        pending.forEach { $0.continuation.resume(returning: false) }
+        continuations.forEach { $0.resume(returning: .closed) }
     }
 
-    private func cancel(waiterID: UUID) {
+    private func awaitResolution(
+        for ticket: AttentionCountTicket
+    ) async -> AttentionCountWaitResult {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if let result = completed.removeValue(forKey: ticket.id) {
+                    lock.unlock()
+                    continuation.resume(returning: result)
+                } else if var waiter = waiters[ticket.id] {
+                    if Task.isCancelled {
+                        waiters[ticket.id] = nil
+                        lock.unlock()
+                        continuation.resume(returning: .cancelled)
+                    } else {
+                        waiter.continuation = continuation
+                        waiters[ticket.id] = waiter
+                        lock.unlock()
+                    }
+                } else {
+                    lock.unlock()
+                    continuation.resume(returning: .closed)
+                }
+            }
+        } onCancel: {
+            self.resolve(ticket: ticket, result: .cancelled)
+        }
+    }
+
+    private func resolve(
+        ticket: AttentionCountTicket,
+        result: AttentionCountWaitResult
+    ) {
         lock.lock()
-        let waiter = waiters.removeValue(forKey: waiterID)
+        guard completed[ticket.id] == nil else {
+            lock.unlock()
+            return
+        }
+        guard let waiter = waiters.removeValue(forKey: ticket.id) else {
+            lock.unlock()
+            return
+        }
+        if waiter.continuation == nil {
+            completed[ticket.id] = result
+        }
+        let continuation = waiter.continuation
         lock.unlock()
-        waiter?.continuation.resume(returning: false)
+        continuation?.resume(returning: result)
     }
 
     deinit {
@@ -350,16 +491,52 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
         }
     }
 
-    func waitForLoadCount(_ target: Int) async {
-        _ = await loadCountBarrier.wait(for: target)
+    @discardableResult
+    func waitForLoadCount(
+        _ target: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> AttentionCountWaitResult {
+        let result = await loadCountBarrier.wait(for: target)
+        XCTAssertEqual(result, .reached, file: file, line: line)
+        return result
     }
 
-    func waitForActionCount(_ target: Int) async {
-        _ = await actionCountBarrier.wait(for: target)
+    @discardableResult
+    func waitForActionCount(
+        _ target: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> AttentionCountWaitResult {
+        let result = await actionCountBarrier.wait(for: target)
+        XCTAssertEqual(result, .reached, file: file, line: line)
+        return result
     }
 
-    func waitForSnoozeCount(_ target: Int) async {
-        _ = await snoozeCountBarrier.wait(for: target)
+    @discardableResult
+    func waitForSnoozeCount(
+        _ target: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> AttentionCountWaitResult {
+        let result = await snoozeCountBarrier.wait(for: target)
+        XCTAssertEqual(result, .reached, file: file, line: line)
+        return result
+    }
+
+    func registerLoadCount(_ target: Int) -> AttentionCountTicket {
+        loadCountBarrier.register(target: target)
+    }
+
+    func finishLoadProducer(_ ticket: AttentionCountTicket) {
+        loadCountBarrier.producerFinished(ticket)
+    }
+
+    func waitForLoadCount(
+        _ ticket: AttentionCountTicket,
+        timeout: Duration = .seconds(5)
+    ) async -> AttentionCountWaitResult {
+        await loadCountBarrier.wait(for: ticket, timeout: timeout)
     }
 
     func closeWaiters() {
@@ -484,8 +661,15 @@ actor ScriptedAttentionSnapshotSource {
         calls.filter { $0.printerID == printerID }.count
     }
 
-    func waitForCallCount(_ target: Int) async {
-        _ = await callCountBarrier.wait(for: target)
+    @discardableResult
+    func waitForCallCount(
+        _ target: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> AttentionCountWaitResult {
+        let result = await callCountBarrier.wait(for: target)
+        XCTAssertEqual(result, .reached, file: file, line: line)
+        return result
     }
 
     private func resolve(_ outcome: AttentionSnapshotOutcome) throws -> Data {
@@ -534,8 +718,15 @@ final class AttentionCallbackQueue: @unchecked Sendable {
         return operations.count
     }
 
-    func waitForCount(_ target: Int) async {
-        _ = await countBarrier.wait(for: target)
+    @discardableResult
+    func waitForCount(
+        _ target: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> AttentionCountWaitResult {
+        let result = await countBarrier.wait(for: target)
+        XCTAssertEqual(result, .reached, file: file, line: line)
+        return result
     }
 
     @MainActor
