@@ -15,6 +15,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 namespace Farm.Web.IntegrationTests;
 
@@ -22,13 +24,21 @@ namespace Farm.Web.IntegrationTests;
 // Provides a simple WebApplicationFactory<Program> so tests can run in this environment.
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
-    private const string TestJwtSigningKey = "test-integration-key-please-change-0123456789";
     private readonly IReadOnlyDictionary<string, string?> _hostConfiguration;
+    private readonly SqliteConnection _keepAliveConnection;
+    private int _keepAliveDisposed;
 
     public CustomWebApplicationFactory()
     {
-        string memDbName = $"integ_shared_{Guid.NewGuid():N}";
-        ConnectionString = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
+        string factoryId = Guid.NewGuid().ToString("N");
+        _keepAliveConnection = new SqliteConnection(
+            $"Data Source=file:integ_shared_{factoryId}?mode=memory&cache=shared;Pooling=False");
+        _keepAliveConnection.Open();
+
+        ConnectionString = _keepAliveConnection.ConnectionString;
+        JwtSigningKey = $"test-integration-signing-key-{factoryId}";
+        JwtIssuer = $"PrintFarmer-{factoryId}";
+        JwtAudience = $"PrintFarmer-{factoryId}";
         _hostConfiguration = new Dictionary<string, string?>
         {
             ["ConnectionStrings:Default"] = ConnectionString,
@@ -39,13 +49,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             ["TEST_DISABLE_BACKGROUND_SERVICES"] = "true",
             ["DISABLE_TELEMETRY"] = "true",
             ["Jwt:Enabled"] = "true",
-            ["Jwt:Key"] = TestJwtSigningKey,
-            ["Jwt:Issuer"] = "PrintFarmer",
-            ["Jwt:Audience"] = "PrintFarmer",
+            ["Jwt:Key"] = JwtSigningKey,
+            ["Jwt:Issuer"] = JwtIssuer,
+            ["Jwt:Audience"] = JwtAudience,
         };
     }
 
     internal string ConnectionString { get; }
+    internal string JwtSigningKey { get; }
+    internal string JwtIssuer { get; }
+    internal string JwtAudience { get; }
 
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
@@ -77,6 +90,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         _ = builder.ConfigureServices((context, services) =>
         {
+            // This callback runs while the minimal host is building, after Program has
+            // added its services. Capture branch outcomes before the provider is created
+            // so tests do not mistake final IConfiguration values for startup-time proof.
+            _ = services.AddSingleton(new StartupRegistrationSnapshot(
+                context.HostingEnvironment.EnvironmentName,
+                services.Any(descriptor =>
+                    descriptor.ServiceType == typeof(TracerProvider)
+                    || descriptor.ServiceType == typeof(MeterProvider)),
+                GuardedBackgroundServiceTypes.Any(type => HasRegistration(services, type))));
+
             // Minimal-host service registration runs before WebApplicationFactory's
             // app-configuration callback. Register the production options again here,
             // after the host-scoped provider above is visible, so no process-global
@@ -111,9 +134,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        // Host configuration is enumerated before Program runs, so minimal-host
-        // service registration receives this factory's database and test settings
-        // without publishing them through process-global environment variables.
+        // Microsoft.AspNetCore.Mvc.Testing's minimal-host DeferredHostBuilder turns
+        // host configuration into entry-point command-line arguments. This is the
+        // supported per-host path that reaches WebApplication.CreateBuilder(args)
+        // before Program makes service-registration decisions.
         _ = builder.ConfigureHostConfiguration(config =>
             config.AddInMemoryCollection(_hostConfiguration));
 
@@ -146,4 +170,39 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         return host;
     }
+
+    public override async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await base.DisposeAsync();
+        }
+        finally
+        {
+            if (Interlocked.Exchange(ref _keepAliveDisposed, 1) == 0)
+            {
+                await _keepAliveConnection.DisposeAsync();
+            }
+        }
+    }
+
+    private static bool HasRegistration(IServiceCollection services, Type implementationType)
+        => services.Any(descriptor =>
+            descriptor.ServiceType == implementationType
+            || descriptor.ImplementationType == implementationType);
+
+    private static readonly Type[] GuardedBackgroundServiceTypes =
+    [
+        typeof(Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService),
+        typeof(Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService),
+        typeof(Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService),
+        typeof(Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService),
+        typeof(Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService),
+        typeof(Farm.Infrastructure.Services.FailureDetection.PrintFailureMonitorService),
+    ];
+
+    internal sealed record StartupRegistrationSnapshot(
+        string EnvironmentName,
+        bool TelemetryRegistered,
+        bool GuardedBackgroundServicesRegistered);
 }
