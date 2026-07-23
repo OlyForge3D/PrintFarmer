@@ -372,4 +372,130 @@ final class APIClientAuthSessionTests: XCTestCase {
                            "\(kase.name) MUST NOT carry T2's bearer, got header=\(auth)")
         }
     }
+
+    // MARK: - A2 tests: atomic identity at APIClient construction
+
+    /// A2: an APIClient constructed with `authSessionToken: t` at INIT time
+    /// publishes a session-expired event with EXACTLY that token on a 401.
+    /// This proves the reconstructed-client path in ServiceContainer no longer
+    /// needs a fire-and-forget establishReconstructedAuthSession Task —
+    /// bearer + identity are bound atomically at construction.
+    func testInitBindsIdentityAtomicallyFromSynchronouslyCapturedToken() async throws {
+        let observer = ExpiryObserver()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance() // generation=1
+        let transport = MockURLProtocol.makeSession()
+
+        // Construct client with T2 identity ATOMICALLY (as production now does).
+        let client = APIClient(
+            baseURL: URL(string: "https://a.example.com")!,
+            session: transport.urlSession,
+            serverGeneration: gen,
+            accessToken: "bearer-T2",
+            authSessionToken: 42
+        )
+
+        transport.requestHandler = { req in
+            (TestData.httpResponse(url: req.url, statusCode: 401), Data())
+        }
+        do {
+            let _: [String: String] = try await client.get("/api/anything")
+            XCTFail("expected unauthorized")
+        } catch let err as NetworkError {
+            if case .unauthorized = err {} else { XCTFail("expected .unauthorized, got \(err)") }
+        }
+
+        let events = observer.snapshot()
+        XCTAssertEqual(events.count, 1, "expected exactly one session-expired publication")
+        XCTAssertEqual(events.first?.authSessionToken, 42,
+                       "identity must match the token captured at construction")
+    }
+
+    /// A2: a delayed reconstructed-client establishment (the old fire-and-forget
+    /// pattern) CANNOT overwrite a fresher session's bearer + identity that has
+    /// already been applied to the shared client. This proves the CAS in
+    /// applySessionIfCurrent is the last line of defense: even a stray late-read
+    /// caller (e.g. a hand-rolled Task that captured a stale accessToken and
+    /// reads epoch after suspending) is rejected because the epoch has advanced.
+    func testDelayedReconstructionCannotOverwriteFresherSession() async throws {
+        let observer = ExpiryObserver()
+        let epoch = AuthOperationEpoch()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+        let transport = MockURLProtocol.makeSession()
+        let client = await makeClient(gen: gen, transport: transport)
+
+        // T1 apply (as if from an earlier login/rebuild).
+        let t1 = epoch.advance()
+        _ = await client.applySessionIfCurrent(
+            baseURL: nil, accessToken: "bearer-T1", epoch: epoch, token: t1)
+
+        // T2 apply advances the epoch and takes over the shared client.
+        let t2 = epoch.advance()
+        _ = await client.applySessionIfCurrent(
+            baseURL: nil, accessToken: "bearer-T2", epoch: epoch, token: t2)
+
+        // Now a STALE reconstruction runs (as the old fire-and-forget Task would
+        // have): it holds T1's bearer and reads the CURRENT epoch (t2) — the very
+        // race the A2 refactor eliminated. Even so, applySessionIfCurrent CAS with
+        // the ACTUAL stale token (t1) must fail: the epoch has advanced beyond t1.
+        let staleApplied = await client.applySessionIfCurrent(
+            baseURL: nil, accessToken: "bearer-T1", epoch: epoch, token: t1)
+        XCTAssertFalse(staleApplied,
+                       "a stale token's applySessionIfCurrent MUST NOT overwrite the fresher session")
+
+        // Now assert the shared client still carries T2's bearer + T2's identity
+        // via a 401 emission.
+        transport.requestHandler = { req in
+            (TestData.httpResponse(url: req.url, statusCode: 401), Data())
+        }
+        do {
+            let _: [String: String] = try await client.get("/api/anything")
+            XCTFail("expected unauthorized")
+        } catch let err as NetworkError {
+            if case .unauthorized = err {} else { XCTFail("expected .unauthorized, got \(err)") }
+        }
+
+        let events = observer.snapshot()
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.authSessionToken, t2,
+                       "session-expiry must carry T2's identity, not the stale T1 or nil")
+
+        // And the outbound request carried T2's bearer, not T1's.
+        let captured = transport.capturedRequests
+        XCTAssertEqual(captured.count, 1)
+        let auth = captured.first?.value(forHTTPHeaderField: "Authorization") ?? ""
+        XCTAssertTrue(auth.contains("bearer-T2"),
+                      "shared client must still hold T2's bearer, got header=\(auth)")
+    }
+
+    /// A2: an unauthenticated construction (nil accessToken) must have NIL
+    /// authSessionToken regardless of any token passed to init — a login-time
+    /// client (no bearer yet) MUST NOT be able to publish session-expired.
+    func testInitWithNilAccessTokenForcesNilIdentity() async throws {
+        let observer = ExpiryObserver()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+        let transport = MockURLProtocol.makeSession()
+        let client = APIClient(
+            baseURL: URL(string: "https://a.example.com")!,
+            session: transport.urlSession,
+            serverGeneration: gen,
+            accessToken: nil,           // no bearer
+            authSessionToken: 99        // must be forced to nil by init
+        )
+
+        transport.requestHandler = { req in
+            (TestData.httpResponse(url: req.url, statusCode: 401), Data())
+        }
+        do {
+            let _: [String: String] = try await client.get("/api/anything")
+            XCTFail("expected unauthorized")
+        } catch let err as NetworkError {
+            if case .unauthorized = err {} else { XCTFail("expected .unauthorized, got \(err)") }
+        }
+
+        XCTAssertTrue(observer.snapshot().isEmpty,
+                      "an unauthenticated client MUST NOT publish session-expired even if init was passed a token")
+    }
 }
