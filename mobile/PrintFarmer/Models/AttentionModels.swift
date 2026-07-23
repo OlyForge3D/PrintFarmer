@@ -81,43 +81,63 @@ struct AttentionExactTimestamp: Hashable, Sendable {
     /// callers (fixtures, memberwise `init`) whose only input *is* a
     /// lossy `Date`.
     ///
-    /// Clamps into the backend-supported year 0001–9999 window and
-    /// handles the round-to-1e9 corner where the fractional part
-    /// promotes into the next second, all without trapping.
+    /// Clamps into the backend-supported UTC interval [year 0001,
+    /// year 10000) — the upper edge is end-exclusive so a caller
+    /// supplying a valid in-range fractional value at the top of the
+    /// range keeps its fraction instead of collapsing onto the
+    /// unrepresentable year-10000 second boundary.
     static func fromProgrammaticDate(_ date: Date) -> AttentionExactTimestamp {
         let interval = date.timeIntervalSince1970
         guard interval.isFinite else {
             return AttentionExactTimestamp(epochSeconds: 0, nanosecond: 0)!
         }
-        // Backend .NET contract: years 0001..9999.
-        //   0001-01-01T00:00:00Z = -62_135_596_800
-        //   9999-12-31T23:59:59Z =  253_402_300_799
-        let maxSeconds: Int64 = 253_402_300_799
-        let minSeconds: Int64 = -62_135_596_800
-        // Clamp to the presentable window before the Double → Int64 cast
-        // so no path can trap.
-        let clamped = min(
-            max(interval, Double(minSeconds)),
-            Double(maxSeconds)
-        )
-        let floored = clamped.rounded(.down)
+        // Backend .NET contract: valid UTC interval is [year 0001, year 10000).
+        //   0001-01-01T00:00:00Z         = -62_135_596_800 (inclusive)
+        //   10000-01-01T00:00:00Z        =  253_402_300_800 (EXCLUSIVE)
+        //   Max representable instant    =  epoch 253_402_300_799 + 999_999_999 ns.
+        let minSeconds: Double = -62_135_596_800
+        let upperBoundExclusive: Double = 253_402_300_800
+        let maxEpochSecondsInclusive: Int64 = 253_402_300_799
+        let nanosPerSecond = AttentionTimestampCodec.nanosecondsPerSecond
+
+        // Clamp below the range → snap to lower edge.
+        if interval < minSeconds {
+            return AttentionExactTimestamp(
+                epochSeconds: -62_135_596_800,
+                nanosecond: 0
+            )!
+        }
+        // Clamp at or above the year-10000 boundary → saturate at the
+        // maximum representable instant so we never emit an instant
+        // whose UTC year is 10000.
+        if interval >= upperBoundExclusive {
+            return AttentionExactTimestamp(
+                epochSeconds: maxEpochSecondsInclusive,
+                nanosecond: UInt32(nanosPerSecond - 1)
+            )!
+        }
+        // In-range: floor to whole seconds, take the fractional
+        // remainder, and convert to nanoseconds. `interval` is strictly
+        // below the upper bound so `floored` fits in Int64 and cannot
+        // land on the year-10000 second.
+        let floored = interval.rounded(.down)
         let seconds = Int64(floored)
-        let fraction = clamped - floored // guaranteed [0, 1)
+        let fraction = interval - floored // guaranteed [0, 1)
         var nanos = UInt32(
-            (fraction * Double(AttentionTimestampCodec.nanosecondsPerSecond))
-                .rounded()
+            (fraction * Double(nanosPerSecond)).rounded()
         )
         var epochSecs = seconds
-        // Rounding can promote 999_999_999.5 → 1_000_000_000; carry into
-        // the next second unless we are already at the year-9999 clamp.
-        if nanos >= UInt32(AttentionTimestampCodec.nanosecondsPerSecond) {
-            if epochSecs < maxSeconds {
+        // Rounding can promote 999_999_999.5 → 1_000_000_000. Carry
+        // into the next second unless that carry would push us onto
+        // the year-10000 boundary (unrepresentable); in that case
+        // saturate at the max representable nanosecond so the
+        // presentation instant stays strictly below year 10000.
+        if nanos >= UInt32(nanosPerSecond) {
+            if epochSecs < maxEpochSecondsInclusive {
                 epochSecs += 1
                 nanos = 0
             } else {
-                nanos = UInt32(
-                    AttentionTimestampCodec.nanosecondsPerSecond - 1
-                )
+                nanos = UInt32(nanosPerSecond - 1)
             }
         }
         return AttentionExactTimestamp(
@@ -130,12 +150,22 @@ struct AttentionExactTimestamp: Hashable, Sendable {
     /// only. Fingerprint identity never routes through this — `Date` is a
     /// `Double`-backed `TimeInterval` and loses ns precision far from
     /// 1970, so the pair is the only authority.
+    ///
+    /// The Double at the top of the range has an ULP (~3e-5 s) much
+    /// larger than 1 ns, so adding the fractional nanoseconds to
+    /// `epochSeconds = 253_402_300_799` can round *up* to
+    /// `253_402_300_800.0` — a Date value inside year 10000. We snap the
+    /// computed interval strictly below the year-10000 boundary so a
+    /// UI/logging consumer can never observe a presentation instant
+    /// with year 10000.
     var presentationDate: Date {
-        Date(
-            timeIntervalSince1970: TimeInterval(epochSeconds)
-                + TimeInterval(nanosecond)
-                    / TimeInterval(AttentionTimestampCodec.nanosecondsPerSecond)
-        )
+        let upperBoundExclusive: Double = 253_402_300_800
+        let raw =
+            TimeInterval(epochSeconds)
+            + TimeInterval(nanosecond)
+                / TimeInterval(AttentionTimestampCodec.nanosecondsPerSecond)
+        let snapped = min(raw, upperBoundExclusive.nextDown)
+        return Date(timeIntervalSince1970: snapped)
     }
 }
 
@@ -265,6 +295,19 @@ enum AttentionTimestampCodec {
             localSeconds.subtractingReportingOverflow(offsetSeconds)
         guard !overflowUtc else { return nil }
 
+        // The `parts.year` bound above checks the LOCAL year. After
+        // applying the offset the normalized UTC instant can fall
+        // outside the backend contract (e.g. `0001-01-01T00:00:00+14:00`
+        // → UTC year 0000, `9999-12-31T23:59:59.9999999-14:00` → UTC
+        // year 10000). Reject those explicitly so the exact pair we
+        // return is always encodable and round-trippable.
+        let minUtcSeconds: Int64 = -62_135_596_800   // 0001-01-01T00:00:00Z (inclusive)
+        let maxUtcSeconds: Int64 =  253_402_300_799  // 9999-12-31T23:59:59Z (inclusive; ns extends to <year 10000)
+        guard utcSeconds >= minUtcSeconds,
+              utcSeconds <= maxUtcSeconds else {
+            return nil
+        }
+
         // Fractional digits → nanoseconds. Right-pad with `0` to 9
         // digits so the count encodes precision without changing value.
         let nanoseconds: UInt32
@@ -371,7 +414,14 @@ enum AttentionTimestampCodec {
         default:
             return nil
         }
+        // ISO-8601 civil offsets extend at most ±14:00 — anything
+        // beyond that (including `+14:01`..`+14:59`) is invalid. The
+        // hour must be in 0..14; when it is exactly 14 the minute must
+        // be 0 so ±14:00 remains the strict maximum magnitude.
         guard hours >= 0, hours <= 14, minutes >= 0, minutes <= 59 else {
+            return nil
+        }
+        if hours == 14 && minutes != 0 {
             return nil
         }
         return sign * (hours * 3600 + minutes * 60)

@@ -509,6 +509,147 @@ final class AttentionModelDecodingTests: XCTestCase {
         )
     }
 
+    // MARK: - Normalized-UTC boundary (offset-shifted) rejection
+
+    /// The local `parts.year` bound is not sufficient — a valid-looking
+    /// local timestamp combined with a ±14 h offset can shift the
+    /// normalized UTC instant into year 0000 or year 10000, neither of
+    /// which is representable by the backend .NET `DateTime` contract
+    /// or by our own encoder. These inputs must be rejected before we
+    /// hand back an exact pair the encoder cannot later round-trip.
+    func testOffsetShiftedInstantOutsideNormalizedUtcRangeIsRejected() {
+        // Lower edge: 0001-01-01T00:00:00 with a +14:00 offset means
+        // UTC = local − 14 h = 0000-12-31T10:00:00Z (year 0000).
+        // Upper edge: 9999-12-31T23:59:59.9999999 with a −14:00 offset
+        // means UTC = local + 14 h = 10000-01-01T13:59:59.9999999Z
+        // (year 10000).
+        for wire in [
+            "0001-01-01T00:00:00+14:00",
+            "9999-12-31T23:59:59.9999999-14:00",
+        ] {
+            XCTAssertThrowsError(
+                try decoder.decode(
+                    AttentionItem.self,
+                    from: attentionItemJSON(occurredAt: wire)
+                ),
+                "Offset-shifted UTC year outside 0001-9999 must not decode: \(wire)"
+            )
+        }
+    }
+
+    /// Valid ±14:00 offsets whose *normalized* UTC instant stays within
+    /// the contract must still decode and canonicalise correctly. This
+    /// pairs with the rejection test above so we don't over-reject.
+    func testMaximumMagnitudeOffsetsWithInRangeUtcAreAccepted() throws {
+        // Local 2026-06-01T14:00:00+14:00 → UTC 2026-06-01T00:00:00Z.
+        let plus = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: "2026-06-01T14:00:00+14:00")
+        )
+        XCTAssertEqual(plus.occurredAtExact,
+                       AttentionTimestampCodec.decode("2026-06-01T00:00:00Z"))
+
+        // Local 2026-06-01T00:00:00-14:00 → UTC 2026-06-01T14:00:00Z.
+        let minus = try decoder.decode(
+            AttentionItem.self,
+            from: attentionItemJSON(occurredAt: "2026-06-01T00:00:00-14:00")
+        )
+        XCTAssertEqual(minus.occurredAtExact,
+                       AttentionTimestampCodec.decode("2026-06-01T14:00:00Z"))
+    }
+
+    /// Offsets whose *hour* is 14 but whose minute is nonzero (e.g.
+    /// `+14:01`, `-14:59`) are outside the ISO-8601 civil bound and
+    /// must be rejected. Combined with the +15:00 rejection above this
+    /// pins the maximum magnitude at exactly ±14:00.
+    func testOffsetsBeyondFourteenHourMaximumAreRejected() {
+        for wire in [
+            "2026-06-01T12:00:00+14:01",
+            "2026-06-01T12:00:00+14:59",
+            "2026-06-01T12:00:00-14:01",
+            "2026-06-01T12:00:00-14:59",
+        ] {
+            XCTAssertThrowsError(
+                try decoder.decode(
+                    AttentionItem.self,
+                    from: attentionItemJSON(occurredAt: wire)
+                ),
+                "Offset with hour=14 and nonzero minute must not decode: \(wire)"
+            )
+        }
+    }
+
+    /// Round-trip a valid boundary-adjacent offset instant: decode →
+    /// encode → decode must produce the same canonical UTC pair. This
+    /// proves that once the normalized-UTC bounds check passes, the
+    /// encoder can always emit a byte-identical canonical form the
+    /// decoder accepts back.
+    func testBoundaryAdjacentOffsetInstantsRoundTripExact() throws {
+        // Exact lower UTC boundary reached via +14:00 offset:
+        //   0001-01-01T14:00:00+14:00 → 0001-01-01T00:00:00Z.
+        let lowerLocal = "0001-01-01T14:00:00+14:00"
+        let lowerCanonical = "0001-01-01T00:00:00Z"
+        let lowerDecoded = try XCTUnwrap(AttentionTimestampCodec.decode(lowerLocal))
+        XCTAssertEqual(AttentionTimestampCodec.encode(lowerDecoded), lowerCanonical)
+        let lowerRoundTrip = try XCTUnwrap(
+            AttentionTimestampCodec.decode(AttentionTimestampCodec.encode(lowerDecoded))
+        )
+        XCTAssertEqual(lowerDecoded, lowerRoundTrip)
+
+        // Upper representable UTC instant reached via +14:00 offset:
+        //   9999-12-31T23:59:59.9999999+14:00 → 9999-12-31T09:59:59.9999999Z.
+        let upperLocal = "9999-12-31T23:59:59.9999999+14:00"
+        let upperCanonical = "9999-12-31T09:59:59.9999999Z"
+        let upperDecoded = try XCTUnwrap(AttentionTimestampCodec.decode(upperLocal))
+        XCTAssertEqual(AttentionTimestampCodec.encode(upperDecoded), upperCanonical)
+        let upperRoundTrip = try XCTUnwrap(
+            AttentionTimestampCodec.decode(AttentionTimestampCodec.encode(upperDecoded))
+        )
+        XCTAssertEqual(upperDecoded, upperRoundTrip)
+    }
+
+    // MARK: - End-exclusive year-10000 clamp
+
+    /// A programmatic caller supplying a `Date` whose interval carries
+    /// a fractional component *at the top of the contract range* must
+    /// keep that fraction. The previous implementation clamped to
+    /// `Double(253_402_300_799)`, so `253_402_300_799.5` collapsed to
+    /// `253_402_300_799.0` and lost the 0.5 s. The upper bound is
+    /// end-exclusive at year 10000, so a value strictly below
+    /// `253_402_300_800` must survive intact.
+    func testProgrammaticDateFractionAtUpperBoundIsPreserved() {
+        let date = Date(timeIntervalSince1970: 253_402_300_799.5)
+        let ts = AttentionExactTimestamp.fromProgrammaticDate(date)
+        XCTAssertEqual(ts.epochSeconds, 253_402_300_799,
+            "Fractional upper-bound value must land on the max representable second, not year 10000.")
+        XCTAssertEqual(ts.nanosecond, 500_000_000,
+            "The 0.5 s fractional component must be preserved through the programmatic Date path.")
+    }
+
+    /// The presentation `Date` for the maximum representable pair must
+    /// stay strictly below the year-10000 boundary. Binary-float
+    /// rounding at magnitude ~2e11 has an ULP much larger than 1 ns, so
+    /// naively adding `999_999_999 / 1e9` to `Double(253_402_300_799)`
+    /// can round up to `253_402_300_800.0` — a Date value inside year
+    /// 10000. The pair authority remains the exact `(epoch, ns)` pair;
+    /// this test locks the presentation clamp.
+    func testMaxWireTimestampPresentationDoesNotCrossYearTenThousandBoundary() throws {
+        let wire = "9999-12-31T23:59:59.999999999Z"
+        let ts = try XCTUnwrap(AttentionTimestampCodec.decode(wire))
+        XCTAssertEqual(ts.epochSeconds, 253_402_300_799)
+        XCTAssertEqual(ts.nanosecond, 999_999_999)
+        let presented = ts.presentationDate.timeIntervalSince1970
+        XCTAssertLessThan(presented, 253_402_300_800,
+            "Presentation Date must never round up to the year-10000 boundary.")
+        // Sanity: the exact-pair authority is still 999_999_999 ns —
+        // the Double snap only affects `Date` presentation, not identity.
+        let expected = try XCTUnwrap(AttentionExactTimestamp(
+            epochSeconds: 253_402_300_799,
+            nanosecond: 999_999_999
+        ))
+        XCTAssertEqual(ts, expected)
+    }
+
     // MARK: - Programmatic Date initializer non-trapping
 
     /// The programmatic `Date` initializer path must not trap for any of
