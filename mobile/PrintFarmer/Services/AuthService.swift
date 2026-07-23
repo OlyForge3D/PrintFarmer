@@ -146,7 +146,7 @@ actor AuthService: AuthServiceProtocol {
         var verifiedUser = response.user
         if verifiedUser == nil {
             let verifyClient = await apiClient.unauthenticatedClient(baseURL: server.baseURL)
-            await verifyClient.setAccessToken(token)
+            await verifyClient.setAccessToken(token, serverID: server.id)
             do {
                 verifiedUser = try await verifyClient.get("/api/auth/me")
             } catch {
@@ -192,7 +192,11 @@ actor AuthService: AuthServiceProtocol {
         // server identity).
         if operation == .unspecified {
             await apiClient.updateBaseURL(server.baseURL)
-            await apiClient.setAccessToken(token)
+            // J4: even the legacy `.unspecified` path binds the stable serverID
+            // alongside the bearer so a later logout snapshot's serverID
+            // matches the captured bearer/baseURL. There is no reachable
+            // authenticated APIClient mutation that leaves serverID nil.
+            await apiClient.setAccessToken(token, serverID: server.id)
         } else {
             let applied = await apiClient.applySessionIfCurrent(
                 baseURL: server.baseURL, accessToken: token, serverID: server.id,
@@ -249,21 +253,17 @@ actor AuthService: AuthServiceProtocol {
                 epoch: authEpoch, token: operation.value
             )
         }
-        // J: when the snapshot's serverID is unset (legacy `.unspecified`
-        // callers or tests that bypass login and never call
-        // applySessionIfCurrent), fall back to the registry's currently-active
-        // server for local cleanup. Fenced callers always populate the
-        // snapshot's serverID atomically via applySessionIfCurrent, so this
-        // fallback is only taken by legacy paths that were never subject to
-        // the epoch-fenced atomicity guarantee.
-        let cleanupServerID: UUID?
-        if let snapshotServerID = snapshot?.serverID {
-            cleanupServerID = snapshotServerID
-        } else if operation == .unspecified, snapshot != nil {
-            cleanupServerID = await activeServer()?.id
-        } else {
-            cleanupServerID = nil
-        }
+        // J4 (issue #816 reject, Hicks): local cleanup TARGETS ONLY the
+        // snapshot's stable serverID. The previous `.unspecified` fallback
+        // reread the mutable registry's activeServer, which is exactly the
+        // A-request / B-cleanup bug the reviewer called out. Any
+        // authenticated APIClient construction/mutation now carries serverID
+        // (see APIClient.init + setAccessToken(_:serverID:)), so a fenced
+        // operation with a captured snapshot ALWAYS has serverID; a
+        // `.unspecified` snapshot without serverID means the shared client
+        // was never authenticated for any known server — safe to skip local
+        // per-server cleanup.
+        let cleanupServerID: UUID? = snapshot?.serverID
         // Network uses the snapshot's captured bearer/baseURL. A superseded
         // logout has a nil snapshot and skips the network entirely (better
         // than sending /logout under T2's session).
@@ -309,10 +309,11 @@ actor AuthService: AuthServiceProtocol {
 
         // H2/J: apply the shared session via a destination CAS with atomic serverID
         // so a restore superseded by a newer login/logout cannot clobber the newer
-        // session. Legacy unspecified callers keep the unconditional behavior.
+        // session. Legacy unspecified callers keep the unconditional behavior but
+        // still bind the stable serverID with the bearer (J4).
         if operation == .unspecified {
             await apiClient.updateBaseURL(server.baseURL)
-            await apiClient.setAccessToken(credentials.accessToken)
+            await apiClient.setAccessToken(credentials.accessToken, serverID: server.id)
         } else {
             let applied = await apiClient.applySessionIfCurrent(
                 baseURL: server.baseURL, accessToken: credentials.accessToken, serverID: server.id,

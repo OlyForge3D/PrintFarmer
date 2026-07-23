@@ -478,7 +478,8 @@ actor APIClient {
         session: URLSession? = nil,
         serverGeneration: ActiveServerGeneration? = nil,
         accessToken: String? = nil,
-        authSessionToken: Int? = nil
+        authSessionToken: Int? = nil,
+        serverID: UUID? = nil
     ) {
         self.baseURL = baseURL
         self.session = session ?? Self.makePrivateNetworkSession()
@@ -493,6 +494,20 @@ actor APIClient {
         // clients (nil accessToken) MUST have nil authSessionToken so they cannot
         // publish session-expiry.
         self.authSessionToken = accessToken == nil ? nil : authSessionToken
+        // J4 (issue #816 reject, Hicks): the stable serverID is bound
+        // ATOMICALLY at construction alongside the access token. Any
+        // authenticated APIClient (accessToken != nil) MUST carry a
+        // non-nil serverID so a later `logoutOperationSnapshot`
+        // reconstruction can guarantee `serverID` matches the bearer/baseURL
+        // captured on the same actor hop. Unauthenticated clients (nil
+        // accessToken) carry nil serverID by construction.
+        if accessToken != nil {
+            precondition(
+                serverID != nil,
+                "J4: authenticated APIClient construction requires a stable serverID"
+            )
+        }
+        self.currentServerID = accessToken == nil ? nil : serverID
 
         self.decoder = JSONDecoder()
         // ASP.NET Core can emit fractional seconds; the built-in .iso8601 strategy
@@ -512,8 +527,23 @@ actor APIClient {
         encoder.dateEncodingStrategy = .iso8601
     }
 
-    func setAccessToken(_ token: String?) {
+    /// J4 (issue #816 reject, Hicks): apply/clear the shared session outside of
+    /// an operation-fenced flow. A non-nil token REQUIRES a non-nil serverID so
+    /// a later logout snapshot's `serverID` is guaranteed to match the
+    /// captured bearer/baseURL. A nil token clears the session (including
+    /// serverID and authSessionToken).
+    func setAccessToken(_ token: String?, serverID: UUID? = nil) {
+        if token != nil {
+            precondition(
+                serverID != nil,
+                "J4: authenticated session mutation requires a stable serverID"
+            )
+        }
         self.accessToken = token
+        self.currentServerID = token == nil ? nil : serverID
+        if token == nil {
+            self.authSessionToken = nil
+        }
     }
 
     /// Applies base URL + access token + server id ATOMICALLY, but only if
@@ -633,8 +663,12 @@ actor APIClient {
     /// bearer, so a request (e.g. `/logout`) is issued under the captured OLD session
     /// even if the shared client is later repointed to a newer session by a concurrent
     /// login. Carries no server generation, so it never emits its own session-expiry.
+    /// J4: the snapshot's serverID is bound at construction alongside its bearer.
     func sessionSnapshotClient() -> APIClient {
-        APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken)
+        APIClient(
+            baseURL: baseURL, session: session, serverGeneration: nil,
+            accessToken: accessToken, serverID: currentServerID
+        )
     }
 
     /// J (issue #816 reject): capture the session snapshot ATOMICALLY under an
@@ -646,7 +680,10 @@ actor APIClient {
     /// them.
     func sessionSnapshotClientIfCurrent(epoch: AuthOperationEpoch, token: Int) -> APIClient? {
         let snapshot: APIClient? = epoch.withCurrent(token) {
-            APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken)
+            APIClient(
+                baseURL: baseURL, session: session, serverGeneration: nil,
+                accessToken: accessToken, serverID: currentServerID
+            )
         }
         return snapshot
     }
@@ -669,7 +706,10 @@ actor APIClient {
     /// callers). Captures baseURL / accessToken / serverID in ONE actor hop.
     func logoutOperationSnapshot() -> LogoutSnapshot {
         LogoutSnapshot(
-            client: APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken),
+            client: APIClient(
+                baseURL: baseURL, session: session, serverGeneration: nil,
+                accessToken: accessToken, serverID: currentServerID
+            ),
             baseURL: baseURL,
             accessToken: accessToken,
             serverID: currentServerID
@@ -684,7 +724,10 @@ actor APIClient {
     func logoutOperationSnapshotIfCurrent(epoch: AuthOperationEpoch, token: Int) -> LogoutSnapshot? {
         epoch.withCurrent(token) {
             LogoutSnapshot(
-                client: APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken),
+                client: APIClient(
+                    baseURL: baseURL, session: session, serverGeneration: nil,
+                    accessToken: accessToken, serverID: currentServerID
+                ),
                 baseURL: baseURL,
                 accessToken: accessToken,
                 serverID: currentServerID
