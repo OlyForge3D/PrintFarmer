@@ -22,8 +22,34 @@ namespace Farm.Web.IntegrationTests;
 // Provides a simple WebApplicationFactory<Program> so tests can run in this environment.
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
+    private const string TestJwtSigningKey = "test-integration-key-please-change-0123456789";
+    private readonly IReadOnlyDictionary<string, string?> _hostConfiguration;
+
+    public CustomWebApplicationFactory()
+    {
+        string memDbName = $"integ_shared_{Guid.NewGuid():N}";
+        ConnectionString = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
+        _hostConfiguration = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Default"] = ConnectionString,
+            ["ConnectionStrings:Sqlite"] = ConnectionString,
+            ["ConnectionStrings:DefaultConnection"] = ConnectionString,
+            ["ConnectionStrings:SlicerDatabase"] = ConnectionString,
+            ["TEST_USE_SQLITE_INMEMORY"] = "true",
+            ["TEST_DISABLE_BACKGROUND_SERVICES"] = "true",
+            ["DISABLE_TELEMETRY"] = "true",
+            ["Jwt:Enabled"] = "true",
+            ["Jwt:Key"] = TestJwtSigningKey,
+            ["Jwt:Issuer"] = "PrintFarmer",
+            ["Jwt:Audience"] = "PrintFarmer",
+        };
+    }
+
+    internal string ConnectionString { get; }
+
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
+        _ = useInMemorySqlite;
         return new CustomWebApplicationFactory();
     }
 
@@ -85,29 +111,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        // Configure a shared in-memory SQLite database for integration tests so
-        // the application startup code will run EnsureCreated + seeding as it
-        // would in a normal host. This keeps integration behavior consistent
-        // with the main test factory without pulling in extra complexity.
-        string memDbName = $"integ_shared_{Guid.NewGuid():N}";
-        string connStr = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
+        // Host configuration is enumerated before Program runs, so minimal-host
+        // service registration receives this factory's database and test settings
+        // without publishing them through process-global environment variables.
+        _ = builder.ConfigureHostConfiguration(config =>
+            config.AddInMemoryCollection(_hostConfiguration));
 
-        // Override connection strings and test flags used by Program startup
-        Environment.SetEnvironmentVariable("ConnectionStrings__Default", connStr);
-        Environment.SetEnvironmentVariable("ConnectionStrings__Sqlite", connStr);
-        Environment.SetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY", "true");
-        Environment.SetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES", "true");
-        Environment.SetEnvironmentVariable("DISABLE_TELEMETRY", "true");
-        // Provide a test JWT key (32+ chars) so authentication middleware can initialize in tests
-        Environment.SetEnvironmentVariable("Jwt__Key", "test-integration-key-please-change-0123456789");
-        Environment.SetEnvironmentVariable("Jwt__Issuer", "PrintFarmer");
-        Environment.SetEnvironmentVariable("Jwt__Audience", "PrintFarmer");
-        // Note: Do NOT force-disable the rate limiter here. Some integration tests
-        // validate rate limiting behavior and expect it to be active. Tests that
-        // need the rate limiter disabled should set the environment variable
-        // explicitly in their own setup.
-
-        // Ensure host runs in Testing environment to match other test factories
+        // Keep the environment host-scoped. Rate limiting remains enabled so the
+        // integration suite exercises the production middleware.
         _ = builder.UseEnvironment("Testing");
 
         IHost host = base.CreateHost(builder);

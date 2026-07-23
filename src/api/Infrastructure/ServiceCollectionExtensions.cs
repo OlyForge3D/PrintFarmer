@@ -149,7 +149,7 @@ public static class ServiceCollectionExtensions
         _ = environment;
 
         // Check if background services should be disabled (for testing)
-        bool disableBackgroundServices = ShouldDisableBackgroundServices();
+        bool disableBackgroundServices = ShouldDisableBackgroundServices(configuration);
 
         // Register services by category
         RegisterCoreInfrastructure(services);
@@ -780,17 +780,11 @@ public static class ServiceCollectionExtensions
 
     #region Helpers
 
-    private static bool ShouldDisableBackgroundServices()
+    private static bool ShouldDisableBackgroundServices(IConfiguration configuration)
     {
-        try
-        {
-            string? env = Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES");
-            return !string.IsNullOrEmpty(env) && (string.Equals(env, "true", StringComparison.OrdinalIgnoreCase) || env == "1");
-        }
-        catch
-        {
-            return false;
-        }
+        string? value = configuration["TEST_DISABLE_BACKGROUND_SERVICES"];
+        return !string.IsNullOrEmpty(value)
+            && (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) || value == "1");
     }
 
     #endregion
