@@ -1,5 +1,62 @@
 import XCTest
+import KeychainSwift
 @testable import PrintFarmer
+
+/// In-memory KeychainSwift so credentials round-trip in the unit-test host (the real
+/// keychain is unavailable there). Lets a container switch resolve a valid access
+/// token and actually reach `connect()` for the connect-boundary orphan proof (#816 C).
+private final class InMemoryKeychain: KeychainSwift, @unchecked Sendable {
+    private let store = NSMutableDictionary()
+    private let lock = NSLock()
+    @discardableResult
+    override func set(_ value: String, forKey key: String, withAccess access: KeychainSwiftAccessOptions? = nil) -> Bool {
+        lock.lock(); store[key] = value; lock.unlock(); return true
+    }
+    override func get(_ key: String) -> String? {
+        lock.lock(); defer { lock.unlock() }; return store[key] as? String
+    }
+    @discardableResult
+    override func delete(_ key: String) -> Bool {
+        lock.lock(); store.removeObject(forKey: key); lock.unlock(); return true
+    }
+}
+
+/// Dedicated SignalR probe for the connect-boundary orphan proof (issue #816 C). Its
+/// `connect()` signals an entered latch then waits on an idempotent release gate; its
+/// `disconnect()` only RECORDS the call (never touches the shared hub / never blocks on
+/// connect). All observation methods delegate to a base mock. This isolates the
+/// connect/disconnect ordering from the hub coordinator so the test cannot deadlock.
+private final class OrphanProbeSignalR: SignalRServiceProtocol, @unchecked Sendable {
+    private let base = MockSignalRService()
+    let connectEntered = AsyncBarrier()
+    let connectGate = AsyncBarrier()
+    private let lock = NSLock()
+    private var disconnects = 0
+    var disconnectCount: Int { withLock { disconnects } }
+    private func withLock<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
+
+    var connectionState: SignalRConnectionState { base.connectionState }
+
+    func connect() async throws {
+        connectEntered.signal()               // causal: entered the connect boundary
+        await connectGate.arriveAndWait()      // wait on an idempotent release gate
+    }
+
+    func disconnect() async {
+        withLock { disconnects += 1 }          // record only, non-blocking
+    }
+
+    @discardableResult
+    func onConnectionStateChanged(_ handler: @escaping @Sendable (SignalRConnectionState) -> Void) -> (initial: SignalRConnectionState, subscription: SignalRSubscription) {
+        base.onConnectionStateChanged(handler)
+    }
+    @discardableResult func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription { base.onPrinterUpdated(handler) }
+    @discardableResult func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription { base.onJobQueueUpdated(handler) }
+    @discardableResult func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription { base.onAttentionChanged(handler) }
+    @discardableResult func onFilamentCoverageChanged(_ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void) -> SignalRSubscription { base.onFilamentCoverageChanged(handler) }
+    @discardableResult func onTaskInvalidated(_ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void) -> SignalRSubscription { base.onTaskInvalidated(handler) }
+    func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) { base.onFallbackGroupsUpdated(handler) }
+}
 
 /// Container-level authority proofs (issue #816, Gates A/B, blocker). Uses the
 /// real `ServiceContainer` + `ServerRegistry` with an injected snapshot trio.
@@ -562,6 +619,66 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners
         )
         return (container, store, a.id, userA)
+    }
+
+    // MARK: C — connect-boundary: demo/no-active supersession disconnects the exact incoming service
+
+    func testIncomingConnectSupersededByDemoDisconnectsExactService() async throws {
+        try await runIncomingConnectSupersededProof(enterDemo: true)
+    }
+
+    func testIncomingConnectSupersededByNoActiveDisconnectsExactService() async throws {
+        try await runIncomingConnectSupersededProof(enterDemo: false)
+    }
+
+    private func runIncomingConnectSupersededProof(enterDemo: Bool) async throws {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        let userA = UUID(), userB = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        owners.setOwner(userID: userB, serverID: b.id)
+        try reg.setActive(id: a.id)
+        let creds = ServerCredentialsStore(keychain: InMemoryKeychain())
+        creds.save(ServerCredentials(accessToken: "tok-b", expiresAt: nil), serverId: b.id)
+
+        let probe = OrphanProbeSignalR()
+        let container = ServiceContainer(
+            serverRegistry: reg, credentialsStore: creds, userDefaultsBox: box(), observeRegistry: false,
+            farmSnapshotAuthority: FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!),
+            farmSnapshotStore: FarmSnapshotStore(authority: FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("t2"))!)), rootURL: newRoot()),
+            farmSnapshotOwnerStore: owners,
+            signalRServiceFactory: { baseURL, _ in baseURL.host == "b.example.com" ? probe : MockSignalRService() as SignalRServiceProtocol }
+        )
+
+        // Failure-safe teardown: release the gate (idempotent) so a throwing assert can
+        // never strand the parked connect.
+        defer { probe.connectGate.release() }
+
+        // Start the real switch to B; its signalR reaches connect() and parks there.
+        let switchTask = Task { await container.switchToServer(b) }
+        await probe.connectEntered.waitUntilArrived()
+
+        // Supersede on the MainActor. switchToDemo/switchToReal advance the transition
+        // epoch + record the new desired target SYNCHRONOUSLY, so the supersession has
+        // executed BEFORE we release connect (MainActor serialization — no poll/sleep).
+        if enterDemo {
+            container.switchToDemo()
+        } else {
+            try reg.setActive(id: nil)   // no-active target
+            container.switchToReal()     // apply the no-active/real target synchronously
+        }
+        probe.connectGate.release()
+        await switchTask.value
+
+        // The exact displaced incoming B service was disconnected (no orphan receive
+        // loop survives), and it is no longer the container's current service.
+        XCTAssertGreaterThanOrEqual(probe.disconnectCount, 1, "the superseded incoming B signalR must be disconnected")
+        XCTAssertFalse(container.signalRService === probe, "the orphaned service is not the current one")
+        if enterDemo {
+            XCTAssertNil(container.apiClient, "demo composition preserved")
+        }
     }
 
     // MARK: C — real signalR is disconnected (not orphaned) when demo supersedes
