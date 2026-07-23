@@ -218,6 +218,20 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     // so tests can assert EXACT sweep identity + order, not just count.
     private(set) var removedURLs: [URL] = []
 
+    /// E (issue #816 reject, Hicks): the EXACT source, destination, expected
+    /// bytes, and return value of every `moveIfContentEquals` invocation.
+    /// A wrong-path or wrong-bytes move that returned `true` (i.e. destroyed
+    /// live bytes and quarantined the wrong file) is provable by inspecting
+    /// these arrays — the move-order test asserts they are the exact live
+    /// URL, exact quarantine URL, and exact seeded corrupt bytes.
+    struct MoveRecord: Equatable {
+        let from: URL
+        let to: URL
+        let expected: Data
+        let result: Bool
+    }
+    private(set) var moveRecords: [MoveRecord] = []
+
     init(backing: DiskFarmSnapshotFileIO = DiskFarmSnapshotFileIO()) {
         self.backing = backing
     }
@@ -304,7 +318,12 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
         }
         if failMove { throw IOFailure() }
         defer { appendEvent("move-returned") }
-        return try backing.moveIfContentEquals(from: from, to: to, expected: expected)
+        let result = try backing.moveIfContentEquals(from: from, to: to, expected: expected)
+        // E (issue #816 reject, Hicks): record the EXACT move call so tests can
+        // prove source, destination, expected bytes, and result — a
+        // wrong-path/wrong-bytes move that returned true is provable.
+        appendMoveRecord(MoveRecord(from: from, to: to, expected: expected, result: result))
+        return result
     }
 
     private func appendEvent(_ event: String) {
@@ -316,6 +335,12 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     private func appendRemovedURL(_ url: URL) {
         lock.lock()
         removedURLs.append(url)
+        lock.unlock()
+    }
+
+    private func appendMoveRecord(_ record: MoveRecord) {
+        lock.lock()
+        moveRecords.append(record)
         lock.unlock()
     }
 }

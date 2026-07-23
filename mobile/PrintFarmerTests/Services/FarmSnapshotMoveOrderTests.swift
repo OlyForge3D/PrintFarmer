@@ -70,6 +70,15 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
     /// in order), and EXACT byte disposition (server dir gone, live file gone,
     /// quarantine file present with the exact seeded bytes). NO conditional
     /// (`guard else return XCTFail`) patterns.
+    ///
+    /// E (issue #816 reject, Bishop+Hicks): additionally asserts the EXACT
+    /// move source, destination, and expected-bytes recorded at the move
+    /// call itself (not derived from disk after the fact) — a
+    /// wrong-path/wrong-bytes move that happened to return true is now
+    /// provable via `moveRecords`. AND captures the quarantine file's bytes
+    /// BEFORE purge sweeps the quarantine directory so the exact byte
+    /// disposition at the compare-and-move boundary is asserted, not
+    /// inferred.
     func testMoveEntryFirstThenPurgeSerializesAfterMove() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
@@ -84,25 +93,52 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
         let corrupt = Data("{ broken".utf8)
         seedCorruptLive(root: root, ns, bytes: corrupt)
 
-        let barrier = AsyncBarrier()
-        defer { barrier.close() } // I: unstrand parked continuation on failure
-        io.moveEntryBarrier = barrier
+        let moveBarrier = AsyncBarrier()
+        defer { moveBarrier.close() } // I: unstrand parked continuation on failure
+        io.moveEntryBarrier = moveBarrier
 
         // Kick off recovery — it parks at real move entry (compare-and-move boundary).
         let recoverTask = Task { await store.hydrateActive() }
-        await barrier.waitUntilArrived()
+        await moveBarrier.waitUntilArrived()
         XCTAssertEqual(io.moveCount, 1, "compare/move primitive actually entered (E: real IO)")
 
-        // Purge lands while recovery holds its lease — the lease forces purge to drain
-        // before it can sweep the tombstoned server dir.
-        let purgeTask = Task { await store.purge(serverID: ns.serverID) }
-
-        // Release the parked move → recover completes → purge drains and completes.
-        barrier.release()
+        // Release the parked move → recovery completes. We drain the recovery task
+        // BEFORE arming the purge so the quarantine bytes are observable at rest.
+        moveBarrier.release()
         let recoverOutcome = await recoverTask.value
         XCTAssertEqual(recoverOutcome, .recovered, "the compare-and-move recovered the corrupt live file (E: exact outcome)")
+
+        // E hardening (Bishop+Hicks): capture the EXACT move source/destination/
+        // expected-bytes/result recorded at the move call itself, BEFORE purge
+        // touches quarantine. A wrong-path move that returned true would fail
+        // one of these exact-equality assertions.
+        let expectedLive = liveURL(root: root, ns)
+        let expectedQuarantine = quarantineDir(root: root, ns.serverID)
+        XCTAssertEqual(io.moveRecords.count, 1, "exactly one move recorded (E: exact)")
+        let moved = io.moveRecords[0]
+        XCTAssertEqual(moved.from, expectedLive,
+                       "move source MUST be the exact live URL (E: exact path — a wrong-path move is caught here)")
+        XCTAssertTrue(
+            moved.to.path.hasPrefix(expectedQuarantine.path),
+            "move destination MUST be under the exact quarantine dir for this server (E: exact path — got \(moved.to.path))"
+        )
+        XCTAssertEqual(moved.expected, corrupt,
+                       "move expected-bytes MUST equal the seeded corrupt bytes (E: exact — a wrong-bytes move is caught here)")
+        XCTAssertTrue(moved.result, "move MUST have returned true (recovered) (E: exact)")
+
+        // E hardening (Bishop+Hicks): capture quarantine bytes at the exact
+        // move destination BEFORE purge sweeps the quarantine directory. A
+        // wrong-bytes quarantine (e.g. torn/partial) is caught here.
+        let quarantineBytesAfterMove = try Data(contentsOf: moved.to)
+        XCTAssertEqual(quarantineBytesAfterMove.count, corrupt.count,
+                       "quarantined file must have same byte count as seeded corrupt (E: exact)")
+        XCTAssertEqual(quarantineBytesAfterMove, corrupt,
+                       "quarantined file must be byte-identical to seeded corrupt (E: exact)")
+
+        // Purge lands after recovery has completed — sweeps [serverDir, quarantineDir].
+        let purgeTask = Task { await store.purge(serverID: ns.serverID) }
         let purgeOutcome = await purgeTask.value
-        XCTAssertEqual(purgeOutcome, .purged, "purge succeeded after draining the recovery lease (E: exact outcome)")
+        XCTAssertEqual(purgeOutcome, .purged, "purge succeeded after the recovery lease drained (E: exact outcome)")
 
         // E hardening (Hicks): EXACT counts + EXACT complete ordered sequence.
         XCTAssertEqual(io.moveCount, 1, "exactly one compare/move must occur (E: exact)")
@@ -119,13 +155,13 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
         XCTAssertEqual(io.removedURLs, [serverDir(root: root, ns.serverID), quarantineDir(root: root, ns.serverID)],
                        "purge MUST removeItem(serverDir) then removeItem(quarantineDir) — exact identities in order (E: exact)")
 
-        // E hardening (Hicks): EXACT byte disposition.
-        // Server dir is gone (purge swept it).
+        // E hardening (Hicks): EXACT byte disposition after the sweep.
         XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path),
                        "purge drained after move and swept the server dir (E: exact)")
-        // The live file inside the server dir is therefore gone too.
         XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL(root: root, ns).path),
                        "live file must not exist after purge (E: exact)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: moved.to.path),
+                       "quarantined file must not exist after purge swept quarantine (E: exact)")
     }
 
     // MARK: - E2: revoke-first — authority lost BEFORE reaching the move boundary

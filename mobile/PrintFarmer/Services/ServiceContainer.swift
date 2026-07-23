@@ -115,8 +115,19 @@ final class ServiceContainer: @unchecked Sendable {
         /// objects observe the same file WITHOUT polluting the real
         /// Application Support directory. When nil AND no explicit
         /// `farmSnapshotAuthority` is provided, production composition
-        /// synthesises a record rooted at `FarmSnapshotStore.defaultRootURL()`.
+        /// synthesises a record rooted at `farmSnapshotRootURL` (or
+        /// `FarmSnapshotStore.defaultRootURL()` when that is nil too).
         farmSnapshotDurableAuthorityRecord: FarmSnapshotDurableAuthorityRecord? = nil,
+        /// H4/E (issue #816 reject, Bishop+Hicks): inject ONLY the snapshot
+        /// root URL and let the shipping ServiceContainer composition build
+        /// its canonical `FarmSnapshotDurableAuthorityRecord` AND
+        /// `FarmSnapshotStore` from that root. The reject-under-remediation
+        /// asked that tests prove production composition — not tests-owned
+        /// manually-injected record objects — actually converges on the
+        /// same durable file across reopen. Passing a temp root here
+        /// (instead of a temp-rooted pre-built record) exercises exactly
+        /// the shipping composition path.
+        farmSnapshotRootURL: URL? = nil,
         apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken in
             APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken)
         },
@@ -137,6 +148,13 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
 
+        // H4/E (issue #816 reject, Bishop+Hicks): the effective snapshot root
+        // is the injected `farmSnapshotRootURL` (test seam) OR the shipping
+        // default. This is the single source of truth for both the durable
+        // authority record and the store when production composition is
+        // used, so both objects converge on the same on-disk root.
+        let effectiveRootURL = farmSnapshotRootURL ?? FarmSnapshotStore.defaultRootURL()
+
         let authority: FarmSnapshotAuthority
         let durableRecord: FarmSnapshotDurableAuthorityRecord?
         if let farmSnapshotAuthority {
@@ -148,13 +166,13 @@ final class ServiceContainer: @unchecked Sendable {
             // H (issue #816 reject, Hicks): production composition wires ONE
             // canonical file-backed durable authority record. If the caller
             // supplied a record (e.g. a tests's temp-rooted instance) use it;
-            // otherwise root at the canonical snapshot root the store uses,
-            // so the shared coordinator sees durable reserved/adopted
-            // high-water AND durable tombstones on every reopen — a distinct
-            // record object constructed from the same root on the next launch
-            // observes the exact same file.
+            // otherwise construct one at the effective root, so the shared
+            // coordinator sees durable reserved/adopted high-water AND
+            // durable tombstones on every reopen — a distinct record object
+            // constructed from the same root on the next launch observes
+            // the exact same file.
             let record = farmSnapshotDurableAuthorityRecord
-                ?? FarmSnapshotDurableAuthorityRecord(rootURL: FarmSnapshotStore.defaultRootURL())
+                ?? FarmSnapshotDurableAuthorityRecord(rootURL: effectiveRootURL)
             durableRecord = record
             authority = FarmSnapshotAuthority(durableAuthorityRecord: record)
         }
@@ -162,7 +180,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.farmSnapshotAuthority = authority
         self.farmSnapshotDurableRecord = durableRecord
         self.farmSnapshotOwnerStore = ownerStore
-        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority, ownerStore: ownerStore)
+        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(
+            authority: authority,
+            rootURL: effectiveRootURL,
+            ownerStore: ownerStore
+        )
 
         let activeServer = serverRegistry.activeServer
         let resolvedURL = activeServer?.baseURL
