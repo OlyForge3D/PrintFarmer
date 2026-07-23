@@ -230,4 +230,146 @@ final class APIClientAuthSessionTests: XCTestCase {
         XCTAssertTrue(observer.snapshot().isEmpty,
                       "the session-snapshot client's 401 MUST NOT publish session-expired")
     }
+
+    // MARK: - A1 tests: request-build bearer coherence
+
+    /// A1: `getData` MUST build its URLRequest from the RequestSession snapshot's
+    /// bearer captured at PUBLIC API ENTRY — never from `self.accessToken` after the
+    /// checker's await. Otherwise a concurrent T2 apply during the checker's park
+    /// would let this request go out with T2's bearer while it is still labeled with
+    /// T1's generation/authSessionToken. This is the primary A1 regression trap.
+    func testGetDataBuildsRequestWithSnapshotBearerAfterCheckerInterleave() async throws {
+        let epoch = AuthOperationEpoch()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+        let transport = MockURLProtocol.makeSession()
+        let client = await makeClient(gen: gen, transport: transport)
+
+        // Apply T1 as the initial authenticated session (bearer-T1).
+        let t1 = epoch.advance()
+        let appliedT1 = await client.applySessionIfCurrent(
+            baseURL: nil, accessToken: "bearer-T1", epoch: epoch, token: t1)
+        XCTAssertTrue(appliedT1)
+
+        // Park the expiry checker so T2 can apply during its await window.
+        let checkerBarrier = AsyncBarrier()
+        // I: register the unconditional close BEFORE any throwing operation so a
+        // failed assertion mid-flight cannot strand the parked checker continuation.
+        addTeardownBlock { checkerBarrier.close() }
+        await client.setTokenExpiryChecker { [weak checkerBarrier] in
+            await checkerBarrier?.arriveAndWait()
+            return false // NOT expired — the request must proceed to the network.
+        }
+
+        // Handler asserts nothing here (bearer is verified after the network return).
+        transport.requestHandler = { req in
+            (TestData.httpResponse(url: req.url, statusCode: 200), Data("{}".utf8))
+        }
+
+        // Kick off the getData; it will park inside the checker.
+        let requestTask = Task {
+            _ = try await client.getData("/api/data")
+        }
+        await checkerBarrier.waitUntilArrived()
+
+        // During the checker's park, apply T2 with a DIFFERENT bearer to the SAME
+        // shared client. If `getData` were building from `self.accessToken` after
+        // the await (the A1 bug), the outbound request would carry bearer-T2 while
+        // still labeled with T1's identity.
+        let t2 = epoch.advance()
+        let appliedT2 = await client.applySessionIfCurrent(
+            baseURL: nil, accessToken: "bearer-T2", epoch: epoch, token: t2)
+        XCTAssertTrue(appliedT2)
+
+        // Release the checker; getData now builds the request AFTER the await.
+        checkerBarrier.release()
+        try await requestTask.value
+
+        // Assert the captured request carries T1's bearer, NOT T2's — proving the
+        // request was built from the immutable snapshot captured at entry.
+        let captured = transport.capturedRequests
+        XCTAssertEqual(captured.count, 1, "exactly one request should have been sent")
+        let auth = captured.first?.value(forHTTPHeaderField: "Authorization") ?? ""
+        XCTAssertTrue(auth.contains("bearer-T1"),
+                      "getData MUST build with the snapshot's T1 bearer, not T2 applied during the checker's await. Actual header=\(auth)")
+        XCTAssertFalse(auth.contains("bearer-T2"),
+                       "getData MUST NOT carry T2's bearer for a T1-labeled request. Actual header=\(auth)")
+    }
+
+    /// A1: for every public request path (`get`, `post`, `postVoid`, `put`,
+    /// `putVoid`, `patch`, `delete`), a request captured at entry uses THAT
+    /// snapshot's bearer for the outbound request — even when the shared client
+    /// is repointed BEFORE the request completes. This proves the snapshot-thread
+    /// refactor covers every public API consistently (no path may build with T2
+    /// bearer but label T1 or vice versa).
+    func testAllPublicRequestPathsUseSnapshotBearerAcrossReapply() async throws {
+        let epoch = AuthOperationEpoch()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+
+        struct Case {
+            let name: String
+            let run: @Sendable (APIClient) async throws -> Void
+        }
+
+        let cases: [Case] = [
+            Case(name: "get") { c in let _: [String: String] = try await c.get("/api/g") },
+            Case(name: "post-decode") { c in
+                let _: [String: String] = try await c.post("/api/p", body: ["x": 1])
+            },
+            Case(name: "post-void") { c in try await c.postVoid("/api/pv") },
+            Case(name: "post-void-body") { c in try await c.postVoid("/api/pvb", body: ["x": 1]) },
+            Case(name: "put") { c in
+                let _: [String: String] = try await c.put("/api/pu", body: ["x": 1])
+            },
+            Case(name: "put-void") { c in try await c.putVoid("/api/puv") },
+            Case(name: "put-void-body") { c in try await c.putVoid("/api/puvb", body: ["x": 1]) },
+            Case(name: "patch") { c in
+                let _: [String: String] = try await c.patch("/api/pa", body: ["x": 1])
+            },
+            Case(name: "delete") { c in try await c.delete("/api/d") },
+            Case(name: "getData") { c in _ = try await c.getData("/api/gd") },
+        ]
+
+        for kase in cases {
+            let transport = MockURLProtocol.makeSession()
+            let client = await makeClient(gen: gen, transport: transport)
+
+            // Apply T1 (bearer-T1) as initial session; then park a checker so we
+            // can interleave a T2 apply during the same-request in-flight window.
+            let t1 = epoch.advance()
+            _ = await client.applySessionIfCurrent(
+                baseURL: nil, accessToken: "bearer-T1-\(kase.name)", epoch: epoch, token: t1)
+
+            let checkerBarrier = AsyncBarrier()
+            addTeardownBlock { checkerBarrier.close() }
+            await client.setTokenExpiryChecker { [weak checkerBarrier] in
+                await checkerBarrier?.arriveAndWait()
+                return false
+            }
+
+            transport.requestHandler = { req in
+                (TestData.httpResponse(url: req.url, statusCode: 200), Data("{}".utf8))
+            }
+
+            let task = Task { try await kase.run(client) }
+            await checkerBarrier.waitUntilArrived()
+
+            // T2 apply during the checker's parked await.
+            let t2 = epoch.advance()
+            _ = await client.applySessionIfCurrent(
+                baseURL: nil, accessToken: "bearer-T2-\(kase.name)", epoch: epoch, token: t2)
+
+            checkerBarrier.release()
+            try await task.value
+
+            let captured = transport.capturedRequests
+            XCTAssertEqual(captured.count, 1, "\(kase.name): exactly one request expected")
+            let auth = captured.first?.value(forHTTPHeaderField: "Authorization") ?? ""
+            XCTAssertTrue(auth.contains("bearer-T1-\(kase.name)"),
+                          "\(kase.name) MUST carry T1's snapshot bearer, got header=\(auth)")
+            XCTAssertFalse(auth.contains("bearer-T2-\(kase.name)"),
+                           "\(kase.name) MUST NOT carry T2's bearer, got header=\(auth)")
+        }
+    }
 }
