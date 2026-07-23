@@ -96,6 +96,12 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
 
+// Forwarded headers (X-Forwarded-For / -Proto / -Host) — bind config + options.
+// Disabled by default; operators behind a reverse proxy must set
+// ForwardedHeaders:Enabled=true and populate KnownProxies / KnownNetworks.
+// See docs/DEPLOYMENT.md and the ForwardedHeaders section in appsettings.json.
+builder.Services.AddPrintFarmerForwardedHeaders(builder.Configuration);
+
 // Feature flag service for phased rollout control
 builder.Services.AddSingleton<IFeatureFlagService, FeatureFlagService>();
 
@@ -239,8 +245,7 @@ builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Env
 // result in "server has not been started" errors in CreateClient().
 try
 {
-    string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-    if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
+    if (!builder.Environment.IsEnvironment("Testing"))
     {
         _ = builder.WebHost.UseUrls("http://0.0.0.0:5245");
     }
@@ -270,8 +275,8 @@ catch (Exception ex)
 {
     try
     {
-        string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (builder.Environment.IsEnvironment("Testing")
+            || string.Equals(builder.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: Build() threw during test startup:");
@@ -314,6 +319,15 @@ app.Logger.LogInformation(
     slicerEnabled,
     slicerModuleEnabled,
     modelFilesEnabled);
+
+// Forwarded headers must be the FIRST middleware in the pipeline so that
+// Connection.RemoteIpAddress is rewritten (or intentionally left as the direct
+// peer) before ANY other middleware — including runtime-discovered slicer plugin
+// modules — has a chance to read it. Registering here (before UseSlicerIntegration)
+// guarantees that even if a plugin module calls app.Use(...) in its Configure()
+// hook, it cannot register middleware ahead of the trust gate. No-op unless
+// ForwardedHeaders:Enabled=true and trusted proxies are configured. (#862)
+app.UsePrintFarmerForwardedHeaders();
 
 // Post-build slicer module configuration (metrics thresholds, alert subscriptions, etc.)
 if (slicerModuleEnabled)
@@ -371,6 +385,9 @@ catch
 }
 
 // === MIDDLEWARE PIPELINE ===
+// NOTE: UsePrintFarmerForwardedHeaders is registered earlier (before slicer
+// integration) so that plugin-registered middleware cannot precede the trust
+// gate. See the #862 comment above.
 
 // Global exception handling
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -738,7 +755,8 @@ catch (Exception ex)
     // Emit diagnostic details in Testing environment but still surface the failure to the test host.
     try
     {
-        if (app.Environment.IsEnvironment("Testing") || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (app.Environment.IsEnvironment("Testing")
+            || string.Equals(app.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");
