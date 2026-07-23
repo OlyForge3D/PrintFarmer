@@ -245,8 +245,7 @@ builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Env
 // result in "server has not been started" errors in CreateClient().
 try
 {
-    string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-    if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
+    if (!builder.Environment.IsEnvironment("Testing"))
     {
         _ = builder.WebHost.UseUrls("http://0.0.0.0:5245");
     }
@@ -276,8 +275,8 @@ catch (Exception ex)
 {
     try
     {
-        string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (builder.Environment.IsEnvironment("Testing")
+            || string.Equals(builder.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: Build() threw during test startup:");
@@ -756,7 +755,8 @@ catch (Exception ex)
     // Emit diagnostic details in Testing environment but still surface the failure to the test host.
     try
     {
-        if (app.Environment.IsEnvironment("Testing") || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (app.Environment.IsEnvironment("Testing")
+            || string.Equals(app.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");

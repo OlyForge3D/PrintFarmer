@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-push hook — enforce dotnet format on the exact outgoing Git tree
+#
+# Reads Git's push list from stdin (`<local ref> <local sha> <remote ref>
+# <remote sha>\n`). For every non-delete ref, computes the .NET-relevant
+# path diff between the outgoing tip and the previous known state, extracts
+# the exact outgoing tree into a detached temporary worktree, and runs
+# an explicit restore followed by
+# `dotnet format ./farm-web.sln --verify-no-changes --no-restore` inside it.
+#
+# Fail-closed principles:
+#   - Missing `dotnet` binary → refuse the push (rc=1). Never "skip" silently.
+#   - Missing sha256 hasher   → refuse the push (rc=1). No unknown-hash cache
+#                              bucket that could collide across trees.
+#   - Diff discovery failure  → refuse the push (rc=1).
+#   - Any check that produced a cache marker whose content is not a 64-hex
+#     digest is treated as absent.
+#
+# Cache:
+#   Successful verifications are stamped as an empty file at
+#   `$(git rev-parse --git-common-dir)/pre-push-fmt-cache/<key>`, where
+#   `<key>` is
+#       sha256( gate_version || hook_sha256 || tree_sha ||
+#               "dotnet --version" || "dotnet format --version" ).
+#   The dotnet/formatter versions are resolved *inside the extracted worktree*
+#   so a repo pinned via `global.json` gets an SDK-accurate identity.
+#
+# Bypass:
+#   The standard `git push --no-verify` (or `-n`) skips all pre-push hooks
+#   including this one. That is Git's documented emergency bypass — this
+#   hook cannot be server-enforced; only branch-protection / required CI can
+#   be. See docs/CI.md for the full policy.
+# =============================================================================
+
+set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# Gate version — increment when the hook logic changes materially so old
+# cache entries no longer match new logic. Keep in lockstep with tests.
+# ---------------------------------------------------------------------------
+readonly GATE_VERSION="pre-push-format-v2"
+
+# ---------------------------------------------------------------------------
+# Colored helpers (only when stderr is a terminal).
+# ---------------------------------------------------------------------------
+if [[ -t 2 ]]; then
+  readonly _RED='\033[0;31m' _GRN='\033[0;32m' _YLW='\033[0;33m' _BLD='\033[1m' _RST='\033[0m'
+else
+  readonly _RED='' _GRN='' _YLW='' _BLD='' _RST=''
+fi
+
+info() { printf "${_GRN}✓${_RST} %s\n" "$1" >&2; }
+warn() { printf "${_YLW}!${_RST} %s\n" "$1" >&2; }
+fail() { printf "${_RED}✗${_RST} %s\n" "$1" >&2; }
+head() { printf "\n${_BLD}%s${_RST}\n" "$1" >&2; }
+
+# ---------------------------------------------------------------------------
+# sha256 wrapper. Emits the 64-hex digest of stdin. Returns nonzero when
+# no hasher is available — we never fall back to a name like "no-sha256"
+# because that would let multiple distinct trees collide into one cache
+# bucket.
+# ---------------------------------------------------------------------------
+sha256_of_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+is_hex64() {
+  [[ "$1" =~ ^[0-9a-f]{64}$ ]]
+}
+
+# ---------------------------------------------------------------------------
+# Are any of the changed paths .NET-relevant? Source, project/solution files,
+# SDK/tool manifests, package configuration, VERSION, editor configuration,
+# and any MSBuild props/targets all affect restore, formatting, or compilation.
+#
+# Uses `git diff -z --no-renames` and Bash read -r -d '' for NUL safety.
+# Renames are decomposed into old-name delete + new-name add so both sides
+# are classified.
+#
+# Sets DOTNET_RELEVANT=0|1 on success. Returns nonzero on any I/O failure —
+# the caller MUST treat that as fail-closed.
+# ---------------------------------------------------------------------------
+DOTNET_RELEVANT=0
+
+diff_dotnet_paths_z() {
+  local from="$1" to="$2"
+  DOTNET_RELEVANT=0
+
+  # Two-pipeline strategy: git diff → filter loop. Check PIPESTATUS after.
+  local tmp
+  tmp="$(mktemp)" || return 1
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$tmp'" RETURN
+
+  # core.quotePath=false: never Git-quote non-ASCII names.
+  if ! git -c core.quotePath=false diff -z --no-renames --name-only "$from" "$to" > "$tmp" 2>/dev/null; then
+    return 1
+  fi
+
+  # Read NUL-terminated entries. bash `read -d ''` uses NUL as delimiter.
+  local entry relevant=0
+  while IFS= read -r -d '' entry; do
+    [[ -z "$entry" ]] && continue
+    case "$entry" in
+      *.cs|*.csproj|*.sln|*.slnx|*.props|*.targets|\
+      .editorconfig|*/.editorconfig|\
+      VERSION|global.json|dotnet-tools.json|\
+      NuGet.Config|NuGet.config|nuget.config|\
+      packages.lock.json|*/packages.lock.json)
+        relevant=1 ;;
+    esac
+  done < "$tmp"
+  DOTNET_RELEVANT=$relevant
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Ensure a working dotnet + `dotnet format --version` returns hex-worthy
+# identity strings. Populates DOTNET_VER and FORMAT_VER globals. Returns
+# nonzero on failure — we then reject the push.
+# ---------------------------------------------------------------------------
+DOTNET_VER=""
+FORMAT_VER=""
+
+probe_dotnet_identity() {
+  DOTNET_VER=""
+  FORMAT_VER=""
+  if ! command -v dotnet >/dev/null 2>&1; then
+    fail "dotnet not found on PATH — cannot verify formatting."
+    fail "Install .NET SDK 10 (https://dot.net) or bypass with 'git push --no-verify'."
+    return 1
+  fi
+  if ! DOTNET_VER="$(dotnet --version 2>/dev/null)"; then
+    fail "'dotnet --version' failed."
+    return 1
+  fi
+  if [[ -z "$DOTNET_VER" ]]; then
+    fail "'dotnet --version' returned empty."
+    return 1
+  fi
+  local fver_rc=0
+  FORMAT_VER="$(dotnet format --version 2>/dev/null)" || fver_rc=$?
+  if (( fver_rc != 0 )); then
+    fail "'dotnet format --version' exited with $fver_rc."
+    return 1
+  fi
+  if [[ -z "$FORMAT_VER" ]]; then
+    fail "'dotnet format --version' returned empty."
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Compute the cache key from the extracted worktree. Must run inside the
+# worktree so global.json is honored when resolving `dotnet --version`.
+# ---------------------------------------------------------------------------
+compute_cache_key() {
+  local tree_sha="$1" hook_hash="$2"
+  # Re-probe versions from inside this worktree to honor global.json.
+  if ! probe_dotnet_identity; then
+    return 1
+  fi
+  local key
+  key="$(printf '%s\n%s\n%s\n%s\n%s\n' \
+    "$GATE_VERSION" "$hook_hash" "$tree_sha" "$DOTNET_VER" "$FORMAT_VER" \
+    | sha256_of_stdin)" || return 1
+  if ! is_hex64 "$key"; then
+    return 1
+  fi
+  printf '%s' "$key"
+}
+
+# ---------------------------------------------------------------------------
+# Verify the formatting of the tree currently checked out in $PWD. Returns 0
+# on success, nonzero on any failure. Writes the cache marker on success.
+# ---------------------------------------------------------------------------
+CACHE_DIR=""
+
+verify_extracted_tree() {
+  local tree_sha="$1" hook_hash="$2"
+  # No src/farm-web.sln in the tree even though .NET-relevant paths changed
+  # → someone deleted the sln. Fail closed rather than declaring "nothing to
+  # format".
+  if [[ ! -f src/farm-web.sln ]]; then
+    fail "src/farm-web.sln missing from outgoing tree — cannot verify format."
+    return 1
+  fi
+
+  local key
+  if ! key="$(compute_cache_key "$tree_sha" "$hook_hash")"; then
+    fail "Could not derive cache key (dotnet/sha256 missing or empty)."
+    return 1
+  fi
+
+  local marker="$CACHE_DIR/$key"
+  if [[ -f "$marker" ]]; then
+    info "cache hit ($key) — skipping dotnet format."
+    return 0
+  fi
+
+  info "cache miss — restoring and verifying formatting on tree $tree_sha"
+  # Cache hits skip both operations. On a miss, restore explicitly into the
+  # machine's normal NuGet package cache, then prevent dotnet format from doing
+  # an implicit second restore.
+  local rc=0
+  ( cd src && dotnet restore ./farm-web.sln --nologo ) || rc=$?
+  if (( rc != 0 )); then
+    fail "dotnet restore failed for the outgoing tree (rc=$rc)."
+    return 1
+  fi
+  ( cd src && dotnet format ./farm-web.sln --verify-no-changes --no-restore ) || rc=$?
+  if (( rc != 0 )); then
+    fail "dotnet format --verify-no-changes failed (rc=$rc)."
+    fail "Run 'cd src && dotnet format ./farm-web.sln' locally, commit the changes, and push again."
+    fail "Emergency bypass: 'git push --no-verify' (see docs/CI.md)."
+    return 1
+  fi
+
+  # Atomic stamp: write to tmp then rename.
+  local tmp
+  tmp="$(mktemp "$CACHE_DIR/.stamp.XXXXXX")" || return 1
+  printf 'ok\n' > "$tmp" || { rm -f "$tmp" ; return 1; }
+  mv -f "$tmp" "$marker" || { rm -f "$tmp" ; return 1; }
+  info "cache stamped ($key)."
+  return 0
+}
+
+# Resolve Git's shared metadata directory before entering extracted trees.
+# Git for Windows may return either /d/... or drive-qualified D:/... paths for
+# linked worktrees. Drive-qualified paths must go through cygpath rather than
+# being mistaken for paths relative to the current worktree.
+resolve_git_common_dir() {
+  local common_dir
+  common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || {
+    fail "Not inside a git repository."
+    return 1
+  }
+
+  case "$common_dir" in
+    /*)
+      ;;
+    [A-Za-z]:[/\\]*)
+      if ! command -v cygpath >/dev/null 2>&1; then
+        fail "Git returned drive-qualified common dir '$common_dir', but cygpath is unavailable."
+        return 1
+      fi
+      common_dir="$(cygpath -u "$common_dir" 2>/dev/null)" || {
+        fail "Could not normalize Git common dir '$common_dir'."
+        return 1
+      }
+      ;;
+    *)
+      local toplevel
+      toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+        fail "Not inside a git worktree."
+        return 1
+      }
+      common_dir="$toplevel/$common_dir"
+      ;;
+  esac
+
+  if [[ ! -d "$common_dir" ]]; then
+    fail "Git common dir '$common_dir' does not exist."
+    return 1
+  fi
+  (cd "$common_dir" && pwd -P)
+}
+
+# ---------------------------------------------------------------------------
+# Given a tip SHA, materialize that tree into a temp directory and run the
+# verification. Returns 0 on pass, nonzero on fail. Cleans up temp dir.
+# ---------------------------------------------------------------------------
+verify_tip_sha() {
+  local tip_sha="$1" hook_hash="$2"
+
+  local tree_sha
+  tree_sha="$(git rev-parse "$tip_sha^{tree}" 2>/dev/null)" || {
+    fail "Cannot resolve tree for tip $tip_sha."
+    return 1
+  }
+
+  local workdir
+  workdir="$(mktemp -d)" || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf -- '$workdir'" RETURN
+
+  # Extract via git archive → tar. Avoids touching the caller's index/worktree.
+  if ! git archive --format=tar "$tip_sha" | tar -x -C "$workdir" 2>/dev/null; then
+    fail "git archive failed for $tip_sha."
+    return 1
+  fi
+
+  ( cd "$workdir" && verify_extracted_tree "$tree_sha" "$hook_hash" )
+}
+
+# ---------------------------------------------------------------------------
+# Main.
+#
+# Git passes push refs on stdin. Each line: <local ref> <local sha> <remote
+# ref> <remote sha>. A local sha of all zeroes means a delete; skip.
+# ---------------------------------------------------------------------------
+main() {
+  local ZERO="0000000000000000000000000000000000000000"
+
+  # Establish cache directory once. Resolve to an absolute path — we later
+  # `cd` into the extracted worktree and relative paths would break.
+  local common_dir
+  common_dir="$(resolve_git_common_dir)" || exit 1
+  CACHE_DIR="$common_dir/pre-push-fmt-cache"
+  mkdir -p "$CACHE_DIR" || {
+    fail "Cannot create cache dir $CACHE_DIR."
+    exit 1
+  }
+
+  # Establish the hook's own hash so any hook code change invalidates cache.
+  local hook_hash="unknown"
+  local self="${BASH_SOURCE[0]}"
+  if [[ -r "$self" ]]; then
+    hook_hash="$(sha256_of_stdin < "$self")" || {
+      fail "sha256 hasher unavailable — cannot compute cache key."
+      exit 1
+    }
+    if ! is_hex64 "$hook_hash"; then
+      fail "hook self-hash malformed."
+      exit 1
+    fi
+  fi
+
+  # Fail early if dotnet is missing — we only need to run format if any ref
+  # has a .NET-relevant change, but rejecting before per-ref work avoids
+  # partially-processed pushes.
+  local any_relevant=0
+  local -a tips=()
+
+  local local_ref local_sha _remote_ref remote_sha
+  # `read` returns nonzero on EOF-without-newline; accept partial final line so
+  # callers that omit the trailing \n (common in tests and some shell shims)
+  # still get processed. Reset per iteration so a partial final line at EOF
+  # doesn't cause the loop body to re-run on stale values.
+  while :; do
+    local_ref="" local_sha="" _remote_ref="" remote_sha=""
+    IFS=' ' read -r local_ref local_sha _remote_ref remote_sha
+    local _read_rc=$?
+    if [[ -z "$local_ref" ]]; then
+      break
+    fi
+    # Skip delete.
+    if [[ "$local_sha" == "$ZERO" ]]; then
+      continue
+    fi
+    # New branch: base is $remote_sha == $ZERO. Diff against a well-known
+    # base (development) if it exists, else the merge base with the default
+    # remote HEAD, else empty tree.
+    local base
+    if [[ "$remote_sha" == "$ZERO" ]]; then
+      base="$(git merge-base "$local_sha" origin/development 2>/dev/null)" \
+        || base="$(git merge-base "$local_sha" origin/main 2>/dev/null)" \
+        || base=""
+      if [[ -z "$base" ]]; then
+        # No common ancestor — treat as .NET-relevant (fail-safe) and verify.
+        any_relevant=1
+        tips+=("$local_sha")
+        continue
+      fi
+    else
+      # Existing ref. Use remote_sha as base for the diff. If remote_sha is
+      # not an ancestor of local_sha (force-push), git diff still works —
+      # it just shows the symmetric change. We accept that as the "outgoing"
+      # set: everything the remote will end up with.
+      base="$remote_sha"
+    fi
+
+    if ! diff_dotnet_paths_z "$base" "$local_sha"; then
+      fail "Could not compute .NET path diff for $local_ref ($base..$local_sha)."
+      exit 1
+    fi
+
+    if (( DOTNET_RELEVANT == 1 )); then
+      any_relevant=1
+      tips+=("$local_sha")
+    fi
+    # EOF after processing a partial (unterminated) final line.
+    if (( _read_rc != 0 )); then
+      break
+    fi
+  done
+
+  if (( any_relevant == 0 )); then
+    info "No .NET-relevant changes in outgoing refs — pre-push format gate skipped."
+    exit 0
+  fi
+
+  head "pre-push .NET format gate"
+  info "outgoing refs with .NET changes: ${#tips[@]}"
+
+  # Dedup tips (multiple refs may push the same commit).
+  local -A seen=() ; local -a uniq=() ; local t
+  for t in "${tips[@]}"; do
+    if [[ -z "${seen[$t]:-}" ]]; then
+      seen[$t]=1
+      uniq+=("$t")
+    fi
+  done
+
+  local rc=0
+  for t in "${uniq[@]}"; do
+    if ! verify_tip_sha "$t" "$hook_hash"; then
+      rc=1
+    fi
+  done
+
+  if (( rc == 0 )); then
+    info "pre-push format gate: PASS"
+  else
+    fail "pre-push format gate: FAIL"
+  fi
+  exit "$rc"
+}
+
+main "$@"

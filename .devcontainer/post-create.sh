@@ -100,8 +100,15 @@ chmod +x scripts/*.sh
 # Initialize git hooks (if available)
 if [ -d ".git" ]; then
     echo "🎣 Setting up git hooks..."
+    if [ -x ".githooks/setup.sh" ]; then
+        # Prefer the tracked installer so pre-commit + pre-push are both wired up.
+        ./.githooks/setup.sh || echo "⚠️  .githooks/setup.sh failed; falling back to direct config"
+    fi
     git config core.hooksPath .githooks
     mkdir -p .githooks
+    # Ensure both hooks are executable (setup.sh already does this; belt-and-suspenders).
+    [ -f .githooks/pre-commit ] && chmod +x .githooks/pre-commit
+    [ -f .githooks/pre-push ]   && chmod +x .githooks/pre-push
 fi
 
 # Create development workspace file
