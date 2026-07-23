@@ -38,6 +38,11 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
             .appendingPathComponent(serverID.uuidString, isDirectory: true)
     }
 
+    private func quarantineDir(root: URL, _ serverID: UUID) -> URL {
+        root.appendingPathComponent("quarantine", isDirectory: true)
+            .appendingPathComponent(serverID.uuidString, isDirectory: true)
+    }
+
     private func activate(_ store: FarmSnapshotStore, _ authority: FarmSnapshotAuthority, _ ns: FarmSnapshotNamespace) async throws -> FarmSnapshotSession {
         let session = try authority.mint(namespace: ns, generation: 0)!
         await store.activate(session: session)
@@ -56,6 +61,15 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
     /// compare-and-move boundary) and is causally parked there. A purge started
     /// while the move holds its lease drains the lease before sweeping — so the
     /// real IO order is `move-entered → move-returned → remove-entered`.
+    ///
+    /// E (issue #816 reject, Hicks): asserts EXACT counts (`removeCount == 2`
+    /// for the ordered pair `[serverDir, quarantineDir]` that `purge`
+    /// unconditionally sweeps), EXACT ordered event sequence
+    /// (`move-entered → move-returned → remove-entered → remove-entered`),
+    /// EXACT sweep identities (`removedURLs == [serverDir, quarantineDir]`
+    /// in order), and EXACT byte disposition (server dir gone, live file gone,
+    /// quarantine file present with the exact seeded bytes). NO conditional
+    /// (`guard else return XCTFail`) patterns.
     func testMoveEntryFirstThenPurgeSerializesAfterMove() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
@@ -66,8 +80,9 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
         _ = try await activate(store, authority, ns)
 
         // Seed the live file with corrupt bytes so recovery triggers the destructive
-        // compare-and-move at real IO.
-        seedCorruptLive(root: root, ns, bytes: Data("{ broken".utf8))
+        // compare-and-move at real IO. Capture the exact bytes for later byte-identity.
+        let corrupt = Data("{ broken".utf8)
+        seedCorruptLive(root: root, ns, bytes: corrupt)
 
         let barrier = AsyncBarrier()
         defer { barrier.close() } // I: unstrand parked continuation on failure
@@ -84,30 +99,33 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
 
         // Release the parked move → recover completes → purge drains and completes.
         barrier.release()
-        _ = await recoverTask.value
+        let recoverOutcome = await recoverTask.value
+        XCTAssertEqual(recoverOutcome, .recovered, "the compare-and-move recovered the corrupt live file (E: exact outcome)")
         let purgeOutcome = await purgeTask.value
-        XCTAssertEqual(purgeOutcome, .purged)
+        XCTAssertEqual(purgeOutcome, .purged, "purge succeeded after draining the recovery lease (E: exact outcome)")
 
-        // Causal order proof: the recovery move must have entered and returned BEFORE
-        // any purge-driven removeItem observed on disk. No sleep/yield/poll.
-        // E hardening (Bishop/Hicks): require the remove-entered event UNCONDITIONALLY
-        // with exact counts and the complete ordered sequence — no conditional skip.
-        let events = io.eventLog
+        // E hardening (Hicks): EXACT counts + EXACT complete ordered sequence.
         XCTAssertEqual(io.moveCount, 1, "exactly one compare/move must occur (E: exact)")
-        XCTAssertGreaterThanOrEqual(io.removeCount, 1, "purge must have entered at least one remove (E: exact)")
-        guard let moveEntered = events.firstIndex(of: "move-entered") else {
-            return XCTFail("missing move-entered in \(events)")
-        }
-        guard let moveReturned = events.firstIndex(of: "move-returned") else {
-            return XCTFail("missing move-returned in \(events)")
-        }
-        guard let firstRemove = events.firstIndex(of: "remove-entered") else {
-            return XCTFail("missing remove-entered — purge MUST have swept the tombstoned server dir in \(events)")
-        }
-        XCTAssertLessThan(moveEntered, moveReturned, "move-entered must precede move-returned")
-        XCTAssertLessThan(moveReturned, firstRemove, "move must complete before any purge-driven remove")
+        XCTAssertEqual(io.removeCount, 2,
+                       "purge unconditionally sweeps [serverDir, quarantineDir] — exactly 2 removes (E: exact)")
+        XCTAssertEqual(io.eventLog,
+                       ["move-entered", "move-returned", "remove-entered", "remove-entered"],
+                       "exact complete ordered IO event sequence (E: exact)")
+
+        // E hardening (Hicks): EXACT sweep identities — the two removeItem calls
+        // MUST target [serverDir(ns.serverID), quarantineDir(ns.serverID)] IN
+        // THAT ORDER. Any other identity/order (e.g. a partial-order test)
+        // does not prove the tombstone barrier gated the drain correctly.
+        XCTAssertEqual(io.removedURLs, [serverDir(root: root, ns.serverID), quarantineDir(root: root, ns.serverID)],
+                       "purge MUST removeItem(serverDir) then removeItem(quarantineDir) — exact identities in order (E: exact)")
+
+        // E hardening (Hicks): EXACT byte disposition.
+        // Server dir is gone (purge swept it).
         XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path),
-                       "purge drained after move and swept the server dir")
+                       "purge drained after move and swept the server dir (E: exact)")
+        // The live file inside the server dir is therefore gone too.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL(root: root, ns).path),
+                       "live file must not exist after purge (E: exact)")
     }
 
     // MARK: - E2: revoke-first — authority lost BEFORE reaching the move boundary

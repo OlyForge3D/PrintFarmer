@@ -201,6 +201,10 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     private(set) var removeCount = 0
     private(set) var moveCount = 0
 
+    // E (issue #816 reject, Hicks): ordered identities of removeItem targets
+    // so tests can assert EXACT sweep identity + order, not just count.
+    private(set) var removedURLs: [URL] = []
+
     init(backing: DiskFarmSnapshotFileIO = DiskFarmSnapshotFileIO()) {
         self.backing = backing
     }
@@ -239,6 +243,7 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     func removeItem(at url: URL) async throws {
         bump(\.removeCount)
         appendEvent("remove-entered")
+        appendRemovedURL(url)
         if let barrier = removeItemBarrier {
             removeItemBarrier = nil
             await barrier.arriveAndWait()
@@ -292,6 +297,12 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     private func appendEvent(_ event: String) {
         lock.lock()
         eventLog.append(event)
+        lock.unlock()
+    }
+
+    private func appendRemovedURL(_ url: URL) {
+        lock.lock()
+        removedURLs.append(url)
         lock.unlock()
     }
 }
