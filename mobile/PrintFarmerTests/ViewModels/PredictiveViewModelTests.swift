@@ -4857,6 +4857,17 @@ private actor AsyncGate {
         }
     }
 
+    /// Hicks H2 remediation: deterministic dead-box pruning callable
+    /// independently of `snapshot()`. Exists so tests can prove raw
+    /// backing storage returns to exactly zero without relying on the
+    /// implicit compaction side-effect of `snapshot()` (which measured
+    /// AND cleaned in the same call — making a raw==0 assertion after
+    /// snapshot vacuous). One actor hop; no polling, sleeps, or yields.
+    /// Idempotent: successive calls are no-ops on an already-clean map.
+    func pruneAllDroppedTicketBoxesForTest() {
+        compactAllParkAckTickets()
+    }
+
     // MARK: Hicks D — hold-inside-cancellation-handler helpers
 
     /// Test-only helper that parks an observer continuation the same way
@@ -5009,6 +5020,155 @@ private actor AsyncGate {
                 attempt.resolveOutcome(.cancelled(receipt))
                 return receipt
 }
+        }
+    }
+
+    // MARK: Hicks H1 addendum — publish-natural-BEFORE-hold variants
+    //
+    // These variants let a test PROVE that a late `Task.cancel()` fires
+    // while the outer `withTaskCancellationHandler` scope is still live
+    // AFTER natural completion has already published `.finishedBeforeProcessing`.
+    // Sequence inside the body:
+    //   1. Park primary continuation (identical branches to `awaitObserver`)
+    //   2. On resume, IMMEDIATELY publish natural completion via the
+    //      attempt's monotonic state gate. This synchronously seals the
+    //      buffered outcome to `.finishedBeforeProcessing`.
+    //   3. Then park inside `holdGate.awaitWaiter(holdToken)`. The outer
+    //      cancellation handler remains installed the entire time; a
+    //      `Task.cancel()` at this point invokes the outer onCancel, whose
+    //      `attempt.beginCancellationIfActive()` returns FALSE because
+    //      state is already `.completedNaturally`, so no cancel Task is
+    //      launched — the exact "natural wins over late cancel while
+    //      handler is live" proof.
+    // Contrast with `awaitObserverAndHold` (holds THEN publishes), which
+    // proves the opposite ordering (cancel arrives before natural publish).
+
+    /// Observer variant of publish-natural-BEFORE-hold. See MARK doc above.
+    func awaitObserverAndHoldAfterPublish(
+        _ token: ObserverToken,
+        attempt: ObserverAwaitAttempt,
+        holdGate: AsyncGate,
+        holdToken: WaiterToken
+    ) async {
+        let awaitID = attempt.id
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { c in
+                if completedObservers.remove(token.id) != nil {
+                    observerFates.removeValue(forKey: token.id)
+                    observerResumeCounts[.latchConsumed, default: 0] += 1
+                    c.resume()
+                    return
+                }
+                if parkedObservers[token.id] != nil {
+                    observerDuplicateAwaitCount += 1
+                    observerResumeCounts[.duplicateAfterParked, default: 0] += 1
+                    c.resume()
+                    return
+                }
+                if observerOrder.contains(token.id) {
+                    if closed {
+                        observerOrder.removeAll { $0 == token.id }
+                        sealObserverOutcome(id: token.id, reason: .closedBeforePark)
+                        observerResumeCounts[.closedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    parkedObservers[token.id] = (awaitID: awaitID, c: c)
+                    flushObserverParkAcks(id: token.id, result: .parked)
+                    return
+                }
+                if token.id >= nextObserverID {
+                    observerUnknownAwaitCount += 1
+                    observerResumeCounts[.unknownToken, default: 0] += 1
+                } else {
+                    observerDuplicateAwaitCount += 1
+                    observerResumeCounts[.duplicateAfterFated, default: 0] += 1
+                }
+                c.resume()
+            }
+            // Hicks H1: publish natural completion FIRST (before hold),
+            // so the state gate transitions to `.completedNaturally`
+            // BEFORE any subsequent Task.cancel() can fire onCancel.
+            if attempt.markCompletedNaturallyIfActive() {
+                attempt.resolveOutcome(.finishedBeforeProcessing)
+            }
+            // Now hold inside the same cancellation-handler scope so a
+            // late Task.cancel() is proven to arrive while the outer
+            // handler is still installed.
+            await holdGate.awaitWaiter(holdToken)
+        } onCancel: {
+            // Hicks H1: state gate returns FALSE here in the natural-wins
+            // path (already `.completedNaturally`); no cancel Task launched.
+            guard attempt.beginCancellationIfActive() else { return }
+            _ = Task<ObserverCancelReceipt, Never> {
+                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID)
+                attempt.resolveOutcome(.cancelled(receipt))
+                return receipt
+            }
+        }
+    }
+
+    /// Waiter analogue of `awaitObserverAndHoldAfterPublish`.
+    func awaitWaiterAndHoldAfterPublish(
+        _ token: WaiterToken,
+        attempt: WaiterAwaitAttempt,
+        holdGate: AsyncGate,
+        holdToken: WaiterToken
+    ) async {
+        let awaitID = attempt.id
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { c in
+                if completedWaiters.remove(token.id) != nil {
+                    waiterFates.removeValue(forKey: token.id)
+                    waiterResumeCounts[.latchConsumed, default: 0] += 1
+                    c.resume()
+                    return
+                }
+                if parkedWaiters[token.id] != nil {
+                    waiterDuplicateAwaitCount += 1
+                    waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
+                    c.resume()
+                    return
+                }
+                if waiterOrder.contains(token.id) {
+                    if closed {
+                        waiterOrder.removeAll { $0 == token.id }
+                        sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
+                        waiterResumeCounts[.closedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    if opened {
+                        waiterOrder.removeAll { $0 == token.id }
+                        sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
+                        waiterResumeCounts[.openedImmediate, default: 0] += 1
+                        c.resume()
+                        return
+                    }
+                    parkedWaiters[token.id] = (awaitID: awaitID, c: c)
+                    flushWaiterParkAcks(id: token.id, result: .parked)
+                    return
+                }
+                if token.id >= nextWaiterID {
+                    waiterUnknownAwaitCount += 1
+                    waiterResumeCounts[.unknownToken, default: 0] += 1
+                } else {
+                    waiterDuplicateAwaitCount += 1
+                    waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
+                }
+                c.resume()
+            }
+            if attempt.markCompletedNaturallyIfActive() {
+                attempt.resolveOutcome(.finishedBeforeProcessing)
+            }
+            await holdGate.awaitWaiter(holdToken)
+        } onCancel: {
+            guard attempt.beginCancellationIfActive() else { return }
+            _ = Task<WaiterCancelReceipt, Never> {
+                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID)
+                attempt.resolveOutcome(.cancelled(receipt))
+                return receipt
+            }
         }
     }
 
