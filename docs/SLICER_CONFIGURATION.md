@@ -278,6 +278,17 @@ only constrain principals carrying the `token_use=desktop_exchange` claim), and 
 **OctoPrint**-purpose keys can never obtain a Desktop-exchange token, since the exchange endpoint
 rejects any key whose `Purpose` is not `Desktop`.
 
+### Database Migrations
+
+The `ApiKeys` table's `Purpose` and `Scopes` columns are provisioned by the
+`AddApiKeyPurposeAndScopes` EF Core migration, present for both the PostgreSQL and SQL Server
+providers (`src/migrations/Farm.Migrations.PostgreSQL` and `src/migrations/Farm.Migrations.SqlServer`).
+Both columns default to `0` (`ApiKeyPurpose.OctoPrint` / `ApiKeyScope.None`), so every pre-existing
+key upgrades in place as an unscoped, OctoPrint-purpose key - it keeps working for slicer uploads
+exactly as before and is never implicitly granted Desktop model/library access. Run
+`dotnet ef database update` (with `DB_PROVIDER` set to `postgres` or `sqlserver`) to apply the
+migration; SQLite deployments continue to use `EnsureCreated()` and pick up the columns automatically.
+
 ### Slicer Host Configuration
 
 To accept Desktop-exchanged tokens, the standalone slicer host needs the same JWT signing
