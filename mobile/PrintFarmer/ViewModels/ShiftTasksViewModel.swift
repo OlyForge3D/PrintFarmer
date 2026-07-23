@@ -56,19 +56,19 @@ final class ShiftTasksViewModel {
     @ObservationIgnored private var refreshWaiters:
         [UUID: CheckedContinuation<Bool, Never>] = [:]
 
-    init() {
-        self.callbackEnqueuer = { operation in
-            Task { @MainActor in
-                await operation()
-            }
+    /// Production callers use the default enqueuer, which hops each
+    /// callback onto the MainActor via an unstructured `Task`. Tests
+    /// inject a deterministic enqueuer to control callback ordering.
+    /// The default reproduces production behavior exactly, so this
+    /// seam is safe to expose in all build configurations (including
+    /// Release build-for-testing).
+    init(callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
+        Task { @MainActor in
+            await operation()
         }
-    }
-
-    #if DEBUG
-    init(callbackEnqueuer: @escaping CallbackEnqueuer) {
+    }) {
         self.callbackEnqueuer = callbackEnqueuer
     }
-    #endif
 
     func configure(
         taskService: any ShiftTaskServiceProtocol,

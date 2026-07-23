@@ -1240,6 +1240,7 @@ final class JobHistoryViewModelTests: XCTestCase {
 
     // MARK: - Task-Scoped Mount Lifecycle (Issue #853)
 
+    #if DEBUG
     func testMountCancelledBeforeHelperBeginsDoesNotActivateOrRequest() async {
         let startGate = TaskStartGate()
         let cleanupQueue = ManualCancellationCleanupEnqueuer()
@@ -1277,6 +1278,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertNil(mockJobAnalyticsService.getHistoryCalledWith)
         XCTAssertNil(mirroredToken)
     }
+    #endif
 
     func testMountWrapperSignalsFinishedWhenCancelledBeforeServiceEntry() async {
         let service = ScriptedJobAnalyticsService()
@@ -1345,6 +1347,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertNil(deferEquivalent.activationToken)
     }
 
+    #if DEBUG
     func testMountCancellationDeactivatesBeforeIgnoringServiceRelease() async {
         let service = ScriptedJobAnalyticsService()
         let registration = await service.register(
@@ -1402,6 +1405,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertEqual(releaseEvent.signalCount, 1)
         XCTAssertTrue(viewModel.historyItems.isEmpty)
     }
+    #endif
 
     func testFailedInitialLoadKeepsMountOwnedUntilCancellation() async {
         let service = ScriptedJobAnalyticsService()
@@ -1627,6 +1631,7 @@ final class JobHistoryViewModelTests: XCTestCase {
 
     // MARK: - History Authority (Issue #853)
 
+    #if DEBUG
     func testCancelledAppearanceHistoryTaskCannotIssueRequestAfterDisappear() async {
         let activationToken = viewModel.activate()
         let startGate = TaskStartGate()
@@ -1650,7 +1655,9 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertFalse(viewModel.isLoadingMore)
     }
+    #endif
 
+    #if DEBUG
     func testAlreadyCancelledReloadDoesNotAcquireAuthorityOrMutateState() async {
         let activationToken = viewModel.activate()
         await commitHistory(historyPage(["committed"], currentPage: 1))
@@ -1678,7 +1685,9 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertFalse(viewModel.isLoadingMore)
     }
+    #endif
 
+    #if DEBUG
     func testAlreadyCancelledLoadMoreDoesNotAcquireAuthorityOrIssueRequest() async {
         let activationToken = viewModel.activate()
         await commitHistory(historyPage(["committed"], currentPage: 1))
@@ -1704,7 +1713,9 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertFalse(viewModel.isLoadingMore)
     }
+    #endif
 
+    #if DEBUG
     func testCancelledEnteredReloadRelinquishesLoadingBeforeServiceRelease() async {
         let activationToken = viewModel.activate()
         await commitHistory(historyPage(["committed"], currentPage: 1))
@@ -1736,7 +1747,9 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.historyItems.map(\.id), ["committed"])
         XCTAssertFalse(viewModel.isLoading)
     }
+    #endif
 
+    #if DEBUG
     func testCancelledEnteredLoadMoreRelinquishesLoadingBeforeServiceRelease() async {
         let activationToken = viewModel.activate()
         await commitHistory(historyPage(["committed"], currentPage: 1))
@@ -1769,6 +1782,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.currentOffset, 0)
         XCTAssertFalse(viewModel.isLoadingMore)
     }
+    #endif
 
     func testDelayedCancelledReloadCleanupCannotClearNewerReload() async {
         let cleanupQueue = ManualCancellationCleanupEnqueuer()
@@ -1825,6 +1839,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    #if DEBUG
     func testRapidReappearanceRejectsDelayedPriorActivationWithoutRevokingCurrentLoad() async {
         let firstActivation = viewModel.activate()
         let startGate = TaskStartGate()
@@ -1881,7 +1896,9 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertFalse(viewModel.isLoadingMore)
     }
+    #endif
 
+    #if DEBUG
     func testCancelledAppearanceTimelineTaskCannotIssueRequestAfterDisappear() async {
         let activationToken = viewModel.activate()
         let startGate = TaskStartGate()
@@ -1908,6 +1925,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.timeline.isEmpty)
         XCTAssertFalse(viewModel.isViewActive)
     }
+    #endif
 
     func testReloadSupersedesLoadMoreWhenPaginationCompletesFirst() async {
         await commitHistory(historyPage(["old-1"], currentPage: 1))
@@ -2304,6 +2322,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoadingMore)
     }
 
+    #if DEBUG
     func testCurrentDeactivationRevokesCompletionQueuedForHistoryApply() async {
         let activationToken = viewModel.activate()
         await commitHistory(historyPage(["committed"], currentPage: 1))
@@ -2338,6 +2357,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isViewActive)
         XCTAssertFalse(viewModel.isLoading)
     }
+    #endif
 
     func testEmptySuccessfulPagePreservesAppendBoundarySemantics() async {
         await commitHistory(historyPage(["page-1"], currentPage: 1))
@@ -2462,6 +2482,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoadingMore)
     }
 
+    #if DEBUG
     func testNewerReloadSuccessRemainsExactWhenOlderReloadSucceedsLater() async {
         let activationToken = viewModel.activate()
         let filterAFrom = Date(timeIntervalSince1970: 1_700_000_000)
@@ -2549,6 +2570,7 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertFalse(viewModel.isLoadingMore)
     }
+    #endif
 
     func testSupersededReloadCannotClearNewerReloadLoadingFlag() async {
         await commitHistory(historyPage(["old"], currentPage: 1))

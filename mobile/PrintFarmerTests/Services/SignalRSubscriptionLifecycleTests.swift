@@ -2635,6 +2635,7 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
 ///     not stack or leak subscription registrations.
 ///
 /// Timing is used ONLY as failure ceilings.
+#if DEBUG
 @MainActor
 final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
 
@@ -3204,6 +3205,7 @@ final class SignalRZeroWaiterCancellationTests: XCTestCase {
     }
 
 }
+#endif
 
 @MainActor
 final class SignalRCausalMockReceiveTests: XCTestCase {
@@ -3864,6 +3866,7 @@ private enum ZeroWaiterFamily: String, Sendable {
 
     var label: String { rawValue }
 
+#if DEBUG
     var debugFamily: SignalRLifecycleInvariants.DebugZeroWaiterFamily {
         switch self {
         case .transport: .transport
@@ -3871,6 +3874,7 @@ private enum ZeroWaiterFamily: String, Sendable {
         case .reconnectOwner: .reconnectOwner
         }
     }
+#endif
 
     func enter(_ invariants: SignalRLifecycleInvariants) {
         switch self {
@@ -4279,6 +4283,7 @@ private final class ActualTaskCompletionProbe<
     }
 }
 
+#if DEBUG
 private final class ZeroWaiterEnrollmentRecorder: @unchecked Sendable {
     typealias Family = SignalRLifecycleInvariants.DebugZeroWaiterFamily
 
@@ -4369,6 +4374,7 @@ private final class ZeroWaiterEnrollmentRecorder: @unchecked Sendable {
         continuation?.resume()
     }
 }
+#endif
 
 private extension Notification.Name {
     static let signalRTaskLifecycleTest = Notification.Name("PrintFarmer.SignalRTaskLifecycle.test")

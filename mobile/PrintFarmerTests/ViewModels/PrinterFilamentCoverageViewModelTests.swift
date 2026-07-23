@@ -20,6 +20,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
 
     /// A scoped invalidation for a DIFFERENT printer must not cause a
     /// refetch on this VM. Absence proved by callback-tick barrier.
+    #if DEBUG
     func testScopedInvalidationForOtherPrinterDoesNotRefetch() async {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -43,7 +44,9 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 1,
                        "Detail VM must ignore invalidations scoped to a different printer.")
     }
+    #endif
 
+    #if DEBUG
     func testFleetScopedInvalidationRefetchesDetail() async {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -66,7 +69,9 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 2)
         XCTAssertEqual(vm.coverage?.status, .runout)
     }
+    #endif
 
+    #if DEBUG
     func testMatchingPrinterInvalidationRefetches() async {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -87,6 +92,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         await vm.waitForCommittedGeneration(atLeast: 2)
         XCTAssertEqual(vm.dispatchedRequestCount, 2)
     }
+    #endif
 
     // MARK: - Feature-disabled tombstone precedence
 
@@ -108,6 +114,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
 
     // MARK: - Reconnect classification (reviewer blocker B + C)
 
+    #if DEBUG
     func testColdStartConnectedDoesNotRefetch() async {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -127,7 +134,9 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
                        "Cold-start `.connected` must not double-load.")
         XCTAssertTrue(vm.hasSeenAnyConnectedForTesting)
     }
+    #endif
 
+    #if DEBUG
     func testReconnectTransitionTriggersOneRefetch() async {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -154,9 +163,11 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         await vm.waitForCommittedGeneration(atLeast: 2)
         XCTAssertEqual(vm.dispatchedRequestCount, 2)
     }
+    #endif
 
     /// Reviewer blocker B: configure while reconnecting → next
     /// `.connected` MUST refetch.
+    #if DEBUG
     func testConfigureWhileReconnectingArmsRecoveryOnNextConnected() async {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -174,6 +185,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 1,
                        "Configure-while-reconnecting must arm recovery for the pending .connected.")
     }
+    #endif
 
     // MARK: - printer not found vs feature-disabled distinction
 
@@ -264,6 +276,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 0)
     }
 
+    #if DEBUG
     func testInflightOldServiceSuccessCannotOverwriteReplacement() async {
         let oldCoverage = ControlledFilamentCoverageService()
         let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
@@ -287,7 +300,9 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.coverage?.status, .runout,
                        "Stale in-flight success from OLD service MUST NOT overwrite replacement's snapshot.")
     }
+    #endif
 
+    #if DEBUG
     func testInflightOldServiceFeatureDisabledCannotTombstoneReplacement() async {
         let oldCoverage = ControlledFilamentCoverageService()
         let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
@@ -313,7 +328,9 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
                        "Stale featureDisabled from OLD service MUST NOT tombstone the replacement.")
         XCTAssertNotNil(vm.coverage)
     }
+    #endif
 
+    #if DEBUG
     func testInflightOldServiceErrorCannotOverwriteReplacement() async {
         let oldCoverage = ControlledFilamentCoverageService()
         let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
@@ -338,6 +355,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastLoadError,
                      "Stale error from OLD service MUST NOT overwrite the replacement's clean state.")
     }
+    #endif
 
     func testTeardownBeforeDrainCausesNoCommit() async {
         let coverage = ControlledFilamentCoverageService()
@@ -364,6 +382,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
     /// Still-current SignalR invalidation for THIS printer that
     /// drains AFTER coverage A→B replacement dispatches exactly
     /// one load against B and commits under B's authority.
+    #if DEBUG
     func testStillCurrentSignalRInvalidationDrainsAgainstReplacementCoverage() async throws {
         let coverageA = ControlledFilamentCoverageService()
         let coverageB = ControlledFilamentCoverageService()
@@ -398,8 +417,10 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.coverage?.status, .runout,
                        "Commit reflects B's snapshot.")
     }
+    #endif
 
     /// Symmetric reconnect variant.
+    #if DEBUG
     func testStillCurrentSignalRReconnectRecoveryDrainsAgainstReplacementCoverage() async throws {
         let coverageA = ControlledFilamentCoverageService()
         let coverageB = ControlledFilamentCoverageService()
@@ -430,9 +451,11 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 1)
         XCTAssertEqual(vm.coverage?.status, .runout)
     }
+    #endif
 
     /// S1 invalidation queued → configureSignalR(S2) → drain →
     /// no-op. Genuine queued-before-replace proof.
+    #if DEBUG
     func testS1InvalidationQueuedBeforeS2ReplaceDrainsAsNoOp() async throws {
         let coverage = ControlledFilamentCoverageService()
         let s1 = MockSignalRService()
@@ -452,8 +475,10 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(__pending, 0)
         XCTAssertEqual(vm.dispatchedRequestCount, 0)
     }
+    #endif
 
     /// S1 invalidation queued → tearDownSignalR → drain → no-op.
+    #if DEBUG
     func testS1InvalidationQueuedBeforeTeardownDrainsAsNoOp() async throws {
         let coverage = ControlledFilamentCoverageService()
         let s1 = MockSignalRService()
@@ -472,6 +497,7 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(__pending, 0)
         XCTAssertEqual(vm.dispatchedRequestCount, 0)
     }
+    #endif
 
     // MARK: - Fixtures
 
