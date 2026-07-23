@@ -498,4 +498,163 @@ final class APIClientAuthSessionTests: XCTestCase {
         XCTAssertTrue(observer.snapshot().isEmpty,
                       "an unauthenticated client MUST NOT publish session-expired even if init was passed a token")
     }
+
+    /// A1 (issue #816 reject, Hicks): T1 request enters `getData`, captures its
+    /// pre-await session snapshot (including baseURL), parks on the token-expiry
+    /// checker's await → T2 apply repoints the SHARED apiClient's baseURL to a
+    /// DIFFERENT server B → checker returns → T1's `buildRequest` resolves the
+    /// URL against `requestSession.baseURL` (server A), NEVER `self.baseURL`
+    /// (server B). The outbound URL host MUST be server A's — the primary A1
+    /// regression trap. Bearer-only tests are insufficient: the whole ask is
+    /// "URL/host/server identity in the same pre-await snapshot".
+    func testGetDataUsesSnapshotHostAcrossBaseURLReapply() async throws {
+        let epoch = AuthOperationEpoch()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+        let transport = MockURLProtocol.makeSession()
+        let client = APIClient(
+            baseURL: URL(string: "https://a.example.com")!,
+            session: transport.urlSession,
+            serverGeneration: gen,
+            accessToken: nil
+        )
+
+        // Apply T1 as bearer=T1 at server A.
+        let t1 = epoch.advance()
+        _ = await client.applySessionIfCurrent(
+            baseURL: URL(string: "https://a.example.com")!,
+            accessToken: "bearer-T1",
+            epoch: epoch, token: t1)
+
+        let checkerBarrier = AsyncBarrier()
+        addTeardownBlock { checkerBarrier.close() }
+        await client.setTokenExpiryChecker { [weak checkerBarrier] in
+            await checkerBarrier?.arriveAndWait()
+            return false
+        }
+
+        transport.requestHandler = { req in
+            (TestData.httpResponse(url: req.url, statusCode: 200), Data("{}".utf8))
+        }
+
+        // T1 request enters getData, parks on the checker await.
+        let requestTask = Task { _ = try await client.getData("/api/data") }
+        await checkerBarrier.waitUntilArrived()
+
+        // T2 apply during the parked await: repoint apiClient to server B with a
+        // DIFFERENT bearer. If getData resolves against `self.baseURL` after the
+        // await (the A1 bug), the outbound request goes to server B under T1's
+        // bearer, labeled with T1's identity.
+        let t2 = epoch.advance()
+        _ = await client.applySessionIfCurrent(
+            baseURL: URL(string: "https://b.example.com")!,
+            accessToken: "bearer-T2",
+            epoch: epoch, token: t2)
+
+        checkerBarrier.release()
+        try await requestTask.value
+
+        let captured = transport.capturedRequests
+        XCTAssertEqual(captured.count, 1, "exactly one request must be sent")
+        // A1 primary invariant: HOST MUST BE SERVER A.
+        XCTAssertEqual(captured.first?.url?.host, "a.example.com",
+                       "getData MUST resolve URL against the SNAPSHOT's baseURL (server A), not self.baseURL (server B). Actual URL=\(String(describing: captured.first?.url))")
+        XCTAssertNotEqual(captured.first?.url?.host, "b.example.com",
+                          "getData MUST NOT hit server B under T1's identity")
+        // A1 co-invariant: BEARER MUST BE T1.
+        let auth = captured.first?.value(forHTTPHeaderField: "Authorization") ?? ""
+        XCTAssertTrue(auth.contains("bearer-T1"),
+                      "getData MUST carry T1 bearer; got header=\(auth)")
+        XCTAssertFalse(auth.contains("bearer-T2"),
+                       "getData MUST NOT carry T2 bearer; got header=\(auth)")
+    }
+
+    /// A1 (issue #816 reject, Hicks): every public request path — get / post
+    /// (decode) / postVoid / postVoid+body / put / putVoid / putVoid+body /
+    /// patch / delete / getData — resolves its outbound URL against the
+    /// PRE-AWAIT snapshot's baseURL AND uses that snapshot's bearer, even
+    /// when the shared apiClient is repointed to a DIFFERENT server (host)
+    /// with a DIFFERENT bearer during the in-flight window. Bearer-only
+    /// coverage does not exercise the host invariant that motivates A1.
+    func testAllPublicRequestPathsUseSnapshotHostAndBearerAcrossReapply() async throws {
+        let epoch = AuthOperationEpoch()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+
+        struct Case {
+            let name: String
+            let run: @Sendable (APIClient) async throws -> Void
+        }
+
+        let cases: [Case] = [
+            Case(name: "get") { c in let _: [String: String] = try await c.get("/api/g") },
+            Case(name: "post-decode") { c in
+                let _: [String: String] = try await c.post("/api/p", body: ["x": 1])
+            },
+            Case(name: "post-void") { c in try await c.postVoid("/api/pv") },
+            Case(name: "post-void-body") { c in try await c.postVoid("/api/pvb", body: ["x": 1]) },
+            Case(name: "put") { c in
+                let _: [String: String] = try await c.put("/api/pu", body: ["x": 1])
+            },
+            Case(name: "put-void") { c in try await c.putVoid("/api/puv") },
+            Case(name: "put-void-body") { c in try await c.putVoid("/api/puvb", body: ["x": 1]) },
+            Case(name: "patch") { c in
+                let _: [String: String] = try await c.patch("/api/pa", body: ["x": 1])
+            },
+            Case(name: "delete") { c in try await c.delete("/api/d") },
+            Case(name: "getData") { c in _ = try await c.getData("/api/gd") },
+        ]
+
+        for kase in cases {
+            let transport = MockURLProtocol.makeSession()
+            let client = APIClient(
+                baseURL: URL(string: "https://a.example.com")!,
+                session: transport.urlSession,
+                serverGeneration: gen,
+                accessToken: nil
+            )
+            let t1 = epoch.advance()
+            _ = await client.applySessionIfCurrent(
+                baseURL: URL(string: "https://a.example.com")!,
+                accessToken: "bearer-T1-\(kase.name)",
+                epoch: epoch, token: t1)
+
+            let checkerBarrier = AsyncBarrier()
+            addTeardownBlock { checkerBarrier.close() }
+            await client.setTokenExpiryChecker { [weak checkerBarrier] in
+                await checkerBarrier?.arriveAndWait()
+                return false
+            }
+
+            transport.requestHandler = { req in
+                (TestData.httpResponse(url: req.url, statusCode: 200), Data("{}".utf8))
+            }
+
+            let task = Task { try await kase.run(client) }
+            await checkerBarrier.waitUntilArrived()
+
+            // Repoint to server B with a different bearer during the parked
+            // in-flight window.
+            let t2 = epoch.advance()
+            _ = await client.applySessionIfCurrent(
+                baseURL: URL(string: "https://b.example.com")!,
+                accessToken: "bearer-T2-\(kase.name)",
+                epoch: epoch, token: t2)
+
+            checkerBarrier.release()
+            try await task.value
+
+            let captured = transport.capturedRequests
+            XCTAssertEqual(captured.count, 1, "\(kase.name): exactly one request expected")
+            XCTAssertEqual(captured.first?.url?.host, "a.example.com",
+                           "\(kase.name) MUST resolve URL against snapshot host (A), not self.baseURL (B). URL=\(String(describing: captured.first?.url))")
+            XCTAssertNotEqual(captured.first?.url?.host, "b.example.com",
+                              "\(kase.name) MUST NOT hit server B under T1's identity")
+            let auth = captured.first?.value(forHTTPHeaderField: "Authorization") ?? ""
+            XCTAssertTrue(auth.contains("bearer-T1-\(kase.name)"),
+                          "\(kase.name) MUST carry T1's bearer; header=\(auth)")
+            XCTAssertFalse(auth.contains("bearer-T2-\(kase.name)"),
+                           "\(kase.name) MUST NOT carry T2's bearer; header=\(auth)")
+        }
+    }
 }
