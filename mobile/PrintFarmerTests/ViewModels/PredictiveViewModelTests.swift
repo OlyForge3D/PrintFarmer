@@ -771,7 +771,8 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTAssertFalse(hop.closedAtHop,
                           ".processedIgnoredMismatch requires gate open at hop (close would produce .closedBeforeProcessing); got closedAtHop=true")
         case .closedBeforeProcessing:
-            XCTAssertEqual(rc[.parkedResumedByCancel] ?? 0, 0)
+            XCTAssertEqual(rc[.parkedResumedByCancel] ?? 0, 1,
+                           "the genuine cancellation handler delivered before its actor hop")
             XCTAssertEqual(rc[.parkedResumedByClose] ?? 0, 0,
                            "close observes an already-resumed caller suspension")
             let fc = snap.waiterFateCounts
@@ -900,6 +901,22 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTFail("waiter cancel receipt present but no hop fingerprint — harness regression")
             return
         }
+        let observerReleaseEvents = observerAttempt.lifecycleEventsForTest.compactMap {
+            event -> AwaitSuspensionReleaseSite? in
+            guard case .suspensionResumed(_, let requestedBy) = event.phase else {
+                return nil
+            }
+            return requestedBy
+        }
+        let waiterReleaseEvents = waiterAttempt.lifecycleEventsForTest.compactMap {
+            event -> AwaitSuspensionReleaseSite? in
+            guard case .suspensionResumed(_, let requestedBy) = event.phase else {
+                return nil
+            }
+            return requestedBy
+        }
+        XCTAssertEqual(observerReleaseEvents.count, 1)
+        XCTAssertEqual(waiterReleaseEvents.count, 1)
 
         // Correlated matched-cancellation + exact-resume-reason for
         // observer side. Because parked was proven pre-cancel, the
@@ -917,8 +934,14 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTAssertTrue(independentlyMatched && obsHop.parkedEntryExisted && !obsHop.closedAtHop,
                           "observer .processedMatched requires hopFingerprint(parked=true, matched=true, closed=false); got \(obsHop)")
         } else {
-            XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
-                           "observer .closedBeforeProcessing: exactly one .parkedResumedByClose")
+            if observerReleaseEvents.first == .cancellationHandler {
+                XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1)
+                XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByClose] ?? 0, 0)
+            } else {
+                XCTAssertEqual(observerReleaseEvents.first, .close)
+                XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 0)
+                XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByClose] ?? 0, 1)
+            }
             XCTAssertEqual(obsSnap.observerFateCounts[.closedWhileParked] ?? 0, 1,
                            "observer .closedBeforeProcessing: fate sealed exactly .closedWhileParked")
             XCTAssertEqual(obsSnap.observerCancelIgnoredCount, 1,
@@ -940,8 +963,14 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTAssertTrue(independentlyMatched && watHop.parkedEntryExisted && !watHop.closedAtHop,
                           "waiter .processedMatched requires hopFingerprint(parked=true, matched=true, closed=false); got \(watHop)")
         } else {
-            XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1,
-                           "waiter .closedBeforeProcessing: exactly one .parkedResumedByClose")
+            if waiterReleaseEvents.first == .cancellationHandler {
+                XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1)
+                XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0)
+            } else {
+                XCTAssertEqual(waiterReleaseEvents.first, .close)
+                XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 0)
+                XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1)
+            }
             XCTAssertEqual(waitSnap.waiterFateCounts[.closedWhileParked] ?? 0, 1,
                            "waiter .closedBeforeProcessing: fate sealed exactly .closedWhileParked")
             XCTAssertEqual(waitSnap.waiterCancelIgnoredCount, 1,
@@ -3333,11 +3362,6 @@ final class PredictiveViewModelTests: XCTestCase {
                 sourceLiveSubscribers: sourceCounts?.live,
                 registryBoxes: registryCounts?.boxes,
                 registryKeys: registryCounts?.keys))
-            callbackEvidence.rescue(CallbackReentrancyEvidence(
-                sourceRawSubscribers: nil,
-                sourceLiveSubscribers: nil,
-                registryBoxes: nil,
-                registryKeys: nil))
         }
         let installationAck = BufferedConsumer<ConsumerInstallationResult>()
         let waiter = Task {
@@ -3347,18 +3371,18 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         let installation = await installationAck.value()
 
-        ticket = nil
-        let rawBoxes = await gate.debugRawObserverParkAckBoxCount()
-        let rawKeys = await gate.debugRawObserverParkAckKeyCount()
-        await gate.close()
-        consumer.rescue(.consumerCancelled)
-        callbackEvidence.rescue(CallbackReentrancyEvidence(
+        callbackEvidence.armRescue(CallbackReentrancyEvidence(
             sourceRawSubscribers: nil,
             sourceLiveSubscribers: nil,
             registryBoxes: nil,
             registryKeys: nil))
+        ticket = nil
+        consumer.rescue(.consumerCancelled)
         let value = await waiter.value
         let callback = await callbackEvidence.value()
+        let rawBoxes = await gate.debugRawObserverParkAckBoxCount()
+        let rawKeys = await gate.debugRawObserverParkAckKeyCount()
+        await gate.close()
 
         XCTAssertEqual(installation, .installed)
         XCTAssertEqual(value, .ticketDeinitialized)
@@ -3393,11 +3417,6 @@ final class PredictiveViewModelTests: XCTestCase {
                 sourceLiveSubscribers: sourceCounts?.live,
                 registryBoxes: registryCounts?.boxes,
                 registryKeys: registryCounts?.keys))
-            callbackEvidence.rescue(CallbackReentrancyEvidence(
-                sourceRawSubscribers: nil,
-                sourceLiveSubscribers: nil,
-                registryBoxes: nil,
-                registryKeys: nil))
         }
         let installationAck = BufferedConsumer<ConsumerInstallationResult>()
         let waiter = Task {
@@ -3407,18 +3426,18 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         let installation = await installationAck.value()
 
-        ticket = nil
-        let rawBoxes = await gate.debugRawWaiterParkAckBoxCount()
-        let rawKeys = await gate.debugRawWaiterParkAckKeyCount()
-        await gate.close()
-        consumer.rescue(.consumerCancelled)
-        callbackEvidence.rescue(CallbackReentrancyEvidence(
+        callbackEvidence.armRescue(CallbackReentrancyEvidence(
             sourceRawSubscribers: nil,
             sourceLiveSubscribers: nil,
             registryBoxes: nil,
             registryKeys: nil))
+        ticket = nil
+        consumer.rescue(.consumerCancelled)
         let value = await waiter.value
         let callback = await callbackEvidence.value()
+        let rawBoxes = await gate.debugRawWaiterParkAckBoxCount()
+        let rawKeys = await gate.debugRawWaiterParkAckKeyCount()
+        await gate.close()
 
         XCTAssertEqual(installation, .installed)
         XCTAssertEqual(value, .ticketDeinitialized)
@@ -5829,6 +5848,9 @@ private final class BufferedConsumer<Value: Sendable>: @unchecked Sendable {
         normalValue = value
         lock.unlock()
         delivery.armRescue(value)
+        precondition(
+            delivery.snapshotForTest.rescueInvocationCount == 1,
+            "source delivery requested without an armed consumer rescue")
         _ = delivery.requestNormal(value)
     }
 
@@ -5841,6 +5863,9 @@ private final class BufferedConsumer<Value: Sendable>: @unchecked Sendable {
         normalValue = value
         lock.unlock()
         delivery.armRescue(value)
+        precondition(
+            delivery.snapshotForTest.rescueInvocationCount == 1,
+            "buffered delivery requested without an armed rescue")
         _ = delivery.requestNormal(value)
     }
 
@@ -6243,6 +6268,9 @@ private final class AwaitSuspensionChannel: @unchecked Sendable {
             waiterInstalled ? site : .installAfterPriorRelease
         lock.unlock()
         onClaim()
+        precondition(
+            delivery.snapshotForTest.rescueInvocationCount == 1,
+            "attempt release requested without an armed rescue")
         return delivery.requestNormal(AwaitSuspensionDeliveryRequest(
             observedSite: observedSite,
             requestedBy: site,
@@ -6459,6 +6487,9 @@ private final class TicketResolutionEndpoint<Value: Sendable>: @unchecked Sendab
     @discardableResult
     func resolve(_ value: Value, cleanupResult: TicketCleanupResult) -> Bool {
         guard source.resolve(value) else { return false }
+        precondition(
+            source.rescueInvocationCountForTest == 1,
+            "ticket resolution requested without an armed fan-out rescue")
         cleanupEvidence.resolve(cleanupResult)
         return true
     }
