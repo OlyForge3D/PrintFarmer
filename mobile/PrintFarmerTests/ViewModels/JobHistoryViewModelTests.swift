@@ -1278,6 +1278,47 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertNil(mirroredToken)
     }
 
+    func testMountWrapperSignalsFinishedWhenCancelledBeforeServiceEntry() async {
+        let service = ScriptedJobAnalyticsService()
+        let registration = await service.register(
+            .success(historyPage(["must-not-load"], totalCount: 1, currentPage: 1))
+        )
+        let startGate = TaskStartGate()
+        let cleanupQueue = ManualCancellationCleanupEnqueuer()
+        let task = Task { @MainActor in
+            await startGate.park()
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: service,
+                onAcquire: { _ in },
+                onRelease: { _ in },
+                cleanupEnqueuer: { cleanupQueue.enqueue($0) }
+            )
+            await service.operationFinished(registration: registration)
+        }
+        addTeardownBlock {
+            task.cancel()
+            _ = await startGate.release()
+            _ = await service.release(registration: registration)
+            await task.value
+            await cleanupQueue.drain()
+        }
+        await startGate.awaitEntered()
+
+        task.cancel()
+        let startRelease = await startGate.release()
+        XCTAssertEqual(startRelease, .released)
+
+        switch await service.awaitEntryOrOperationFinished(registration: registration) {
+        case .entered:
+            XCTFail("pre-cancelled mount must not enter the history service")
+        case .operationFinished:
+            break
+        }
+        await task.value
+        await cleanupQueue.drain()
+    }
+
     func testPreInstallCleanupDoesNotConsumeExactTokenCleanup() async {
         let attempt = JobAnalyticsMountLifecycle.MountAttempt()
         let activationToken = UUID()
@@ -1323,6 +1364,7 @@ final class JobHistoryViewModelTests: XCTestCase {
                 },
                 cleanupEnqueuer: { cleanupQueue.enqueue($0) }
             )
+            await service.operationFinished(registration: registration)
         }
         addTeardownBlock {
             task.cancel()
@@ -1380,6 +1422,7 @@ final class JobHistoryViewModelTests: XCTestCase {
                 onLifetimeArmed: { lifetimeArmed.signal() },
                 cleanupEnqueuer: { cleanupQueue.enqueue($0) }
             )
+            await service.operationFinished(registration: registration)
         }
         addTeardownBlock {
             task.cancel()
