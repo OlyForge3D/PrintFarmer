@@ -150,14 +150,22 @@ actor AuthService: AuthServiceProtocol {
             verifiedUser = try? await currentUser()
         }
         guard isCurrentOperation(operation) else { return .superseded }
-        fencedMutation(operation) {
+        // J (issue #816 reject): do NOT ignore the owner-mutation fenced result.
+        // If it fails, the operation has been superseded — return .superseded
+        // rather than proceeding to activate() and stamping the registry.
+        guard fencedMutation(operation, {
             if let user = verifiedUser {
                 snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
             } else {
                 snapshotOwnerStore.clearOwner(serverID: server.id)
             }
-        }
-        await activate(server)
+        }) else { return .superseded }
+        // J (issue #816 reject): active-server registry mutation must also be
+        // fenced on this operation and must not silently swallow its outcome.
+        // A superseded login MUST NOT stamp the registry active server under a
+        // superseded operation's identity.
+        let activated = await activate(server, operation: operation)
+        guard activated else { return .superseded }
         // Carry the VERIFIED user back to the caller (not the original nil).
         let verifiedResponse = AuthResponse(
             success: response.success,
@@ -170,13 +178,31 @@ actor AuthService: AuthServiceProtocol {
     }
 
     func logout(operation: AuthOperationToken) async {
+        // J (issue #816 reject): capture the session snapshot ATOMICALLY under an
+        // operation currency check BEFORE any other await (activeServer() or the
+        // /logout network hop). Even a T2 apply that lands between here and the
+        // network can never cause /logout to be sent under T2's bearer, because
+        // this snapshot returns nil when the epoch has advanced past this
+        // operation's token.
+        let logoutClient: APIClient?
+        if operation == .unspecified {
+            logoutClient = await apiClient.sessionSnapshotClient()
+        } else {
+            logoutClient = await apiClient.sessionSnapshotClientIfCurrent(
+                epoch: authEpoch, token: operation.value
+            )
+        }
+        // Only look up the current registered server AFTER the snapshot is fixed.
+        // A stale logout that fails the epoch-currency check does not need to
+        // resolve the active server — it will neither hit the network nor mutate
+        // any local state below (the fencedMutation guard also rejects it).
         let currentServer = await activeServer()
-        // J: issue `/logout` through an IMMUTABLE client carrying the exact captured
-        // old-session bearer — never the shared client, which a newer login could have
-        // repointed to a different session. A stale logout thus cannot contact the
-        // server as the newer session.
-        let logoutClient = await apiClient.sessionSnapshotClient()
-        try? await logoutClient.postVoid("/api/auth/logout")
+        // Network uses the snapshot's captured bearer/baseURL. A superseded
+        // logout has a nil snapshot and skips the network entirely (better than
+        // sending /logout under T2's session).
+        if let logoutClient {
+            try? await logoutClient.postVoid("/api/auth/logout")
+        }
         // After the network await, clear local + durable state only if THIS operation is
         // still current, each mutation fenced atomically on the operation.
         fencedMutation(operation) {
@@ -315,23 +341,59 @@ actor AuthService: AuthServiceProtocol {
         }
     }
 
-    private func activate(_ server: RegisteredServer) async {
+    /// J (issue #816 reject): activate the given server as the registry's active
+    /// server, FENCED on this operation and surfacing the result. A superseded
+    /// operation makes no registry mutation and returns false. The mutation is
+    /// synchronous under a MainActor hop (registry is main-actor-isolated), so
+    /// the operation-currency check and the mutation are one atomic unit under
+    /// the auth-operation epoch lock — a newer operation cannot advance between
+    /// them and see a stale active server.
+    @discardableResult
+    private func activate(_ server: RegisteredServer, operation: AuthOperationToken = .unspecified) async -> Bool {
         if let serverRegistry {
-            await MainActor.run {
-                try? serverRegistry.setActive(id: server.id)
+            return await MainActor.run {
+                self.fencedRegistryMutation(operation) {
+                    // J: the registry setActive result MUST NOT be silently
+                    // swallowed. A duplicate/no-op is treated as success; a hard
+                    // failure logs and returns false so the caller can react.
+                    do {
+                        try serverRegistry.setActive(id: server.id)
+                        return true
+                    } catch {
+                        return false
+                    }
+                }
             }
-            return
         }
 
         let userDefaultsBox = userDefaultsBox
         let migrateLegacyServerURL = migrateLegacyServerURL
-        await MainActor.run {
-            let registry = ServerRegistry(
-                userDefaults: userDefaultsBox.userDefaults,
-                migrateLegacyServerURL: migrateLegacyServerURL
-            )
-            try? registry.setActive(id: server.id)
+        return await MainActor.run {
+            self.fencedRegistryMutation(operation) {
+                let registry = ServerRegistry(
+                    userDefaults: userDefaultsBox.userDefaults,
+                    migrateLegacyServerURL: migrateLegacyServerURL
+                )
+                do {
+                    try registry.setActive(id: server.id)
+                    return true
+                } catch {
+                    return false
+                }
+            }
         }
+    }
+
+    /// J: fenced variant of `fencedMutation` that runs the given body under the
+    /// operation-currency lock and returns the body's own success/failure. Used
+    /// by `activate()` so a supersession short-circuits (returns false without
+    /// running body) and a body-reported failure surfaces to the caller.
+    /// nonisolated because it only touches the Sendable `authEpoch` — safe to
+    /// invoke from a MainActor closure.
+    @discardableResult
+    private nonisolated func fencedRegistryMutation(_ operation: AuthOperationToken, _ body: () -> Bool) -> Bool {
+        if operation == .unspecified { return body() }
+        return authEpoch.withCurrent(operation.value) { body() } ?? false
     }
 
     private func registerTokenExpiryChecker(for server: RegisteredServer) async {

@@ -578,6 +578,20 @@ actor APIClient {
         APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken)
     }
 
+    /// J (issue #816 reject): capture the session snapshot ATOMICALLY under an
+    /// operation currency check, so the returned client's bearer/baseURL matches
+    /// EXACTLY the operation the caller is running. Returns nil if the epoch has
+    /// advanced past `token` — a stale logout thus cannot contact the server as a
+    /// newer session. Because the currency check and the snapshot capture share
+    /// this actor call (no await between them), the epoch cannot advance between
+    /// them.
+    func sessionSnapshotClientIfCurrent(epoch: AuthOperationEpoch, token: Int) -> APIClient? {
+        let snapshot: APIClient? = epoch.withCurrent(token) {
+            APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken)
+        }
+        return snapshot
+    }
+
     /// Restores a previously-saved server URL from UserDefaults.
     /// Upgrades legacy `http://` IP URLs to `https://` to match current behavior.
     static func savedBaseURL() -> URL? {
