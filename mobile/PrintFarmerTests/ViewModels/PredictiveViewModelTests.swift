@@ -645,6 +645,18 @@ final class PredictiveViewModelTests: XCTestCase {
         // `AwaitAttempt.markCompletedNaturallyIfActive()`, never by
         // cancelWaiter. Include it for switch exhaustiveness with a
         // failing branch to catch a future misuse.
+        // Ripley Finding 4: correlate receipt with per-attempt hop
+        // fingerprint recorded at cancelWaiter's actor turn. This
+        // disambiguates broken-matcher regressions (matched entry
+        // wrongly rejected → .processedIgnoredMismatch + close-side
+        // drain would silently pass without this correlation) from
+        // legitimate CancelBefore races. hopFingerprintForTest is
+        // nil only if the cancel Task never dispatched — which the
+        // receipt existence already rules out.
+        guard let hop = attempt.hopFingerprintForTest else {
+            XCTFail("cancel receipt present but no hop fingerprint recorded — harness regression")
+            return
+        }
         switch r {
         case .processedMatched:
             // Cancel Task drained the parked entry directly.
@@ -654,6 +666,12 @@ final class PredictiveViewModelTests: XCTestCase {
                            ".processedMatched must seal fate exactly .cancelledWhileParked")
             XCTAssertEqual(snap.waiterCancelIgnoredCount, 0,
                            ".processedMatched: no ignore-path bump")
+            // Ripley Finding 4: at hop time, parked entry MUST have
+            // existed AND matched this attempt's awaitID exactly.
+            XCTAssertTrue(hop.parkedEntryExisted && hop.awaitIDMatched,
+                          ".processedMatched requires hopFingerprint(parked=true, matched=true); got \(hop)")
+            XCTAssertFalse(hop.closedAtHop,
+                          ".processedMatched requires gate open at hop; got closedAtHop=true")
         case .processedIgnoredMismatch:
             // Cancel Task ran before park was observable; parked/registered
             // continuation was subsequently drained by close's terminal
@@ -666,6 +684,14 @@ final class PredictiveViewModelTests: XCTestCase {
                            ".processedIgnoredMismatch: close-side drain must fire exactly once; got \(closedDrain)")
             XCTAssertEqual(snap.waiterCancelIgnoredCount, 1,
                            ".processedIgnoredMismatch bumps ignored count by one")
+            // Ripley Finding 4: at hop time, either no parked entry
+            // existed OR one existed with a DIFFERENT awaitID. If a
+            // parked entry existed AND matched, the matcher wrongly
+            // classified it as mismatch — broken-matcher regression.
+            XCTAssertFalse(hop.awaitIDMatched,
+                          ".processedIgnoredMismatch requires hopFingerprint(awaitIDMatched=false); a true value here is broken-matcher regression (matched entry classified as mismatch). Fingerprint: \(hop)")
+            XCTAssertFalse(hop.closedAtHop,
+                          ".processedIgnoredMismatch requires gate open at hop (close would produce .closedBeforeProcessing); got closedAtHop=true")
         case .closedBeforeProcessing:
             // Cancel Task saw closed=true. Two sub-cases: task parked
             // before close (→ .parkedResumedByClose + .closedWhileParked),
@@ -683,6 +709,10 @@ final class PredictiveViewModelTests: XCTestCase {
                            ".closedBeforeProcessing: close-side fate seal must fire exactly once; got \(closedFate)")
             XCTAssertEqual(snap.waiterCancelIgnoredCount, 1,
                            ".closedBeforeProcessing: closed-guard bumps ignored count by one")
+            // Ripley Finding 4: gate MUST have been closed at hop
+            // time. Any other fingerprint value is inconsistent.
+            XCTAssertTrue(hop.closedAtHop,
+                          ".closedBeforeProcessing requires hopFingerprint(closedAtHop=true); got \(hop)")
         case .finishedBeforeProcessing:
             XCTFail(".finishedBeforeProcessing is a natural-path receipt; cancelWaiter must not produce it")
         }
@@ -774,6 +804,24 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(waitSnap.waiterCancelInvocationCount, 1,
                        "exactly one cancelWaiter across the test lifetime")
 
+        // Ripley Finding 4: correlate each observed receipt with the
+        // per-attempt hop fingerprint. Because parked was PROVEN
+        // pre-cancel (waitForXParked returned .parked before
+        // task.cancel), any cancel dispatch that later sees no parked
+        // entry must have raced close (fingerprint.closedAtHop=true).
+        // A broken matcher classifying the still-parked matching entry
+        // as mismatch would surface as .processedIgnoredMismatch with
+        // fingerprint(matched=true) — impossible in the receipt set we
+        // accept, so any such combination is a definitive regression.
+        guard let obsHop = observerAttempt.hopFingerprintForTest else {
+            XCTFail("observer cancel receipt present but no hop fingerprint — harness regression")
+            return
+        }
+        guard let watHop = waiterAttempt.hopFingerprintForTest else {
+            XCTFail("waiter cancel receipt present but no hop fingerprint — harness regression")
+            return
+        }
+
         // Correlated matched-cancellation + exact-resume-reason for
         // observer side. Because parked was proven pre-cancel, the
         // parked continuation MUST have been drained by either cancel
@@ -785,6 +833,8 @@ final class PredictiveViewModelTests: XCTestCase {
                            "observer .processedMatched: fate sealed exactly .cancelledWhileParked")
             XCTAssertEqual(obsSnap.observerCancelIgnoredCount, 0,
                            "observer matched cancel — ignored count stays zero")
+            XCTAssertTrue(obsHop.awaitIDMatched && obsHop.parkedEntryExisted && !obsHop.closedAtHop,
+                          "observer .processedMatched requires hopFingerprint(parked=true, matched=true, closed=false); got \(obsHop)")
         } else {
             XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
                            "observer .closedBeforeProcessing: exactly one .parkedResumedByClose")
@@ -792,6 +842,8 @@ final class PredictiveViewModelTests: XCTestCase {
                            "observer .closedBeforeProcessing: fate sealed exactly .closedWhileParked")
             XCTAssertEqual(obsSnap.observerCancelIgnoredCount, 1,
                            "observer close-guard bumps ignored count by one")
+            XCTAssertTrue(obsHop.closedAtHop,
+                          "observer .closedBeforeProcessing requires hopFingerprint(closedAtHop=true); got \(obsHop)")
         }
 
         // Correlated proof for waiter side.
@@ -802,6 +854,8 @@ final class PredictiveViewModelTests: XCTestCase {
                            "waiter .processedMatched: fate sealed exactly .cancelledWhileParked")
             XCTAssertEqual(waitSnap.waiterCancelIgnoredCount, 0,
                            "waiter matched cancel — ignored count stays zero")
+            XCTAssertTrue(watHop.awaitIDMatched && watHop.parkedEntryExisted && !watHop.closedAtHop,
+                          "waiter .processedMatched requires hopFingerprint(parked=true, matched=true, closed=false); got \(watHop)")
         } else {
             XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1,
                            "waiter .closedBeforeProcessing: exactly one .parkedResumedByClose")
@@ -809,6 +863,8 @@ final class PredictiveViewModelTests: XCTestCase {
                            "waiter .closedBeforeProcessing: fate sealed exactly .closedWhileParked")
             XCTAssertEqual(waitSnap.waiterCancelIgnoredCount, 1,
                            "waiter close-guard bumps ignored count by one")
+            XCTAssertTrue(watHop.closedAtHop,
+                          "waiter .closedBeforeProcessing requires hopFingerprint(closedAtHop=true); got \(watHop)")
         }
     }
 
