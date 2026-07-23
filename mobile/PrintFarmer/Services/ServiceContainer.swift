@@ -248,6 +248,12 @@ final class ServiceContainer: @unchecked Sendable {
         // reconciles `.demo` (a no-op that never rebuilds real) instead of re-reading
         // the registry and undoing demo.
         recordTarget(.demo)
+        // Bishop: entering demo must also supersede any IN-FLIGHT login/restore auth
+        // operation. Advancing the auth epoch fails-closes a late-returning real login
+        // at every token-gated destination (VM state, credentials, owner, APIClient
+        // session, and the snapshot publication CAS), so it can have zero real side
+        // effects while demo is active — not merely a disabled button.
+        authOperationEpoch.advance()
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
@@ -358,6 +364,14 @@ final class ServiceContainer: @unchecked Sendable {
     /// (H2, Bishop). Switch-driven binds pass `nil` and rely on the transition epoch.
     private func bindSnapshotToActiveServer(authToken: Int? = nil) async {
         func authStillCurrent() -> Bool { authToken.map { authOperationEpoch.isCurrent($0) } ?? true }
+        // Bishop: never bind a real snapshot session while demo is the desired target —
+        // a late real login/activation must not resurrect a real binding under demo.
+        if case .demo = desiredTarget {
+            if let session = farmSnapshotAuthority.currentSession() {
+                farmSnapshotAuthority.deactivate(session)
+            }
+            return
+        }
         guard let serverRegistry, let active = serverRegistry.activeServer else {
             // No active server: conditionally clear the current session if any.
             if let session = farmSnapshotAuthority.currentSession() {
@@ -385,12 +399,21 @@ final class ServiceContainer: @unchecked Sendable {
             return // tombstoned (purged) server — do not resurrect
         }
         await farmSnapshotStore.prepareStartup()
-        guard serverRegistry.activeServerID == active.id,
+        // Re-validate at publication (no await between here and the adopt): the desired
+        // target must still be a real server (not demo), the active server unchanged,
+        // the generation current, and the auth token current.
+        guard !isDemoDesiredTarget,
+              serverRegistry.activeServerID == active.id,
               activeGeneration.isCurrent(capturedGeneration),
               authStillCurrent(),
               farmSnapshotAuthority.adopt(candidate) else {
             return // superseded during readiness, or an older token — candidate never published
         }
+    }
+
+    private var isDemoDesiredTarget: Bool {
+        if case .demo = desiredTarget { return true }
+        return false
     }
 
     /// Attach the registry observer if a production registry is present and not

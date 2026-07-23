@@ -515,6 +515,28 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         XCTAssertNil(session, "auth-token CAS must block publication when the epoch advanced during activation")
     }
 
+    func testLoginActivationInFlightThenDemoNeverBindsRealSnapshot() async throws {
+        // Bishop: a real login's snapshot activation is in flight (parked in readiness);
+        // the user enters demo through the production path. Entering demo advances the
+        // auth epoch AND records the `.demo` desired target, so the resumed activation
+        // publishes NO real snapshot session and demo (nil apiClient) is preserved.
+        let io = ControlledFarmSnapshotFileIO()
+        let (container, store, _, _) = try makeSingleServerContainer(tombstonedDummy: true, io: io)
+        let token = container.authOperationEpoch.advance()
+
+        let barrier = AsyncBarrier()
+        io.removeItemBarrier = barrier
+        let task = Task { await container.activateFarmSnapshotForActiveServer(authToken: token) }
+        await barrier.waitUntilArrived() // login's snapshot activation parked in readiness
+        container.switchToDemo()          // enter demo through the production path
+        barrier.release()
+        await task.value
+
+        let demoSession = await store.currentSession()
+        XCTAssertNil(demoSession, "no real snapshot session binds while demo is active")
+        XCTAssertNil(container.apiClient, "demo composition (nil apiClient) is preserved")
+    }
+
     /// Builds an `observeRegistry:false` container with one active server (A) whose
     /// owner is persisted. When `tombstonedDummy` is set, a dummy tombstone forces the
     /// startup sweep inside `store.activate` to call `removeItem` (a gate-able await).
