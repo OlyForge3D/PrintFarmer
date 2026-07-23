@@ -14,43 +14,160 @@ enum AttentionProofError: LocalizedError, Sendable, Equatable {
     }
 }
 
+final class AttentionCountBarrier: @unchecked Sendable {
+    private struct Waiter {
+        let target: Int
+        let continuation: CheckedContinuation<Bool, Never>
+    }
+
+    private let lock = NSLock()
+    private var count = 0
+    private var isClosed = false
+    private var waiters: [UUID: Waiter] = [:]
+
+    func advance(to newCount: Int) {
+        lock.lock()
+        count = newCount
+        let ready = waiters.filter { count >= $0.value.target }
+        ready.keys.forEach { waiters[$0] = nil }
+        lock.unlock()
+        ready.values.forEach { $0.continuation.resume(returning: true) }
+    }
+
+    @discardableResult
+    func wait(for target: Int) async -> Bool {
+        let waiterID = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if count >= target {
+                    lock.unlock()
+                    continuation.resume(returning: true)
+                } else if isClosed || Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(returning: false)
+                } else {
+                    waiters[waiterID] = Waiter(
+                        target: target,
+                        continuation: continuation
+                    )
+                    lock.unlock()
+                }
+            }
+        } onCancel: {
+            self.cancel(waiterID: waiterID)
+        }
+    }
+
+    func close() {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            return
+        }
+        isClosed = true
+        let pending = Array(waiters.values)
+        waiters = [:]
+        lock.unlock()
+        pending.forEach { $0.continuation.resume(returning: false) }
+    }
+
+    private func cancel(waiterID: UUID) {
+        lock.lock()
+        let waiter = waiters.removeValue(forKey: waiterID)
+        lock.unlock()
+        waiter?.continuation.resume(returning: false)
+    }
+
+    deinit {
+        close()
+    }
+}
+
 // MARK: - Result gate
 
 /// Awaitable one-shot barrier that lets a test hold a service call
 /// mid-flight and later resolve it as success or failure. Modelled on
 /// `ShiftTaskResultGate` from the shift-task suite. Deterministic — no
 /// polling or fixed sleeps.
-actor AttentionResultGate<Value: Sendable> {
-    private var result: Result<Value, AttentionProofError>?
-    private var continuation: CheckedContinuation<
-        Result<Value, AttentionProofError>,
-        Never
-    >?
+final class AttentionResultGate<Value: Sendable>: @unchecked Sendable {
+    private enum Resolution {
+        case success(Value)
+        case failure(AttentionProofError)
+        case cancelled
+    }
+
+    private let lock = NSLock()
+    private var terminalResolution: Resolution?
+    private var continuations: [
+        UUID: CheckedContinuation<Resolution, Never>
+    ] = [:]
 
     func wait() async throws -> Value {
-        let resolved: Result<Value, AttentionProofError> = await withCheckedContinuation { continuation in
-            if let result {
-                continuation.resume(returning: result)
-            } else {
-                self.continuation = continuation
+        let waiterID = UUID()
+        let resolution: Resolution = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if let terminalResolution {
+                    lock.unlock()
+                    continuation.resume(returning: terminalResolution)
+                } else if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(returning: .cancelled)
+                } else {
+                    continuations[waiterID] = continuation
+                    lock.unlock()
+                }
             }
+        } onCancel: {
+            self.cancelWaiter(waiterID)
         }
-        return try resolved.get()
+
+        switch resolution {
+        case .success(let value):
+            return value
+        case .failure(let error):
+            throw error
+        case .cancelled:
+            throw CancellationError()
+        }
     }
 
-    func succeed(_ value: Value) {
-        resolve(.success(value))
+    func succeed(_ value: Value) async {
+        precondition(complete(.success(value)), "AttentionResultGate resolved twice")
     }
 
-    func fail(_ error: AttentionProofError) {
-        resolve(.failure(error))
+    func fail(_ error: AttentionProofError) async {
+        precondition(complete(.failure(error)), "AttentionResultGate resolved twice")
     }
 
-    private func resolve(_ result: Result<Value, AttentionProofError>) {
-        precondition(self.result == nil, "AttentionResultGate resolved twice")
-        self.result = result
-        continuation?.resume(returning: result)
-        continuation = nil
+    func cancel() {
+        _ = complete(.cancelled)
+    }
+
+    private func complete(_ resolution: Resolution) -> Bool {
+        lock.lock()
+        guard terminalResolution == nil else {
+            lock.unlock()
+            return false
+        }
+        terminalResolution = resolution
+        let waiters = Array(continuations.values)
+        continuations = [:]
+        lock.unlock()
+        waiters.forEach { $0.resume(returning: resolution) }
+        return true
+    }
+
+    private func cancelWaiter(_ waiterID: UUID) {
+        lock.lock()
+        let continuation = continuations.removeValue(forKey: waiterID)
+        lock.unlock()
+        continuation?.resume(returning: .cancelled)
+    }
+
+    deinit {
+        _ = complete(.cancelled)
     }
 }
 
@@ -119,12 +236,9 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
     private(set) var loadCalls: [AttentionLoadCall] = []
     private(set) var actionCalls: [AttentionActionCall] = []
     private(set) var snoozeCalls: [AttentionSnoozeCall] = []
-    private var loadCountWaiters:
-        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
-    private var actionCountWaiters:
-        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
-    private var snoozeCountWaiters:
-        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private let loadCountBarrier = AttentionCountBarrier()
+    private let actionCountBarrier = AttentionCountBarrier()
+    private let snoozeCountBarrier = AttentionCountBarrier()
 
     init(
         steps: [AttentionLoadStep] = [],
@@ -148,7 +262,7 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
 
     func getFeed(cursor: String?, limit: Int?) async throws -> AttentionFeed {
         loadCalls.append(AttentionLoadCall(cursor: cursor, limit: limit))
-        resumeLoadCountWaiters()
+        loadCountBarrier.advance(to: loadCalls.count)
 
         guard !steps.isEmpty else { return defaultFeed }
         let step = steps.removeFirst()
@@ -192,7 +306,7 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
                 snoozedUntilUtc: snoozedUntilUtc
             )
         )
-        resumeSnoozeCountWaiters()
+        snoozeCountBarrier.advance(to: snoozeCalls.count)
 
         guard !snoozeSteps.isEmpty else {
             return SnoozeAttentionResponse(
@@ -220,7 +334,7 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
         actionCalls.append(
             AttentionActionCall(itemID: itemId, actionKind: actionKind)
         )
-        resumeActionCountWaiters()
+        actionCountBarrier.advance(to: actionCalls.count)
 
         guard !actionSteps.isEmpty else {
             return AttentionActionResult(outcome: "Ok")
@@ -237,50 +351,21 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
     }
 
     func waitForLoadCount(_ target: Int) async {
-        guard loadCalls.count < target else { return }
-        await withCheckedContinuation { continuation in
-            loadCountWaiters.append((target, continuation))
-        }
+        _ = await loadCountBarrier.wait(for: target)
     }
 
     func waitForActionCount(_ target: Int) async {
-        guard actionCalls.count < target else { return }
-        await withCheckedContinuation { continuation in
-            actionCountWaiters.append((target, continuation))
-        }
+        _ = await actionCountBarrier.wait(for: target)
     }
 
     func waitForSnoozeCount(_ target: Int) async {
-        guard snoozeCalls.count < target else { return }
-        await withCheckedContinuation { continuation in
-            snoozeCountWaiters.append((target, continuation))
-        }
+        _ = await snoozeCountBarrier.wait(for: target)
     }
 
-    private func resumeLoadCountWaiters() {
-        let ready = loadCountWaiters.filter { loadCalls.count >= $0.target }
-        loadCountWaiters.removeAll { loadCalls.count >= $0.target }
-        ready.forEach { $0.continuation.resume() }
-    }
-
-    private func resumeActionCountWaiters() {
-        let ready = actionCountWaiters.filter {
-            actionCalls.count >= $0.target
-        }
-        actionCountWaiters.removeAll {
-            actionCalls.count >= $0.target
-        }
-        ready.forEach { $0.continuation.resume() }
-    }
-
-    private func resumeSnoozeCountWaiters() {
-        let ready = snoozeCountWaiters.filter {
-            snoozeCalls.count >= $0.target
-        }
-        snoozeCountWaiters.removeAll {
-            snoozeCalls.count >= $0.target
-        }
-        ready.forEach { $0.continuation.resume() }
+    func closeWaiters() {
+        loadCountBarrier.close()
+        actionCountBarrier.close()
+        snoozeCountBarrier.close()
     }
 }
 
@@ -295,28 +380,65 @@ enum AttentionSnapshotOutcome: Sendable {
     case failure(AttentionProofError)
 }
 
-actor AttentionSnapshotGate {
-    private var outcome: AttentionSnapshotOutcome?
-    private var continuation: CheckedContinuation<
-        AttentionSnapshotOutcome,
-        Never
-    >?
+final class AttentionSnapshotGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var terminalOutcome: AttentionSnapshotOutcome?
+    private var continuations: [
+        UUID: CheckedContinuation<AttentionSnapshotOutcome, Never>
+    ] = [:]
 
     func wait() async -> AttentionSnapshotOutcome {
-        await withCheckedContinuation { continuation in
-            if let outcome {
-                continuation.resume(returning: outcome)
-            } else {
-                self.continuation = continuation
+        let waiterID = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if let terminalOutcome {
+                    lock.unlock()
+                    continuation.resume(returning: terminalOutcome)
+                } else if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(returning: .nativeCancellation)
+                } else {
+                    continuations[waiterID] = continuation
+                    lock.unlock()
+                }
             }
+        } onCancel: {
+            self.cancelWaiter(waiterID)
         }
     }
 
-    func resolve(_ outcome: AttentionSnapshotOutcome) {
-        precondition(self.outcome == nil, "AttentionSnapshotGate resolved twice")
-        self.outcome = outcome
-        continuation?.resume(returning: outcome)
-        continuation = nil
+    func resolve(_ outcome: AttentionSnapshotOutcome) async {
+        precondition(complete(outcome), "AttentionSnapshotGate resolved twice")
+    }
+
+    func cancel() {
+        _ = complete(.nativeCancellation)
+    }
+
+    private func complete(_ outcome: AttentionSnapshotOutcome) -> Bool {
+        lock.lock()
+        guard terminalOutcome == nil else {
+            lock.unlock()
+            return false
+        }
+        terminalOutcome = outcome
+        let waiters = Array(continuations.values)
+        continuations = [:]
+        lock.unlock()
+        waiters.forEach { $0.resume(returning: outcome) }
+        return true
+    }
+
+    private func cancelWaiter(_ waiterID: UUID) {
+        lock.lock()
+        let continuation = continuations.removeValue(forKey: waiterID)
+        lock.unlock()
+        continuation?.resume(returning: .nativeCancellation)
+    }
+
+    deinit {
+        _ = complete(.nativeCancellation)
     }
 }
 
@@ -332,8 +454,7 @@ struct AttentionSnapshotCall: Equatable, Sendable {
 actor ScriptedAttentionSnapshotSource {
     private var stepsByPrinterID: [UUID: [AttentionSnapshotStep]]
     private(set) var calls: [AttentionSnapshotCall] = []
-    private var callCountWaiters:
-        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private let callCountBarrier = AttentionCountBarrier()
 
     init(stepsByPrinterID: [UUID: [AttentionSnapshotStep]]) {
         self.stepsByPrinterID = stepsByPrinterID
@@ -341,7 +462,7 @@ actor ScriptedAttentionSnapshotSource {
 
     func load(printerID: UUID) async throws -> Data {
         calls.append(AttentionSnapshotCall(printerID: printerID))
-        resumeCallCountWaiters()
+        callCountBarrier.advance(to: calls.count)
 
         guard var steps = stepsByPrinterID[printerID], !steps.isEmpty else {
             throw AttentionProofError.forced(
@@ -364,10 +485,7 @@ actor ScriptedAttentionSnapshotSource {
     }
 
     func waitForCallCount(_ target: Int) async {
-        guard calls.count < target else { return }
-        await withCheckedContinuation { continuation in
-            callCountWaiters.append((target, continuation))
-        }
+        _ = await callCountBarrier.wait(for: target)
     }
 
     private func resolve(_ outcome: AttentionSnapshotOutcome) throws -> Data {
@@ -387,10 +505,8 @@ actor ScriptedAttentionSnapshotSource {
         }
     }
 
-    private func resumeCallCountWaiters() {
-        let ready = callCountWaiters.filter { calls.count >= $0.target }
-        callCountWaiters.removeAll { calls.count >= $0.target }
-        ready.forEach { $0.continuation.resume() }
+    func closeWaiters() {
+        callCountBarrier.close()
     }
 }
 
@@ -404,8 +520,7 @@ final class AttentionCallbackQueue: @unchecked Sendable {
 
     private let lock = NSLock()
     private var operations: [Operation] = []
-    private var countWaiters:
-        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private let countBarrier = AttentionCountBarrier()
 
     var enqueuer: AttentionFeedViewModel.CallbackEnqueuer {
         { [weak self] operation in
@@ -420,39 +535,32 @@ final class AttentionCallbackQueue: @unchecked Sendable {
     }
 
     func waitForCount(_ target: Int) async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if operations.count >= target {
-                lock.unlock()
-                continuation.resume()
-                return
-            }
-            countWaiters.append((target, continuation))
-            lock.unlock()
-        }
+        _ = await countBarrier.wait(for: target)
     }
 
     @MainActor
     func runNext() async {
-        let operation: Operation = {
+        let (operation, remainingCount): (Operation, Int) = {
             lock.lock()
             defer { lock.unlock() }
             precondition(!operations.isEmpty, "No queued attention callback")
-            return operations.removeFirst()
+            let operation = operations.removeFirst()
+            return (operation, operations.count)
         }()
+        countBarrier.advance(to: remainingCount)
         await operation()
     }
 
     private func append(_ operation: @escaping Operation) {
-        var ready: [CheckedContinuation<Void, Never>] = []
         lock.lock()
         operations.append(operation)
-        ready = countWaiters
-            .filter { operations.count >= $0.target }
-            .map(\.continuation)
-        countWaiters.removeAll { operations.count >= $0.target }
+        let operationCount = operations.count
         lock.unlock()
-        ready.forEach { $0.resume() }
+        countBarrier.advance(to: operationCount)
+    }
+
+    func closeWaiters() {
+        countBarrier.close()
     }
 }
 

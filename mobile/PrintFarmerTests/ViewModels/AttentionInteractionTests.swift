@@ -44,6 +44,65 @@ final class AttentionInteractionTests: XCTestCase {
         )
     }
 
+    func testResultGateTaskCancellationReleasesWaiter() async {
+        let gate = AttentionResultGate<Int>()
+        let entered = AttentionResultGate<Void>()
+        defer {
+            gate.cancel()
+            entered.cancel()
+        }
+        let task = Task {
+            await entered.succeed(())
+            return try await gate.wait()
+        }
+        _ = try? await entered.wait()
+        task.cancel()
+
+        let result = await task.result
+        guard case .failure(let error) = result else {
+            return XCTFail("Cancelled result gate waiter must terminate")
+        }
+        XCTAssertTrue(error is CancellationError)
+    }
+
+    func testSnapshotGateTaskCancellationReleasesWaiter() async {
+        let gate = AttentionSnapshotGate()
+        let entered = AttentionResultGate<Void>()
+        defer {
+            gate.cancel()
+            entered.cancel()
+        }
+        let task = Task {
+            await entered.succeed(())
+            return await gate.wait()
+        }
+        _ = try? await entered.wait()
+        task.cancel()
+
+        let outcome = await task.value
+        guard case .nativeCancellation = outcome else {
+            return XCTFail("Cancelled snapshot gate waiter must terminate as cancellation")
+        }
+    }
+
+    func testCountBarrierTaskCancellationReleasesWaiter() async {
+        let barrier = AttentionCountBarrier()
+        let entered = AttentionResultGate<Void>()
+        defer {
+            barrier.close()
+            entered.cancel()
+        }
+        let task = Task {
+            await entered.succeed(())
+            return await barrier.wait(for: 1)
+        }
+        _ = try? await entered.wait()
+        task.cancel()
+
+        let reachedTarget = await task.value
+        XCTAssertFalse(reachedTarget)
+    }
+
     func testActionDispatchBlocksDuplicateAndRefreshesExactlyOnce() async {
         let action = AttentionAction(
             kind: .resume,
@@ -57,6 +116,7 @@ final class AttentionInteractionTests: XCTestCase {
             jobID: jobA
         )
         let gate = AttentionResultGate<AttentionActionResult>()
+        defer { gate.cancel() }
         let service = ScriptedAttentionService(
             steps: [
                 .value(makeAttentionFeed(items: [item])),
@@ -114,6 +174,7 @@ final class AttentionInteractionTests: XCTestCase {
             actions: [action]
         )
         let actionGate = AttentionResultGate<AttentionActionResult>()
+        defer { actionGate.cancel() }
         let service = ScriptedAttentionService(
             steps: [
                 .value(makeAttentionFeed(items: [item])),
@@ -178,6 +239,10 @@ final class AttentionInteractionTests: XCTestCase {
         let feed = makeAttentionFeed(items: [item])
         let actionGate = AttentionResultGate<AttentionActionResult>()
         let overlappingRefreshGate = AttentionResultGate<AttentionFeed>()
+        defer {
+            actionGate.cancel()
+            overlappingRefreshGate.cancel()
+        }
         let service = ScriptedAttentionService(
             steps: [
                 .value(feed),
@@ -251,6 +316,7 @@ final class AttentionInteractionTests: XCTestCase {
             actions: [action]
         )
         let actionGate = AttentionResultGate<AttentionActionResult>()
+        defer { actionGate.cancel() }
         let service = ScriptedAttentionService(
             steps: [
                 .value(makeAttentionFeed(items: [item])),
@@ -291,6 +357,604 @@ final class AttentionInteractionTests: XCTestCase {
         XCTAssertEqual(loadCount, 4)
         XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
         XCTAssertEqual(vm.actionState(for: item.id), .idle)
+    }
+
+    func testSuccessfulMutationRefreshFailureRequiresRefreshOnlyRecovery() async {
+        let action = AttentionAction(
+            kind: .harvest,
+            label: "Harvest",
+            requiresConfirmation: true
+        )
+        let item = makeAttentionItem(
+            id: "harvest:refresh-failure",
+            kind: .harvest,
+            severity: .info,
+            printerID: printerA,
+            actions: [action],
+            jobID: jobA
+        )
+        let refreshRetryGate = AttentionResultGate<AttentionFeed>()
+        defer { refreshRetryGate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .failure(.network("Canonical refresh failed")),
+                .gated(refreshRetryGate),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let mutationSucceeded = await vm.performAction(action, for: item.id)
+        XCTAssertTrue(mutationSucceeded)
+        guard case .refreshPending(let pending) = vm.actionState(for: item.id) else {
+            return XCTFail("Successful mutation with failed GET must remain refresh-pending")
+        }
+        XCTAssertEqual(pending.action.kind, .harvest)
+        XCTAssertEqual(pending.message, "Canonical refresh failed")
+        XCTAssertEqual(vm.snapshot?.items.map(\.id), [item.id])
+
+        let duplicateAccepted = await vm.performAction(action, for: item.id)
+        XCTAssertFalse(duplicateAccepted)
+        let callsBeforeRefreshRetry = await service.actionCallCount
+        let loadsBeforeRefreshRetry = await service.loadCallCount
+        XCTAssertEqual(callsBeforeRefreshRetry, 1)
+        XCTAssertEqual(loadsBeforeRefreshRetry, 2)
+
+        let refreshRetryTask = Task {
+            await vm.retryActionRefresh(pendingID: pending.id)
+        }
+        await service.waitForLoadCount(3)
+        guard case .refreshPending(let retrying) = vm.actionState(for: item.id) else {
+            return XCTFail("Refresh-only retry must retain pending authority")
+        }
+        XCTAssertNil(retrying.message)
+        let callsWhileRetrying = await service.actionCallCount
+        XCTAssertEqual(callsWhileRetrying, 1)
+
+        await refreshRetryGate.succeed(makeAttentionFeed())
+        let refreshRetrySucceeded = await refreshRetryTask.value
+        XCTAssertTrue(refreshRetrySucceeded)
+        let callsAfterRefreshRetry = await service.actionCallCount
+        let loadsAfterRefreshRetry = await service.loadCallCount
+        XCTAssertEqual(callsAfterRefreshRetry, 1)
+        XCTAssertEqual(loadsAfterRefreshRetry, 3)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+    }
+
+    func testDeactivationPreservesPOSTOwnershipUntilReentryCanonicalApply() async {
+        let action = AttentionAction(
+            kind: .harvest,
+            label: "Harvest",
+            requiresConfirmation: true
+        )
+        let item = makeAttentionItem(
+            id: "harvest:deactivation",
+            kind: .harvest,
+            severity: .info,
+            printerID: printerA,
+            actions: [action],
+            jobID: jobA
+        )
+        let actionGate = AttentionResultGate<AttentionActionResult>()
+        defer { actionGate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed()),
+            ],
+            actionSteps: [.gated(actionGate)]
+        )
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForActionCount(1)
+        vm.deactivate()
+        XCTAssertEqual(vm.actionState(for: item.id), .inProgress(.harvest))
+
+        await actionGate.succeed(AttentionActionResult(outcome: "Ok"))
+        let actionSucceeded = await actionTask.value
+        XCTAssertTrue(actionSucceeded)
+        guard case .refreshPending = vm.actionState(for: item.id) else {
+            return XCTFail("Inactive POST success must retain refresh authority")
+        }
+        let callsWhileInactive = await service.actionCallCount
+        let loadsWhileInactive = await service.loadCallCount
+        XCTAssertEqual(callsWhileInactive, 1)
+        XCTAssertEqual(loadsWhileInactive, 1)
+
+        let duplicateAccepted = await vm.performAction(action, for: item.id)
+        XCTAssertFalse(duplicateAccepted)
+        let callsAfterDuplicate = await service.actionCallCount
+        XCTAssertEqual(callsAfterDuplicate, 1)
+
+        let freshLifecycle = vm.currentLifecycleToken()
+        let bootstrapApplied = await vm.bootstrap(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true,
+            lifecycleToken: freshLifecycle
+        )
+        XCTAssertTrue(bootstrapApplied)
+        let finalLoadCount = await service.loadCallCount
+        XCTAssertEqual(finalLoadCount, 2)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
+    }
+
+    func testQualifyingNewerRefreshSatisfiesSupersededActionRefresh() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:qualifying-supersession",
+            printerID: printerA,
+            actions: [action]
+        )
+        let actionRefreshGate = AttentionResultGate<AttentionFeed>()
+        let qualifyingRefreshGate = AttentionResultGate<AttentionFeed>()
+        defer {
+            actionRefreshGate.cancel()
+            qualifyingRefreshGate.cancel()
+        }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .gated(actionRefreshGate),
+                .gated(qualifyingRefreshGate),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForLoadCount(2)
+
+        let qualifyingRefreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(3)
+
+        await actionRefreshGate.succeed(makeAttentionFeed(items: [item]))
+        let actionSucceeded = await actionTask.value
+        XCTAssertTrue(actionSucceeded)
+        guard case .refreshPending = vm.actionState(for: item.id) else {
+            return XCTFail("Superseded action refresh must retain mutation authority")
+        }
+
+        await qualifyingRefreshGate.succeed(makeAttentionFeed())
+        let qualifyingRefreshSucceeded = await qualifyingRefreshTask.value
+        XCTAssertTrue(qualifyingRefreshSucceeded)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        let actionCallCount = await service.actionCallCount
+        let loadCallCount = await service.loadCallCount
+        XCTAssertEqual(actionCallCount, 1)
+        XCTAssertEqual(loadCallCount, 3)
+    }
+
+    func testNonQualifyingOlderRefreshCannotSatisfyMutationRequirement() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:nonqualifying-supersession",
+            printerID: printerA,
+            actions: [action]
+        )
+        let actionPOSTGate = AttentionResultGate<AttentionActionResult>()
+        let olderRefreshGate = AttentionResultGate<AttentionFeed>()
+        let actionRefreshGate = AttentionResultGate<AttentionFeed>()
+        defer {
+            actionPOSTGate.cancel()
+            olderRefreshGate.cancel()
+            actionRefreshGate.cancel()
+        }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .gated(olderRefreshGate),
+                .gated(actionRefreshGate),
+            ],
+            actionSteps: [.gated(actionPOSTGate)]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForActionCount(1)
+
+        let olderRefreshTask = Task { await vm.refresh() }
+        await service.waitForLoadCount(2)
+
+        await actionPOSTGate.succeed(AttentionActionResult(outcome: "Ok"))
+        await service.waitForLoadCount(3)
+
+        await olderRefreshGate.succeed(makeAttentionFeed())
+        let olderRefreshSucceeded = await olderRefreshTask.value
+        XCTAssertFalse(olderRefreshSucceeded)
+        guard case .refreshPending = vm.actionState(for: item.id) else {
+            return XCTFail("A request started before mutation success cannot release authority")
+        }
+
+        await actionRefreshGate.succeed(makeAttentionFeed())
+        let actionSucceeded = await actionTask.value
+        XCTAssertTrue(actionSucceeded)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        let actionCallCount = await service.actionCallCount
+        XCTAssertEqual(actionCallCount, 1)
+    }
+
+    func testEventDuringActionRefreshHasDeterministicFollowupBeforeCallbackDrain() async {
+        await assertEventDuringActionRefresh(drainCallbackBeforeCompletion: true)
+    }
+
+    func testEventDuringActionRefreshHasDeterministicFollowupAfterCallbackDrain() async {
+        await assertEventDuringActionRefresh(drainCallbackBeforeCompletion: false)
+    }
+
+    func testMixedInvalidationsUseSingleMutationOwnedFollowup() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:mixed-invalidations",
+            printerID: printerA,
+            actions: [action]
+        )
+        let refreshGate = AttentionResultGate<AttentionFeed>()
+        defer { refreshGate.cancel() }
+        let callbackQueue = AttentionCallbackQueue()
+        let signalR = MockSignalRService()
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .gated(refreshGate),
+                .value(makeAttentionFeed()),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = AttentionFeedViewModel(
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForLoadCount(2)
+
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: item.id,
+                changeKind: .resolved,
+                occurredAt: fixedNow
+            )
+        )
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: "maintenance:unrelated",
+                changeKind: .updated,
+                occurredAt: fixedNow
+            )
+        )
+        await callbackQueue.waitForCount(2)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+
+        await refreshGate.succeed(makeAttentionFeed(items: [item]))
+        let actionSucceeded = await actionTask.value
+        let loadCount = await service.loadCallCount
+        XCTAssertTrue(actionSucceeded)
+        XCTAssertEqual(loadCount, 3)
+        XCTAssertEqual(callbackQueue.count, 0)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
+    }
+
+    func testActionRefreshFailurePreservesEventForRefreshOnlyRetry() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:event-refresh-failure",
+            printerID: printerA,
+            actions: [action]
+        )
+        let refreshGate = AttentionResultGate<AttentionFeed>()
+        defer { refreshGate.cancel() }
+        let callbackQueue = AttentionCallbackQueue()
+        let signalR = MockSignalRService()
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .gated(refreshGate),
+                .value(makeAttentionFeed()),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = AttentionFeedViewModel(
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForLoadCount(2)
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: item.id,
+                changeKind: .resolved,
+                occurredAt: fixedNow
+            )
+        )
+        await callbackQueue.waitForCount(1)
+
+        await refreshGate.fail(.network("Post-action refresh failed"))
+        let actionSucceeded = await actionTask.value
+        XCTAssertTrue(actionSucceeded)
+        await callbackQueue.runNext()
+
+        guard case .refreshPending(let pending) = vm.actionState(for: item.id) else {
+            return XCTFail("Failed action refresh must preserve refresh-only authority")
+        }
+        XCTAssertEqual(pending.message, "Post-action refresh failed")
+        let callsBeforeRetry = await service.actionCallCount
+        let loadsBeforeRetry = await service.loadCallCount
+        XCTAssertEqual(callsBeforeRetry, 1)
+        XCTAssertEqual(loadsBeforeRetry, 2)
+
+        let duplicateAccepted = await vm.performAction(action, for: item.id)
+        XCTAssertFalse(duplicateAccepted)
+        let callsAfterDuplicate = await service.actionCallCount
+        XCTAssertEqual(callsAfterDuplicate, 1)
+
+        let refreshRetrySucceeded = await vm.retryActionRefresh(
+            pendingID: pending.id
+        )
+        XCTAssertTrue(refreshRetrySucceeded)
+        let callsAfterRetry = await service.actionCallCount
+        let loadsAfterRetry = await service.loadCallCount
+        XCTAssertEqual(callsAfterRetry, 1)
+        XCTAssertEqual(loadsAfterRetry, 3)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
+    func testRemovedLiveActionDropsObsoleteFailure() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let original = makeAttentionItem(
+            id: "failure:removed-action",
+            printerID: printerA,
+            actions: [action]
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            actions: []
+        )
+        let actionGate = AttentionResultGate<AttentionActionResult>()
+        defer { actionGate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ],
+            actionSteps: [.gated(actionGate)]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: original.id)
+        }
+        await service.waitForActionCount(1)
+        let replacementSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementSucceeded)
+        XCTAssertEqual(vm.actionState(for: original.id), .inProgress(.resume))
+
+        await actionGate.fail(.network("Resume rejected"))
+        let actionSucceeded = await actionTask.value
+        XCTAssertFalse(actionSucceeded)
+        XCTAssertEqual(vm.actionState(for: original.id), .idle)
+        guard let liveItem = vm.snapshot?.items.first else {
+            return XCTFail("Replacement item must remain visible")
+        }
+        XCTAssertTrue(AttentionFeedViewModel.supportedActions(in: liveItem).isEmpty)
+    }
+
+    func testRetainedSnoozeActionRetriesOriginalDeadlineAfterFailure() async throws {
+        let action = AttentionAction(
+            kind: .snooze,
+            label: "Snooze",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "runout:retained-snooze",
+            kind: .runout,
+            printerID: printerA,
+            actions: [action]
+        )
+        let deadline = fixedNow.addingTimeInterval(
+            AttentionFeedViewModel.defaultSnoozeInterval
+        )
+        let snoozeGate = AttentionResultGate<SnoozeAttentionResponse>()
+        defer { snoozeGate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed()),
+            ],
+            snoozeSteps: [
+                .gated(snoozeGate),
+                .value(
+                    SnoozeAttentionResponse(
+                        snoozedUntilUtc: deadline,
+                        attentionItemAnchorAtUtc: item.occurredAt
+                    )
+                ),
+            ]
+        )
+        let vm = configuredViewModel(service: service, now: fixedNow)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let snoozeTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForSnoozeCount(1)
+        let replacementSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementSucceeded)
+
+        await snoozeGate.fail(.network("Snooze rejected"))
+        let snoozeSucceeded = await snoozeTask.value
+        XCTAssertFalse(snoozeSucceeded)
+        let failure = try actionFailure(vm.actionState(for: item.id))
+        XCTAssertEqual(failure.snoozedUntilUtc, deadline)
+
+        let retrySucceeded = await vm.retryAction(failureID: failure.id)
+        XCTAssertTrue(retrySucceeded)
+        let snoozeDeadlines = await service.snoozeCalls.map(\.snoozedUntilUtc)
+        XCTAssertEqual(
+            snoozeDeadlines,
+            [deadline, deadline]
+        )
+        let snoozeCallCount = await service.snoozeCallCount
+        XCTAssertEqual(snoozeCallCount, 2)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+    }
+
+    func testOmittedFailedSnoozeReappendPreservesExactRetryWithoutSynthesis() async throws {
+        let action = AttentionAction(
+            kind: .snooze,
+            label: "Snooze",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "runout:omitted-snooze",
+            kind: .runout,
+            printerID: printerA,
+            actions: [action]
+        )
+        let deadline = fixedNow.addingTimeInterval(
+            AttentionFeedViewModel.defaultSnoozeInterval
+        )
+        let snoozeGate = AttentionResultGate<SnoozeAttentionResponse>()
+        defer { snoozeGate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed(nextCursor: "page-2")),
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed()),
+            ],
+            snoozeSteps: [
+                .gated(snoozeGate),
+                .value(
+                    SnoozeAttentionResponse(
+                        snoozedUntilUtc: deadline,
+                        attentionItemAnchorAtUtc: item.occurredAt
+                    )
+                ),
+            ]
+        )
+        let vm = configuredViewModel(service: service, now: fixedNow)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let snoozeTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForSnoozeCount(1)
+        let omissionSucceeded = await vm.refresh()
+        XCTAssertTrue(omissionSucceeded)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
+        XCTAssertEqual(vm.actionState(for: item.id), .inProgress(.snooze))
+
+        await snoozeGate.fail(.network("Snooze rejected"))
+        let snoozeSucceeded = await snoozeTask.value
+        XCTAssertFalse(snoozeSucceeded)
+        let hiddenFailure = try actionFailure(vm.actionState(for: item.id))
+        XCTAssertEqual(hiddenFailure.snoozedUntilUtc, deadline)
+
+        let absentRetryAccepted = await vm.retryAction(
+            failureID: hiddenFailure.id
+        )
+        XCTAssertFalse(absentRetryAccepted)
+        let stillHiddenFailure = try actionFailure(
+            vm.actionState(for: item.id)
+        )
+        XCTAssertEqual(stillHiddenFailure.id, hiddenFailure.id)
+        let callsWhileAbsent = await service.snoozeCallCount
+        XCTAssertEqual(callsWhileAbsent, 1)
+
+        let appendSucceeded = await vm.loadMore()
+        XCTAssertTrue(appendSucceeded)
+        XCTAssertEqual(vm.snapshot?.items.map(\.id), [item.id])
+        let visibleFailure = try actionFailure(vm.actionState(for: item.id))
+        XCTAssertEqual(visibleFailure.id, hiddenFailure.id)
+
+        let retrySucceeded = await vm.retryAction(failureID: visibleFailure.id)
+        XCTAssertTrue(retrySucceeded)
+        let snoozeDeadlines = await service.snoozeCalls.map(\.snoozedUntilUtc)
+        XCTAssertEqual(
+            snoozeDeadlines,
+            [deadline, deadline]
+        )
+        let snoozeCallCount = await service.snoozeCallCount
+        XCTAssertEqual(snoozeCallCount, 2)
     }
 
     func testActionFailureIsItemScopedAndRetryRefreshesOnce() async throws {
@@ -451,6 +1115,7 @@ final class AttentionInteractionTests: XCTestCase {
         )
         let feed = makeAttentionFeed(items: [itemA, itemB])
         let gate = AttentionResultGate<AttentionActionResult>()
+        defer { gate.cancel() }
         let service = ScriptedAttentionService(
             steps: [.value(feed), .value(feed)],
             actionSteps: [
@@ -497,6 +1162,10 @@ final class AttentionInteractionTests: XCTestCase {
         )
         let gateA = AttentionSnapshotGate()
         let gateB = AttentionSnapshotGate()
+        defer {
+            gateA.cancel()
+            gateB.cancel()
+        }
         let source = ScriptedAttentionSnapshotSource(
             stepsByPrinterID: [
                 printerA: [.gated(gateA)],
@@ -545,6 +1214,184 @@ final class AttentionInteractionTests: XCTestCase {
         let printerBCount = await source.callCount(for: printerB)
         XCTAssertEqual(printerACount, 1)
         XCTAssertEqual(printerBCount, 1)
+    }
+
+    func testAvailableMediaClearsWhenSameIDChangesProvenance() async {
+        let original = makeAttentionItem(
+            id: "failure:media:available-replacement",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerB,
+            occurredAt: fixedNow.addingTimeInterval(60),
+            jobID: jobB
+        )
+        let originalData = Data([0xA1])
+        let replacementData = Data([0xB2])
+        let source = ScriptedAttentionSnapshotSource(
+            stepsByPrinterID: [
+                printerA: [.outcome(.value(originalData))],
+                printerB: [.outcome(.value(replacementData))],
+            ]
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ]
+        )
+        let vm = configuredViewModel(
+            service: service,
+            printerService: snapshotPrinterService(source: source)
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        let originalLoadSucceeded = await vm.loadSnapshot(for: original.id)
+        XCTAssertTrue(initialLoadSucceeded)
+        XCTAssertTrue(originalLoadSucceeded)
+        XCTAssertEqual(vm.mediaState(for: original.id), .available(originalData))
+
+        let replacementRefreshSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementRefreshSucceeded)
+        XCTAssertEqual(vm.mediaState(for: replacement.id), .idle)
+        let originalCallCount = await source.callCount(for: printerA)
+        let replacementCountBeforeLoad = await source.callCount(for: printerB)
+        XCTAssertEqual(originalCallCount, 1)
+        XCTAssertEqual(replacementCountBeforeLoad, 0)
+
+        let replacementLoadSucceeded = await vm.loadSnapshot(
+            for: replacement.id
+        )
+        XCTAssertTrue(replacementLoadSucceeded)
+        XCTAssertEqual(
+            vm.mediaState(for: replacement.id),
+            .available(replacementData)
+        )
+        let replacementCallCount = await source.callCount(for: printerB)
+        XCTAssertEqual(replacementCallCount, 1)
+    }
+
+    func testUnavailableMediaClearsWhenSameIDOccurrenceChanges() async {
+        let original = makeAttentionItem(
+            id: "failure:media:unavailable-replacement",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(120),
+            jobID: jobB
+        )
+        let replacementData = Data([0xC3])
+        let source = ScriptedAttentionSnapshotSource(
+            stepsByPrinterID: [
+                printerA: [
+                    .outcome(.failure(.network("Old occurrence unavailable"))),
+                    .outcome(.value(replacementData)),
+                ],
+            ]
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ]
+        )
+        let vm = configuredViewModel(
+            service: service,
+            printerService: snapshotPrinterService(source: source)
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        let originalLoadSucceeded = await vm.loadSnapshot(for: original.id)
+        XCTAssertTrue(initialLoadSucceeded)
+        XCTAssertFalse(originalLoadSucceeded)
+        XCTAssertEqual(
+            vm.mediaState(for: original.id),
+            .unavailable("Old occurrence unavailable")
+        )
+
+        let replacementRefreshSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementRefreshSucceeded)
+        XCTAssertEqual(vm.mediaState(for: replacement.id), .idle)
+        let replacementLoadSucceeded = await vm.loadSnapshot(
+            for: replacement.id
+        )
+        XCTAssertTrue(replacementLoadSucceeded)
+        XCTAssertEqual(
+            vm.mediaState(for: replacement.id),
+            .available(replacementData)
+        )
+        let callCount = await source.callCount(for: printerA)
+        XCTAssertEqual(callCount, 2)
+    }
+
+    func testInFlightOldOccurrenceCannotApplyAfterSameIDReplacement() async {
+        let original = makeAttentionItem(
+            id: "failure:media:inflight-replacement",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(180),
+            jobID: jobB
+        )
+        let oldGate = AttentionSnapshotGate()
+        defer { oldGate.cancel() }
+        let replacementData = Data([0xD4])
+        let source = ScriptedAttentionSnapshotSource(
+            stepsByPrinterID: [
+                printerA: [
+                    .gated(oldGate),
+                    .outcome(.value(replacementData)),
+                ],
+            ]
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ]
+        )
+        let vm = configuredViewModel(
+            service: service,
+            printerService: snapshotPrinterService(source: source)
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let oldLoad = Task { await vm.loadSnapshot(for: original.id) }
+        await source.waitForCallCount(1)
+        let replacementRefreshSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementRefreshSucceeded)
+        XCTAssertEqual(vm.mediaState(for: replacement.id), .idle)
+
+        let replacementLoad = Task {
+            await vm.loadSnapshot(for: replacement.id)
+        }
+        await source.waitForCallCount(2)
+        let replacementLoadSucceeded = await replacementLoad.value
+        XCTAssertTrue(replacementLoadSucceeded)
+        XCTAssertEqual(
+            vm.mediaState(for: replacement.id),
+            .available(replacementData)
+        )
+
+        await oldGate.resolve(.value(Data([0xE5])))
+        let oldLoadSucceeded = await oldLoad.value
+        XCTAssertFalse(oldLoadSucceeded)
+        XCTAssertEqual(
+            vm.mediaState(for: replacement.id),
+            .available(replacementData)
+        )
+        let callCount = await source.callCount(for: printerA)
+        XCTAssertEqual(callCount, 2)
     }
 
     func testNativeSnapshotCancellationReturnsIdleAndRetries() async {
@@ -646,6 +1493,7 @@ final class AttentionInteractionTests: XCTestCase {
             printerID: printerA
         )
         let oldGate = AttentionSnapshotGate()
+        defer { oldGate.cancel() }
         let freshData = Data([0x22])
         let source = ScriptedAttentionSnapshotSource(
             stepsByPrinterID: [
@@ -744,6 +1592,12 @@ final class AttentionInteractionTests: XCTestCase {
             snoozedUntilUtc: nil,
             message: "Printer refused the command"
         )
+        let refreshPending = AttentionActionRefreshPending(
+            id: UUID(),
+            itemID: item.id,
+            action: resume,
+            message: "Canonical refresh failed"
+        )
 
         let card = AttentionAccessibility.card(item)
         let severity = AttentionAccessibility.severity(item)
@@ -777,6 +1631,10 @@ final class AttentionInteractionTests: XCTestCase {
             fallback,
             progress,
             error,
+            AttentionAccessibility.actionRefresh(
+                item: item,
+                pending: refreshPending
+            ),
             AttentionAccessibility.navigation(
                 item: item,
                 destination: .printerDetail(id: printerA)
@@ -804,6 +1662,15 @@ final class AttentionInteractionTests: XCTestCase {
         )
         XCTAssertEqual(progress.label, "Resume in progress")
         XCTAssertTrue(error.label.contains("Printer refused the command"))
+        let refreshError = AttentionAccessibility.actionRefresh(
+            item: item,
+            pending: refreshPending
+        )
+        XCTAssertEqual(
+            refreshError.identifier,
+            "attention.item.\(item.id).action.refreshError"
+        )
+        XCTAssertTrue(refreshError.hint.contains("without repeating"))
 
         let collapsed = AttentionAccessibility.healthySummary(
             count: 4,
@@ -836,6 +1703,103 @@ final class AttentionInteractionTests: XCTestCase {
                 "attention.item.\(item.id).action.retry",
             ]
         )
+        XCTAssertEqual(
+            Array(
+                AttentionAccessibility.orderedIdentifiers(
+                    item: item,
+                    mediaState: nil,
+                    actions: [resume],
+                    actionState: .refreshPending(refreshPending)
+                ).suffix(2)
+            ),
+            [
+                "attention.item.\(item.id).action.refreshError",
+                "attention.item.\(item.id).action.refreshRetry",
+            ]
+        )
+    }
+
+    private func assertEventDuringActionRefresh(
+        drainCallbackBeforeCompletion: Bool
+    ) async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: drainCallbackBeforeCompletion
+                ? "failure:event-during-before-drain"
+                : "failure:event-during-after-drain",
+            printerID: printerA,
+            actions: [action]
+        )
+        let refreshGate = AttentionResultGate<AttentionFeed>()
+        defer { refreshGate.cancel() }
+        let callbackQueue = AttentionCallbackQueue()
+        let signalR = MockSignalRService()
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .gated(refreshGate),
+                .value(makeAttentionFeed()),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = AttentionFeedViewModel(
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(
+            attentionService: service,
+            signalRService: signalR,
+            attentionEnabled: true
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task {
+            await vm.performAction(action, for: item.id)
+        }
+        await service.waitForLoadCount(2)
+
+        signalR.simulateAttentionChanged(
+            AttentionChangedEvent(
+                itemId: item.id,
+                changeKind: .resolved,
+                occurredAt: fixedNow
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        if drainCallbackBeforeCompletion {
+            await callbackQueue.runNext()
+        }
+
+        await refreshGate.succeed(makeAttentionFeed(items: [item]))
+        let actionSucceeded = await actionTask.value
+        XCTAssertTrue(actionSucceeded)
+
+        if !drainCallbackBeforeCompletion {
+            await callbackQueue.runNext()
+        }
+
+        let loadCount = await service.loadCallCount
+        let actionCount = await service.actionCallCount
+        XCTAssertEqual(loadCount, 3)
+        XCTAssertEqual(actionCount, 1)
+        XCTAssertEqual(callbackQueue.count, 0)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+    }
+
+    private func actionFailure(
+        _ state: AttentionItemActionState
+    ) throws -> AttentionActionFailure {
+        guard case .failed(let failure) = state else {
+            throw AttentionProofError.forced("Expected failed action state")
+        }
+        return failure
     }
 
     private func assertSnapshotCancellationRetries(

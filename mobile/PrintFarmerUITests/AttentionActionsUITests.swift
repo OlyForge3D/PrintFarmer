@@ -168,9 +168,37 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
         reveal(retry)
         XCTAssertEqual(retry.label, "Retry Resume")
         retry.tap()
+
+        let refreshError = element(
+            "attention.item.\(failureID).action.refreshError",
+            type: .any
+        )
+        XCTAssertTrue(
+            refreshError.waitForExistence(timeout: 10),
+            "Successful mutation with failed canonical GET must expose refresh-only recovery"
+        )
+        XCTAssertTrue(
+            refreshError.label.contains("Canonical attention refresh failed.")
+        )
+        XCTAssertTrue(
+            failureCard.exists,
+            "Stale card remains visible but non-actionable until canonical refresh applies"
+        )
+        XCTAssertFalse(
+            resume.isEnabled,
+            "Completed mutation must stay disabled while canonical refresh is pending"
+        )
+
+        let refreshRetry = element(
+            "attention.item.\(failureID).action.refreshRetry",
+            type: .button
+        )
+        reveal(refreshRetry)
+        XCTAssertEqual(refreshRetry.label, "Retry attention refresh")
+        refreshRetry.tap()
         XCTAssertTrue(
             failureCard.waitForNonExistence(timeout: 10),
-            "Successful retry must disappear only after canonical refresh"
+            "Refresh-only retry must remove the stale card after canonical apply"
         )
 
         let unavailableMedia = element(

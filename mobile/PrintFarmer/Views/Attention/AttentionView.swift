@@ -166,6 +166,24 @@ enum AttentionAccessibility {
         )
     }
 
+    static func actionRefresh(
+        item: AttentionItem,
+        pending: AttentionActionRefreshPending
+    ) -> AttentionAccessibilityDescriptor {
+        if let message = pending.message {
+            return AttentionAccessibilityDescriptor(
+                identifier: "attention.item.\(item.id).action.refreshError",
+                label: "\(pending.action.label) completed. Attention refresh failed. \(message)",
+                hint: "Retry the canonical feed refresh without repeating the completed action."
+            )
+        }
+        return AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).action.refreshPending",
+            label: "\(pending.action.label) completed. Refreshing attention",
+            hint: "The completed action stays unavailable until canonical server truth is applied."
+        )
+    }
+
     static func orderedIdentifiers(
         item: AttentionItem,
         mediaState: AttentionMediaState?,
@@ -195,6 +213,11 @@ enum AttentionAccessibility {
         case .failed(let failure):
             identifiers.append(actionError(item: item, failure: failure).identifier)
             identifiers.append("attention.item.\(item.id).action.retry")
+        case .refreshPending(let pending):
+            identifiers.append(actionRefresh(item: item, pending: pending).identifier)
+            if pending.message != nil {
+                identifiers.append("attention.item.\(item.id).action.refreshRetry")
+            }
         }
         return identifiers
     }
@@ -479,6 +502,16 @@ struct AttentionView: View {
         }
     }
 
+    private func retryActionRefresh(_ pending: AttentionActionRefreshPending) {
+        let capturedGeneration = services.activeServerGeneration
+        Task {
+            guard capturedGeneration == services.activeServerGeneration else {
+                return
+            }
+            await feedViewModel.retryActionRefresh(pendingID: pending.id)
+        }
+    }
+
     private func retryMedia(itemID: String) {
         let capturedGeneration = services.activeServerGeneration
         Task {
@@ -620,6 +653,7 @@ struct AttentionView: View {
                                 handleActionTap(item: item, action: action)
                             },
                             onRetryAction: retryAction,
+                            onRetryActionRefresh: retryActionRefresh,
                             onLoadMedia: {
                                 await feedViewModel.loadSnapshot(for: item.id)
                             },
@@ -974,6 +1008,7 @@ struct AttentionItemRow: View {
     let mediaRequestID: AttentionMediaRequestID
     let onAction: (AttentionAction) -> Void
     let onRetryAction: (AttentionActionFailure) -> Void
+    let onRetryActionRefresh: (AttentionActionRefreshPending) -> Void
     let onLoadMedia: () async -> Bool
     let onRetryMedia: () -> Void
 
@@ -998,7 +1033,7 @@ struct AttentionItemRow: View {
                 mediaView(state: mediaState)
             }
             navigationLinks
-            if !supportedActions.isEmpty {
+            if !supportedActions.isEmpty || actionState != .idle {
                 Divider()
                 actionControls
             }
@@ -1250,6 +1285,8 @@ struct AttentionItemRow: View {
                 actionProgress(kind)
             case .failed(let failure):
                 actionFailure(failure)
+            case .refreshPending(let pending):
+                actionRefresh(pending)
             }
         }
     }
@@ -1272,7 +1309,7 @@ struct AttentionItemRow: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(actionTint(action.kind))
-        .disabled(isActionInProgress)
+        .disabled(isActionBlocked(action.kind))
         .accessibilityLabel(accessibility.label)
         .accessibilityHint(accessibility.hint)
         .accessibilityIdentifier(accessibility.identifier)
@@ -1326,11 +1363,60 @@ struct AttentionItemRow: View {
         .accessibilityIdentifier(accessibility.identifier)
     }
 
-    private var isActionInProgress: Bool {
-        if case .inProgress = actionState {
-            return true
+    private func actionRefresh(
+        _ pending: AttentionActionRefreshPending
+    ) -> some View {
+        let accessibility = AttentionAccessibility.actionRefresh(
+            item: item,
+            pending: pending
+        )
+
+        return VStack(alignment: .leading, spacing: 8) {
+            if let message = pending.message {
+                Label("Action completed, refresh failed", systemImage: "arrow.clockwise.circle")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.pfWarning)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Retry refresh") {
+                    onRetryActionRefresh(pending)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Retry attention refresh")
+                .accessibilityHint(
+                    "Refreshes canonical server truth without repeating \(pending.action.label)."
+                )
+                .accessibilityIdentifier(
+                    "attention.item.\(item.id).action.refreshRetry"
+                )
+            } else {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Action completed. Refreshing attention…")
+                        .font(.footnote.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
-        return false
+        .padding(12)
+        .background(Color.pfWarning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityHint(accessibility.hint)
+        .accessibilityIdentifier(accessibility.identifier)
+    }
+
+    private func isActionBlocked(_ kind: AttentionActionKind) -> Bool {
+        switch actionState {
+        case .inProgress, .refreshPending:
+            return true
+        case .failed(let failure):
+            return failure.action.kind == kind
+        case .idle:
+            return false
+        }
     }
 
     private var severityText: String {

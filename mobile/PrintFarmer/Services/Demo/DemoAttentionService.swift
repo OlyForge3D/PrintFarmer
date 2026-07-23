@@ -2,10 +2,13 @@ import Foundation
 
 private enum DemoAttentionServiceError: LocalizedError {
     case forcedActionFailure(String)
+    case forcedRefreshFailure(String)
 
     var errorDescription: String? {
         switch self {
         case .forcedActionFailure(let message):
+            message
+        case .forcedRefreshFailure(let message):
             message
         }
     }
@@ -47,27 +50,39 @@ actor DemoAttentionService: AttentionServiceProtocol {
     private var feed: AttentionFeed
     private let gatedFailureAction: AttentionActionKind?
     private let gateReleaseAction: AttentionActionKind?
+    private let feedFailureAfterSuccessfulAction: AttentionActionKind?
     private let actionGate = DemoAttentionActionGate()
     private var didRunGatedFailure = false
+    private var shouldFailNextFeed = false
 
     init() {
         self.feed = Self.emptyFeed
         self.gatedFailureAction = nil
         self.gateReleaseAction = nil
+        self.feedFailureAfterSuccessfulAction = nil
     }
 
     init(
         feed: AttentionFeed,
         gatedFailureAction: AttentionActionKind? = nil,
-        gateReleaseAction: AttentionActionKind? = nil
+        gateReleaseAction: AttentionActionKind? = nil,
+        feedFailureAfterSuccessfulAction: AttentionActionKind? = nil
     ) {
         self.feed = feed
         self.gatedFailureAction = gatedFailureAction
         self.gateReleaseAction = gateReleaseAction
+        self.feedFailureAfterSuccessfulAction =
+            feedFailureAfterSuccessfulAction
     }
 
     func getFeed(cursor: String?, limit: Int?) async throws -> AttentionFeed {
-        feed
+        if shouldFailNextFeed {
+            shouldFailNextFeed = false
+            throw DemoAttentionServiceError.forcedRefreshFailure(
+                "Canonical attention refresh failed."
+            )
+        }
+        return feed
     }
 
     func snooze(
@@ -98,6 +113,9 @@ actor DemoAttentionService: AttentionServiceProtocol {
             await actionGate.open()
         }
         removeItem(id: itemId)
+        if actionKind == feedFailureAfterSuccessfulAction {
+            shouldFailNextFeed = true
+        }
         return AttentionActionResult(outcome: "Ok")
     }
 

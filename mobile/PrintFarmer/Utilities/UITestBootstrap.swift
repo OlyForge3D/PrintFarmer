@@ -213,7 +213,8 @@ enum UITestBootstrap {
             services.attentionService = DemoAttentionService(
                 feed: attentionActionsScenarioFeed(),
                 gatedFailureAction: .resume,
-                gateReleaseAction: .acknowledge
+                gateReleaseAction: .acknowledge,
+                feedFailureAfterSuccessfulAction: .resume
             )
             services.printerService = DemoPrinterService(
                 additionalPrinters: [duplicateNamePrinter()],

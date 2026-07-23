@@ -96,10 +96,18 @@ struct AttentionActionFailure: Equatable, Identifiable, Sendable {
     let message: String
 }
 
+struct AttentionActionRefreshPending: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let itemID: String
+    let action: AttentionAction
+    let message: String?
+}
+
 enum AttentionItemActionState: Equatable, Sendable {
     case idle
     case inProgress(AttentionActionKind)
     case failed(AttentionActionFailure)
+    case refreshPending(AttentionActionRefreshPending)
 }
 
 enum AttentionMediaState: Equatable, Sendable {
@@ -109,9 +117,38 @@ enum AttentionMediaState: Equatable, Sendable {
     case unavailable(String)
 }
 
-struct AttentionMediaRequestID: Hashable, Sendable {
+struct AttentionMediaFingerprint: Hashable, Sendable {
     let itemID: String
+    let printerID: UUID
+    let occurredAt: Date
+    let jobID: UUID?
+    let toolheadIndex: Int?
+
+    init(item: AttentionItem) {
+        itemID = item.id
+        printerID = item.printerId
+        occurredAt = item.occurredAt
+        jobID = item.jobId
+        toolheadIndex = item.toolheadIndex
+    }
+}
+
+struct AttentionMediaRequestID: Hashable, Sendable {
+    let fingerprint: AttentionMediaFingerprint?
     let generation: UInt64
+
+    var itemID: String? { fingerprint?.itemID }
+}
+
+private struct AttentionMutationRefreshRequirement {
+    let id: UUID
+    let itemID: String
+    let action: AttentionAction
+    let snoozedUntilUtc: Date?
+    let requiredAfterRefreshOrdinal: UInt64
+    var requiredEventSequence: UInt64
+    var awaitingPaginationRefreshOrdinal: UInt64?
+    var message: String?
 }
 
 /// Opaque token issued by the view model to a caller that intends to
@@ -158,6 +195,29 @@ final class EventSequenceBox: @unchecked Sendable {
         defer { lock.unlock() }
         _value &+= 1
         return _value
+    }
+}
+
+final class ItemEventSequenceBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: UInt64] = [:]
+
+    func record(itemID: String, sequence: UInt64) {
+        lock.lock()
+        values[itemID] = max(values[itemID] ?? 0, sequence)
+        lock.unlock()
+    }
+
+    func currentValue(for itemID: String) -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[itemID] ?? 0
+    }
+
+    func reset() {
+        lock.lock()
+        values = [:]
+        lock.unlock()
     }
 }
 
@@ -220,7 +280,7 @@ final class AttentionFeedViewModel {
     private(set) var actionStates: [String: AttentionItemActionState] = [:]
 
     /// Failure snapshot state keyed by Attention item identity.
-    private(set) var mediaStates: [String: AttentionMediaState] = [:]
+    private(set) var mediaStates: [AttentionMediaFingerprint: AttentionMediaState] = [:]
 
     /// Canonical replacement/deactivation stamp used by row `.task(id:)`
     /// and stale media completion fences.
@@ -239,6 +299,11 @@ final class AttentionFeedViewModel {
     @ObservationIgnored private var actionGeneration: UInt64 = 0
     @ObservationIgnored private var actionOperationTokens: [String: UUID] = [:]
     @ObservationIgnored private var deferredMutationInvalidationSequences: [String: UInt64] = [:]
+    @ObservationIgnored private var mutationRefreshRequirements:
+        [String: AttentionMutationRefreshRequirement] = [:]
+    @ObservationIgnored private var refreshRequestOrdinal: UInt64 = 0
+    @ObservationIgnored private var currentSnapshotRefreshOrdinal: UInt64?
+    @ObservationIgnored private var currentSnapshotCoverSequence: UInt64?
     @ObservationIgnored private var attentionEnabled = true
     @ObservationIgnored private var isActive = false
     /// Bumped whenever `configure` replaces the service/signalR pair.
@@ -278,6 +343,7 @@ final class AttentionFeedViewModel {
     /// — the refresh covers exactly the events whose sequence is ≤
     /// that watermark.
     @ObservationIgnored private let eventSequenceBox = EventSequenceBox()
+    @ObservationIgnored private let itemEventSequenceBox = ItemEventSequenceBox()
     /// The highest event sequence that has been covered by an APPLIED
     /// successful canonical refresh. Advanced only on `applySnapshot`
     /// success; failures and disabled outcomes do NOT advance it, so
@@ -417,12 +483,14 @@ final class AttentionFeedViewModel {
         let capturedEpoch = authorityEpoch
         let enqueue = callbackEnqueuer
         let sequenceBox = eventSequenceBox
+        let itemSequenceBox = itemEventSequenceBox
         attentionSubscription = signalRService.onAttentionChanged { [weak self] event in
             // Issue the event's monotonic sequence at signalR delivery
             // time. This gives a strict ordering between events and
             // subsequent refresh-start "cover watermarks", regardless
             // of when the callback drains on MainActor.
             let eventSeq = sequenceBox.issueNext()
+            itemSequenceBox.record(itemID: event.itemId, sequence: eventSeq)
             enqueue { [weak self] in
                 guard let self,
                       self.matchesAuthorityIgnoringActive(
@@ -492,6 +560,23 @@ final class AttentionFeedViewModel {
             return
         }
 
+        if var requirement = mutationRefreshRequirements[itemID] {
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                eventSeq
+            )
+            requirement.awaitingPaginationRefreshOrdinal = nil
+            mutationRefreshRequirements[itemID] = requirement
+            publishMutationRefreshState(requirement)
+
+            if requirement.message == nil,
+               isActive,
+               activeRequestTokens.isEmpty {
+                _ = await refresh()
+            }
+            return
+        }
+
         if !isActive {
             // Off-screen: drain on activate.
             pendingReloadOnActivate = true
@@ -523,10 +608,11 @@ final class AttentionFeedViewModel {
     /// caller that captured a token before an async await sees the
     /// token become stale and refuses to `bootstrap`.
     func deactivate() {
-        if !actionOperationTokens.isEmpty {
+        if !actionOperationTokens.isEmpty
+            || !mutationRefreshRequirements.isEmpty {
             pendingReloadOnActivate = true
         }
-        invalidateItemOperationsForDeactivation()
+        invalidateMediaForDeactivation()
         // Preserve `snapshot` so re-entering the view keeps the last
         // rendered content until the queued refresh completes; but drop
         // any in-flight authority so completions can't mutate state.
@@ -733,6 +819,9 @@ final class AttentionFeedViewModel {
             return false
         }
 
+        refreshRequestOrdinal &+= 1
+        let requestOrdinal = refreshRequestOrdinal
+
         // Capture BOTH the load stamp (prevents reverse-order applies
         // within a single activation) and the activation epoch (fences
         // off applies across a deactivate/reactivate boundary). An
@@ -821,7 +910,12 @@ final class AttentionFeedViewModel {
 
         switch outcome {
         case .success(let feed):
-            applySnapshot(feed, mode: .refresh)
+            applySnapshot(
+                feed,
+                mode: .refresh,
+                refreshOrdinal: requestOrdinal,
+                coverSequence: startCoverSnapshot
+            )
             // Advance coverage. Any event with sequence ≤ startCover is
             // now proven covered by an applied successful refresh.
             lastCoveredEventSequence = max(lastCoveredEventSequence, startCoverSnapshot)
@@ -830,13 +924,27 @@ final class AttentionFeedViewModel {
                 pendingCoverageEventSequence = nil
             }
             pruneCoveredMutationInvalidations()
-            tryScheduleFollowupIfPending(capturedActivation: stampedActivation)
+            let needsMutationFollowup = reconcileMutationRequirementsAfterCanonicalApply(
+                refreshOrdinal: requestOrdinal,
+                coverSequence: startCoverSnapshot
+            )
+            if needsMutationFollowup {
+                _ = await refresh()
+            } else {
+                tryScheduleFollowupIfPending(
+                    capturedActivation: stampedActivation
+                )
+            }
             return true
         case .featureDisabled:
             applyDisabled()
             return false
         case .failure(let error):
             applyFailure(error)
+            markMutationRefreshFailure(
+                refreshOrdinal: requestOrdinal,
+                error: error
+            )
             return false
         }
     }
@@ -901,6 +1009,7 @@ final class AttentionFeedViewModel {
             // Authority still valid?
             guard self.isActive, self.attentionEnabled,
                   self.attentionService != nil else { return }
+            guard self.activeRequestTokens.isEmpty else { return }
             // Pending still uncovered under CURRENT authority?
             // (`invalidateAuthority` resets `pendingCoverageEventSequence`
             // so this is implicit after the authority-epoch check,
@@ -988,7 +1097,10 @@ final class AttentionFeedViewModel {
 
         switch outcome {
         case .success(let feed):
-            applyAppendedPage(feed)
+            let needsMutationFollowup = applyAppendedPage(feed)
+            if needsMutationFollowup {
+                _ = await refresh()
+            }
             return true
         case .featureDisabled:
             // A backend disable racing pagination collapses to the safe
@@ -1067,10 +1179,12 @@ final class AttentionFeedViewModel {
             return false
         }
 
-        guard let item = liveItem(id: failure.itemID),
-              Self.supportedActions(in: item).contains(where: {
-                  $0.kind == failure.action.kind
-              }) else {
+        guard let item = liveItem(id: failure.itemID) else {
+            return false
+        }
+        guard Self.supportedActions(in: item).contains(where: {
+            $0.kind == failure.action.kind
+        }) else {
             actionStates[failure.itemID] = nil
             return false
         }
@@ -1078,21 +1192,44 @@ final class AttentionFeedViewModel {
         return await performActionRequest(
             failure.action,
             itemID: failure.itemID,
-            snoozedUntilUtc: failure.snoozedUntilUtc
+            snoozedUntilUtc: failure.snoozedUntilUtc,
+            isRetry: true
         )
+    }
+
+    @discardableResult
+    func retryActionRefresh(pendingID: UUID) async -> Bool {
+        guard var requirement = mutationRefreshRequirements.values.first(where: {
+            $0.id == pendingID
+        }) else {
+            return false
+        }
+
+        requirement.message = nil
+        requirement.awaitingPaginationRefreshOrdinal = nil
+        mutationRefreshRequirements[requirement.itemID] = requirement
+        publishMutationRefreshState(requirement)
+        return await refresh()
     }
 
     @discardableResult
     private func performActionRequest(
         _ action: AttentionAction,
         itemID: String,
-        snoozedUntilUtc: Date?
+        snoozedUntilUtc: Date?,
+        isRetry: Bool = false
     ) async -> Bool {
         guard isActive, attentionEnabled, let service = attentionService else {
             return false
         }
-        if case .inProgress = actionState(for: itemID) {
+        switch actionState(for: itemID) {
+        case .inProgress, .refreshPending:
             return false
+        case .failed(let failure)
+            where failure.action.kind == action.kind && !isRetry:
+            return false
+        case .idle, .failed:
+            break
         }
 
         let token = UUID()
@@ -1126,8 +1263,26 @@ final class AttentionFeedViewModel {
                 return false
             }
 
+            let pendingID = UUID()
+            let requirement = AttentionMutationRefreshRequirement(
+                id: pendingID,
+                itemID: itemID,
+                action: action,
+                snoozedUntilUtc: snoozedUntilUtc,
+                requiredAfterRefreshOrdinal: refreshRequestOrdinal,
+                requiredEventSequence: max(
+                    deferredMutationInvalidationSequences[itemID] ?? 0,
+                    itemEventSequenceBox.currentValue(for: itemID)
+                ),
+                awaitingPaginationRefreshOrdinal: nil,
+                message: nil
+            )
+            actionOperationTokens[itemID] = nil
+            deferredMutationInvalidationSequences[itemID] = nil
+            mutationRefreshRequirements[itemID] = requirement
+            publishMutationRefreshState(requirement)
+
             _ = await refresh()
-            clearActionOperationIfCurrent(itemID: itemID, token: token)
             return true
         } catch {
             guard matchesActionOperation(
@@ -1141,19 +1296,25 @@ final class AttentionFeedViewModel {
 
             actionOperationTokens[itemID] = nil
             if Self.isCancellation(error) {
-                actionStates[itemID] = .idle
+                actionStates[itemID] = liveItem(id: itemID) == nil ? nil : .idle
             } else {
                 let message = (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
-                actionStates[itemID] = .failed(
-                    AttentionActionFailure(
-                        id: UUID(),
-                        itemID: itemID,
-                        action: action,
-                        snoozedUntilUtc: snoozedUntilUtc,
-                        message: message
-                    )
+                let failure = AttentionActionFailure(
+                    id: UUID(),
+                    itemID: itemID,
+                    action: action,
+                    snoozedUntilUtc: snoozedUntilUtc,
+                    message: message
                 )
+                if let item = liveItem(id: itemID) {
+                    actionStates[itemID] = Self.supportedActions(in: item)
+                        .contains(where: { $0.kind == action.kind })
+                        ? .failed(failure)
+                        : .idle
+                } else {
+                    actionStates[itemID] = .failed(failure)
+                }
             }
             if actionOperationTokens.isEmpty,
                !deferredMutationInvalidationSequences.isEmpty {
@@ -1167,11 +1328,18 @@ final class AttentionFeedViewModel {
     // MARK: - Failure media
 
     func mediaState(for itemID: String) -> AttentionMediaState {
-        mediaStates[itemID] ?? .idle
+        guard let item = liveItem(id: itemID), item.kind == .failure else {
+            return .idle
+        }
+        return mediaStates[AttentionMediaFingerprint(item: item)] ?? .idle
     }
 
     func mediaRequestID(for itemID: String) -> AttentionMediaRequestID {
-        AttentionMediaRequestID(itemID: itemID, generation: mediaGeneration)
+        let fingerprint = liveItem(id: itemID).map(AttentionMediaFingerprint.init)
+        return AttentionMediaRequestID(
+            fingerprint: fingerprint,
+            generation: mediaGeneration
+        )
     }
 
     @discardableResult
@@ -1183,25 +1351,26 @@ final class AttentionFeedViewModel {
               item.kind == .failure else {
             return false
         }
-        guard mediaState(for: itemID) == .idle else { return false }
+        let fingerprint = AttentionMediaFingerprint(item: item)
+        guard (mediaStates[fingerprint] ?? .idle) == .idle else { return false }
 
         let capturedGeneration = mediaGeneration
-        mediaStates[itemID] = .loading
+        mediaStates[fingerprint] = .loading
 
         do {
             let data = try await service.getSnapshot(id: item.printerId)
             guard matchesMediaOperation(
-                itemID: itemID,
+                fingerprint: fingerprint,
                 generation: capturedGeneration,
                 printerServiceIdentity: printerServiceIdentity
             ) else {
                 return false
             }
-            mediaStates[itemID] = .available(data)
+            mediaStates[fingerprint] = .available(data)
             return true
         } catch {
             guard matchesMediaOperation(
-                itemID: itemID,
+                fingerprint: fingerprint,
                 generation: capturedGeneration,
                 printerServiceIdentity: printerServiceIdentity
             ) else {
@@ -1209,11 +1378,11 @@ final class AttentionFeedViewModel {
             }
 
             if Self.isCancellation(error) {
-                mediaStates[itemID] = .idle
+                mediaStates[fingerprint] = .idle
             } else {
                 let message = (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
-                mediaStates[itemID] = .unavailable(message)
+                mediaStates[fingerprint] = .unavailable(message)
             }
             return false
         }
@@ -1221,13 +1390,17 @@ final class AttentionFeedViewModel {
 
     @discardableResult
     func retrySnapshot(for itemID: String) async -> Bool {
-        switch mediaState(for: itemID) {
+        guard let item = liveItem(id: itemID), item.kind == .failure else {
+            return false
+        }
+        let fingerprint = AttentionMediaFingerprint(item: item)
+        switch mediaStates[fingerprint] ?? .idle {
         case .idle:
             break
         case .unavailable:
-            mediaStates[itemID] = .idle
+            mediaStates[fingerprint] = .idle
         case .available:
-            mediaStates[itemID] = .idle
+            mediaStates[fingerprint] = .idle
         case .loading:
             return false
         }
@@ -1311,7 +1484,12 @@ final class AttentionFeedViewModel {
         }
     }
 
-    private func applySnapshot(_ feed: AttentionFeed, mode: ApplyMode) {
+    private func applySnapshot(
+        _ feed: AttentionFeed,
+        mode: ApplyMode,
+        refreshOrdinal: UInt64,
+        coverSequence: UInt64
+    ) {
         // Deduplicate defensively — the server should never return
         // duplicates within a page, but a bad cursor would corrupt
         // pagination state if we trusted the payload blindly.
@@ -1326,11 +1504,17 @@ final class AttentionFeedViewModel {
             nextCursor: feed.nextCursor,
             healthyPrinterCount: feed.healthyPrinterCount
         )
-        reconcileItemScopedState(with: ordered)
         _ = mode // reserved for future modes; only .refresh today
         snapshot = normalized
+        currentSnapshotRefreshOrdinal = refreshOrdinal
+        currentSnapshotCoverSequence = coverSequence
         knownIDs = seen
         groups = Self.groupBySeverity(ordered)
+        reconcileItemScopedState(
+            with: ordered,
+            hasMorePages: feed.nextCursor != nil,
+            replaceMedia: true
+        )
         loadFailure = nil
         // A canonical refresh success clears any latched pagination
         // failure. The list has been rewritten atomically; the stale
@@ -1340,7 +1524,7 @@ final class AttentionFeedViewModel {
         phase = .loaded
     }
 
-    private func applyAppendedPage(_ feed: AttentionFeed) {
+    private func applyAppendedPage(_ feed: AttentionFeed) -> Bool {
         var appended: [AttentionItem] = []
         var seen = knownIDs
         appended.reserveCapacity(feed.items.count)
@@ -1357,8 +1541,14 @@ final class AttentionFeedViewModel {
         snapshot = merged
         knownIDs = seen
         groups = Self.groupBySeverity(existing)
+        reconcileItemScopedState(
+            with: existing,
+            hasMorePages: feed.nextCursor != nil,
+            replaceMedia: false
+        )
         loadFailure = nil
         // phase stays `.loaded`; pagination does not alter shell phase.
+        return reconcileMutationRequirementsAfterPagination()
     }
 
     private func applyFailure(_ error: Error) {
@@ -1430,27 +1620,31 @@ final class AttentionFeedViewModel {
         generation: UInt64,
         authority: UInt64
     ) -> Bool {
-        isActive
-            && attentionEnabled
+        attentionEnabled
             && authorityEpoch == authority
             && actionGeneration == generation
             && actionOperationTokens[itemID] == token
     }
 
-    private func clearActionOperationIfCurrent(itemID: String, token: UUID) {
-        guard actionOperationTokens[itemID] == token else { return }
-        actionOperationTokens[itemID] = nil
-        deferredMutationInvalidationSequences[itemID] = nil
-        actionStates[itemID] = liveItem(id: itemID) == nil ? nil : .idle
-    }
-
     private func isPendingCoverageDeferredToMutation(_ pending: UInt64) -> Bool {
-        let highestActiveDeferredSequence = deferredMutationInvalidationSequences
+        let highestActionDeferredSequence = deferredMutationInvalidationSequences
             .filter { actionOperationTokens[$0.key] != nil }
             .values
             .max()
-        guard let highestActiveDeferredSequence else { return false }
-        return pending <= highestActiveDeferredSequence
+        let highestRefreshRequirementSequence = mutationRefreshRequirements
+            .values
+            .map { requirement in
+                max(
+                    requirement.requiredEventSequence,
+                    itemEventSequenceBox.currentValue(for: requirement.itemID)
+                )
+            }
+            .max()
+        let highestDeferredSequence = max(
+            highestActionDeferredSequence ?? 0,
+            highestRefreshRequirementSequence ?? 0
+        )
+        return highestDeferredSequence > 0 && pending <= highestDeferredSequence
     }
 
     private func pruneCoveredMutationInvalidations() {
@@ -1461,29 +1655,173 @@ final class AttentionFeedViewModel {
             }
     }
 
+    private func publishMutationRefreshState(
+        _ requirement: AttentionMutationRefreshRequirement
+    ) {
+        actionStates[requirement.itemID] = .refreshPending(
+            AttentionActionRefreshPending(
+                id: requirement.id,
+                itemID: requirement.itemID,
+                action: requirement.action,
+                message: requirement.message
+            )
+        )
+    }
+
+    private func clearMutationRefreshRequirement(itemID: String) {
+        mutationRefreshRequirements[itemID] = nil
+        deferredMutationInvalidationSequences[itemID] = nil
+        actionStates[itemID] = liveItem(id: itemID) == nil ? nil : .idle
+    }
+
+    private func reconcileMutationRequirementsAfterCanonicalApply(
+        refreshOrdinal: UInt64,
+        coverSequence: UInt64
+    ) -> Bool {
+        var needsFollowup = false
+
+        for itemID in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[itemID],
+                  refreshOrdinal > requirement.requiredAfterRefreshOrdinal else {
+                continue
+            }
+
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                itemEventSequenceBox.currentValue(for: itemID)
+            )
+            requirement.message = nil
+
+            guard coverSequence >= requirement.requiredEventSequence else {
+                requirement.awaitingPaginationRefreshOrdinal = nil
+                mutationRefreshRequirements[itemID] = requirement
+                publishMutationRefreshState(requirement)
+                needsFollowup = true
+                continue
+            }
+
+            if liveItem(id: itemID) != nil || snapshot?.nextCursor == nil {
+                clearMutationRefreshRequirement(itemID: itemID)
+            } else {
+                requirement.awaitingPaginationRefreshOrdinal = refreshOrdinal
+                mutationRefreshRequirements[itemID] = requirement
+                publishMutationRefreshState(requirement)
+            }
+        }
+
+        return needsFollowup
+    }
+
+    private func markMutationRefreshFailure(
+        refreshOrdinal: UInt64,
+        error: Error
+    ) {
+        let message = (error as? LocalizedError)?.errorDescription
+            ?? error.localizedDescription
+
+        for itemID in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[itemID],
+                  refreshOrdinal > requirement.requiredAfterRefreshOrdinal else {
+                continue
+            }
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                itemEventSequenceBox.currentValue(for: itemID)
+            )
+            requirement.awaitingPaginationRefreshOrdinal = nil
+            requirement.message = message
+            mutationRefreshRequirements[itemID] = requirement
+            publishMutationRefreshState(requirement)
+        }
+    }
+
+    private func reconcileMutationRequirementsAfterPagination() -> Bool {
+        guard let refreshOrdinal = currentSnapshotRefreshOrdinal,
+              let coverSequence = currentSnapshotCoverSequence else {
+            return false
+        }
+
+        var needsFollowup = false
+        for itemID in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[itemID],
+                  requirement.awaitingPaginationRefreshOrdinal == refreshOrdinal else {
+                continue
+            }
+
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                itemEventSequenceBox.currentValue(for: itemID)
+            )
+            guard coverSequence >= requirement.requiredEventSequence else {
+                requirement.awaitingPaginationRefreshOrdinal = nil
+                mutationRefreshRequirements[itemID] = requirement
+                publishMutationRefreshState(requirement)
+                needsFollowup = true
+                continue
+            }
+
+            if liveItem(id: itemID) != nil || snapshot?.nextCursor == nil {
+                clearMutationRefreshRequirement(itemID: itemID)
+            }
+        }
+        return needsFollowup
+    }
+
     private func matchesMediaOperation(
-        itemID: String,
+        fingerprint: AttentionMediaFingerprint,
         generation: UInt64,
         printerServiceIdentity: ObjectIdentifier
     ) -> Bool {
         isActive
             && mediaGeneration == generation
             && self.printerServiceIdentity == printerServiceIdentity
-            && liveItem(id: itemID)?.kind == .failure
+            && liveItem(id: fingerprint.itemID)
+                .map(AttentionMediaFingerprint.init) == fingerprint
     }
 
-    private func reconcileItemScopedState(with items: [AttentionItem]) {
+    private func reconcileItemScopedState(
+        with items: [AttentionItem],
+        hasMorePages: Bool,
+        replaceMedia: Bool
+    ) {
         let liveIDs = Set(items.map(\.id))
+        let liveItemsByID = Dictionary(
+            uniqueKeysWithValues: items.map { ($0.id, $0) }
+        )
 
-        actionStates = actionStates.filter {
-            liveIDs.contains($0.key)
-                || actionOperationTokens[$0.key] != nil
+        actionStates = actionStates.filter { entry in
+            liveIDs.contains(entry.key)
+                || actionOperationTokens[entry.key] != nil
+                || mutationRefreshRequirements[entry.key] != nil
+                || (hasMorePages && {
+                    if case .failed = entry.value { return true }
+                    return false
+                }())
         }
 
-        mediaGeneration &+= 1
-        mediaStates = mediaStates.reduce(into: [:]) { result, entry in
-            guard liveIDs.contains(entry.key) else { return }
-            result[entry.key] = entry.value == .loading ? .idle : entry.value
+        for (itemID, state) in actionStates {
+            guard case .failed(let failure) = state,
+                  let item = liveItemsByID[itemID] else {
+                continue
+            }
+            if !Self.supportedActions(in: item).contains(where: {
+                $0.kind == failure.action.kind
+            }) {
+                actionStates[itemID] = nil
+            }
+        }
+
+        if replaceMedia {
+            let liveFingerprints = Set(
+                items
+                    .filter { $0.kind == .failure }
+                    .map(AttentionMediaFingerprint.init)
+            )
+            mediaGeneration &+= 1
+            mediaStates = mediaStates.reduce(into: [:]) { result, entry in
+                guard liveFingerprints.contains(entry.key) else { return }
+                result[entry.key] = entry.value == .loading ? .idle : entry.value
+            }
         }
     }
 
@@ -1498,11 +1836,7 @@ final class AttentionFeedViewModel {
         }
     }
 
-    private func invalidateItemOperationsForDeactivation() {
-        actionGeneration &+= 1
-        actionOperationTokens = [:]
-        actionStates = [:]
-        deferredMutationInvalidationSequences.removeAll()
+    private func invalidateMediaForDeactivation() {
         invalidateMediaState(clearTerminalStates: false)
     }
 
@@ -1511,6 +1845,11 @@ final class AttentionFeedViewModel {
         actionOperationTokens = [:]
         actionStates = [:]
         deferredMutationInvalidationSequences.removeAll()
+        mutationRefreshRequirements.removeAll()
+        refreshRequestOrdinal = 0
+        currentSnapshotRefreshOrdinal = nil
+        currentSnapshotCoverSequence = nil
+        itemEventSequenceBox.reset()
         invalidateMediaState(clearTerminalStates: clearTerminalMedia)
     }
 
