@@ -32,24 +32,19 @@ struct JobTimelineView: View {
                 activationToken: activationToken
             )
         }
-        .onAppear {
-            viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
-            activationToken = viewModel.activate()
-        }
-        .task(id: activationToken) { [activationToken] in
-            guard let activationToken else { return }
-            await viewModel.loadTimeline(
-                dateFrom: nil,
-                dateTo: nil,
-                activationToken: activationToken
+        .task {
+            await JobAnalyticsMountLifecycle.runTimeline(
+                viewModel: viewModel,
+                service: services.jobAnalyticsService,
+                onAcquire: { token in
+                    activationToken = token
+                },
+                onRelease: { token in
+                    if activationToken == token {
+                        activationToken = nil
+                    }
+                }
             )
-        }
-        .onDisappear { [departingToken = activationToken] in
-            guard let departingToken else { return }
-            viewModel.deactivate(activationToken: departingToken)
-            if activationToken == departingToken {
-                activationToken = nil
-            }
         }
     }
 

@@ -62,24 +62,17 @@ struct JobHistoryView: View {
             guard let activationToken else { return }
             await viewModel.loadHistory(activationToken: activationToken)
         }
-        .onAppear {
-            viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
-            activationToken = viewModel.activate()
-        }
-        .task(id: activationToken) { [activationToken] in
-            guard let activationToken else { return }
-            await viewModel.loadHistory(activationToken: activationToken)
-        }
-        .onDisappear { [departingToken = activationToken] in
-            guard let departingToken else { return }
-            activeTasks
-                .filter { $0.activationToken == departingToken }
-                .forEach { $0.task.cancel() }
-            activeTasks.removeAll { $0.activationToken == departingToken }
-            viewModel.deactivate(activationToken: departingToken)
-            if activationToken == departingToken {
-                activationToken = nil
-            }
+        .task {
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: services.jobAnalyticsService,
+                onAcquire: { token in
+                    activationToken = token
+                },
+                onRelease: { token in
+                    releaseMount(activationToken: token)
+                }
+            )
         }
     }
 
@@ -262,6 +255,16 @@ struct JobHistoryView: View {
             await viewModel.loadMore(activationToken: activationToken)
         }
         activeTasks.append(ActiveTask(activationToken: activationToken, task: task))
+    }
+
+    private func releaseMount(activationToken releasedToken: UUID) {
+        activeTasks
+            .filter { $0.activationToken == releasedToken }
+            .forEach { $0.task.cancel() }
+        activeTasks.removeAll { $0.activationToken == releasedToken }
+        if activationToken == releasedToken {
+            activationToken = nil
+        }
     }
 
     // MARK: - Helpers

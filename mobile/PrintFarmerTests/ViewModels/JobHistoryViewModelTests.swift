@@ -147,6 +147,15 @@ final class JobHistoryViewModelTests: XCTestCase {
         }
     }
 
+    private func runNextCleanup(
+        _ enqueuer: ManualCancellationCleanupEnqueuer,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let didRun = await enqueuer.runNext()
+        XCTAssertTrue(didRun, file: file, line: line)
+    }
+
     /// Per-call scripted history service for #853 interleaving tests. Every
     /// operation is registered before dispatch, signals entry only after its
     /// release continuation is installed, receives an explicit release outcome,
@@ -637,6 +646,28 @@ final class JobHistoryViewModelTests: XCTestCase {
             guard !cleanups.isEmpty else { return nil }
             let cleanup = cleanups.removeFirst()
             return cleanup
+        }
+    }
+
+    @MainActor
+    private final class MainActorEvent {
+        private var signaled = false
+        private var waiter: CheckedContinuation<Void, Never>?
+        private(set) var signalCount = 0
+
+        func signal() {
+            signalCount += 1
+            signaled = true
+            waiter?.resume()
+            waiter = nil
+        }
+
+        func wait() async {
+            if signaled { return }
+            await withCheckedContinuation { continuation in
+                precondition(waiter == nil, "only one MainActorEvent waiter is allowed")
+                waiter = continuation
+            }
         }
     }
     
@@ -1173,6 +1204,218 @@ final class JobHistoryViewModelTests: XCTestCase {
         // Complete request history is preserved across all outcomes.
         let recorded = await gated.recordedCalls
         XCTAssertEqual(recorded.map(\.offset), [30, 60, 90])
+    }
+
+    // MARK: - Task-Scoped Mount Lifecycle (Issue #853)
+
+    func testMountCancelledBeforeHelperBeginsDoesNotActivateOrRequest() async {
+        let startGate = TaskStartGate()
+        let cleanupQueue = ManualCancellationCleanupEnqueuer()
+        var mirroredToken: UUID?
+        let task = Task { @MainActor in
+            await startGate.park()
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: mockJobAnalyticsService,
+                onAcquire: { mirroredToken = $0 },
+                onRelease: { token in
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                },
+                cleanupEnqueuer: { cleanupQueue.enqueue($0) }
+            )
+        }
+        await startGate.awaitEntered()
+
+        task.cancel()
+        let startRelease = await startGate.release()
+        XCTAssertEqual(startRelease, .released)
+        await task.value
+
+        XCTAssertEqual(cleanupQueue.pendingCount, 1)
+        await runNextCleanup(cleanupQueue)
+        XCTAssertEqual(viewModel.activationCountForTesting, 0)
+        XCTAssertNil(mockJobAnalyticsService.getHistoryCalledWith)
+        XCTAssertNil(mirroredToken)
+    }
+
+    func testMountCancellationDeactivatesBeforeIgnoringServiceRelease() async {
+        let service = ScriptedJobAnalyticsService()
+        let registration = await service.register(
+            .success(historyPage(["late"], totalCount: 1, currentPage: 1))
+        )
+        let cleanupQueue = ManualCancellationCleanupEnqueuer()
+        let releaseEvent = MainActorEvent()
+        var mirroredToken: UUID?
+        let task = Task { @MainActor in
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: service,
+                onAcquire: { mirroredToken = $0 },
+                onRelease: { token in
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                    releaseEvent.signal()
+                },
+                cleanupEnqueuer: { cleanupQueue.enqueue($0) }
+            )
+        }
+        guard await requireEntry(service, registration: registration) != nil else {
+            return
+        }
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertNotNil(mirroredToken)
+
+        let operationCleanupTarget = viewModel.cancellationCleanupTickForTesting + 1
+        task.cancel()
+        await viewModel.waitForCancellationCleanupForTesting(
+            atLeast: operationCleanupTarget
+        )
+        XCTAssertEqual(cleanupQueue.pendingCount, 1)
+        await runNextCleanup(cleanupQueue)
+        await releaseEvent.wait()
+
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(mirroredToken)
+
+        let serviceRelease = await service.release(registration: registration)
+        XCTAssertEqual(serviceRelease, .released)
+        await task.value
+        XCTAssertEqual(cleanupQueue.pendingCount, 1)
+        await runNextCleanup(cleanupQueue)
+        XCTAssertEqual(releaseEvent.signalCount, 1)
+        XCTAssertTrue(viewModel.historyItems.isEmpty)
+    }
+
+    func testDelayedMountACleanupCannotClearMountBMirrorOrOwnedTasks() async {
+        mockJobAnalyticsService.historyPageToReturn = historyPage(
+            ["mounted"],
+            totalCount: 1,
+            currentPage: 1
+        )
+        let cleanupQueueA = ManualCancellationCleanupEnqueuer()
+        let cleanupQueueB = ManualCancellationCleanupEnqueuer()
+        let lifetimeA = MainActorEvent()
+        let lifetimeB = MainActorEvent()
+        var mirroredToken: UUID?
+        var buttonTaskOwners: Set<UUID> = []
+        var releaseCountByToken: [UUID: Int] = [:]
+
+        let taskA = Task { @MainActor in
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: mockJobAnalyticsService,
+                onAcquire: { token in
+                    mirroredToken = token
+                    buttonTaskOwners.insert(token)
+                },
+                onRelease: { token in
+                    buttonTaskOwners.remove(token)
+                    releaseCountByToken[token, default: 0] += 1
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                },
+                onLifetimeArmed: { lifetimeA.signal() },
+                cleanupEnqueuer: { cleanupQueueA.enqueue($0) }
+            )
+        }
+        await lifetimeA.wait()
+        guard let tokenA = mirroredToken else {
+            return XCTFail("mount A should publish its immutable token")
+        }
+
+        taskA.cancel()
+        await taskA.value
+        XCTAssertEqual(cleanupQueueA.pendingCount, 2)
+
+        let taskB = Task { @MainActor in
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: mockJobAnalyticsService,
+                onAcquire: { token in
+                    mirroredToken = token
+                    buttonTaskOwners.insert(token)
+                },
+                onRelease: { token in
+                    buttonTaskOwners.remove(token)
+                    releaseCountByToken[token, default: 0] += 1
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                },
+                onLifetimeArmed: { lifetimeB.signal() },
+                cleanupEnqueuer: { cleanupQueueB.enqueue($0) }
+            )
+        }
+        await lifetimeB.wait()
+        guard let tokenB = mirroredToken else {
+            return XCTFail("mount B should publish its immutable token")
+        }
+        XCTAssertNotEqual(tokenA, tokenB)
+
+        await runNextCleanup(cleanupQueueA)
+        XCTAssertEqual(mirroredToken, tokenB)
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertTrue(buttonTaskOwners.contains(tokenB))
+        XCTAssertFalse(buttonTaskOwners.contains(tokenA))
+        XCTAssertEqual(releaseCountByToken[tokenA], 1)
+        XCTAssertNil(releaseCountByToken[tokenB])
+        await runNextCleanup(cleanupQueueA)
+        XCTAssertEqual(releaseCountByToken[tokenA], 1)
+
+        taskB.cancel()
+        await taskB.value
+        XCTAssertEqual(cleanupQueueB.pendingCount, 2)
+        await runNextCleanup(cleanupQueueB)
+        await runNextCleanup(cleanupQueueB)
+        XCTAssertNil(mirroredToken)
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertTrue(buttonTaskOwners.isEmpty)
+        XCTAssertEqual(releaseCountByToken[tokenB], 1)
+    }
+
+    func testTimelineMountRemainsActiveAfterLoadUntilTaskCancellation() async {
+        mockJobAnalyticsService.timelineToReturn = [timelineEvent("mounted")]
+        let cleanupQueue = ManualCancellationCleanupEnqueuer()
+        let lifetimeArmed = MainActorEvent()
+        var mirroredToken: UUID?
+        var releaseCount = 0
+        let task = Task { @MainActor in
+            await JobAnalyticsMountLifecycle.runTimeline(
+                viewModel: viewModel,
+                service: mockJobAnalyticsService,
+                onAcquire: { mirroredToken = $0 },
+                onRelease: { token in
+                    releaseCount += 1
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                },
+                onLifetimeArmed: { lifetimeArmed.signal() },
+                cleanupEnqueuer: { cleanupQueue.enqueue($0) }
+            )
+        }
+        await lifetimeArmed.wait()
+
+        XCTAssertEqual(viewModel.timeline.map(\.jobId), ["mounted"])
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertNotNil(mirroredToken)
+        XCTAssertEqual(releaseCount, 0)
+
+        task.cancel()
+        await task.value
+        XCTAssertEqual(cleanupQueue.pendingCount, 2)
+        await runNextCleanup(cleanupQueue)
+        await runNextCleanup(cleanupQueue)
+
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertNil(mirroredToken)
+        XCTAssertEqual(releaseCount, 1)
     }
 
     // MARK: - History Authority (Issue #853)
@@ -2008,6 +2251,94 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.historyPage?.stats?.averageDurationMinutes, 45)
         XCTAssertEqual(viewModel.currentOffset, 30)
         XCTAssertNotNil(viewModel.error)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
+    func testNewerReloadSuccessRemainsExactWhenOlderReloadSucceedsLater() async {
+        let activationToken = viewModel.activate()
+        let filterAFrom = Date(timeIntervalSince1970: 1_700_000_000)
+        let filterATo = Date(timeIntervalSince1970: 1_700_086_400)
+        let filterBFrom = Date(timeIntervalSince1970: 1_710_000_000)
+        let filterBTo = Date(timeIntervalSince1970: 1_710_086_400)
+        let statsA = QueueHistoryStats(
+            totalCompleted: 10,
+            totalFailed: 2,
+            averageDurationMinutes: 55
+        )
+        let statsB = QueueHistoryStats(
+            totalCompleted: 20,
+            totalFailed: 1,
+            averageDurationMinutes: 25
+        )
+        let service = ScriptedJobAnalyticsService()
+        let staleRegistration = await service.register(
+            .success(historyPage(["stale"], currentPage: 1, stats: statsA))
+        )
+        let currentRegistration = await service.register(
+            .success(historyPage(["current"], currentPage: 1, stats: statsB))
+        )
+        viewModel.configure(jobAnalyticsService: service)
+
+        viewModel.dateFrom = filterAFrom
+        viewModel.dateTo = filterATo
+        let staleTask = Task { @MainActor in
+            await viewModel.loadHistory(activationToken: activationToken)
+            await service.operationFinished(registration: staleRegistration)
+        }
+        guard let staleCall = await requireEntry(
+            service,
+            registration: staleRegistration
+        ) else {
+            return
+        }
+        XCTAssertEqual(staleCall.dateStart, filterAFrom)
+        XCTAssertEqual(staleCall.dateEnd, filterATo)
+
+        viewModel.dateFrom = filterBFrom
+        viewModel.dateTo = filterBTo
+        let currentTask = Task { @MainActor in
+            await viewModel.loadHistory(activationToken: activationToken)
+            await service.operationFinished(registration: currentRegistration)
+        }
+        guard let currentCall = await requireEntry(
+            service,
+            registration: currentRegistration
+        ) else {
+            _ = await service.release(registration: staleRegistration)
+            await staleTask.value
+            return
+        }
+        XCTAssertEqual(currentCall.dateStart, filterBFrom)
+        XCTAssertEqual(currentCall.dateEnd, filterBTo)
+
+        let currentRelease = await service.release(registration: currentRegistration)
+        XCTAssertEqual(currentRelease, .released)
+        await currentTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["current"])
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
+        XCTAssertEqual(viewModel.historyPage?.stats?.totalCompleted, 20)
+        XCTAssertEqual(viewModel.historyPage?.stats?.totalFailed, 1)
+        XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertEqual(viewModel.committedDateFromForTesting, filterBFrom)
+        XCTAssertEqual(viewModel.committedDateToForTesting, filterBTo)
+        XCTAssertNil(viewModel.error)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertFalse(viewModel.isLoadingMore)
+
+        let staleRelease = await service.release(registration: staleRegistration)
+        XCTAssertEqual(staleRelease, .released)
+        await staleTask.value
+
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["current"])
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
+        XCTAssertEqual(viewModel.historyPage?.stats?.totalCompleted, 20)
+        XCTAssertEqual(viewModel.historyPage?.stats?.totalFailed, 1)
+        XCTAssertEqual(viewModel.currentOffset, 0)
+        XCTAssertEqual(viewModel.committedDateFromForTesting, filterBFrom)
+        XCTAssertEqual(viewModel.committedDateToForTesting, filterBTo)
+        XCTAssertNil(viewModel.error)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertFalse(viewModel.isLoadingMore)
     }

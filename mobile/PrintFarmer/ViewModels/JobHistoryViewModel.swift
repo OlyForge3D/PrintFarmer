@@ -57,6 +57,200 @@ final class JobHistoryViewModel {
         }
     }
 
+    @MainActor
+    enum JobAnalyticsMountLifecycle {
+        typealias CleanupEnqueuer = @Sendable (
+            @escaping @MainActor @Sendable () -> Void
+        ) -> Void
+
+        private final class MountAttempt: @unchecked Sendable {
+            struct CleanupClaim {
+                let isFirst: Bool
+                let activationToken: UUID?
+            }
+
+            private let lock = NSLock()
+            private var cancelled = false
+            private var activationToken: UUID?
+            private var cleanupClaimed = false
+            private var lifetimeContinuation: CheckedContinuation<Void, Never>?
+
+            var isCancelled: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return cancelled
+            }
+
+            func install(activationToken: UUID) -> Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                self.activationToken = activationToken
+                return !cancelled
+            }
+
+            func cancel() {
+                let continuation: CheckedContinuation<Void, Never>?
+                lock.lock()
+                cancelled = true
+                continuation = lifetimeContinuation
+                lifetimeContinuation = nil
+                lock.unlock()
+                continuation?.resume()
+            }
+
+            func waitForCancellation() async {
+                await withCheckedContinuation { continuation in
+                    lock.lock()
+                    if cancelled {
+                        lock.unlock()
+                        continuation.resume()
+                    } else {
+                        lifetimeContinuation = continuation
+                        lock.unlock()
+                    }
+                }
+            }
+
+            func claimCleanup() -> CleanupClaim {
+                lock.lock()
+                defer { lock.unlock() }
+                guard !cleanupClaimed else {
+                    return CleanupClaim(isFirst: false, activationToken: nil)
+                }
+                cleanupClaimed = true
+                return CleanupClaim(isFirst: true, activationToken: activationToken)
+            }
+        }
+
+        private final class Callbacks: @unchecked Sendable {
+            let onAcquire: @MainActor (UUID) -> Void
+            let onRelease: @MainActor (UUID) -> Void
+            let onLifetimeArmed: @MainActor () -> Void
+            let initialLoad: @MainActor (UUID) async -> Void
+
+            init(
+                onAcquire: @escaping @MainActor (UUID) -> Void,
+                onRelease: @escaping @MainActor (UUID) -> Void,
+                onLifetimeArmed: @escaping @MainActor () -> Void,
+                initialLoad: @escaping @MainActor (UUID) async -> Void
+            ) {
+                self.onAcquire = onAcquire
+                self.onRelease = onRelease
+                self.onLifetimeArmed = onLifetimeArmed
+                self.initialLoad = initialLoad
+            }
+        }
+
+        static func runHistory(
+            viewModel: JobHistoryViewModel,
+            service: any JobAnalyticsServiceProtocol,
+            onAcquire: @escaping @MainActor (UUID) -> Void,
+            onRelease: @escaping @MainActor (UUID) -> Void,
+            onLifetimeArmed: @escaping @MainActor () -> Void = {},
+            cleanupEnqueuer: @escaping CleanupEnqueuer = defaultCleanupEnqueuer
+        ) async {
+            await run(
+                viewModel: viewModel,
+                service: service,
+                onAcquire: onAcquire,
+                onRelease: onRelease,
+                onLifetimeArmed: onLifetimeArmed,
+                cleanupEnqueuer: cleanupEnqueuer
+            ) { activationToken in
+                await viewModel.loadHistory(activationToken: activationToken)
+            }
+        }
+
+        static func runTimeline(
+            viewModel: JobHistoryViewModel,
+            service: any JobAnalyticsServiceProtocol,
+            onAcquire: @escaping @MainActor (UUID) -> Void,
+            onRelease: @escaping @MainActor (UUID) -> Void,
+            onLifetimeArmed: @escaping @MainActor () -> Void = {},
+            cleanupEnqueuer: @escaping CleanupEnqueuer = defaultCleanupEnqueuer
+        ) async {
+            await run(
+                viewModel: viewModel,
+                service: service,
+                onAcquire: onAcquire,
+                onRelease: onRelease,
+                onLifetimeArmed: onLifetimeArmed,
+                cleanupEnqueuer: cleanupEnqueuer
+            ) { activationToken in
+                await viewModel.loadTimeline(
+                    dateFrom: nil,
+                    dateTo: nil,
+                    activationToken: activationToken
+                )
+            }
+        }
+
+        private static func run(
+            viewModel: JobHistoryViewModel,
+            service: any JobAnalyticsServiceProtocol,
+            onAcquire: @escaping @MainActor (UUID) -> Void,
+            onRelease: @escaping @MainActor (UUID) -> Void,
+            onLifetimeArmed: @escaping @MainActor () -> Void,
+            cleanupEnqueuer: @escaping CleanupEnqueuer,
+            initialLoad: @escaping @MainActor (UUID) async -> Void
+        ) async {
+            let attempt = MountAttempt()
+            let callbacks = Callbacks(
+                onAcquire: onAcquire,
+                onRelease: onRelease,
+                onLifetimeArmed: onLifetimeArmed,
+                initialLoad: initialLoad
+            )
+
+            await withTaskCancellationHandler {
+                guard !Task.isCancelled, !attempt.isCancelled else { return }
+
+                viewModel.configure(jobAnalyticsService: service)
+                let activationToken = viewModel.activate()
+                guard attempt.install(activationToken: activationToken),
+                      !Task.isCancelled,
+                      !attempt.isCancelled else {
+                    cleanup(attempt: attempt, viewModel: viewModel, callbacks: callbacks)
+                    return
+                }
+
+                callbacks.onAcquire(activationToken)
+                defer {
+                    cleanupEnqueuer {
+                        cleanup(attempt: attempt, viewModel: viewModel, callbacks: callbacks)
+                    }
+                }
+
+                await callbacks.initialLoad(activationToken)
+                guard !attempt.isCancelled else { return }
+                callbacks.onLifetimeArmed()
+                await attempt.waitForCancellation()
+            } onCancel: {
+                attempt.cancel()
+                cleanupEnqueuer {
+                    cleanup(attempt: attempt, viewModel: viewModel, callbacks: callbacks)
+                }
+            }
+        }
+
+        private static func cleanup(
+            attempt: MountAttempt,
+            viewModel: JobHistoryViewModel,
+            callbacks: Callbacks
+        ) {
+            let claim = attempt.claimCleanup()
+            guard claim.isFirst, let activationToken = claim.activationToken else { return }
+            viewModel.deactivate(activationToken: activationToken)
+            callbacks.onRelease(activationToken)
+        }
+
+        private static let defaultCleanupEnqueuer: CleanupEnqueuer = { cleanup in
+            _ = Task { @MainActor in
+                cleanup()
+            }
+        }
+    }
+
     private struct HistoryFilters: Equatable {
         let dateFrom: Date?
         let dateTo: Date?
@@ -142,8 +336,11 @@ final class JobHistoryViewModel {
         [(target: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
     @ObservationIgnored var beforeHistoryApplyForTesting:
         (@MainActor @Sendable () async -> Void)?
+    private(set) var activationCountForTesting: UInt64 = 0
 
     var cancellationCleanupTickForTesting: UInt64 { cancellationCleanupTick }
+    var committedDateFromForTesting: Date? { committedHistory.filters.dateFrom }
+    var committedDateToForTesting: Date? { committedHistory.filters.dateTo }
 
     func waitForCancellationCleanupForTesting(atLeast target: UInt64) async {
         if cancellationCleanupTick >= target { return }
@@ -170,6 +367,9 @@ final class JobHistoryViewModel {
     @discardableResult
     func activate() -> UUID {
         invalidateOperationAuthorities()
+        #if DEBUG
+        activationCountForTesting &+= 1
+        #endif
         let token = UUID()
         activeViewToken = token
         isViewActive = true
@@ -635,3 +835,5 @@ final class JobHistoryViewModel {
         return page.entries.count < page.totalCount
     }
 }
+
+typealias JobAnalyticsMountLifecycle = JobHistoryViewModel.JobAnalyticsMountLifecycle
