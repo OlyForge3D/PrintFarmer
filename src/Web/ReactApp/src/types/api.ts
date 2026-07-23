@@ -1944,6 +1944,12 @@ export interface ApiError {
   message: string;
   details?: string;
   statusCode: number;
+  /**
+   * Raw response body from the server, when available. Used to recover structured
+   * conflict payloads (e.g. `{ expectedRevision, actualRevision }` on HTTP 409) so callers
+   * can build revision-aware conflict UI instead of showing a generic error message.
+   */
+  data?: unknown;
 }
 
 // Authentication types
