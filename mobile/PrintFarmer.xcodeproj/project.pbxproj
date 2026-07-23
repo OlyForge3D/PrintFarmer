@@ -444,6 +444,7 @@
 		FA5A00000000000000000003 /* FarmSnapshotSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000004 /* FarmSnapshotSession.swift */; };
 		FA5A00000000000000000005 /* FarmSnapshotOwnerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */; };
 		FA5A00000000000000000007 /* FarmSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000008 /* FarmSnapshotStore.swift */; };
+		FADC00000000000000000001 /* FarmSnapshotDomainCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */; };
 		FA5A00000000000000000009 /* FarmSnapshotEnvelopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */; };
 		FA5A0000000000000000000B /* FarmSnapshotTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */; };
 		FA5A0000000000000000000D /* FarmSnapshotAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */; };
@@ -795,6 +796,7 @@
 		FA5A00000000000000000004 /* FarmSnapshotSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotSession.swift; sourceTree = "<group>"; };
 		FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotOwnerStore.swift; sourceTree = "<group>"; };
 		FA5A00000000000000000008 /* FarmSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotStore.swift; sourceTree = "<group>"; };
+		FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotDomainCoordinator.swift; sourceTree = "<group>"; };
 		FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotEnvelopeTests.swift; sourceTree = "<group>"; };
 		FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotTestSupport.swift; sourceTree = "<group>"; };
 		FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotAuthorityTests.swift; sourceTree = "<group>"; };
@@ -920,6 +922,7 @@
 				FA5A00000000000000000004 /* FarmSnapshotSession.swift */,
 				FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */,
 				FA5A00000000000000000008 /* FarmSnapshotStore.swift */,
+				FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */,
 				9FB00D1FA66F23705042FF95 /* Demo */,
 				BC2000000000000000000004 /* BarcodeIntakeService.swift */,
 				BC2000000000000000000003 /* BarcodeScannerService.swift */,
@@ -1722,6 +1725,7 @@
 				FA5A00000000000000000003 /* FarmSnapshotSession.swift in Sources */,
 				FA5A00000000000000000005 /* FarmSnapshotOwnerStore.swift in Sources */,
 				FA5A00000000000000000007 /* FarmSnapshotStore.swift in Sources */,
+				FADC00000000000000000001 /* FarmSnapshotDomainCoordinator.swift in Sources */,
 				BC1000000000000000000001 /* BarcodeScannerProtocol.swift in Sources */,
 				BC1000000000000000000002 /* BarcodeIntakeServiceProtocol.swift in Sources */,
 				BC1000000000000000000003 /* BarcodeScannerService.swift in Sources */,

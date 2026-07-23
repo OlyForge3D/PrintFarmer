@@ -96,6 +96,14 @@ struct DiskFarmSnapshotFileIO: FarmSnapshotFileIO {
 /// monotonic activation token, and the durable server tombstone set. Shared by
 /// `ServiceContainer` (which mints/revokes/tombstones synchronously) and the
 /// actor store (which validates at each durable boundary).
+///
+/// H (issue #816): the ownership of `current`, `tombstones` (cache) AND the
+/// `withPromotion` critical section has moved into a shared
+/// `FarmSnapshotDomainCoordinator` resolved from a weak-ref registry keyed on
+/// `tombstoneStore.domain`. Two Authorities constructed with the same domain
+/// identifier share ONE coordinator — so a stale Authority cannot promote after
+/// a peer Authority adopts/tombstones on the same domain. This class is now a
+/// thin facade over the coordinator; its API is preserved for callers.
 final class FarmSnapshotAuthority: @unchecked Sendable {
     /// Outcome of a promotion attempt evaluated inside the critical section.
     enum PromotionOutcome: Sendable, Equatable {
@@ -104,192 +112,94 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         case integrityFailure
     }
 
-    private let lock = NSLock()
-    /// In-memory cache of the highest RESERVED token (advances at reserve/mint or
-    /// via an externally-adopted higher token). Reload durable-authoritative value
-    /// inside every allocation critical section — this cache is only an
-    /// optimization, never a source of truth (H).
-    private var reservedHighWater: UInt64 = 0
-    /// In-memory cache of the highest ADOPTED token. Reload durable inside adopt.
-    private var adoptedHighWater: UInt64 = 0
-    private var current: FarmSnapshotSession?
-    private var tombstones: Set<UUID>
-    private let tombstoneStore: FarmSnapshotTombstoneStore
+    /// The shared per-domain coordinator that actually owns all mutable state.
+    /// Held strongly so the weak-ref registry keeps this domain alive while any
+    /// Authority references it.
+    private let coordinator: FarmSnapshotDomainCoordinator
 
-    init(tombstoneStore: FarmSnapshotTombstoneStore = FarmSnapshotTombstoneStore()) {
-        self.tombstoneStore = tombstoneStore
-        // Durable tombstones survive process restart / the crash window between
-        // purge and registry removal (H4).
-        self.tombstones = tombstoneStore.load()
-        // H: seed the caches from durable state, but every allocation critical
-        // section reloads the durable-authoritative value — a peer instance in
-        // the same domain could have advanced it after our init.
-        self.reservedHighWater = tombstoneStore.loadReservedHighWater()
-        self.adoptedHighWater = tombstoneStore.loadAdoptedHighWater()
+    init(
+        tombstoneStore: FarmSnapshotTombstoneStore = FarmSnapshotTombstoneStore(),
+        durableAuthorityRecord: FarmSnapshotDurableAuthorityRecord? = nil
+    ) {
+        self.coordinator = FarmSnapshotDomainCoordinator.coordinator(
+            for: tombstoneStore,
+            durableRecord: durableAuthorityRecord
+        )
     }
 
     /// Reserve a token for a candidate session WITHOUT publishing it as current (P3).
-    /// The candidate is not authoritative — no commit can be authorized against it —
-    /// until a later `adopt` publishes it. Returns `nil` when the server is tombstoned.
-    ///
-    /// H: the token reservation is DURABLE and cross-instance atomic — the tombstone
-    /// store's coordinator lock serializes the read-modify-write on the persisted
-    /// reserved high-water even across two live authorities on the same persistence
-    /// domain, so two concurrent reserves cannot collide (H bug). Overflow at
-    /// `UInt64.max` and durable-persistence failure are typed errors — the caller
-    /// MUST treat them as fail-closed and MUST NOT publish an un-reserved token.
-    /// Reserving advances only the RESERVED counter; the ADOPTED counter advances
-    /// at `adopt` publication, so the reserved token can still be adopted at its
-    /// exact reserved value.
+    /// H: delegates through the shared coordinator so a same-domain peer's reservation
+    /// is observed.
     func reserve(namespace: FarmSnapshotNamespace, generation: Int) throws -> FarmSnapshotSession? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !tombstones.contains(namespace.serverID) else { return nil }
-        let reserved = try tombstoneStore.reserveNextToken(atLeast: reservedHighWater)
-        reservedHighWater = max(reservedHighWater, reserved)
-        return FarmSnapshotSession(namespace: namespace, generation: generation, token: reserved)
+        try coordinator.reserve(namespace: namespace, generation: generation)
     }
 
-    /// Mint a fresh authoritative session for a settled server + verified owner.
-    /// Returns `nil` when the server is tombstoned (purged) so nothing can
-    /// resurrect it. Every mint advances the monotonic token AND the adopted
-    /// high-water mark, so a same-user / same-server relogin supersedes any
-    /// in-flight session.
-    ///
-    /// H: uses the same durable atomic reservation as `reserve`, then durably
-    /// adopts the reserved token so the current session is authoritative
-    /// end-to-end. A mint failure (overflow / persistence) throws WITHOUT
-    /// publishing a session.
+    /// Mint a fresh authoritative session. H: delegates through the shared coordinator
+    /// so a same-domain peer's mint / adopt / tombstone is observed.
     func mint(namespace: FarmSnapshotNamespace, generation: Int) throws -> FarmSnapshotSession? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !tombstones.contains(namespace.serverID) else { return nil }
-        let reserved = try tombstoneStore.reserveNextToken(atLeast: reservedHighWater)
-        reservedHighWater = max(reservedHighWater, reserved)
-        // Durably adopt the freshly reserved token in the same critical section
-        // (mint is reserve + adopt fused). If durable adopt fails, we throw so
-        // no session is published (typed persistence failure).
-        let adopted = try tombstoneStore.tryAdopt(token: reserved)
-        // The token was just reserved above, so tryAdopt cannot legitimately return
-        // false — the reservation was strictly above the domain's adopted counter.
-        // If it does return false (a peer advanced adopted past us mid-critical),
-        // treat as superseded: throw so caller fails closed.
-        guard adopted else { throw FarmSnapshotAuthorityError.persistenceFailure }
-        adoptedHighWater = max(adoptedHighWater, reserved)
-        let session = FarmSnapshotSession(namespace: namespace, generation: generation, token: reserved)
-        current = session
-        return session
+        try coordinator.mint(namespace: namespace, generation: generation)
     }
 
-    /// Adopt an externally-minted session as current — serialized durable
-    /// compare-and-set against the adopted high-water: a delayed OLDER or
-    /// already-consumed token can never re-adopt, even after the current was
-    /// revoked/deactivated (H3). Re-adopting the exact current session is
-    /// idempotent. Returns whether the session is current after the call.
-    ///
-    /// H: reads the durable adopted high-water inside the critical section so a
-    /// same-domain peer's advance is observed. Advancing the durable adopted
-    /// high-water on adopt is atomic; a persistence failure is typed — the
-    /// caller MUST treat a throw as fail-closed and MUST NOT publish the session.
+    /// H: durable CAS via the shared coordinator so a same-domain peer's adopt is
+    /// observed. Returns whether `session` is authoritative after the call.
     @discardableResult
     func adopt(_ session: FarmSnapshotSession) throws -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !tombstones.contains(session.serverID) else { return false }
-        if session == current { return true } // idempotent for the exact current
-        // H: attempt the durable CAS. Returns false when a peer has already adopted
-        // this-or-higher (delayed old); throws on verified-read mismatch.
-        let accepted = try tombstoneStore.tryAdopt(token: session.token)
-        guard accepted else { return false }
-        adoptedHighWater = max(adoptedHighWater, session.token)
-        reservedHighWater = max(reservedHighWater, session.token)
-        current = session
-        return true
+        try coordinator.adopt(session)
     }
 
-    /// Unconditionally clear the current session (explicit logout / no-server). The
-    /// adopted high-water barrier is retained (durably) so nothing older can
-    /// re-adopt afterward.
+    /// Unconditionally clear the current session on the shared coordinator.
     func revoke() {
-        lock.lock()
-        defer { lock.unlock() }
-        current = nil
+        coordinator.revoke()
     }
 
     /// Conditionally clear the current session ONLY if `session` is still exactly
-    /// current — a stale deactivate cannot clear a newer login (H3). Returns
-    /// whether it cleared.
+    /// current on the shared coordinator — a stale deactivate cannot clear a newer
+    /// login even if issued from a different Authority instance in the same domain.
     @discardableResult
     func deactivate(_ session: FarmSnapshotSession) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard current == session else { return false }
-        current = nil
-        return true
+        coordinator.deactivate(session)
     }
 
-    /// Tombstone a server durably and revoke it if it is the current session (H4).
+    /// Tombstone a server durably on the shared coordinator (and revoke it if it is
+    /// the current session).
     func tombstone(_ serverID: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        tombstones.insert(serverID)
-        tombstoneStore.insert(serverID)
-        if current?.serverID == serverID {
-            current = nil
-        }
+        coordinator.tombstone(serverID)
     }
 
-    /// Clear a server's tombstone once its ID lifecycle is complete (registry
-    /// removal done). Server UUIDs are never reused, so this is housekeeping only.
+    /// Clear a server's tombstone on the shared coordinator once its ID lifecycle
+    /// is complete.
     func clearTombstone(_ serverID: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        tombstones.remove(serverID)
-        tombstoneStore.remove(serverID)
+        coordinator.clearTombstone(serverID)
     }
 
     func isTombstoned(_ serverID: UUID) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return tombstones.contains(serverID)
+        coordinator.isTombstoned(serverID)
     }
 
     /// Snapshot of all durably-tombstoned server IDs (for startup residue sweep, H4).
     func tombstonedServerIDs() -> Set<UUID> {
-        lock.lock()
-        defer { lock.unlock() }
-        return tombstones
+        coordinator.tombstonedServerIDs()
     }
 
     func currentSession() -> FarmSnapshotSession? {
-        lock.lock()
-        defer { lock.unlock() }
-        return current
+        coordinator.currentSession()
     }
 
     func isCurrent(_ session: FarmSnapshotSession) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return current == session && !tombstones.contains(session.serverID)
+        coordinator.isCurrent(session)
     }
 
     /// Run `body` (a synchronous durable step — promotion or quarantine move) IF
     /// `session` is still exactly current, not tombstoned, and not cancelled — all
-    /// while holding the lock so a concurrent revoke/tombstone/switch cannot
-    /// interleave at the destructive boundary. Returns `nil` when the session is
-    /// no longer authoritative (body not run). Used by both commit promotion and
-    /// quarantine move (H5).
+    /// while holding the SHARED coordinator lock so a concurrent revoke/tombstone/
+    /// switch (from ANY Authority on this domain) cannot interleave at the
+    /// destructive boundary.
     func withPromotion<T>(
         _ session: FarmSnapshotSession,
         cancelled: () -> Bool,
         _ body: () throws -> T
     ) rethrows -> T? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard current == session, !tombstones.contains(session.serverID), !cancelled() else {
-            return nil
-        }
-        return try body()
+        try coordinator.withPromotion(session, cancelled: cancelled, body)
     }
 }
 
