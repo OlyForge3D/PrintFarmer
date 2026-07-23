@@ -257,6 +257,9 @@ final class ServiceContainer: @unchecked Sendable {
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
+        // C: capture the displaced real signalR and disconnect that EXACT instance so a
+        // connected real receive loop cannot linger as an orphan under demo.
+        let displacedSignalR = self.signalRService
         self.apiClient = nil
         self.authService = DemoAuthService()
         self.printerService = DemoPrinterService()
@@ -280,6 +283,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.capabilitiesService = StubSystemCapabilitiesService()
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
+        Task { await displacedSignalR.disconnect() }
         #if canImport(UIKit)
         self.qrScannerService = nil
         self.barcodeScannerService = nil
@@ -522,10 +526,18 @@ final class ServiceContainer: @unchecked Sendable {
         await bindSnapshotToServer(server, generation: capturedGeneration, epoch: epoch)
 
         guard transitionEpoch.isCurrent(epoch), accessToken != nil else { return }
+        // Capture the EXACT instance we are about to connect. After connect returns, if
+        // this switch was superseded (demo/none/newer switch) or the field was swapped,
+        // disconnect THIS exact instance so its receive loop cannot linger as an orphan
+        // (Hicks H1 / C).
+        let connectingSignalR = signalRService
         do {
-            try await signalRService.connect()
+            try await connectingSignalR.connect()
         } catch {
             // RootView will also attempt connection when authenticated; keep switching non-fatal.
+        }
+        if !transitionEpoch.isCurrent(epoch) || signalRService !== connectingSignalR {
+            await connectingSignalR.disconnect()
         }
     }
 

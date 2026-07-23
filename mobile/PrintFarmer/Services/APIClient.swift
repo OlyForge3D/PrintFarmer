@@ -363,6 +363,10 @@ actor APIClient {
     private let encoder: JSONEncoder
     private var baseURL: URL
     private var accessToken: String?
+    /// The exact auth-session/operation token this client's authenticated session was
+    /// applied under (A). Carried on a 401 so the expiry handler can reject a stale
+    /// event; nil for unauthenticated / login clients.
+    private var authSessionToken: Int?
     private var tokenExpiryChecker: (@Sendable () async -> Bool)?
     private let serverGeneration: ActiveServerGeneration?
     private let generationAtCreation: Int?
@@ -510,9 +514,26 @@ actor APIClient {
                 UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
             }
             self.accessToken = accessToken
+            // A: capture the exact auth-session/operation identity this authenticated
+            // session was applied under, so a later 401 carries it and the handler can
+            // reject a stale event without borrowing the current token.
+            self.authSessionToken = accessToken == nil ? nil : token
             return true
         }
         return applied ?? false
+    }
+
+    /// Post a session-expiry event carrying the originating auth-session identity
+    /// `{serverGeneration, authSessionToken}` (A). SUPPRESSED for unauthenticated /
+    /// login clients (nil generation or no captured auth session), which must never be
+    /// able to log out an authenticated session.
+    private func postSessionExpired() {
+        guard let generationAtCreation, let authSessionToken else { return }
+        NotificationCenter.default.post(
+            name: .sessionExpired,
+            object: nil,
+            userInfo: ["generation": generationAtCreation, "authSessionToken": authSessionToken]
+        )
     }
 
     /// Registers a closure that checks whether the current token is expired.
@@ -716,7 +737,7 @@ actor APIClient {
     private func checkTokenExpiry() async throws {
         try validateActiveServerGeneration()
         if let checker = tokenExpiryChecker, await checker() {
-            NotificationCenter.default.post(name: .sessionExpired, object: generationAtCreation.map(NSNumber.init(value:)))
+            postSessionExpired()
             throw NetworkError.unauthorized
         }
     }
@@ -764,7 +785,7 @@ actor APIClient {
         case 200...299:
             return
         case 401:
-            NotificationCenter.default.post(name: .sessionExpired, object: generationAtCreation.map(NSNumber.init(value:)))
+            postSessionExpired()
             throw NetworkError.unauthorized
         case 403:
             throw NetworkError.forbidden

@@ -31,29 +31,30 @@ final class AuthViewModel {
             queue: .main
         ) { [weak self] note in
             guard let self else { return }
-            // The event carries the originating APIClient's server generation (or nil
-            // for legacy). Discard a stale-generation 401 (H2) on the posting thread.
-            let generation = (note.object as? NSNumber)?.intValue
+            // The event carries the originating auth-session identity
+            // {generation, authSessionToken}. Unauthenticated/login clients suppress the
+            // event entirely (A), so a missing identity is discarded here too.
+            let generation = (note.userInfo?["generation"] as? Int)
+            let authSessionToken = (note.userInfo?["authSessionToken"] as? Int)
             Task { @MainActor in
-                await self.handleSessionExpiration(generation: generation)
+                await self.handleSessionExpiration(generation: generation, authSessionToken: authSessionToken)
             }
         }
     }
 
-    /// React to a server-reported session expiry. This is NOT a user logout: it
-    /// must not advance the auth-operation token (else it would supersede a fresh
-    /// concurrent login). It clears the current session state and revokes the
-    /// snapshot for the expired session only (issue #816, H2). A 401 originating from
-    /// an APIClient we already switched away from (stale generation) is ignored.
-    private func handleSessionExpiration(generation: Int?) async {
-        if let generation, !services.isActiveGeneration(generation) { return }
-        // Gate the clears on the CURRENT auth epoch WITHOUT advancing it: a newer login
-        // that advances the epoch during these awaits is not clobbered, and a fresh
-        // concurrent login is not superseded.
-        let token = services.authOperationEpoch.current
+    /// React to a server-reported session expiry. This is NOT a user logout: it must
+    /// not advance the auth-operation token. It fail-closes unless BOTH the originating
+    /// server generation AND the originating auth-session token are still current — so a
+    /// stale-server or old-session 401 arriving during a newer same-server login can
+    /// never log out the newer session (issue #816 A). The carried token is used
+    /// directly; the current token is NEVER borrowed to authorize an old event.
+    private func handleSessionExpiration(generation: Int?, authSessionToken: Int?) async {
+        guard let generation, let authSessionToken else { return } // suppress identity-less events
+        guard services.isActiveGeneration(generation),
+              services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         await services.revokeFarmSnapshot()
-        await services.authService.logout(operation: AuthOperationToken(value: token))
-        guard services.authOperationEpoch.isCurrent(token) else { return }
+        await services.authService.logout(operation: AuthOperationToken(value: authSessionToken))
+        guard services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         isAuthenticated = false
         currentUser = nil
     }

@@ -42,9 +42,13 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     /// test park a switch operation exactly at its outgoing-service teardown
     /// suspension point (issue #816 H1) without sleeps/polling.
     var disconnectHook: (@Sendable () async -> Void)?
+    /// Optional deterministic hook awaited at the start of `connect()`. Lets a test
+    /// park a switch at its incoming-service connect suspension point (issue #816 C).
+    var connectHook: (@Sendable () async -> Void)?
 
     func connect() async throws {
         connectCalled = true
+        if let connectHook { await connectHook() }
         if let error = errorToThrow { throw error }
         connectionStateHub.setStateSync(.connected)
     }

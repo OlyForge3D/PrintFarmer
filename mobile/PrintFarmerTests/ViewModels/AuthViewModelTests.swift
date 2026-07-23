@@ -267,7 +267,14 @@ final class AuthViewModelTests: XCTestCase {
             }
         }
 
-        NotificationCenter.default.post(name: .sessionExpired, object: nil)
+        // Post a session-expiry event carrying the CURRENT auth-session identity so the
+        // identity-scoped handler (issue #816 A) acts on it. Generation 0 is the fresh
+        // container's active generation; the token is the current auth-operation epoch.
+        NotificationCenter.default.post(
+            name: .sessionExpired,
+            object: nil,
+            userInfo: ["generation": 0, "authSessionToken": services.authOperationEpoch.current]
+        )
 
         let result = await XCTWaiter.fulfillment(of: [loggedOut], timeout: 5)
         XCTAssertEqual(result, .completed, "session-expiry logout did not drive isAuthenticated to false")

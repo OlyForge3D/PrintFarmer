@@ -43,6 +43,22 @@ final class AsyncBarrier: @unchecked Sendable {
         waiters.forEach { $0.resume() }
     }
 
+    /// Secondary rescue (issue #816 I): if the barrier is deallocated while a
+    /// continuation is still parked (e.g. a test threw before releasing and nothing
+    /// retains the barrier), resume it so the suspended task cannot strand. This is a
+    /// backstop only — tests must still `defer { barrier.release() }` after creation,
+    /// and `release()`/`markReleased` are idempotent so double-release is a no-op.
+    deinit {
+        lock.lock()
+        let release = releaseWaiter
+        releaseWaiter = nil
+        let arrivals = arrivalWaiters
+        arrivalWaiters = []
+        lock.unlock()
+        release?.resume()
+        arrivals.forEach { $0.resume() }
+    }
+
     // MARK: Synchronous lock helpers (kept out of async scope)
 
     private func markArrived() -> [CheckedContinuation<Void, Never>] {

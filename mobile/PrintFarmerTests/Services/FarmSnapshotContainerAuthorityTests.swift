@@ -568,12 +568,21 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
     final class SignalRFactoryRecorder: @unchecked Sendable {
         let firstDisconnectBarrier = AsyncBarrier()
+        /// Barrier awaited inside `connect()` for services created for `connectBarrierHost`.
+        let connectBarrier = AsyncBarrier()
+        var connectBarrierHost: String?
         private let lock = NSLock()
         private(set) var createdBaseURLs: [URL] = []
+        private(set) var services: [String: MockSignalRService] = [:] // host -> service
         private var callCount = 0
         private let barrierOnFirst: Bool
 
         init(barrierOnFirst: Bool) { self.barrierOnFirst = barrierOnFirst }
+
+        func service(forHost host: String) -> MockSignalRService? {
+            lock.lock(); defer { lock.unlock() }
+            return services[host]
+        }
 
         var factory: ServiceContainer.SignalRServiceFactory {
             { [weak self] baseURL, _ in
@@ -582,12 +591,17 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
                 let isFirst: Bool = {
                     self.lock.lock(); defer { self.lock.unlock() }
                     self.createdBaseURLs.append(baseURL)
+                    if let host = baseURL.host { self.services[host] = service }
                     defer { self.callCount += 1 }
                     return self.callCount == 0
                 }()
                 if isFirst && self.barrierOnFirst {
                     let barrier = self.firstDisconnectBarrier
                     service.disconnectHook = { await barrier.arriveAndWait() }
+                }
+                if let host = baseURL.host, host == self.connectBarrierHost {
+                    let barrier = self.connectBarrier
+                    service.connectHook = { await barrier.arriveAndWait() }
                 }
                 return service
             }
