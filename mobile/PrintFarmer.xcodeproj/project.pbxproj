@@ -377,6 +377,7 @@
 		D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0630DF455D4C1F4FA86F892 /* PrinterDetailView.swift */; };
 		D71037FADE952266CE7F84B8 /* NotificationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2099E58B96BAECC1E27BEE93 /* NotificationsView.swift */; };
 		D8F9A0B1C2E3D4F5A6B7C8D9 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */; };
+		D816D0A0000000000816D0A0 /* SnapshotActivationPendingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D816D0A1000000000816D0A1 /* SnapshotActivationPendingView.swift */; };
 		D99CD2AB46AD4834B0BC33CA /* PredictiveInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B82175969F41E18F12CE414 /* PredictiveInsightsView.swift */; };
 		DADAA45CEF6DEBFEFF5B983D /* UptimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9613964BDF412E866655E27 /* UptimeView.swift */; };
 		DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CD7956B1ACA5B4B641B1E2 /* TestProtocols.swift */; };
@@ -680,6 +681,7 @@
 		C419E5042E5AB2FD54B88C0F /* AutoDispatchSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchSection.swift; sourceTree = "<group>"; };
 		C5B16CA4D9FC52BF34ADB51B /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		D816D0A1000000000816D0A1 /* SnapshotActivationPendingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotActivationPendingView.swift; sourceTree = "<group>"; };
 		C7D2128F28601E1ED8FEE835 /* DeepLinkHandlerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeepLinkHandlerTests.swift; sourceTree = "<group>"; };
 		C8090CB206CE8E8AE1084796 /* NotificationsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsViewModel.swift; sourceTree = "<group>"; };
 		C81783B769C3897AF7B30353 /* DemoNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoNotificationService.swift; sourceTree = "<group>"; };
@@ -1156,6 +1158,7 @@
 				CBAC88193AFA3F2403893113 /* Settings */,
 				255B7030A4CC2759FC7FC79B /* ContentView.swift */,
 				C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */,
+				D816D0A1000000000816D0A1 /* SnapshotActivationPendingView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1805,6 +1808,7 @@
 				FF2EE1DD0CC9BB8AA7F6E5D4 /* LocalNetworkAuthorization.swift in Sources */,
 				C6B5A4F3E2D1C0B9A8F7E6D5 /* LocalNetworkPermissionView.swift in Sources */,
 				D8F9A0B1C2E3D4F5A6B7C8D9 /* RootView.swift in Sources */,
+				D816D0A0000000000816D0A0 /* SnapshotActivationPendingView.swift in Sources */,
 				0165CA554584E940BBCF8A15 /* EmptyStateView.swift in Sources */,
 				13A9714DB66389EFE231ED4E /* ActionButtonStyle.swift in Sources */,
 				2145660BC57194889CDBC78A /* JobCardView.swift in Sources */,

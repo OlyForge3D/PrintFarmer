@@ -41,29 +41,38 @@ struct RootView: View {
                             await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
                         }
                 } else if authViewModel.isAuthenticated {
-                    ContentView()
-                        .id(services.activeServerGeneration)
-                        .task(id: services.activeServerGeneration) {
-                            pendingReadyMonitor.configure(
-                                autoPrintService: services.autoPrintService,
-                                printerService: services.printerService
-                            )
-                            await pendingReadyMonitor.requestNotificationPermission()
-                            pendingReadyMonitor.startMonitoring()
-                            do {
-                                try await services.signalRService.connect()
-                            } catch {
-                                // SignalR will auto-reconnect; log silently
+                    // D (issue #816 reject): the root MUST consume `snapshotActivationPending`
+                    // and visibly gate/offer retry rather than silently entering
+                    // ContentView on `isAuthenticated` alone. If the snapshot did not
+                    // activate (e.g. startup preparation failed), show an accessible
+                    // retry-or-sign-out surface instead of the main app shell.
+                    if authViewModel.snapshotActivationPending {
+                        SnapshotActivationPendingView()
+                    } else {
+                        ContentView()
+                            .id(services.activeServerGeneration)
+                            .task(id: services.activeServerGeneration) {
+                                pendingReadyMonitor.configure(
+                                    autoPrintService: services.autoPrintService,
+                                    printerService: services.printerService
+                                )
+                                await pendingReadyMonitor.requestNotificationPermission()
+                                pendingReadyMonitor.startMonitoring()
+                                do {
+                                    try await services.signalRService.connect()
+                                } catch {
+                                    // SignalR will auto-reconnect; log silently
+                                }
+                                connectionMonitor.configure(
+                                    apiClient: services.apiClient,
+                                    signalRService: services.signalRService
+                                )
+                                connectionMonitor.start()
                             }
-                            connectionMonitor.configure(
-                                apiClient: services.apiClient,
-                                signalRService: services.signalRService
-                            )
-                            connectionMonitor.start()
-                        }
-                        .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
-                            router.pendingReadyCount = newValue
-                        }
+                            .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
+                                router.pendingReadyCount = newValue
+                            }
+                    }
                 } else if !hasSeenOnboarding {
                     OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
                 } else if !hasCompletedNetworkPermission {
@@ -102,15 +111,16 @@ struct RootView: View {
     }
 
     /// True only when the authenticated `ContentView` shell is actually on
-    /// screen — i.e. auth checked, splash elapsed, and a server is selected.
-    /// The connection bar is gated on this so it never renders over the splash
-    /// screen or `AddFirstServerView` (where the monitor hasn't started).
+    /// screen — i.e. auth checked, splash elapsed, a server is selected, AND
+    /// the farm-snapshot activation completed (D: the pending-retry screen must
+    /// NOT show the connection bar because ContentView isn't mounted).
     private var isShowingMainContent: Bool {
         authViewModel.hasCheckedAuth
             && minimumSplashElapsed
             && !serverRegistry.servers.isEmpty
             && serverRegistry.activeServerID != nil
             && authViewModel.isAuthenticated
+            && !authViewModel.snapshotActivationPending
     }
 
     /// Shown briefly while `restoreSession()` checks for a saved token.

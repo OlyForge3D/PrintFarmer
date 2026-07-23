@@ -15,9 +15,17 @@ final class AuthViewModel {
     /// the snapshot is NOT yet ready — the app must not treat it as fully ready and can
     /// retry activation (without a new login) via `retrySnapshotActivationIfPending()`.
     private(set) var snapshotActivationPending = false
-    /// The auth-operation token to reuse when retrying a pending activation, so identity
-    /// is preserved across the retry without re-authenticating.
-    @ObservationIgnored private var pendingActivationAuthToken: Int?
+    /// D: the full activation snapshot to retry against. Stores server/user/generation/
+    /// auth-token so the retry cannot bind a different server than the one that failed
+    /// and cannot be reused across a server switch or an auth-token change (issue #816
+    /// reject D: "invalidate on server/desired-target/auth change").
+    struct PendingActivation: Equatable, Sendable {
+        let authToken: Int
+        let serverID: UUID
+        let userID: UUID
+        let generation: Int
+    }
+    @ObservationIgnored private(set) var pendingActivation: PendingActivation?
 
     /// The current user's primary role for permission gating.
     /// Returns "farm_admin" when the user has that role; otherwise the first role; nil if unauthenticated.
@@ -69,34 +77,69 @@ final class AuthViewModel {
     }
 
     /// D: record a snapshot activation outcome. `.preparationFailed` marks a retryable
-    /// pending activation (session stays authenticated, snapshot NOT ready); any other
-    /// outcome clears the pending state.
+    /// pending activation with the exact snapshot (server/user/generation/authToken); any
+    /// other outcome clears the pending state. The pending record is later invalidated on
+    /// any server/desired-target/auth change (checked at retry time in
+    /// `retrySnapshotActivationIfPending`).
     private func recordActivationOutcome(_ result: FarmSnapshotActivationResult, authToken: Int) {
-        if result == .preparationFailed {
+        if result == .preparationFailed,
+           let serverID = services.currentActiveServerID,
+           let userID = currentUser?.id {
             snapshotActivationPending = true
-            pendingActivationAuthToken = authToken
+            pendingActivation = PendingActivation(
+                authToken: authToken,
+                serverID: serverID,
+                userID: userID,
+                generation: services.activeServerGeneration
+            )
         } else {
             snapshotActivationPending = false
-            pendingActivationAuthToken = nil
+            pendingActivation = nil
         }
     }
 
     /// D: retry a pending snapshot activation WITHOUT a new login. Reuses the original
-    /// auth-operation token so identity is preserved. On success (or any non-retryable
-    /// outcome) the pending flag clears; if preparation still fails it stays pending for
-    /// a future retry. No-op when nothing is pending or the token was superseded.
+    /// auth-operation token, server id, user id, and generation so identity is preserved
+    /// and cannot bind a different server. On success (or any non-retryable outcome) the
+    /// pending flag clears; if preparation still fails it stays pending for a future
+    /// retry. No-op when nothing is pending, the token was superseded, or the pinned
+    /// server / user / generation no longer matches the current app state.
     @discardableResult
     func retrySnapshotActivationIfPending() async -> FarmSnapshotActivationResult? {
-        guard snapshotActivationPending, let token = pendingActivationAuthToken else { return nil }
-        guard services.authOperationEpoch.isCurrent(token) else {
-            // A newer op (logout/login) superseded this session: drop the stale pending.
+        guard snapshotActivationPending, let pending = pendingActivation else { return nil }
+        // Auth-token invalidation: a newer login/logout advanced the epoch.
+        guard services.authOperationEpoch.isCurrent(pending.authToken) else {
             snapshotActivationPending = false
-            pendingActivationAuthToken = nil
+            pendingActivation = nil
             return nil
         }
-        let result = await services.retryFarmSnapshotActivation(authToken: token)
-        guard services.authOperationEpoch.isCurrent(token) else { return nil }
-        recordActivationOutcome(result, authToken: token)
+        // Server-switch invalidation: user changed the active server since the failure.
+        // The retry is pinned to the failed server and must NOT bind the current server.
+        guard let currentServerID = services.currentActiveServerID,
+              currentServerID == pending.serverID else {
+            snapshotActivationPending = false
+            pendingActivation = nil
+            return nil
+        }
+        // Generation-switch invalidation: the active-server generation advanced.
+        guard services.isActiveGeneration(pending.generation) else {
+            snapshotActivationPending = false
+            pendingActivation = nil
+            return nil
+        }
+        // User-change invalidation: authenticated user is no longer the pending user.
+        guard currentUser?.id == pending.userID else {
+            snapshotActivationPending = false
+            pendingActivation = nil
+            return nil
+        }
+        let result = await services.retryFarmSnapshotActivation(
+            authToken: pending.authToken,
+            expectedServerID: pending.serverID,
+            expectedGeneration: pending.generation
+        )
+        guard services.authOperationEpoch.isCurrent(pending.authToken) else { return nil }
+        recordActivationOutcome(result, authToken: pending.authToken)
         return result
     }
 
@@ -222,7 +265,7 @@ final class AuthViewModel {
         currentUser = nil
         isLoading = false
         snapshotActivationPending = false
-        pendingActivationAuthToken = nil
+        pendingActivation = nil
     }
 
     func logoutIfServerRegistryUnavailable(_ registry: ServerRegistry) async {

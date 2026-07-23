@@ -354,9 +354,27 @@ final class ServiceContainer: @unchecked Sendable {
     /// login. Re-runs the bind for the settled active server under the given auth token;
     /// if startup preparation now succeeds the snapshot binds. Callers hold the auth
     /// token from the original login/restore so identity is preserved across the retry.
+    ///
+    /// D-strengthening: retry is PINNED to the failed server/generation. If the caller's
+    /// pending record no longer matches the current active server or the current
+    /// generation, the retry refuses to bind and returns `.notApplicable`. This
+    /// implements the reject: "Retry targets only failed server and cannot bind current
+    /// different server."
     @discardableResult
-    func retryFarmSnapshotActivation(authToken: Int? = nil) async -> FarmSnapshotActivationResult {
+    func retryFarmSnapshotActivation(
+        authToken: Int? = nil,
+        expectedServerID: UUID? = nil,
+        expectedGeneration: Int? = nil
+    ) async -> FarmSnapshotActivationResult {
         await activeServerSwitchTask?.value
+        if let expectedServerID,
+           serverRegistry?.activeServerID != expectedServerID {
+            return .notApplicable
+        }
+        if let expectedGeneration,
+           !activeGeneration.isCurrent(expectedGeneration) {
+            return .notApplicable
+        }
         return await bindSnapshotToActiveServer(authToken: authToken)
     }
 
@@ -365,6 +383,11 @@ final class ServiceContainer: @unchecked Sendable {
     func awaitActiveServerSettled() async {
         await activeServerSwitchTask?.value
     }
+
+    /// D: expose the current active-server id (read-only) so the AuthViewModel can pin
+    /// pending-activation state to the failed server and invalidate the pending record
+    /// when the user switches servers.
+    var currentActiveServerID: UUID? { serverRegistry?.activeServerID }
 
     /// Whether `generation` is the current active-server generation. Used to discard a
     /// stale session-expiry event posted by an APIClient we already switched away from
