@@ -1210,6 +1210,200 @@ final class AttentionInteractionTests: XCTestCase {
         XCTAssertEqual(snoozeCallCount, 1)
     }
 
+    // MARK: - Incomplete-pagination media/action retention (Hicks blocker #1)
+    //
+    // Media state and action authority hang off the exact
+    // ``AttentionOccurrenceFingerprint`` of the item that owns it. A
+    // first-page canonical replacement (`replaceMedia: true`) that omits an
+    // item is *not* enough evidence to prove the item is gone if there are
+    // more pages to load — the canonical occurrence set is only complete
+    // once the final page's `nextCursor` is nil. These tests pin the
+    // "retain until fully known, reconcile once complete" contract.
+
+    /// After a first-page refresh that omits an existing item with
+    /// `hasMorePages == true`, the preserved media entry must be
+    /// re-observable once a later page restores the same
+    /// exact-fingerprint occurrence — with no fresh printer snapshot
+    /// request, because the state should never have been dropped.
+    func testIncompletePaginationOmissionPreservesMediaUntilLaterPageRestoresIt() async {
+        let item = makeAttentionItem(
+            id: "failure:media:incomplete-preserve",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            jobID: jobA
+        )
+        let preservedData = Data([0xAB, 0xCD])
+        let source = ScriptedAttentionSnapshotSource(
+            stepsByPrinterID: [
+                printerA: [.outcome(.value(preservedData))],
+            ]
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed(nextCursor: "incomplete-omission-cursor")),
+                .value(makeAttentionFeed(items: [item])),
+            ]
+        )
+        let vm = configuredViewModel(
+            service: service,
+            printerService: snapshotPrinterService(source: source)
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+        let mediaLoaded = await vm.loadSnapshot(for: item.id)
+        XCTAssertTrue(mediaLoaded)
+        XCTAssertEqual(vm.mediaState(for: item.id), .available(preservedData))
+        let initialSnapshotCallCount = await source.callCount(for: printerA)
+        XCTAssertEqual(initialSnapshotCallCount, 1)
+
+        // First-page canonical refresh omits the item with more pages
+        // pending. The item disappears from the snapshot temporarily, but
+        // its media entry must remain in the internal store so the same
+        // fingerprint can bring it back below without a re-fetch.
+        let incompleteOmissionSucceeded = await vm.refresh()
+        XCTAssertTrue(incompleteOmissionSucceeded)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true,
+            "The incomplete-omission refresh's first page is genuinely empty.")
+
+        let restoringPageSucceeded = await vm.loadMore()
+        XCTAssertTrue(restoringPageSucceeded)
+        XCTAssertEqual(vm.mediaState(for: item.id), .available(preservedData),
+            "The exact-fingerprint occurrence must restore the preserved media entry unchanged.")
+        let restoredSnapshotCallCount = await source.callCount(for: printerA)
+        XCTAssertEqual(restoredSnapshotCallCount, 1,
+            "No fresh snapshot request should have been issued — the media was preserved through pagination.")
+        let feedCallCount = await service.loadCallCount
+        XCTAssertEqual(feedCallCount, 3,
+            "Initial refresh + omission refresh + loadMore restoration = 3 feed calls.")
+    }
+
+    /// When an omission arrives on the *final* page (`hasMorePages == false`)
+    /// the canonical occurrence set is complete. Media, action state, and
+    /// any per-fingerprint bookkeeping must all clear so a later
+    /// reappearance of the same id/printer/job/toolhead observes idle
+    /// state and triggers a fresh snapshot request.
+    func testCompleteFinalPaginationOmissionClearsMediaAndReappearanceIsFresh() async {
+        let item = makeAttentionItem(
+            id: "failure:media:complete-clear",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            jobID: jobA
+        )
+        let originalData = Data([0x11])
+        let freshData = Data([0x22])
+        let source = ScriptedAttentionSnapshotSource(
+            stepsByPrinterID: [
+                printerA: [
+                    .outcome(.value(originalData)),
+                    .outcome(.value(freshData)),
+                ],
+            ]
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed()),
+                .value(makeAttentionFeed(items: [item])),
+            ]
+        )
+        let vm = configuredViewModel(
+            service: service,
+            printerService: snapshotPrinterService(source: source)
+        )
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+        let mediaLoaded = await vm.loadSnapshot(for: item.id)
+        XCTAssertTrue(mediaLoaded)
+        XCTAssertEqual(vm.mediaState(for: item.id), .available(originalData))
+
+        // Complete omission: page is empty AND has no next cursor, so the
+        // canonical set is fully known. The stored media entry must be
+        // dropped, matching the action-authority revoke path.
+        let completeOmissionSucceeded = await vm.refresh()
+        XCTAssertTrue(completeOmissionSucceeded)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
+
+        // Reappearance: item comes back with an unchanged fingerprint. The
+        // media entry was dropped, so `.mediaState(for:)` reads `.idle` and
+        // a fresh snapshot load is required.
+        let reappearanceSucceeded = await vm.refresh()
+        XCTAssertTrue(reappearanceSucceeded)
+        XCTAssertEqual(vm.mediaState(for: item.id), .idle,
+            "Complete omission must have cleared the preserved media before reappearance.")
+
+        let freshLoadSucceeded = await vm.loadSnapshot(for: item.id)
+        XCTAssertTrue(freshLoadSucceeded)
+        XCTAssertEqual(vm.mediaState(for: item.id), .available(freshData))
+        let totalSnapshotCallCount = await source.callCount(for: printerA)
+        XCTAssertEqual(totalSnapshotCallCount, 2,
+            "Complete omission must force a fresh printer snapshot request on reappearance.")
+        let feedCallCount = await service.loadCallCount
+        XCTAssertEqual(feedCallCount, 3)
+    }
+
+    /// A gated action whose POST is still in flight when a *complete*
+    /// canonical omission arrives (empty page, `hasMorePages == false`)
+    /// must have its authority revoked. When the POST later succeeds, the
+    /// success branch's `matchesActionOperation` check must fail (token was
+    /// cleared by the revoke) so the completion produces no state
+    /// mutation and, critically, does not trigger a post-success canonical
+    /// refresh — the revoke has already established that the item is gone.
+    func testLateActionCompletionAfterCompleteOmissionIsNoOp() async {
+        let action = AttentionAction(
+            kind: .acknowledge,
+            label: "Acknowledge",
+            requiresConfirmation: false
+        )
+        let item = makeAttentionItem(
+            id: "failure:late-completion-after-omission",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            actions: [action],
+            jobID: jobA
+        )
+        let actionGate = AttentionResultGate<AttentionActionResult>()
+        defer { actionGate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [item])),
+                .value(makeAttentionFeed()),
+            ],
+            actionSteps: [.gated(actionGate)]
+        )
+        let vm = configuredViewModel(service: service, now: fixedNow)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let actionTask = Task { await vm.performAction(action, for: item.id) }
+        await service.waitForActionCount(1)
+        XCTAssertEqual(vm.actionState(for: item.id), .inProgress(.acknowledge))
+
+        // Complete canonical omission arrives while the POST is still in
+        // flight. The `!hasMorePages` branch of `reconcileItemScopedState`
+        // must revoke the pending fingerprint's authority immediately.
+        let omissionRefreshSucceeded = await vm.refresh()
+        XCTAssertTrue(omissionRefreshSucceeded)
+        XCTAssertTrue(vm.snapshot?.items.isEmpty == true)
+        XCTAssertEqual(vm.actionState(for: item.id), .idle,
+            "Complete omission must revoke the in-flight action's authority.")
+
+        // Late POST success: the token was cleared by the revoke, so
+        // `matchesActionOperation` must reject the completion and return
+        // false without publishing state or triggering a follow-up refresh.
+        await actionGate.succeed(AttentionActionResult(outcome: "Ok"))
+        let lateCompletionAccepted = await actionTask.value
+        XCTAssertFalse(lateCompletionAccepted,
+            "A POST success that lands after complete omission must produce no state mutation.")
+        XCTAssertEqual(vm.actionState(for: item.id), .idle)
+
+        let finalFeedCallCount = await service.loadCallCount
+        XCTAssertEqual(finalFeedCallCount, 2,
+            "Revoked completions must not trigger the post-success canonical refresh.")
+        let finalActionCallCount = await service.actionCallCount
+        XCTAssertEqual(finalActionCallCount, 1)
+    }
+
     func testSameIDNewOccurrenceClearsOldActionFailure() async throws {
         let action = AttentionAction(
             kind: .resume,

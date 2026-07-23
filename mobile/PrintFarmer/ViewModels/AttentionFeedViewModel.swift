@@ -124,14 +124,21 @@ enum AttentionMediaState: Equatable, Sendable {
 struct AttentionOccurrenceFingerprint: Hashable, Sendable {
     let itemID: String
     let printerID: UUID
-    let occurredAt: Date
+    /// Canonical Int64 nanoseconds since the Unix epoch. Storing the
+    /// canonical scalar (rather than the source `Date`) is what guarantees
+    /// two items that decode from the same wire string produce identical
+    /// fingerprints — even after a decode → encode → decode round trip
+    /// through ``AttentionTimestampCodec``, and even when the source
+    /// `Date`'s `TimeInterval` cannot represent the nanosecond value
+    /// exactly. See the codec's header comment in ``AttentionModels.swift``.
+    let occurredAtNanoseconds: Int64
     let jobID: UUID?
     let toolheadIndex: Int?
 
     init(item: AttentionItem) {
         itemID = item.id
         printerID = item.printerId
-        occurredAt = item.occurredAt
+        occurredAtNanoseconds = AttentionTimestampCodec.nanoseconds(item.occurredAt)
         jobID = item.jobId
         toolheadIndex = item.toolheadIndex
     }
@@ -1910,15 +1917,34 @@ final class AttentionFeedViewModel {
             }
         }
 
-        if replaceMedia {
-            let liveFingerprints = Set(
-                items
+        if replaceMedia || !hasMorePages {
+            // On a first-page canonical replacement (`replaceMedia`) or the
+            // final page of a pagination sweep (`!hasMorePages`), the
+            // canonical occurrence set is fully known for the items we can
+            // see. Reconcile media entries against it:
+            //
+            //   • Same `itemID` present with the same fingerprint → keep
+            //     the entry (normalising a lingering `.loading` to `.idle`).
+            //   • Same `itemID` present with a contradictory fingerprint →
+            //     drop the stale media immediately, matching the revoke
+            //     path above.
+            //   • `itemID` absent → drop the entry only when pagination is
+            //     complete. During incomplete pagination the missing item
+            //     may still appear on a later page, so we retain the media
+            //     until either a later page restores the same fingerprint
+            //     or the final page confirms the omission.
+            let liveFingerprintsByItemID: [String: AttentionMediaFingerprint] = Dictionary(
+                uniqueKeysWithValues: items
                     .filter { $0.kind == .failure }
-                    .map(AttentionMediaFingerprint.init)
+                    .map { ($0.id, AttentionMediaFingerprint(item: $0)) }
             )
             mediaGeneration &+= 1
             mediaStates = mediaStates.reduce(into: [:]) { result, entry in
-                guard liveFingerprints.contains(entry.key) else { return }
+                if let liveFingerprint = liveFingerprintsByItemID[entry.key.itemID] {
+                    guard liveFingerprint == entry.key else { return }
+                } else {
+                    guard hasMorePages else { return }
+                }
                 result[entry.key] = entry.value == .loading ? .idle : entry.value
             }
         }

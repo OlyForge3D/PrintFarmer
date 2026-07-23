@@ -80,6 +80,127 @@ final class AttentionModelDecodingTests: XCTestCase {
         XCTAssertNil(item.jobId)
     }
 
+    // MARK: - AttentionTimestampCodec / occurrence fingerprint round-trip
+    //
+    // These tests pin the canonical fractional-second contract that
+    // ``AttentionOccurrenceFingerprint`` relies on. Because the fingerprint
+    // is what correlates an item across pagination, media loads, and
+    // pending actions, a lossy encode/decode cycle would silently break
+    // authority correlation for any item whose occurredAt carries a
+    // fractional component.
+
+    /// Round-tripping an item that carries a fractional-second `occurredAt`
+    /// through encode → decode must preserve the ``AttentionOccurrenceFingerprint``.
+    /// This is the property Hicks blocker #2 requires: without it, a
+    /// realtime `attentionchanged` invalidation whose refetched payload
+    /// re-encodes through the app's own JSON coder would fall out of
+    /// authority with any pending action.
+    func testFractionalOccurredAtRoundTripPreservesFingerprint() throws {
+        let json = attentionItemJSON(occurredAt: "2026-06-01T12:00:00.123456789Z")
+        let original = try decoder.decode(AttentionItem.self, from: json)
+        let originalFingerprint = AttentionOccurrenceFingerprint(item: original)
+
+        let encoder = JSONEncoder()
+        // Deliberately use the app's default `.iso8601` encoder strategy —
+        // the codec must survive even when the surrounding encoder would
+        // otherwise truncate. This is the exact configuration `APIClient`
+        // uses today (see APIClient.init).
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(original)
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        let emittedOccurredAt = try XCTUnwrap(object["occurredAt"] as? String)
+        XCTAssertTrue(emittedOccurredAt.contains("."),
+            "Fractional occurredAt must survive encoding — got \(emittedOccurredAt).")
+        XCTAssertTrue(emittedOccurredAt.hasSuffix("Z"),
+            "Attention timestamps must be emitted as UTC (Z) — got \(emittedOccurredAt).")
+
+        let roundTripped = try decoder.decode(AttentionItem.self, from: encoded)
+        let roundTrippedFingerprint = AttentionOccurrenceFingerprint(item: roundTripped)
+        XCTAssertEqual(
+            originalFingerprint,
+            roundTrippedFingerprint,
+            "Fingerprint must survive encode/decode of a fractional-second occurredAt."
+        )
+    }
+
+    /// Two items with the same id/printer/job/toolhead but distinct
+    /// fractional-second `occurredAt` values within the same wall-clock
+    /// second must produce distinct fingerprints. Truncating the
+    /// fingerprint to whole seconds would collapse them and cause a fresh
+    /// occurrence to inherit the prior occurrence's action state — the
+    /// exact hazard Hicks blocker #2 flags.
+    func testDistinctFractionalOccurrencesWithinOneSecondHaveDistinctFingerprints() throws {
+        let earlierJson = attentionItemJSON(occurredAt: "2026-06-01T12:00:00.100000000Z")
+        let laterJson = attentionItemJSON(occurredAt: "2026-06-01T12:00:00.200000000Z")
+
+        let earlier = try decoder.decode(AttentionItem.self, from: earlierJson)
+        let later = try decoder.decode(AttentionItem.self, from: laterJson)
+
+        XCTAssertEqual(earlier.id, later.id)
+        XCTAssertEqual(earlier.printerId, later.printerId)
+        XCTAssertEqual(earlier.jobId, later.jobId)
+        XCTAssertEqual(earlier.toolheadIndex, later.toolheadIndex)
+        XCTAssertNotEqual(
+            AttentionOccurrenceFingerprint(item: earlier),
+            AttentionOccurrenceFingerprint(item: later),
+            "Distinct fractional occurredAt values within one second must produce distinct fingerprints."
+        )
+    }
+
+    /// Legacy whole-second timestamps must continue to decode and
+    /// round-trip byte-identically. This guards the existing wire contract
+    /// against the new codec accidentally forcing a fractional block onto
+    /// every emitted timestamp.
+    func testWholeSecondOccurredAtRoundTripsWithoutFractionalBlock() throws {
+        let json = attentionItemJSON(occurredAt: "2026-06-01T12:00:00Z")
+        let original = try decoder.decode(AttentionItem.self, from: json)
+        let originalFingerprint = AttentionOccurrenceFingerprint(item: original)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(original)
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        let emittedOccurredAt = try XCTUnwrap(object["occurredAt"] as? String)
+        XCTAssertEqual(emittedOccurredAt, "2026-06-01T12:00:00Z",
+            "Whole-second occurredAt must emit no fractional block for wire byte-parity with the legacy encoder.")
+
+        let roundTripped = try decoder.decode(AttentionItem.self, from: encoded)
+        XCTAssertEqual(
+            originalFingerprint,
+            AttentionOccurrenceFingerprint(item: roundTripped),
+            "Whole-second occurredAt round-trip must preserve the fingerprint."
+        )
+    }
+
+    /// Helper — builds a canonical single-item payload with the caller's
+    /// `occurredAt` wire string, holding every other fingerprint dimension
+    /// (id/printer/job/toolhead) constant so the tests can isolate the
+    /// timestamp variable.
+    private func attentionItemJSON(occurredAt: String) -> Data {
+        """
+        {
+          "id": "failure:11111111-1111-1111-1111-111111111111",
+          "kind": "failure",
+          "severity": "critical",
+          "printerId": "22222222-2222-2222-2222-222222222222",
+          "printerName": "Voron 2.4",
+          "title": "Print failed",
+          "detail": "First-layer adhesion lost",
+          "occurredAt": "\(occurredAt)",
+          "actions": [],
+          "toolheadIndex": 0,
+          "jobId": "33333333-3333-3333-3333-333333333333",
+          "allowFreshOccurrenceBypass": true
+        }
+        """.data(using: .utf8)!
+    }
+
     func testUnknownAttentionKindDecodesToUnknown() throws {
         let json = """
         {
