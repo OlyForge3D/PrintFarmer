@@ -139,7 +139,15 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
         isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
         inMaintenance = try c.decode(Bool.self, forKey: .inMaintenance)
         obicoEnabled = try c.decode(Bool.self, forKey: .obicoEnabled)
-        isPendingReady = try c.decodeIfPresent(Bool.self, forKey: .isPendingReady) ?? false
+        // Only the newly-added `isPendingReady` is defaulted, and ONLY when the key is
+        // ABSENT (legacy v1). An explicit `null` or wrong type is NOT legacy-compatible
+        // and must fail to decode (→ quarantine), so distinguish absence via `contains`
+        // rather than `decodeIfPresent` (which collapses null and absent) (issue #816 H6).
+        if c.contains(.isPendingReady) {
+            isPendingReady = try c.decode(Bool.self, forKey: .isPendingReady)
+        } else {
+            isPendingReady = false
+        }
         // Fields that were optional in v1 remain optional.
         location = try c.decodeIfPresent(FarmSnapshotLocation.self, forKey: .location)
         modelName = try c.decodeIfPresent(String.self, forKey: .modelName)

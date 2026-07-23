@@ -86,7 +86,8 @@ enum FarmSnapshotHydration: Sendable, Equatable {
 enum FarmSnapshotCommitResult: Sendable, Equatable {
     case committed
     /// The candidate was not strictly newer than the durable record — preserved.
-    case notNewer
+    /// `cleanupFailed` surfaces a secondary temp/candidate removal failure (H7).
+    case notNewer(cleanupFailed: Bool)
     /// Authority changed (revoke / generation advance / tombstone / cancellation)
     /// before the durable promotion — prior bytes preserved, nothing written.
     case superseded
@@ -95,8 +96,9 @@ enum FarmSnapshotCommitResult: Sendable, Equatable {
     /// The incoming envelope's schema is unsupported — rejected before any write.
     case schemaUnsupported
     /// The existing durable record could not be read/validated — fail closed,
-    /// prior bytes untouched (never treated as absence).
-    case integrityFailure
+    /// prior bytes untouched (never treated as absence). `cleanupFailed` surfaces a
+    /// secondary temp/candidate removal failure (H7).
+    case integrityFailure(cleanupFailed: Bool)
     /// A durable write/promotion failed. `cleanupFailed` surfaces a secondary
     /// temp/candidate cleanup failure without masking the primary result; the
     /// live record still holds the exact prior accepted bytes.

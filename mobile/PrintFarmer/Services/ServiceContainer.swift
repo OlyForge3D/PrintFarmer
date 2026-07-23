@@ -398,7 +398,8 @@ final class ServiceContainer: @unchecked Sendable {
         guard let candidate = farmSnapshotAuthority.reserve(namespace: namespace, generation: capturedGeneration) else {
             return // tombstoned (purged) server — do not resurrect
         }
-        await farmSnapshotStore.prepareStartup()
+        // D: fail closed if startup readiness (residue sweep) did not succeed.
+        guard await farmSnapshotStore.prepareStartup() else { return }
         // Re-validate at publication (no await between here and the adopt): the desired
         // target must still be a real server (not demo), the active server unchanged,
         // the generation current, and the auth token current.
@@ -541,7 +542,7 @@ final class ServiceContainer: @unchecked Sendable {
         // single synchronous critical section that re-validates the transition epoch —
         // no await between the guard and the adopt.
         guard let candidate = farmSnapshotAuthority.reserve(namespace: namespace, generation: generation) else { return }
-        await farmSnapshotStore.prepareStartup()
+        guard await farmSnapshotStore.prepareStartup() else { return } // D: fail closed on prep failure
         guard transitionEpoch.isCurrent(epoch), farmSnapshotAuthority.adopt(candidate) else {
             return // superseded during readiness, or an older token — candidate never published
         }

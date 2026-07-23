@@ -156,7 +156,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
 
         // Release the older commit — it completes last and must lose.
         barrier.release()
-        XAssertEqual(await olderTask.value, .notNewer)
+        XAssertEqual(await olderTask.value, .notNewer(cleanupFailed: false))
 
         // Exact counts (asserted before any hydrate read): 2 async reads, 2 candidate
         // writes, 2 durable re-reads, 1 promote.

@@ -84,7 +84,37 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         XCTAssertEqual(result, .superseded)
     }
 
-    // MARK: P3 — reserve/publish split (unpublished activation candidate)
+    // MARK: H — durable authority monotonicity across restart
+
+    func testHighWaterSurvivesAuthorityRecreation() {
+        let suite = trackedSuiteName("tomb")
+        let ns = FarmSnapshotFixtures.namespace()
+        // Adopt a high token, then recreate the authority on the SAME durable store.
+        let a1 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
+        XCTAssertTrue(a1.adopt(FarmSnapshotSession(namespace: ns, generation: 0, token: 500)))
+        let a2 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
+        // The next mint on the recreated authority is STRICTLY greater than the durable
+        // high-water — a delayed older token can never re-adopt after relaunch.
+        let minted = a2.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(minted.token, 500)
+        // A stale token at-or-below the persisted high-water is rejected.
+        XCTAssertFalse(a2.adopt(FarmSnapshotSession(namespace: ns, generation: 0, token: 400)))
+        XCTAssertTrue(a2.isCurrent(minted))
+    }
+
+    func testHighWaterFromMintSurvivesRecreationAndRevokeStaysNonReusable() {
+        let suite = trackedSuiteName("tomb")
+        let ns = FarmSnapshotFixtures.namespace()
+        let a1 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
+        let s1 = a1.mint(namespace: ns, generation: 0)!
+        a1.revoke()
+        // Recreate; the revoked token remains non-reusable and the counter is monotonic.
+        let a2 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
+        XCTAssertFalse(a2.adopt(s1), "a revoked/consumed token cannot re-adopt after restart")
+        let s2 = a2.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(s2.token, s1.token)
+    }
+
 
     func testReserveDoesNotPublishUntilAdopt() async {
         let root = FarmSnapshotFixtures.tempRoot()

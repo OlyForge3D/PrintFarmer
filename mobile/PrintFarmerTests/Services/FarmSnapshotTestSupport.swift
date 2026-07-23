@@ -145,10 +145,6 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     /// `store.activate`). Lets a test park an activation mid-await and advance the
     /// auth epoch to prove the final snapshot-publication CAS (issue #816 H2, Bishop).
     var removeItemBarrier: AsyncBarrier?
-    /// Fires on `purgeWillDrain` — after purge has installed its durable tombstone +
-    /// purging barrier and BEFORE it drains in-flight leases. Causal ACK so a test can
-    /// deterministically release a blocked lease knowing the tombstone is in effect (H4).
-    var purgeWillDrainBarrier: AsyncBarrier?
 
     // Exact counts.
     private(set) var readCount = 0
@@ -223,25 +219,10 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
         try backing.promoteAtomically(candidate: candidate, to: live)
     }
 
-    /// Synchronous probe fired at the REAL compare-and-move boundary, immediately
-    /// before the backing `moveIfContentEquals` primitive (issue #816 H5). Runs
-    /// inside the authority lock, so it must stay synchronous and must not re-enter
-    /// the authority (that would deadlock / make the atomic section reentrant). Used
-    /// to prove the destructive move is a single serialized primitive.
-    var moveBoundaryProbe: (@Sendable () -> Void)?
-
     func moveIfContentEquals(from: URL, to: URL, expected: Data) throws -> Bool {
         bump(\.moveCount)
-        moveBoundaryProbe?()
         if failMove { throw IOFailure() }
         return try backing.moveIfContentEquals(from: from, to: to, expected: expected)
-    }
-
-    func purgeWillDrain(_ serverID: UUID) async {
-        if let barrier = purgeWillDrainBarrier {
-            purgeWillDrainBarrier = nil
-            await barrier.arriveAndWait()
-        }
     }
 }
 

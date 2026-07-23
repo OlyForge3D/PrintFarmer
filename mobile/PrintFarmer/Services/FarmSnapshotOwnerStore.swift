@@ -72,12 +72,31 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
 /// Persistent record of purged server UUIDs.
 final class FarmSnapshotTombstoneStore: @unchecked Sendable {
     static let key = "pf_snapshot_tombstones"
+    static let highWaterKey = "pf_snapshot_highwater"
 
     private let userDefaults: UserDefaults
     private let lock = NSLock()
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
+    }
+
+    /// The durably-persisted authority high-water mark (H). Survives process/store
+    /// recreation so a delayed older token can never re-adopt after relaunch.
+    func loadHighWater() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return (userDefaults.object(forKey: Self.highWaterKey) as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// Durably advance the persisted high-water to `value` (monotonic; never lowers).
+    func storeHighWater(_ value: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        let existing = (userDefaults.object(forKey: Self.highWaterKey) as? NSNumber)?.uint64Value ?? 0
+        if value > existing {
+            userDefaults.set(NSNumber(value: value), forKey: Self.highWaterKey)
+        }
     }
 
     /// The persisted tombstone set (server UUIDs).

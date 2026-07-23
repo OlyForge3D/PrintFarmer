@@ -38,6 +38,17 @@ final class AuthOperationEpoch: @unchecked Sendable {
         defer { lock.unlock() }
         return value == epoch
     }
+
+    /// Runs `body` under the epoch lock IFF `epoch` is still current, so the epoch
+    /// cannot advance between the currency check and the body's mutation — one atomic
+    /// authority operation (issue #816 B). Returns `body`'s result, or `nil` when the
+    /// operation was already superseded (body not run).
+    func withCurrent<T>(_ epoch: Int, _ body: () -> T) -> T? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard value == epoch else { return nil }
+        return body()
+    }
 }
 
 actor AuthService: AuthServiceProtocol {

@@ -502,13 +502,17 @@ actor APIClient {
     /// restore can never clobber a newer operation's session. Returns whether applied.
     @discardableResult
     func applySessionIfCurrent(baseURL: URL?, accessToken: String?, epoch: AuthOperationEpoch, token: Int) -> Bool {
-        guard epoch.isCurrent(token) else { return false }
-        if let baseURL {
-            self.baseURL = baseURL
-            UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+        // B: perform the currency check AND the session mutation as ONE atomic
+        // operation under the epoch lock, so the epoch cannot advance between them.
+        let applied: Bool? = epoch.withCurrent(token) {
+            if let baseURL {
+                self.baseURL = baseURL
+                UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+            }
+            self.accessToken = accessToken
+            return true
         }
-        self.accessToken = accessToken
-        return true
+        return applied ?? false
     }
 
     /// Registers a closure that checks whether the current token is expired.

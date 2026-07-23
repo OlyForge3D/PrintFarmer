@@ -105,7 +105,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
         let newer = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000)
         XAssertEqual(await store.commit(newer, capturedSession: session), .committed)
         let older = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1000)
-        XAssertEqual(await store.commit(older, capturedSession: session), .notNewer)
+        XAssertEqual(await store.commit(older, capturedSession: session), .notNewer(cleanupFailed: false))
 
         XAssertEqual(await store.hydrateActive(), .snapshot(newer))
     }
@@ -119,7 +119,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
         let first = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets(), isPendingReady: false)])
         XAssertEqual(await store.commit(first, capturedSession: session), .committed)
         let equalStamp = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [])
-        XAssertEqual(await store.commit(equalStamp, capturedSession: session), .notNewer)
+        XAssertEqual(await store.commit(equalStamp, capturedSession: session), .notNewer(cleanupFailed: false))
 
         XAssertEqual(await store.hydrateActive(), .snapshot(first))
     }
@@ -137,7 +137,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
         let (store2, authority2) = makeStore(root: root)
         let session2 = await activate(store2, authority2, namespace)
         let stale = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 100_500)
-        XAssertEqual(await store2.commit(stale, capturedSession: session2), .notNewer)
+        XAssertEqual(await store2.commit(stale, capturedSession: session2), .notNewer(cleanupFailed: false))
         XAssertEqual(await store2.hydrateActive(), .snapshot(committed))
 
         let fresh = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 100_901)
@@ -188,7 +188,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
         try? corruptBytes.write(to: live)
 
         let envelope = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 9999)
-        XAssertEqual(await store.commit(envelope, capturedSession: session), .integrityFailure)
+        XAssertEqual(await store.commit(envelope, capturedSession: session), .integrityFailure(cleanupFailed: false))
         // The exact prior (corrupt) bytes are untouched — never treated as absence.
         XCTAssertEqual(try? Data(contentsOf: live), corruptBytes)
     }
@@ -215,7 +215,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
         let (throwStore, throwAuth) = makeStore(root: root, fileIO: ThrowingReadIO())
         let throwSession = await activate(throwStore, throwAuth, namespace)
         let envelope = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1)
-        XAssertEqual(await throwStore.commit(envelope, capturedSession: throwSession), .integrityFailure)
+        XAssertEqual(await throwStore.commit(envelope, capturedSession: throwSession), .integrityFailure(cleanupFailed: false))
         _ = (store, session)
     }
 

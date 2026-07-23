@@ -35,16 +35,6 @@ protocol FarmSnapshotFileIO: Sendable {
     /// current bytes at `from` still equal `expected`; returns `false` (no move)
     /// when the bytes have changed so a newer valid commit is never destroyed.
     func moveIfContentEquals(from: URL, to: URL, expected: Data) throws -> Bool
-
-    /// Lifecycle notification: a purge has installed its durable tombstone and
-    /// purging barrier for `serverID` and is about to drain in-flight leases. Real
-    /// filesystem implementations ignore it; test doubles use it as a causal ACK to
-    /// sequence deterministically (H4). Default: no-op.
-    func purgeWillDrain(_ serverID: UUID) async
-}
-
-extension FarmSnapshotFileIO {
-    func purgeWillDrain(_ serverID: UUID) async {}
 }
 
 /// Real filesystem implementation. A missing file reads as `nil` (absence) and a
@@ -129,6 +119,12 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         // Durable tombstones survive process restart / the crash window between
         // purge and registry removal (H4).
         self.tombstones = tombstoneStore.load()
+        // H: the high-water mark is durable across process/store recreation, so a
+        // delayed older token can never re-adopt after relaunch. Seed both the
+        // high-water and the counter from the persisted value.
+        let persistedHighWater = tombstoneStore.loadHighWater()
+        self.highWater = persistedHighWater
+        self.tokenCounter = persistedHighWater
     }
 
     /// Mint a fresh authoritative session for a settled server + verified owner.
@@ -160,6 +156,7 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         let next = max(tokenCounter, highWater) + 1
         tokenCounter = next
         highWater = next
+        tombstoneStore.storeHighWater(highWater) // H: durable monotonic high-water
         let session = FarmSnapshotSession(namespace: namespace, generation: generation, token: next)
         current = session
         return session
@@ -178,6 +175,7 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         if session == current { return true } // idempotent for the exact current
         guard session.token > highWater else { return false }
         highWater = session.token
+        tombstoneStore.storeHighWater(highWater) // H: durable monotonic high-water
         // Keep the mint counter monotonically ahead of any adopted token so a later
         // mint never issues a token at-or-below an already-adopted one (H3).
         tokenCounter = max(tokenCounter, session.token)
@@ -372,9 +370,9 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
 
     @discardableResult
     func activate(session: FarmSnapshotSession) async -> Bool {
-        // H4: on first use, replay durable tombstones and sweep residual namespaces
-        // a crash may have left before activating anything.
-        await ensureStartupPreparation()
+        // D/H4: gate on SUCCESSFUL startup preparation — if residue could not be swept,
+        // fail closed rather than activate over a possibly-resurrected namespace.
+        guard await ensureStartupPreparation() else { return false }
         // H3: honor the compare-and-set result so callers can refuse to bind a
         // session the authority rejected (older/consumed token).
         return authority.adopt(session)
@@ -394,7 +392,9 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     // MARK: Hydrate
 
     func hydrateActive() async -> FarmSnapshotHydration {
-        await ensureStartupPreparation() // P4: every public op ensures startup readiness
+        // D/P4: gate on successful startup readiness; a failed sweep is surfaced, not
+        // silently proceeded past.
+        guard await ensureStartupPreparation() else { return .unreadable }
         guard let session = authority.currentSession() else { return .inactive }
         let live = liveURL(session.namespace)
 
@@ -468,7 +468,8 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     // MARK: Commit
 
     func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult {
-        await ensureStartupPreparation() // P4: ensure startup readiness before any commit
+        // D/P4: gate on successful startup readiness before any commit.
+        guard await ensureStartupPreparation() else { return .persistenceFailure(cleanupFailed: false) }
         // 1. Reject unsupported incoming schema before any durable mutation.
         guard envelope.isSupportedSchema else { return .schemaUnsupported }
         // 2. The candidate must belong to the captured session's namespace.
@@ -489,17 +490,17 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
                 guard let decoded = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: data),
                       decoded.isSupportedSchema,
                       decoded.namespace == capturedSession.namespace else {
-                    return .integrityFailure
+                    return .integrityFailure(cleanupFailed: false) // no candidate written yet
                 }
                 existing = decoded
             } else {
                 existing = nil
             }
         } catch {
-            return .integrityFailure
+            return .integrityFailure(cleanupFailed: false) // no candidate written yet
         }
         if let existing, existing.lastUpdatedAtMillis >= envelope.lastUpdatedAtMillis {
-            return .notNewer
+            return .notNewer(cleanupFailed: false) // no candidate written yet
         }
 
         guard authority.isCurrent(capturedSession) else { return .superseded }
@@ -554,11 +555,11 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         case .promoted:
             return .committed
         case .notNewer:
-            _ = await cleanup(candidate)
-            return .notNewer
+            let cleanupFailed = await cleanup(candidate)
+            return .notNewer(cleanupFailed: cleanupFailed)
         case .integrityFailure:
-            _ = await cleanup(candidate)
-            return .integrityFailure
+            let cleanupFailed = await cleanup(candidate)
+            return .integrityFailure(cleanupFailed: cleanupFailed)
         case nil:
             // Authority lost during the candidate write (revoke / tombstone /
             // generation advance / cancellation). Prior bytes intact.
@@ -604,11 +605,9 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         purging.insert(serverID)
         // 3. Clear the persisted owner mapping so a stale owner cannot re-select it.
         ownerStore?.clearOwner(serverID: serverID)
-        // 4. Causal ACK: the durable tombstone + purging barrier are now installed
-        //    (before the drain wait). A test can deterministically observe this and
-        //    release a blocked in-flight lease knowing the tombstone is in effect.
-        await fileIO.purgeWillDrain(serverID)
-        // 5. Drain all in-flight commit/quarantine leases before touching the disk.
+        // 4. Drain all in-flight commit/quarantine leases before touching the disk. The
+        //    lease is the real serialization primitive: purge cannot sweep (or return)
+        //    until every in-flight operation holding a lease for this server releases it.
         await drain(serverID)
         // 6. Final recursive sweep of live/temp/quarantine; surface removal failures.
         var failures = 0

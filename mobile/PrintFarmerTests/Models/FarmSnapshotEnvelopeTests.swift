@@ -192,6 +192,28 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
         }
     }
 
+    func testHandAuthoredV1ExplicitNullIsPendingReadyFailsToDecode() throws {
+        // An EXPLICIT null (not absence) is not legacy-compatible — only absence defaults
+        // to false. Explicit null must fail to decode so the store quarantines it (H6/F).
+        var printer: [String: Any] = [
+            "id": UUID().uuidString, "name": "Voron-01", "isOnline": true,
+            "isEnabled": true, "inMaintenance": false, "obicoEnabled": false,
+            "isPendingReady": NSNull()
+        ]
+        let envelope: [String: Any] = [
+            "schemaVersion": 1,
+            "namespace": ["serverID": UUID().uuidString, "userID": UUID().uuidString],
+            "payload": [printer],
+            "lastUpdatedAtMillis": 1000
+        ]
+        let data = try JSONSerialization.data(withJSONObject: envelope)
+        XCTAssertThrowsError(
+            try FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: data),
+            "explicit null isPendingReady must fail to decode (not defaulted like absence)"
+        )
+        _ = printer
+    }
+
     func testStoreQuarantinesHandAuthoredCorruptV1() async {
         // A corrupt v1 record (missing a required key) written as the live file must be
         // quarantined by the store on hydrate — never coerced.
