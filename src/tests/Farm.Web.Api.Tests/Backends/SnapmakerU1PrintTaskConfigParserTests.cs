@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
 using FluentAssertions;
