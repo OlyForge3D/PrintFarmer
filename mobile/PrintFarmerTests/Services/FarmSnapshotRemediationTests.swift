@@ -340,6 +340,66 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertEqual(try? Data(contentsOf: live), corrupt)
     }
 
+    // MARK: H5 — real move-boundary, both orders + concurrent-revoke serialization
+
+    func testMoveBoundaryMoveFirstCompletesAtomicallyThenRevokeSerializes() async {
+        // Order A (move-first): a revoke launched at the REAL compare-and-move boundary
+        // (on a background thread) blocks on the authority lock until the synchronous
+        // move completes — so recovery is atomic and the revoke only takes effect AFTER.
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        let session = await activate(store, authority, ns)
+
+        let live = liveURL(root: root, ns)
+        try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data("{ broken".utf8).write(to: live)
+
+        let revokeFinished = AsyncBarrier()
+        io.moveBoundaryProbe = {
+            // Runs inside the authority lock at the exact move boundary. Launch a
+            // concurrent revoke; it must serialize AFTER this synchronous move.
+            DispatchQueue.global().async {
+                _ = authority.deactivate(session) // blocks on the same lock until the move releases it
+                revokeFinished.signal()
+            }
+        }
+        let result = await store.hydrateActive()
+        XCTAssertEqual(result, .recovered, "move completed atomically before the revoke")
+        XCTAssertEqual(io.moveCount, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: live.path)) // quarantined
+        await revokeFinished.waitUntilArrived() // revoke completed, serialized after the move
+        XCTAssertNil(authority.currentSession(), "the revoke took effect only after the atomic move")
+    }
+
+    func testMoveBoundaryRevokeFirstPreventsMove() async {
+        // Order B (revoke-first): the authority is lost BEFORE the move boundary; the
+        // synchronous primitive never runs and the live bytes are preserved.
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        _ = await activate(store, authority, ns)
+
+        let live = liveURL(root: root, ns)
+        try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let corrupt = Data("{ broken".utf8)
+        try? corrupt.write(to: live)
+
+        let barrier = AsyncBarrier()
+        io.readDataBarrier = barrier // pause BEFORE the withPromotion move boundary
+        let task = Task { await store.hydrateActive() }
+        await barrier.waitUntilArrived()
+        authority.revoke()
+        barrier.release()
+        XAssertEqual(await task.value, .inactive)
+        XCTAssertEqual(io.moveCount, 0, "revoke-first prevents the destructive move entirely")
+        XCTAssertEqual(try? Data(contentsOf: live), corrupt)
+    }
+
     // MARK: H7 — atomicity / interruption
 
     func testQuarantineCompareFalseAtMoveBoundaryPreservesLiveByteIdentical() async {
@@ -471,6 +531,59 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         // Live is still exactly the OLD valid record; the candidate did not replace it.
         let onDisk = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: Data(contentsOf: live))
         XCTAssertEqual(onDisk, prior)
+    }
+
+    func testCancellationAfterCandidateWriteLeavesLiveOldAndCleansCandidate() async {
+        // Cancellation at the post-write / pre-promote seam: the candidate is fully
+        // written, then the commit task is cancelled and the seam terminally released
+        // (no stranded continuation). No promote happens (promoteCount unchanged), the
+        // live path stays OLD, and the candidate temp is cleaned up. Real FileManager.
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        let session = await activate(store, authority, ns)
+        let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
+        XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
+        let promotesAfterPrior = io.promoteCount
+
+        let live = liveURL(root: root, ns)
+        let newer = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
+        let barrier = AsyncBarrier()
+        io.postWriteCandidateBarrier = barrier
+        let task = Task { await store.commit(newer, capturedSession: session) }
+        await barrier.waitUntilArrived()
+        task.cancel()      // cancel after the candidate is fully written
+        barrier.release()  // terminal release — no stranded continuation
+        _ = await task.value
+
+        XCTAssertEqual(io.promoteCount, promotesAfterPrior, "cancelled commit performs no promote")
+        let onDisk = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: Data(contentsOf: live))
+        XCTAssertEqual(onDisk, prior, "live remains the OLD valid record")
+        XCTAssertNil(candidateTempData(root: root, ns), "the candidate temp is cleaned up")
+    }
+
+    func testPostPromotionLeavesLiveNewWithExactCounts() async {
+        // After the atomic promote, the live path is the NEW valid record and exactly
+        // one promote occurred for the newer commit. Real FileManager path.
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        let session = await activate(store, authority, ns)
+        let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
+        XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
+        let promotesAfterPrior = io.promoteCount
+
+        let newer = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
+        XAssertEqual(await store.commit(newer, capturedSession: session), .committed)
+        XCTAssertEqual(io.promoteCount, promotesAfterPrior + 1, "exactly one promote for the newer commit")
+        let live = liveURL(root: root, ns)
+        let onDisk = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: Data(contentsOf: live))
+        XCTAssertEqual(onDisk, newer, "live is the NEW valid record after promotion")
+        XCTAssertNil(candidateTempData(root: root, ns), "no candidate temp remains after promotion")
     }
 
     func testRealFileManagerInterruptionStagedTempLeavesOldRecord() async {

@@ -36,6 +36,13 @@ final class AsyncBarrier: @unchecked Sendable {
         waiter?.resume()
     }
 
+    /// Fire-and-forget arrival signal (no wait for release). Lets a background thread
+    /// notify the test it completed without blocking that thread.
+    func signal() {
+        let waiters = markArrived()
+        waiters.forEach { $0.resume() }
+    }
+
     // MARK: Synchronous lock helpers (kept out of async scope)
 
     private func markArrived() -> [CheckedContinuation<Void, Never>] {

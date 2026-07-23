@@ -145,4 +145,72 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
             XCTAssertFalse(text.contains(sentinel))
         }
     }
+
+    // MARK: H6 — hand-authored v1 on-disk compatibility fixtures
+
+    /// Builds a hand-authored v1 envelope JSON whose single printer contains exactly the
+    /// v1-required keys, minus any listed in `omitting`.
+    private func handAuthoredV1(omitting: Set<String> = []) -> Data {
+        var printer: [String: Any] = [
+            "id": UUID().uuidString,
+            "name": "Voron-01",
+            "isOnline": true,
+            "isEnabled": true,
+            "inMaintenance": false,
+            "obicoEnabled": false,
+            "isPendingReady": true
+        ]
+        for key in omitting { printer.removeValue(forKey: key) }
+        let envelope: [String: Any] = [
+            "schemaVersion": 1,
+            "namespace": ["serverID": UUID().uuidString, "userID": UUID().uuidString],
+            "payload": [printer],
+            "lastUpdatedAtMillis": 1000
+        ]
+        return try! JSONSerialization.data(withJSONObject: envelope)
+    }
+
+    func testHandAuthoredV1MissingOnlyIsPendingReadyDecodesFalse() throws {
+        // An older on-disk v1 record that predates isPendingReady must decode with the
+        // field defaulted to false — never rejected.
+        let data = handAuthoredV1(omitting: ["isPendingReady"])
+        let decoded = try FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: data)
+        XCTAssertEqual(decoded.payload.count, 1)
+        XCTAssertFalse(decoded.payload[0].isPendingReady, "absent isPendingReady defaults to false")
+        XCTAssertTrue(decoded.isSupportedSchema)
+    }
+
+    func testHandAuthoredV1MissingEachRequiredFieldFailsToDecode() {
+        // Every previously-required v1 field must remain REQUIRED; a fixture missing any
+        // one must fail to decode (so the store quarantines a truncated/corrupt record).
+        for key in ["id", "name", "isOnline", "isEnabled", "inMaintenance", "obicoEnabled"] {
+            let data = handAuthoredV1(omitting: [key])
+            XCTAssertThrowsError(
+                try FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: data),
+                "missing required key \(key) must fail to decode"
+            )
+        }
+    }
+
+    func testStoreQuarantinesHandAuthoredCorruptV1() async {
+        // A corrupt v1 record (missing a required key) written as the live file must be
+        // quarantined by the store on hydrate — never coerced.
+        let root = FarmSnapshotFixtures.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let ns = FarmSnapshotFixtures.namespace()
+        let session = authority.mint(namespace: ns, generation: 0)!
+        _ = await store.activate(session: session)
+
+        let live = root.appendingPathComponent("servers", isDirectory: true)
+            .appendingPathComponent(ns.serverID.uuidString, isDirectory: true)
+            .appendingPathComponent("\(ns.userID.uuidString).json")
+        try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? handAuthoredV1(omitting: ["isOnline"]).write(to: live)
+
+        let result = await store.hydrateActive()
+        XCTAssertEqual(result, .recovered, "corrupt v1 is quarantined (recovered), not coerced")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: live.path), "corrupt live file is quarantined away")
+    }
 }
