@@ -469,13 +469,22 @@ actor APIClient {
         baseURL: URL,
         session: URLSession? = nil,
         serverGeneration: ActiveServerGeneration? = nil,
-        accessToken: String? = nil
+        accessToken: String? = nil,
+        authSessionToken: Int? = nil
     ) {
         self.baseURL = baseURL
         self.session = session ?? Self.makePrivateNetworkSession()
         self.accessToken = accessToken
         self.serverGeneration = serverGeneration
         self.generationAtCreation = serverGeneration?.current
+        // A2: bind the authenticated session's identity ATOMICALLY at construction.
+        // Callers capture `authOperationEpoch.current` synchronously BEFORE handing
+        // to the factory; the Task that used to publish identity later is gone, so
+        // no orphaned reconstructed-client can read a newer epoch and clobber this
+        // client's identity with a superseded operation's token. Unauthenticated
+        // clients (nil accessToken) MUST have nil authSessionToken so they cannot
+        // publish session-expiry.
+        self.authSessionToken = accessToken == nil ? nil : authSessionToken
 
         self.decoder = JSONDecoder()
         // ASP.NET Core can emit fractional seconds; the built-in .iso8601 strategy

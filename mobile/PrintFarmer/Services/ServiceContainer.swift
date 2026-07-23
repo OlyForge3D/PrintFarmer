@@ -6,7 +6,7 @@ import Observation
 @MainActor
 @Observable
 final class ServiceContainer: @unchecked Sendable {
-    typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?) -> APIClient
+    typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?, Int?) -> APIClient
     typealias SignalRServiceFactory = @MainActor (URL, APIClient) -> any SignalRServiceProtocol
 
     var apiClient: APIClient?
@@ -104,8 +104,8 @@ final class ServiceContainer: @unchecked Sendable {
         farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
         farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
         farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
-        apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken)
+        apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken in
+            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken)
         },
         signalRServiceFactory: @escaping SignalRServiceFactory = { baseURL, client in
             SignalRService(
@@ -136,7 +136,12 @@ final class ServiceContainer: @unchecked Sendable {
             ?? APIClient.savedBaseURL()
             ?? AppConfig.baseURL
         let accessToken = Self.validAccessToken(for: activeServer, credentialsStore: credentialsStore)
-        let client = apiClientFactory(resolvedURL, activeGeneration, accessToken)
+        // A2: capture the auth-operation epoch SYNCHRONOUSLY (before any await or Task
+        // spawn) and bind identity + bearer in the SAME atomic construction. A later
+        // fire-and-forget Task cannot read a newer epoch and clobber this client's
+        // identity with a superseded operation's token.
+        let reconstructedAuthToken = accessToken == nil ? nil : authOperationEpoch.current
+        let client = apiClientFactory(resolvedURL, activeGeneration, accessToken, reconstructedAuthToken)
 
         self.apiClient = client
         self.authService = AuthService(
@@ -177,11 +182,11 @@ final class ServiceContainer: @unchecked Sendable {
 
         if let activeServer {
             userDefaultsBox.userDefaults.set(activeServer.normalizedURLString, forKey: APIClient.serverURLKey)
-            let reconstructedToken = accessToken
             Task {
-                // A: establish the reconstructed authenticated client's session identity
-                // (cold-launch restore) so a later 401 is not suppressed.
-                await self.establishReconstructedAuthSession(client: client, accessToken: reconstructedToken)
+                // A2: no fire-and-forget establishReconstructedAuthSession — bearer
+                // AND identity were bound atomically at APIClient construction (above)
+                // from a synchronously captured epoch, so a later fire-and-forget Task
+                // cannot read a newer epoch and clobber a fresher session's identity.
                 await self.configureTokenExpiryChecker(client: client, serverID: activeServer.id)
             }
         }
@@ -316,7 +321,9 @@ final class ServiceContainer: @unchecked Sendable {
         ensureObservingRegistry()
         if let server {
             Task {
-                await self.establishReconstructedAuthSession(client: client, accessToken: accessToken)
+                // A2: no fire-and-forget identity establishment — bearer AND identity
+                // are set atomically inside rebuildRealServices from a synchronously
+                // captured epoch.
                 await self.configureTokenExpiryChecker(client: client, serverID: server.id)
             }
         }
@@ -557,9 +564,10 @@ final class ServiceContainer: @unchecked Sendable {
         // between them, so an older switch cannot publish stale services.
         let client = rebuildRealServices(baseURL: server.baseURL, server: server, accessToken: accessToken)
         userDefaultsBox.userDefaults.set(server.normalizedURLString, forKey: APIClient.serverURLKey)
-        // A: give a reconstructed AUTHENTICATED client the current auth-session identity
-        // so a later 401 is not suppressed.
-        await establishReconstructedAuthSession(client: client, accessToken: accessToken)
+        // A2: rebuildRealServices already bound bearer + identity atomically at
+        // construction from a synchronously captured epoch. No fire-and-forget
+        // identity establishment — a later Task could read a newer epoch and
+        // overwrite this client's identity with a superseded token.
         await configureTokenExpiryChecker(client: client, serverID: server.id)
         guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
 
@@ -648,7 +656,12 @@ final class ServiceContainer: @unchecked Sendable {
         server: RegisteredServer?,
         accessToken: String?
     ) -> APIClient {
-        let client = apiClientFactory(baseURL, activeGeneration, accessToken)
+        // A2: capture the auth-operation epoch SYNCHRONOUSLY (no await, no Task
+        // between capture and factory call) and bind identity + bearer atomically at
+        // APIClient construction. A superseded operation cannot later overwrite this
+        // client's identity because the identity is fixed at init.
+        let reconstructedAuthToken = accessToken == nil ? nil : authOperationEpoch.current
+        let client = apiClientFactory(baseURL, activeGeneration, accessToken, reconstructedAuthToken)
         self.apiClient = client
         self.authService = AuthService(
             apiClient: client,
@@ -695,13 +708,14 @@ final class ServiceContainer: @unchecked Sendable {
         }
     }
 
-    /// A: establish the exact current auth-session identity on a freshly RECONSTRUCTED
-    /// authenticated APIClient (switch / cold-launch restore). A reconstructed client
-    /// otherwise carries a bearer but a nil auth-session token, which silently
-    /// SUPPRESSES a legitimate 401 session-expiry. Applying the current auth-operation
-    /// epoch as the session identity (only if it still holds) makes a later expiry emit
-    /// the current exact identity. No-op for unauthenticated (nil-token) clients, which
-    /// must remain unable to log out an authenticated session.
+    /// A2: identity establishment is now atomic AT APIClient CONSTRUCTION. This method
+    /// is retained only for the identity-carry test (AuthSnapshotIdentityTests /
+    /// APIClientAuthSessionTests) that exercises the compare-and-set path directly.
+    /// Production composition never calls this method — it captures the epoch
+    /// synchronously in the same synchronous scope as the factory call and passes
+    /// the token via `APIClient.init(authSessionToken:)`. A fire-and-forget Task
+    /// that reads the epoch LATE would (and did, before A2) allow a superseded
+    /// operation's identity to clobber a fresher session's identity.
     private func establishReconstructedAuthSession(client: APIClient, accessToken: String?) async {
         guard let accessToken else { return }
         let token = authOperationEpoch.current
@@ -751,8 +765,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.serverRegistry = serverRegistry
         self.credentialsStore = ServerCredentialsStore()
         self.userDefaultsBox = AuthServiceUserDefaultsBox(.standard)
-        self.apiClientFactory = { baseURL, generation, accessToken in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken)
+        self.apiClientFactory = { baseURL, generation, accessToken, authSessionToken in
+            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken)
         }
         self.signalRServiceFactory = { baseURL, client in
             SignalRService(
