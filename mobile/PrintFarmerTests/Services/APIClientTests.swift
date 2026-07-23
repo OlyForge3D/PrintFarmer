@@ -5,6 +5,8 @@ import XCTest
 /// error mapping, and base URL configuration.
 final class APIClientTests: XCTestCase {
 
+    private static let testServerID = UUID()
+
     private struct TransportValue: Decodable, Equatable, Sendable {
         let value: String
     }
@@ -233,7 +235,8 @@ final class APIClientTests: XCTestCase {
 
     func testRequestIncludesAuthorizationHeader() async throws {
         let token = "test-jwt-token-123"
-        await apiClient.setAccessToken(token)
+        await apiClient.setAuthenticatedSession(
+            AuthenticatedIdentity(accessToken: token, serverID: Self.testServerID))
         mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
@@ -244,7 +247,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testRequestOmitsAuthorizationWhenNoToken() async throws {
-        await apiClient.setAccessToken(nil)
+        await apiClient.clearSession()
         mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")

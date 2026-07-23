@@ -132,25 +132,81 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_singleFlightDropsConcurrentCommands() async throws {
-        let gate = AsyncGate()
-        mockService.beforeSetTemperatures = { await gate.wait() }
+        // Deterministic single-flight proof — no yields, sleeps, polling,
+        // retries, or elapsed-time criteria.
+        //
+        // Design:
+        //   * `entered` — opened by the mock the first time
+        //     `beforeSetTemperatures` fires. Because `preheat` calls
+        //     `beginCommand` (which publishes `pendingCommand`) synchronously
+        //     before awaiting `setTemperatures`, waiting on `entered` proves
+        //     both "first command is in flight" and "pendingCommand is set".
+        //   * `release` — awaited by the mock only on the FIRST invocation;
+        //     the test opens it to let the first command complete.
+        //   * `hookInvocations` — counts hook entries so ONLY the first
+        //     service invocation is gated. If single-flight regresses and the
+        //     concurrent `preheat(.abs)` reaches the mock, its hook returns
+        //     immediately, its call is recorded, and no task is blocked on a
+        //     closed gate — so the regression is captured as a failed
+        //     assertion rather than a deadlock.
+        //   * `capture-then-drain-then-assert` — we do not assert while the
+        //     first task is held behind `release`. We capture pending state
+        //     and the second-call evidence into locals, unconditionally open
+        //     `release`, await the first task to completion, and only then
+        //     assert. This guarantees no assertion failure can strand either
+        //     task before cleanup.
+        //   * Unstructured `Task` — the first command runs as an unstructured
+        //     child task rather than `async let`, so an unexpected early exit
+        //     from the method (thrown error, teardown) does not implicitly
+        //     await the gate waiter before `addTeardownBlock` can run.
+        //   * Teardown safety net — the teardown block idempotently opens
+        //     `release` so any unexpected early exit still drains the mock.
+        let entered = AsyncGate()
+        let release = AsyncGate()
+        let hookInvocations = HookCounter()
+
+        addTeardownBlock { await release.open() }
+
+        mockService.beforeSetTemperatures = {
+            let ordinal = await hookInvocations.next()
+            guard ordinal == 1 else { return }
+            await entered.open()
+            await release.wait()
+        }
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
 
-        async let first: Void = vm.preheat(.pla)
-        // Yield so first task enters beginCommand and sets pendingCommand.
-        await Task.yield()
-        await Task.yield()
-        XCTAssertNotNil(vm.pendingCommand)
+        // Unstructured task so no implicit awaiter of `first` blocks an early
+        // exit path before teardown can open `release`.
+        let first = Task { await vm.preheat(.pla) }
 
-        // Second call while first is in flight must drop silently.
+        // Deterministic handshake — resumes only after the first command has
+        // entered the gated service path, i.e. after `beginCommand` has set
+        // `pendingCommand`.
+        await entered.wait()
+
+        // Capture, do not assert. Clearing `setTemperaturesCalledWith` here
+        // isolates any second-invocation side effect for post-drain inspection.
+        let capturedPending = vm.pendingCommand
         mockService.setTemperaturesCalledWith = nil
-        await vm.preheat(.abs)
-        XCTAssertNil(mockService.setTemperaturesCalledWith, "Concurrent command must be dropped")
-        XCTAssertNil(vm.lastError, "Dropped command must not surface as an error")
 
-        await gate.open()
-        await first
+        // Concurrent second command. Under correct behavior it is dropped
+        // inside `beginCommand` and never reaches the mock. Under regression
+        // it would reach the mock; the second hook invocation returns without
+        // waiting (see `guard ordinal == 1 else { return }`) so this call
+        // returns promptly and its evidence is captured — no deadlock.
+        await vm.preheat(.abs)
+        let capturedSetTempCall = mockService.setTemperaturesCalledWith
+        let capturedError = vm.lastError
+
+        // Release and drain BEFORE asserting so no assertion failure can
+        // strand the first task.
+        await release.open()
+        await first.value
+
+        XCTAssertNotNil(capturedPending, "First command must be in flight before the concurrent call")
+        XCTAssertNil(capturedSetTempCall, "Concurrent command must be dropped")
+        XCTAssertNil(capturedError, "Dropped command must not surface as an error")
     }
 
     func test_signalRClearsPendingCommand() async throws {
@@ -596,4 +652,11 @@ private actor AsyncGate {
         waiters.removeAll()
         for c in toResume { c.resume() }
     }
+}
+
+/// Serialized invocation counter used to gate only the FIRST mock hook entry
+/// so a regressed single-flight cannot deadlock on a closed gate.
+private actor HookCounter {
+    private var n = 0
+    func next() -> Int { n += 1; return n }
 }

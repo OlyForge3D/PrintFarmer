@@ -439,24 +439,27 @@ final class AttentionFeedViewModel {
     /// activation moves (checked at schedule time).
     @ObservationIgnored private var pendingReloadClaimedForActivation: UInt64?
 
-    init(now: @escaping @Sendable () -> Date = { Date() }) {
-        self.now = now
-        self.callbackEnqueuer = { operation in
+    /// Production callers use the default enqueuer, which hops each
+    /// callback onto the MainActor via an unstructured `Task`. Tests
+    /// inject a deterministic enqueuer to control callback ordering.
+    /// The default reproduces production behavior exactly, so this
+    /// seam is safe to expose in all build configurations (including
+    /// Release build-for-testing).
+    ///
+    /// The `now` seam lets tests supply a deterministic clock for the
+    /// Attention timing arithmetic; production uses the real system
+    /// clock via `Date()`.
+    init(
+        callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
             Task { @MainActor in
                 await operation()
             }
-        }
-    }
-
-    #if DEBUG
-    init(
-        callbackEnqueuer: @escaping CallbackEnqueuer,
+        },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.now = now
         self.callbackEnqueuer = callbackEnqueuer
+        self.now = now
     }
-    #endif
 
     // MARK: - Configuration
 

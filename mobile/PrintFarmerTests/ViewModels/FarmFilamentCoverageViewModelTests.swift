@@ -115,6 +115,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
 
     // MARK: - Invalidation → single refetch
 
+    #if DEBUG
     func testFilamentCoverageChangedTriggersRefetch() async throws {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -138,11 +139,13 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 2,
                        "Single event => single refetch (baseline + one invalidation refetch).")
     }
+    #endif
 
     // MARK: - Reconnect classification (reviewer blocker B + C)
 
     /// Cold-start `.connected` MUST NOT double-load. Absence proven
     /// deterministically via `waitForCallbackTick` — no yield gate.
+    #if DEBUG
     func testColdStartConnectedDoesNotRefetch() async throws {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -173,7 +176,9 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertTrue(vm.hasSeenAnyConnectedForTesting,
                       "The cold transition must arm the classifier so the next `.connected` is treated as recovery.")
     }
+    #endif
 
+    #if DEBUG
     func testReconnectTransitionTriggersExactlyOneRecoveryRefetch() async throws {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -203,10 +208,12 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 2,
                        "Exactly one recovery refetch per reconnect transition.")
     }
+    #endif
 
     /// Reviewer blocker B: configure while the hub is ALREADY
     /// `.reconnecting`. The next `.connected` MUST dispatch a
     /// recovery refetch (not be mis-classified as cold-start).
+    #if DEBUG
     func testConfigureWhileReconnectingArmsRecoveryOnNextConnected() async throws {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -229,6 +236,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 1,
                        "The .connected transition following configure-while-reconnecting MUST dispatch exactly one recovery refetch.")
     }
+    #endif
 
     /// Reviewer blocker B: a repeat configure/replacement AROUND a
     /// reconnect cycle must not stack refetches and must not miss
@@ -240,6 +248,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
     ///      → new subscription's initial state is `.reconnecting`
     ///      → pre-seed classifier so next `.connected` is recovery
     ///   5. simulate `.connected` → exactly one recovery refetch
+    #if DEBUG
     func testRepeatConfigureAroundReconnectDispatchesExactlyOneRecovery() async throws {
         let service = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -272,6 +281,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.dispatchedRequestCount, 1,
                        "Reconfigure-during-reconnecting must dispatch exactly one recovery refetch on the next .connected.")
     }
+    #endif
 
     // MARK: - Teardown safety (reviewer blocker A + C)
 
@@ -352,6 +362,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
 
     /// An OLD-service in-flight SUCCESS must NOT overwrite the
     /// replacement's state.
+    #if DEBUG
     func testInflightOldServiceSuccessCannotOverwriteReplacement() async throws {
         let oldCoverage = ControlledFilamentCoverageService()
         let vm = FarmFilamentCoverageViewModel()
@@ -385,9 +396,11 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.coverageByPrinter.values.first?.printerName, "Fresh",
                        "Stale in-flight success from the OLD service MUST NOT overwrite the replacement's snapshot.")
     }
+    #endif
 
     /// An OLD-service in-flight FEATURE-DISABLED completion must NOT
     /// tombstone the replacement.
+    #if DEBUG
     func testInflightOldServiceFeatureDisabledCannotTombstoneReplacement() async throws {
         let oldCoverage = ControlledFilamentCoverageService()
         let vm = FarmFilamentCoverageViewModel()
@@ -415,9 +428,11 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
                        "Stale featureDisabled from the OLD service MUST NOT tombstone the replacement.")
         XCTAssertEqual(vm.coverageByPrinter.count, 1)
     }
+    #endif
 
     /// An OLD-service in-flight ERROR must NOT overwrite the
     /// replacement's `lastLoadError`.
+    #if DEBUG
     func testInflightOldServiceErrorCannotOverwriteReplacement() async throws {
         let oldCoverage = ControlledFilamentCoverageService()
         let vm = FarmFilamentCoverageViewModel()
@@ -442,6 +457,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastLoadError,
                      "Stale server-error from the OLD service MUST NOT overwrite the replacement's clean state.")
     }
+    #endif
 
     func testTeardownBeforeDrainCausesNoCommit() async throws {
         let coverage = ControlledFilamentCoverageService()
@@ -505,6 +521,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
     /// test yields at `await B.awaitPending`. That gives us the
     /// EXACT `emit → callback queued but not drained → replace →
     /// drain` sequence Hicks required.
+    #if DEBUG
     func testStillCurrentSignalRInvalidationDrainsAgainstReplacementCoverage() async throws {
         let coverageA = ControlledFilamentCoverageService()
         let coverageB = ControlledFilamentCoverageService()
@@ -558,11 +575,13 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.coverageByPrinter.values.first?.printerName, "B-from-invalidation",
                        "The commit must reflect the B-service snapshot, not A's.")
     }
+    #endif
 
     /// Reconnect recovery symmetrically survives a coverage
     /// replacement: after A→B swap, a still-current SignalR
     /// `.reconnecting → .connected` transition must dispatch
     /// exactly one recovery load against B.
+    #if DEBUG
     func testStillCurrentSignalRReconnectRecoveryDrainsAgainstReplacementCoverage() async throws {
         let coverageA = ControlledFilamentCoverageService()
         let coverageB = ControlledFilamentCoverageService()
@@ -605,6 +624,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
                        "Exactly one recovery refetch was dispatched.")
         XCTAssertEqual(vm.coverageByPrinter.values.first?.printerName, "B-from-reconnect")
     }
+    #endif
 
     /// S1 emits an invalidation → callback Task queued but not
     /// drained → `configureSignalR(S2)` replaces the subscription
@@ -613,6 +633,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
     ///
     /// This is the genuine "queued-before-replace" proof Hicks
     /// required — NOT a substituted `subscriberCount == 0` test.
+    #if DEBUG
     func testS1InvalidationQueuedBeforeS2ReplaceDrainsAsNoOp() async throws {
         let coverage = ControlledFilamentCoverageService()
         let s1 = MockSignalRService()
@@ -644,10 +665,12 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
                        "S1 callback drained AFTER S2 replacement MUST NOT dispatch a GET.")
         XCTAssertEqual(vm.dispatchedRequestCount, 0)
     }
+    #endif
 
     /// S1 emits an invalidation → callback Task queued but not
     /// drained → `tearDownSignalR()` → drain. The S1 callback's
     /// captured epoch is stale, so it no-ops. Zero GETs.
+    #if DEBUG
     func testS1InvalidationQueuedBeforeTeardownDrainsAsNoOp() async throws {
         let coverage = ControlledFilamentCoverageService()
         let s1 = MockSignalRService()
@@ -674,12 +697,14 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
                        "S1 callback drained AFTER teardown MUST NOT dispatch a GET.")
         XCTAssertEqual(vm.dispatchedRequestCount, 0)
     }
+    #endif
 
     /// S1 emits a `.reconnecting` transition (queued) → replace S2
     /// → the queued transition drains under a stale SignalR epoch
     /// and no-ops. NO recovery is armed under S1's classifier
     /// state. This proves the classifier doesn't get corrupted by
     /// a stale queued state transition.
+    #if DEBUG
     func testS1ConnectionStateChangeQueuedBeforeS2ReplaceDrainsAsNoOp() async throws {
         let coverage = ControlledFilamentCoverageService()
         let s1 = MockSignalRService()
@@ -711,11 +736,13 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
                        "Stale S1 reconnect-recovery transition MUST NOT dispatch a load.")
         XCTAssertEqual(vm.dispatchedRequestCount, 0)
     }
+    #endif
 
     // MARK: - Configuration-order permutations (blocker H last bullet)
 
     /// Configure coverage FIRST, then SignalR — the standard order
     /// used by the views. Baseline behavior.
+    #if DEBUG
     func testCoverageThenSignalRPermutation() async throws {
         let coverage = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -725,10 +752,12 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(vm.coverageAuthorityEpochForTesting, 1)
         XCTAssertEqual(vm.signalRAuthorityEpochForTesting, 1)
     }
+    #endif
 
     /// Configure SignalR FIRST, then coverage. The load() called
     /// via a callback captures the current coverage epoch fresh, so
     /// once coverage is set the callback dispatches correctly.
+    #if DEBUG
     func testSignalRThenCoveragePermutation_CallbackDispatchesAfterCoverageAttached() async throws {
         let coverage = ControlledFilamentCoverageService()
         let signalR = MockSignalRService()
@@ -757,6 +786,7 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         await vm.waitForCallbackTick(atLeast: tickBefore2 + 1)
         XCTAssertEqual(vm.dispatchedRequestCount, 1)
     }
+    #endif
 
     // MARK: - Fixtures
 
