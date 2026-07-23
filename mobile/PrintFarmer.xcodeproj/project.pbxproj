@@ -450,6 +450,7 @@
 		FA5A0000000000000000000D /* FarmSnapshotAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */; };
 		FC7A00000000000000000001 /* APIClientAuthSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000002 /* APIClientAuthSessionTests.swift */; };
 		FC7A00000000000000000003 /* AuthServiceFencedMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000004 /* AuthServiceFencedMutationTests.swift */; };
+		FC7A000000000000000000A1 /* HudsonR7RevisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A000000000000000000A2 /* HudsonR7RevisionTests.swift */; };
 		FC7A00000000000000000005 /* FarmSnapshotStartupFailureRetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000006 /* FarmSnapshotStartupFailureRetryTests.swift */; };
 		FC7A00000000000000000007 /* FarmSnapshotMoveOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000008 /* FarmSnapshotMoveOrderTests.swift */; };
 		FA5A0000000000000000000F /* FarmSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000010 /* FarmSnapshotStoreTests.swift */; };
@@ -802,6 +803,7 @@
 		FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotAuthorityTests.swift; sourceTree = "<group>"; };
 		FC7A00000000000000000002 /* APIClientAuthSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientAuthSessionTests.swift; sourceTree = "<group>"; };
 		FC7A00000000000000000004 /* AuthServiceFencedMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceFencedMutationTests.swift; sourceTree = "<group>"; };
+		FC7A000000000000000000A2 /* HudsonR7RevisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HudsonR7RevisionTests.swift; sourceTree = "<group>"; };
 		FC7A00000000000000000006 /* FarmSnapshotStartupFailureRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotStartupFailureRetryTests.swift; sourceTree = "<group>"; };
 		FC7A00000000000000000008 /* FarmSnapshotMoveOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotMoveOrderTests.swift; sourceTree = "<group>"; };
 		FA5A00000000000000000010 /* FarmSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotStoreTests.swift; sourceTree = "<group>"; };
@@ -1331,6 +1333,7 @@
 				FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */,
 				FC7A00000000000000000002 /* APIClientAuthSessionTests.swift */,
 				FC7A00000000000000000004 /* AuthServiceFencedMutationTests.swift */,
+				FC7A000000000000000000A2 /* HudsonR7RevisionTests.swift */,
 				FC7A00000000000000000006 /* FarmSnapshotStartupFailureRetryTests.swift */,
 				FC7A00000000000000000008 /* FarmSnapshotMoveOrderTests.swift */,
 				FA5A00000000000000000010 /* FarmSnapshotStoreTests.swift */,
@@ -1614,6 +1617,7 @@
 				FA5A0000000000000000000D /* FarmSnapshotAuthorityTests.swift in Sources */,
 				FC7A00000000000000000001 /* APIClientAuthSessionTests.swift in Sources */,
 				FC7A00000000000000000003 /* AuthServiceFencedMutationTests.swift in Sources */,
+				FC7A000000000000000000A1 /* HudsonR7RevisionTests.swift in Sources */,
 				FC7A00000000000000000005 /* FarmSnapshotStartupFailureRetryTests.swift in Sources */,
 				FC7A00000000000000000007 /* FarmSnapshotMoveOrderTests.swift in Sources */,
 				FA5A0000000000000000000F /* FarmSnapshotStoreTests.swift in Sources */,
