@@ -134,14 +134,41 @@ actor AuthService: AuthServiceProtocol {
         // client — the shared apiClient is not repointed here, so a supersession
         // during /me does not leave any shared destination holding this operation's
         // state.
+        //
+        // J2 (issue #816 reject, Hicks): a REQUIRED /me verification failure
+        // (login response had no user, so identity is not yet proven) must
+        // publish nothing and surface an explicit error. The previous `try?`
+        // silently swallowed 401 / decode / transport failure into
+        // `verifiedUser == nil`, after which the code below persisted a
+        // token-only session with a cleared owner — publishing an
+        // unauthenticated identity for the server. Failures on the required
+        // path now throw so no destination sees this operation's state.
         var verifiedUser = response.user
         if verifiedUser == nil {
             let verifyClient = await apiClient.unauthenticatedClient(baseURL: server.baseURL)
             await verifyClient.setAccessToken(token)
-            verifiedUser = try? await verifyClient.get("/api/auth/me")
+            do {
+                verifiedUser = try await verifyClient.get("/api/auth/me")
+            } catch {
+                // Required identity verification failed. Nothing is published,
+                // credentials are not saved, apiClient is not repointed. A
+                // supersession that also happened during the failing /me is
+                // still handled by the guard below (would have been superseded
+                // anyway). Surface the explicit failure to the caller.
+                throw NetworkError.authFailed("Identity verification failed: \(String(describing: error))")
+            }
         }
         // After the verification await, if we've been superseded, publish nothing.
         guard isCurrentOperation(operation) else { return .superseded }
+
+        // J2: at this point verifiedUser is guaranteed non-nil (either the login
+        // response carried it, or /me returned it — a failure would have thrown
+        // above). Bind it so the publication phase cannot accidentally publish a
+        // nil owner via the previous "if let user else clearOwner" pattern.
+        guard let identity = verifiedUser else {
+            // Defensive: unreachable per the guarantee above.
+            throw NetworkError.authFailed("Identity verification produced no user")
+        }
 
         // Publication phase — every step is fenced or CAS, and rolls back prior
         // published steps in reverse order on failure so no destination is left
@@ -153,11 +180,10 @@ actor AuthService: AuthServiceProtocol {
                 ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
                 serverId: server.id
             )
-            if let user = verifiedUser {
-                snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
-            } else {
-                snapshotOwnerStore.clearOwner(serverID: server.id)
-            }
+            // J2: publish the VERIFIED owner unconditionally. There is no
+            // "clear owner because verification is missing" branch anymore —
+            // a missing verification would have thrown before reaching here.
+            snapshotOwnerStore.setOwner(userID: identity.id, serverID: server.id)
         }
         guard published else { return .superseded }
 
@@ -175,7 +201,7 @@ actor AuthService: AuthServiceProtocol {
             guard applied else {
                 // Rollback step 1: our exact credentials + owner.
                 credentialsStore.clearIfAccessTokenMatches(serverId: server.id, expectedAccessToken: token)
-                snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: verifiedUser?.id)
+                snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: identity.id)
                 return .superseded
             }
         }
@@ -186,7 +212,7 @@ actor AuthService: AuthServiceProtocol {
         guard activated else {
             // Rollback steps 1-2: our exact credentials + owner + apiClient session.
             credentialsStore.clearIfAccessTokenMatches(serverId: server.id, expectedAccessToken: token)
-            snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: verifiedUser?.id)
+            snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: identity.id)
             if operation != .unspecified {
                 await apiClient.clearSessionIfMatches(
                     expectedAccessToken: token,
@@ -200,7 +226,7 @@ actor AuthService: AuthServiceProtocol {
             success: response.success,
             token: response.token,
             expiresAt: response.expiresAt,
-            user: verifiedUser,
+            user: identity,
             error: response.error
         )
         return .applied(verifiedResponse)
@@ -325,10 +351,35 @@ actor AuthService: AuthServiceProtocol {
             }
             return .restored(user)
         } catch {
+            // J3 (issue #816 reject, Hicks): on ANY completion after the
+            // publication of the shared apiClient session, first determine
+            // whether THIS operation still owns the destination. A supersession
+            // detected here must roll back the exact T1 session we published,
+            // regardless of the error class — leaving a stale bearer applied
+            // while a newer T2 login has already advanced the epoch would be
+            // exactly the "superseded restore leaks API session" bug.
+            let stillCurrent = isCurrentOperation(operation)
+            if !stillCurrent {
+                // Superseded during transient / decode / definitive failure —
+                // compare-and-clear ONLY our own session so a newer T2 login's
+                // apiClient bearer / session token is preserved. Credentials
+                // and owner are left alone here because the newer T2 also owns
+                // them (destination CAS on the fenced clears would no-op
+                // anyway, but the credential store has no operation tag).
+                if operation != .unspecified {
+                    await apiClient.clearSessionIfMatches(
+                        expectedAccessToken: credentials.accessToken,
+                        expectedAuthSessionToken: operation.value
+                    )
+                }
+                return .superseded
+            }
+            // Still current. Definitive auth rejection = clear creds/owner/apiClient.
+            // Transient error = preserve for offline continuity.
+            //
             // H2/J: a stale restore's late 401 must not clear a newer login's
             // credentials/owner/session — fence the definitive-rejection clears on the
-            // operation, and CAS the APIClient clear. Transient errors do NOT clear
-            // (offline continuity).
+            // operation, and CAS the APIClient clear.
             if isDefinitiveAuthRejection(error) {
                 fencedMutation(operation) {
                     credentialsStore.clear(serverId: server.id)
