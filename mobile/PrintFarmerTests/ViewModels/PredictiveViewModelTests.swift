@@ -9,6 +9,39 @@ final class PredictiveViewModelTests: XCTestCase {
     private var mockPredictiveService: MockPredictiveService!
     private var viewModel: PredictiveViewModel!
     private let testPrinterId = UUID()
+
+    private func assertExactNormalDelivery(
+        _ snapshot: RecoverableDeliverySnapshot,
+        rescueInvocations: Int = 1,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(snapshot.normalRequestCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.normalEnqueueCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.normalObservationCount, 1, file: file, line: line)
+        XCTAssertEqual(
+            snapshot.rescueInvocationCount,
+            rescueInvocations,
+            file: file,
+            line: line)
+        XCTAssertEqual(snapshot.rescueTakeoverCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.waiterInstallationCount, 1, file: file, line: line)
+        XCTAssertTrue(snapshot.exactNormalDeliveryObserved, file: file, line: line)
+    }
+
+    private func assertRescueTakeoverAfterSuppressedNormalDelivery(
+        _ snapshot: RecoverableDeliverySnapshot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(snapshot.normalRequestCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.normalEnqueueCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.normalObservationCount, 0, file: file, line: line)
+        XCTAssertEqual(snapshot.rescueInvocationCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.rescueTakeoverCount, 1, file: file, line: line)
+        XCTAssertEqual(snapshot.waiterInstallationCount, 1, file: file, line: line)
+        XCTAssertFalse(snapshot.exactNormalDeliveryObserved, file: file, line: line)
+    }
     
     override func setUp() {
         super.setUp()
@@ -30,6 +63,12 @@ final class PredictiveViewModelTests: XCTestCase {
     ) -> ObserverAwaitAttempt.Outcome? {
         attempt.rescueCancellationOutcomeIfNeeded()
         XCTAssertEqual(
+            attempt.rescuePublicationInvocationCountForTest,
+            1,
+            "observer outcome rescue must be invoked exactly once",
+            file: file,
+            line: line)
+        XCTAssertEqual(
             attempt.rescuePublicationCountForTest,
             0,
             "normal observer publication was missing",
@@ -44,6 +83,12 @@ final class PredictiveViewModelTests: XCTestCase {
         line: UInt = #line
     ) -> WaiterAwaitAttempt.Outcome? {
         attempt.rescueCancellationOutcomeIfNeeded()
+        XCTAssertEqual(
+            attempt.rescuePublicationInvocationCountForTest,
+            1,
+            "waiter outcome rescue must be invoked exactly once",
+            file: file,
+            line: line)
         XCTAssertEqual(
             attempt.rescuePublicationCountForTest,
             0,
@@ -996,7 +1041,6 @@ final class PredictiveViewModelTests: XCTestCase {
         task.cancel()
         attempt.releaseSuspensionForTest()
         await task.value
-        attempt.rescueCancellationOutcomeIfNeeded()
         await gate.open()
         await gate.close()
 
@@ -1355,8 +1399,10 @@ final class PredictiveViewModelTests: XCTestCase {
         // Second open() must be a no-op — same counts, no state change.
         await gate.open()
         let afterOpen2 = await gate.snapshot()
-        XCTAssertEqual(afterOpen2, afterOpen1,
-                       "second open() must be a bit-identical no-op")
+        XCTAssertEqual(afterOpen2.parkedWaiterCount, afterOpen1.parkedWaiterCount)
+        XCTAssertEqual(afterOpen2.waiterOrder, afterOpen1.waiterOrder)
+        XCTAssertEqual(afterOpen2.waiterFateCounts, afterOpen1.waiterFateCounts)
+        XCTAssertEqual(afterOpen2.completedWaiterCount, afterOpen1.completedWaiterCount)
 
         // Every parked task must have resumed exactly once.
         // R3: unconditional close BEFORE `await t.value` — regression
@@ -1379,6 +1425,13 @@ final class PredictiveViewModelTests: XCTestCase {
         // additional resumes.
         XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 3,
                        "exactly three actual continuation resumes at open site")
+        XCTAssertEqual(final.waiterInFlightDelivery,
+                       InFlightDeliverySnapshot(
+                        activeCount: 0,
+                        requestCount: 3,
+                        rescueInvocationCount: 3,
+                        normalObservationCount: 3,
+                        rescueTakeoverCount: 0))
         XCTAssertEqual(final.waiterResumeCounts[.latchConsumed] ?? 0, 0,
                        "no waiter took the latch path")
         XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0,
@@ -1556,6 +1609,8 @@ final class PredictiveViewModelTests: XCTestCase {
                 processingCheckpoint: processingCheckpoint)
         }
 
+        branchCheckpoint.armRescue(.rescuedMissingPublication)
+        processingCheckpoint.armRescue(.rescuedMissingPublication)
         let branch = await branchCheckpoint.value()
         // Independent rescue occurs after the duplicate branch checkpoint.
         // Correct behavior already resumed at `.duplicateAfterParked`; deleting
@@ -1567,15 +1622,18 @@ final class PredictiveViewModelTests: XCTestCase {
         // Wait-for graph: both attempt rescues, outcome rescue, and gate close
         // precede either child join.
         await gate.close()
-        dupAttempt.releaseSuspensionForTest()
         dupAttempt.rescueCancellationOutcomeIfNeeded()
         origAttempt.releaseSuspensionForTest()
         await duplicate.value
         await original.value
         XCTAssertEqual(branch, .duplicateAfterParked)
         XCTAssertEqual(processing, .processed(.processedIgnoredMismatch))
-        XCTAssertEqual(branchCheckpoint.rescueCountForTest, 0)
-        XCTAssertEqual(processingCheckpoint.rescueCountForTest, 0)
+        assertExactNormalDelivery(branchCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(processingCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(dupAttempt.suspensionDeliveryForTest)
+        assertExactNormalDelivery(origAttempt.suspensionDeliveryForTest)
+        XCTAssertEqual(dupAttempt.rescuePublicationInvocationCountForTest, 1)
+        XCTAssertEqual(dupAttempt.rescuePublicationCountForTest, 0)
         guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
             XCTFail("duplicate cancellation did not publish")
             return
@@ -1666,21 +1724,26 @@ final class PredictiveViewModelTests: XCTestCase {
                 branchCheckpoint: branchCheckpoint,
                 processingCheckpoint: processingCheckpoint)
         }
+        branchCheckpoint.armRescue(.rescuedMissingPublication)
+        processingCheckpoint.armRescue(.rescuedMissingPublication)
         let branch = await branchCheckpoint.value()
         dupAttempt.releaseSuspensionForTest()
         let processing = await processingCheckpoint.value()
         await gate.open()
 
         await gate.close()
-        dupAttempt.releaseSuspensionForTest()
         dupAttempt.rescueCancellationOutcomeIfNeeded()
         origAttempt.releaseSuspensionForTest()
         await duplicate.value
         await original.value
         XCTAssertEqual(branch, .duplicateAfterParked)
         XCTAssertEqual(processing, .processed(.processedIgnoredMismatch))
-        XCTAssertEqual(branchCheckpoint.rescueCountForTest, 0)
-        XCTAssertEqual(processingCheckpoint.rescueCountForTest, 0)
+        assertExactNormalDelivery(branchCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(processingCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(dupAttempt.suspensionDeliveryForTest)
+        assertExactNormalDelivery(origAttempt.suspensionDeliveryForTest)
+        XCTAssertEqual(dupAttempt.rescuePublicationInvocationCountForTest, 1)
+        XCTAssertEqual(dupAttempt.rescuePublicationCountForTest, 0)
         guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
             XCTFail("duplicate cancellation did not publish")
             return
@@ -1915,7 +1978,6 @@ final class PredictiveViewModelTests: XCTestCase {
         task.cancel()
         attempt.releaseSuspensionForTest()
         await task.value
-        attempt.rescueCancellationOutcomeIfNeeded()
         await gate.open()
         await gate.close()
 
@@ -2480,10 +2542,15 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.observerParkAckTicketCount, 0)
         XCTAssertTrue(snap.observerFates.isEmpty,
                       "no per-token fate accumulation across \(iterations) iterations")
-        XCTAssertEqual(snap.observerResumeCounts[.parkedResumedBySignal] ?? 0, iterations)
         // Unconditional teardown, then drain all signal-resumed tasks.
         await gate.close()
         for park in parkTasks { await park.value }
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedBySignal] ?? 0, iterations)
+        XCTAssertEqual(final.observerInFlightDelivery.normalObservationCount, iterations)
+        XCTAssertEqual(final.observerInFlightDelivery.rescueInvocationCount, iterations)
+        XCTAssertEqual(final.observerInFlightDelivery.rescueTakeoverCount, 0)
+        XCTAssertEqual(final.observerInFlightDelivery.activeCount, 0)
     }
 
     /// Waiter analogue of the ticket-never-awaited proof.
@@ -2509,12 +2576,17 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTAssertEqual(post.waiterParkAckTicketCount, 0)
             XCTAssertTrue(post.waiterFates.isEmpty,
                           "no per-token fate accumulation per iteration")
-            XCTAssertEqual(post.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1)
             // Unconditional teardown, then drain the open-resumed task. open()
             // sealed .openedWhileParked synchronously, so the assertions above
             // hold without the (deferred) park.value.
             await gate.close()
             await park.value
+            let final = await gate.snapshot()
+            XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1)
+            XCTAssertEqual(final.waiterInFlightDelivery.normalObservationCount, 1)
+            XCTAssertEqual(final.waiterInFlightDelivery.rescueInvocationCount, 1)
+            XCTAssertEqual(final.waiterInFlightDelivery.rescueTakeoverCount, 0)
+            XCTAssertEqual(final.waiterInFlightDelivery.activeCount, 0)
             totalOpens += 1
         }
         XCTAssertEqual(totalOpens, iterations,
@@ -2561,6 +2633,7 @@ final class PredictiveViewModelTests: XCTestCase {
                        "self-cancel ran while the handler was installed")
         XCTAssertEqual(attempt.normalPublicationCountForTest, 1)
         XCTAssertEqual(attempt.rescuePublicationCountForTest, 0)
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
         let events = attempt.lifecycleEventsForTest
         XCTAssertEqual(events.map(\.id), [1, 2, 3, 4],
                        "raw event identities must be monotonic and gap-free")
@@ -2613,6 +2686,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(attempt.cancelHandlerInvocationCountForTest, 1)
         XCTAssertEqual(attempt.normalPublicationCountForTest, 1)
         XCTAssertEqual(attempt.rescuePublicationCountForTest, 0)
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
         let events = attempt.lifecycleEventsForTest
         XCTAssertEqual(events.map(\.id), [1, 2, 3, 4])
         XCTAssertEqual(events.map(\.phase), [
@@ -2650,8 +2724,6 @@ final class PredictiveViewModelTests: XCTestCase {
         // the mutation bounded while changing the raw release site.
         attempt.releaseSuspensionForTest()
         await task.value
-        attempt.rescueCancellationOutcomeIfNeeded()
-        await gate.close()
 
         guard let outcome = boundedOutcome(attempt) else {
             XCTFail("observer cancel path produced no outcome")
@@ -2668,6 +2740,8 @@ final class PredictiveViewModelTests: XCTestCase {
         ])
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1)
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
+        await gate.close()
     }
 
     /// Waiter analogue.
@@ -2682,8 +2756,6 @@ final class PredictiveViewModelTests: XCTestCase {
 
         attempt.releaseSuspensionForTest()
         await task.value
-        attempt.rescueCancellationOutcomeIfNeeded()
-        await gate.close()
 
         guard let outcome = boundedOutcome(attempt) else {
             XCTFail("waiter cancel path produced no outcome")
@@ -2700,6 +2772,8 @@ final class PredictiveViewModelTests: XCTestCase {
         ])
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1)
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
+        await gate.close()
     }
 
     // MARK: Hicks H2 — weak ticket boxes stay bounded on enter+drop
@@ -3620,6 +3694,236 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(ticket.rescueCountForTest, 0)
     }
 
+    func testAsyncGateSuppressedObserverSignalDeliveryUsesRescueWithoutNormalAck() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+        let attempt = ObserverAwaitAttempt(
+            suppressNormalSuspensionDeliveryForTest: true)
+        let task = Task { await gate.awaitObserver(token, attempt: attempt) }
+        let parkAck = await gate.waitForObserverParked(token)
+        XCTAssertEqual(parkAck, .parked)
+
+        await gate.signal()
+        await gate.close()
+        await task.value
+
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            attempt.suspensionDeliveryForTest)
+        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing)
+        XCTAssertEqual(
+            attempt.lifecycleEventsForTest.map(\.phase),
+            [.naturalPublicationCommitted],
+            "rescue takeover must not counterfeit a normal release ACK")
+        let snapshot = await gate.snapshot()
+        XCTAssertEqual(snapshot.observerFateCounts[.signaledWhileParked], 1)
+        XCTAssertEqual(snapshot.observerResumeCounts[.parkedResumedBySignal] ?? 0, 0)
+        XCTAssertEqual(snapshot.observerInFlightDelivery.normalObservationCount, 0)
+        XCTAssertEqual(snapshot.observerInFlightDelivery.rescueTakeoverCount, 1)
+        XCTAssertEqual(snapshot.observerInFlightDelivery.activeCount, 0)
+    }
+
+    func testAsyncGateSuppressedWaiterOpenDeliveryUsesRescueWithoutNormalAck() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        let attempt = WaiterAwaitAttempt(
+            suppressNormalSuspensionDeliveryForTest: true)
+        let task = Task { await gate.awaitWaiter(token, attempt: attempt) }
+        let parkAck = await gate.waitForWaiterParked(token)
+        XCTAssertEqual(parkAck, .parked)
+
+        await gate.open()
+        await gate.close()
+        await task.value
+
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            attempt.suspensionDeliveryForTest)
+        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing)
+        XCTAssertEqual(
+            attempt.lifecycleEventsForTest.map(\.phase),
+            [.naturalPublicationCommitted])
+        let snapshot = await gate.snapshot()
+        XCTAssertEqual(snapshot.waiterFateCounts[.openedWhileParked], 1)
+        XCTAssertEqual(snapshot.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 0)
+        XCTAssertEqual(snapshot.waiterInFlightDelivery.normalObservationCount, 0)
+        XCTAssertEqual(snapshot.waiterInFlightDelivery.rescueTakeoverCount, 1)
+        XCTAssertEqual(snapshot.waiterInFlightDelivery.activeCount, 0)
+    }
+
+    func testAsyncGateSuppressedMatchedCancelDeliveryRescuesObserverAndWaiter() async {
+        let observerGate = AsyncGate()
+        let observerToken = await observerGate.registerObserver()
+        let observerAttempt = ObserverAwaitAttempt(
+            suppressNormalSuspensionDeliveryForTest: true)
+        let observerTask = Task {
+            await observerGate.awaitObserver(
+                observerToken,
+                attempt: observerAttempt)
+        }
+        let observerParkAck =
+            await observerGate.waitForObserverParked(observerToken)
+        XCTAssertEqual(observerParkAck, .parked)
+        observerTask.cancel()
+        await observerTask.value
+
+        let waiterGate = AsyncGate()
+        let waiterToken = await waiterGate.registerWaiter()
+        let waiterAttempt = WaiterAwaitAttempt(
+            suppressNormalSuspensionDeliveryForTest: true)
+        let waiterTask = Task {
+            await waiterGate.awaitWaiter(waiterToken, attempt: waiterAttempt)
+        }
+        let waiterParkAck = await waiterGate.waitForWaiterParked(waiterToken)
+        XCTAssertEqual(waiterParkAck, .parked)
+        waiterTask.cancel()
+        await waiterTask.value
+
+        let observerPreTeardown = await observerGate.snapshot()
+        let waiterPreTeardown = await waiterGate.snapshot()
+        XCTAssertEqual(observerPreTeardown.observerOrder, [])
+        XCTAssertEqual(observerPreTeardown.parkedObserverCount, 0)
+        XCTAssertEqual(
+            observerPreTeardown.observerFateCounts,
+            [.cancelledWhileParked: 1])
+        XCTAssertEqual(observerPreTeardown.observerCancelInvocationCount, 1)
+        XCTAssertEqual(observerPreTeardown.observerCancelIgnoredCount, 0)
+        XCTAssertEqual(waiterPreTeardown.waiterOrder, [])
+        XCTAssertEqual(waiterPreTeardown.parkedWaiterCount, 0)
+        XCTAssertEqual(
+            waiterPreTeardown.waiterFateCounts,
+            [.cancelledWhileParked: 1])
+        XCTAssertEqual(waiterPreTeardown.waiterCancelInvocationCount, 1)
+        XCTAssertEqual(waiterPreTeardown.waiterCancelIgnoredCount, 0)
+        XCTAssertEqual(
+            observerAttempt.bufferedOutcomeForTest,
+            .cancelled(.processedMatched))
+        XCTAssertEqual(
+            waiterAttempt.bufferedOutcomeForTest,
+            .cancelled(.processedMatched))
+
+        await observerGate.close()
+        await waiterGate.close()
+
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            observerAttempt.suspensionDeliveryForTest)
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            waiterAttempt.suspensionDeliveryForTest)
+        let observerSnapshot = await observerGate.snapshot()
+        let waiterSnapshot = await waiterGate.snapshot()
+        XCTAssertEqual(observerSnapshot.observerOrder, [])
+        XCTAssertEqual(observerSnapshot.parkedObserverCount, 0)
+        XCTAssertEqual(observerSnapshot.observerResumeCounts[.parkedResumedByCancel] ?? 0, 0)
+        XCTAssertEqual(waiterSnapshot.waiterOrder, [])
+        XCTAssertEqual(waiterSnapshot.parkedWaiterCount, 0)
+        XCTAssertEqual(waiterSnapshot.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 0)
+    }
+
+    func testAsyncGateSuppressedCloseDeliveryRescuesObserverAndWaiter() async {
+        let observerGate = AsyncGate()
+        let observerToken = await observerGate.registerObserver()
+        let observerAttempt = ObserverAwaitAttempt(
+            suppressNormalSuspensionDeliveryForTest: true)
+        let observerTask = Task {
+            await observerGate.awaitObserver(
+                observerToken,
+                attempt: observerAttempt)
+        }
+        let observerParkAck =
+            await observerGate.waitForObserverParked(observerToken)
+        XCTAssertEqual(observerParkAck, .parked)
+
+        let waiterGate = AsyncGate()
+        let waiterToken = await waiterGate.registerWaiter()
+        let waiterAttempt = WaiterAwaitAttempt(
+            suppressNormalSuspensionDeliveryForTest: true)
+        let waiterTask = Task {
+            await waiterGate.awaitWaiter(waiterToken, attempt: waiterAttempt)
+        }
+        let waiterParkAck = await waiterGate.waitForWaiterParked(waiterToken)
+        XCTAssertEqual(waiterParkAck, .parked)
+
+        await observerGate.close()
+        await waiterGate.close()
+        await observerTask.value
+        await waiterTask.value
+
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            observerAttempt.suspensionDeliveryForTest)
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            waiterAttempt.suspensionDeliveryForTest)
+        XCTAssertEqual(observerAttempt.bufferedOutcomeForTest, .finishedBeforeProcessing)
+        XCTAssertEqual(waiterAttempt.bufferedOutcomeForTest, .finishedBeforeProcessing)
+        let observerSnapshot = await observerGate.snapshot()
+        let waiterSnapshot = await waiterGate.snapshot()
+        XCTAssertEqual(observerSnapshot.observerFateCounts[.closedWhileParked], 1)
+        XCTAssertEqual(waiterSnapshot.waiterFateCounts[.closedWhileParked], 1)
+        XCTAssertEqual(observerSnapshot.observerResumeCounts[.parkedResumedByClose] ?? 0, 0)
+        XCTAssertEqual(waiterSnapshot.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0)
+    }
+
+    func testAsyncGateSuppressedObserverTicketFanoutUsesRescueTakeover() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+        let ticket = await gate.enterObserverParkAck(token)
+        let consumer = ticket.subscribeForValue(
+            suppressNormalDeliveryForTest: true)
+        let installationAck = BufferedConsumer<ConsumerInstallationResult>()
+        let waiter = Task {
+            await consumer.value(
+                installationAck: installationAck,
+                cancellationValue: .consumerCancelled)
+        }
+        let installation = await installationAck.value()
+        XCTAssertEqual(installation, .installed)
+
+        let parkAttempt = ObserverAwaitAttempt()
+        let park = Task { await gate.awaitObserver(token, attempt: parkAttempt) }
+        let parkAck = await gate.waitForObserverParked(token)
+        XCTAssertEqual(parkAck, .parked)
+        await gate.close()
+        await park.value
+        let value = await waiter.value
+
+        XCTAssertEqual(value, .parked)
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            consumer.deliverySnapshotForTest)
+        XCTAssertEqual(ticket.rescueInvocationCountForTest, 1)
+        XCTAssertEqual(ticket.normalObservationCountForTest, 0)
+        XCTAssertEqual(ticket.rescueTakeoverCountForTest, 1)
+        XCTAssertEqual(ticket.sourceForTest.subscriberCountForTest, 0)
+    }
+
+    func testAsyncGateSuppressedWaiterTicketFanoutUsesRescueTakeover() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        let ticket = await gate.enterWaiterParkAck(token)
+        let consumer = ticket.subscribeForValue(
+            suppressNormalDeliveryForTest: true)
+        let installationAck = BufferedConsumer<ConsumerInstallationResult>()
+        let waiter = Task {
+            await consumer.value(
+                installationAck: installationAck,
+                cancellationValue: .consumerCancelled)
+        }
+        let installation = await installationAck.value()
+        XCTAssertEqual(installation, .installed)
+
+        let parkAttempt = WaiterAwaitAttempt()
+        let park = Task { await gate.awaitWaiter(token, attempt: parkAttempt) }
+        let parkAck = await gate.waitForWaiterParked(token)
+        XCTAssertEqual(parkAck, .parked)
+        await gate.close()
+        await park.value
+        let value = await waiter.value
+
+        XCTAssertEqual(value, .parked)
+        assertRescueTakeoverAfterSuppressedNormalDelivery(
+            consumer.deliverySnapshotForTest)
+        XCTAssertEqual(ticket.rescueInvocationCountForTest, 1)
+        XCTAssertEqual(ticket.normalObservationCountForTest, 0)
+        XCTAssertEqual(ticket.rescueTakeoverCountForTest, 1)
+        XCTAssertEqual(ticket.sourceForTest.subscriberCountForTest, 0)
+    }
+
     /// Hicks R4: ticket-never-awaited also drained by close(). Enter
     /// a ticket on an active token, DO NOT consume it, then close.
     /// Actor removes the ticket entry at close-time resolution.
@@ -3746,22 +4050,27 @@ final class PredictiveViewModelTests: XCTestCase {
                 branchCheckpoint: branchCheckpoint,
                 processingCheckpoint: processingCheckpoint)
         }
+        branchCheckpoint.armRescue(.rescuedMissingPublication)
+        processingCheckpoint.armRescue(.rescuedMissingPublication)
         let branch = await branchCheckpoint.value()
         dupAttempt.releaseSuspensionForTest()
         let processing = await processingCheckpoint.value()
         _ = await gate.registerWaiter()
         await gate.close()
-        dupAttempt.releaseSuspensionForTest()
         dupAttempt.rescueCancellationOutcomeIfNeeded()
         origAttempt.releaseSuspensionForTest()
         await duplicate.value
         await original.value
         XCTAssertEqual(branch, .duplicateAfterParked)
         XCTAssertEqual(processing, .processed(.processedIgnoredMismatch))
-        XCTAssertEqual(branchCheckpoint.rescueCountForTest, 0)
-        XCTAssertEqual(processingCheckpoint.rescueCountForTest, 0)
+        assertExactNormalDelivery(branchCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(processingCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(dupAttempt.suspensionDeliveryForTest)
+        assertExactNormalDelivery(origAttempt.suspensionDeliveryForTest)
+        XCTAssertEqual(dupAttempt.rescuePublicationInvocationCountForTest, 1)
+        XCTAssertEqual(dupAttempt.rescuePublicationCountForTest, 0)
 
-        guard let dupOutcome = boundedOutcome(dupAttempt) else {
+        guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
             XCTFail("duplicate observer cancellation produced no outcome")
             return
         }
@@ -3806,22 +4115,27 @@ final class PredictiveViewModelTests: XCTestCase {
                 branchCheckpoint: branchCheckpoint,
                 processingCheckpoint: processingCheckpoint)
         }
+        branchCheckpoint.armRescue(.rescuedMissingPublication)
+        processingCheckpoint.armRescue(.rescuedMissingPublication)
         let branch = await branchCheckpoint.value()
         dupAttempt.releaseSuspensionForTest()
         let processing = await processingCheckpoint.value()
         await gate.open()
         await gate.close()
-        dupAttempt.releaseSuspensionForTest()
         dupAttempt.rescueCancellationOutcomeIfNeeded()
         origAttempt.releaseSuspensionForTest()
         await duplicate.value
         await original.value
         XCTAssertEqual(branch, .duplicateAfterParked)
         XCTAssertEqual(processing, .processed(.processedIgnoredMismatch))
-        XCTAssertEqual(branchCheckpoint.rescueCountForTest, 0)
-        XCTAssertEqual(processingCheckpoint.rescueCountForTest, 0)
+        assertExactNormalDelivery(branchCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(processingCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(dupAttempt.suspensionDeliveryForTest)
+        assertExactNormalDelivery(origAttempt.suspensionDeliveryForTest)
+        XCTAssertEqual(dupAttempt.rescuePublicationInvocationCountForTest, 1)
+        XCTAssertEqual(dupAttempt.rescuePublicationCountForTest, 0)
 
-        guard let dupOutcome = boundedOutcome(dupAttempt) else {
+        guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
             XCTFail("duplicate waiter cancellation produced no outcome")
             return
         }
@@ -3855,8 +4169,6 @@ final class PredictiveViewModelTests: XCTestCase {
         task.cancel()
         attempt.releaseSuspensionForTest()
         await task.value
-        attempt.rescueCancellationOutcomeIfNeeded()
-        await gate.close()
 
         guard let outcome = boundedOutcome(attempt) else {
             XCTFail("matched observer cancellation produced no outcome")
@@ -3864,11 +4176,25 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         XCTAssertEqual(outcome, .cancelled(.processedMatched),
                        "matched cancel drains THIS attempt's parked continuation")
-        let snap = await gate.snapshot()
-        XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1)
-        XCTAssertEqual(snap.observerCancelInvocationCount, 1)
+        let preTeardown = await gate.snapshot()
+        XCTAssertEqual(preTeardown.parkedObserverCount, 0,
+                       "matched cancellation removes the raw parked entry")
+        XCTAssertEqual(preTeardown.observerOrder, [],
+                       "matched cancellation removes the ordered token before teardown")
+        XCTAssertEqual(preTeardown.observerCancelInvocationCount, 1)
+        XCTAssertEqual(preTeardown.observerCancelIgnoredCount, 0)
+        XCTAssertEqual(preTeardown.observerFateCounts, [.cancelledWhileParked: 1])
+        XCTAssertEqual(preTeardown.observerResumeCounts, [.parkedResumedByCancel: 1])
         XCTAssertTrue(attempt.cancellationReleaseSucceededForTest)
         XCTAssertEqual(attempt.rescuePublicationCountForTest, 0)
+        XCTAssertEqual(attempt.lifecycleEventsForTest.map(\.phase), [
+            .cancellationHandlerObserved(observedAcknowledgementEventID: nil),
+            .suspensionResumed(
+                site: .cancellationHandler,
+                requestedBy: .cancellationHandler),
+        ])
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
+        await gate.close()
     }
 
     /// Waiter analogue.
@@ -3883,19 +4209,29 @@ final class PredictiveViewModelTests: XCTestCase {
         task.cancel()
         attempt.releaseSuspensionForTest()
         await task.value
-        attempt.rescueCancellationOutcomeIfNeeded()
-        await gate.close()
 
         guard let outcome = boundedOutcome(attempt) else {
             XCTFail("matched waiter cancellation produced no outcome")
             return
         }
         XCTAssertEqual(outcome, .cancelled(.processedMatched))
-        let snap = await gate.snapshot()
-        XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1)
-        XCTAssertEqual(snap.waiterCancelInvocationCount, 1)
+        let preTeardown = await gate.snapshot()
+        XCTAssertEqual(preTeardown.parkedWaiterCount, 0)
+        XCTAssertEqual(preTeardown.waiterOrder, [])
+        XCTAssertEqual(preTeardown.waiterCancelInvocationCount, 1)
+        XCTAssertEqual(preTeardown.waiterCancelIgnoredCount, 0)
+        XCTAssertEqual(preTeardown.waiterFateCounts, [.cancelledWhileParked: 1])
+        XCTAssertEqual(preTeardown.waiterResumeCounts, [.parkedResumedByCancel: 1])
         XCTAssertTrue(attempt.cancellationReleaseSucceededForTest)
         XCTAssertEqual(attempt.rescuePublicationCountForTest, 0)
+        XCTAssertEqual(attempt.lifecycleEventsForTest.map(\.phase), [
+            .cancellationHandlerObserved(observedAcknowledgementEventID: nil),
+            .suspensionResumed(
+                site: .cancellationHandler,
+                requestedBy: .cancellationHandler),
+        ])
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
+        await gate.close()
     }
 
     // MARK: - Hicks R4 + Vasquez: no-consumer cancel receipt proofs
@@ -3911,6 +4247,9 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let iterations = 100
         var rescuePublications = 0
+        var suspensionRescueInvocations = 0
+        var suspensionRescueTakeovers = 0
+        var outcomeRescueInvocations = 0
         for _ in 0..<iterations {
             let token = await gate.registerObserver()
             let attempt = ObserverAwaitAttempt()
@@ -3921,6 +4260,11 @@ final class PredictiveViewModelTests: XCTestCase {
             await task.value
             attempt.rescueCancellationOutcomeIfNeeded()
             rescuePublications += attempt.rescuePublicationCountForTest
+            let delivery = attempt.suspensionDeliveryForTest
+            suspensionRescueInvocations += delivery.rescueInvocationCount
+            suspensionRescueTakeovers += delivery.rescueTakeoverCount
+            outcomeRescueInvocations +=
+                attempt.rescuePublicationInvocationCountForTest
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed, "gate remains open — pre-close boundedness proof")
@@ -3930,6 +4274,9 @@ final class PredictiveViewModelTests: XCTestCase {
                        "aggregate cancel-invocation counter is the only growth")
         XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByCancel] ?? 0, iterations)
         XCTAssertEqual(rescuePublications, 0)
+        XCTAssertEqual(suspensionRescueInvocations, iterations)
+        XCTAssertEqual(suspensionRescueTakeovers, 0)
+        XCTAssertEqual(outcomeRescueInvocations, iterations)
         await gate.close()
     }
 
@@ -3938,6 +4285,9 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let iterations = 100
         var rescuePublications = 0
+        var suspensionRescueInvocations = 0
+        var suspensionRescueTakeovers = 0
+        var outcomeRescueInvocations = 0
         for _ in 0..<iterations {
             let token = await gate.registerWaiter()
             let attempt = WaiterAwaitAttempt()
@@ -3948,12 +4298,20 @@ final class PredictiveViewModelTests: XCTestCase {
             await task.value
             attempt.rescueCancellationOutcomeIfNeeded()
             rescuePublications += attempt.rescuePublicationCountForTest
+            let delivery = attempt.suspensionDeliveryForTest
+            suspensionRescueInvocations += delivery.rescueInvocationCount
+            suspensionRescueTakeovers += delivery.rescueTakeoverCount
+            outcomeRescueInvocations +=
+                attempt.rescuePublicationInvocationCountForTest
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed)
         XCTAssertEqual(snap.waiterCancelInvocationCount, iterations)
         XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, iterations)
         XCTAssertEqual(rescuePublications, 0)
+        XCTAssertEqual(suspensionRescueInvocations, iterations)
+        XCTAssertEqual(suspensionRescueTakeovers, 0)
+        XCTAssertEqual(outcomeRescueInvocations, iterations)
         await gate.close()
     }
 
@@ -4011,8 +4369,6 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertTrue(afterClose.closed)
         XCTAssertEqual(afterClose.parkedObserverCount, 0,
                        "close drained the parked observer")
-        XCTAssertEqual(afterClose.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
-                       "exactly one parkedResumedByClose resume at close")
         XCTAssertEqual(afterClose.observerFateCounts[.closedWhileParked] ?? 0, 1,
                        "close sealed fate .closedWhileParked for the primary observer")
 
@@ -4078,6 +4434,7 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         XCTAssertEqual(outcome, .cancelled(.closedBeforeProcessing),
                        "close-first ordering MUST yield exact .cancelled(.closedBeforeProcessing) (no OR)")
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
@@ -4111,7 +4468,6 @@ final class PredictiveViewModelTests: XCTestCase {
         let afterClose = await gate.snapshot()
         XCTAssertTrue(afterClose.closed)
         XCTAssertEqual(afterClose.parkedWaiterCount, 0)
-        XCTAssertEqual(afterClose.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1)
         XCTAssertEqual(afterClose.waiterFateCounts[.closedWhileParked] ?? 0, 1)
 
         // Reviewer finding C: cancel with no pre-arrival handshake.
@@ -4131,6 +4487,7 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         XCTAssertEqual(outcome, .cancelled(.closedBeforeProcessing),
                        "close-first ordering MUST yield exact .cancelled(.closedBeforeProcessing) (no OR)")
+        assertExactNormalDelivery(attempt.suspensionDeliveryForTest)
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
@@ -4275,6 +4632,27 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertTrue(ticket.isResolved,
                       "fabricated observer id must return an already-resolved ticket")
 
+        let maximumIssuedID = AsyncGate.maximumIssuedTokenIDForTest
+        let reservedHighID = maximumIssuedID + 1
+        let zeroObserver = AsyncGate.ObserverToken(id: 0)
+        let zeroWaiter = AsyncGate.WaiterToken(id: 0)
+        let reservedObserver = AsyncGate.ObserverToken(id: reservedHighID)
+        let reservedWaiter = AsyncGate.WaiterToken(id: reservedHighID)
+        let maxObserver = AsyncGate.ObserverToken(id: UInt64.max)
+        let maxWaiter = AsyncGate.WaiterToken(id: UInt64.max)
+        let zeroObserverReceipt = await gate.waitForObserverParked(zeroObserver)
+        let zeroWaiterReceipt = await gate.waitForWaiterParked(zeroWaiter)
+        let highObserverReceipt = await gate.waitForObserverParked(reservedObserver)
+        let highWaiterReceipt = await gate.waitForWaiterParked(reservedWaiter)
+        let maxObserverReceipt = await gate.waitForObserverParked(maxObserver)
+        let maxWaiterReceipt = await gate.waitForWaiterParked(maxWaiter)
+        XCTAssertEqual(zeroObserverReceipt, .unknown)
+        XCTAssertEqual(zeroWaiterReceipt, .unknown)
+        XCTAssertEqual(highObserverReceipt, .unknown)
+        XCTAssertEqual(highWaiterReceipt, .unknown)
+        XCTAssertEqual(maxObserverReceipt, .unknown)
+        XCTAssertEqual(maxWaiterReceipt, .unknown)
+
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.observerParkAckTicketCount, 0)
         XCTAssertEqual(snap.waiterParkAckTicketCount, 0)
@@ -4289,6 +4667,54 @@ final class PredictiveViewModelTests: XCTestCase {
         let ticketRes = await ticket.value()
         XCTAssertEqual(ticketRes, .unknown,
                        "enterObserverParkAck fabricated-id → immediately-resolved .unknown")
+
+        let sequentialGate = AsyncGate()
+        let observer1 = await sequentialGate.registerObserver()
+        let observer2 = await sequentialGate.registerObserver()
+        let waiter1 = await sequentialGate.registerWaiter()
+        let waiter2 = await sequentialGate.registerWaiter()
+        XCTAssertEqual([observer1.id, observer2.id], [1, 2])
+        XCTAssertEqual([waiter1.id, waiter2.id], [1, 2])
+        let sequentialSnapshot = await sequentialGate.snapshot()
+        XCTAssertEqual(sequentialSnapshot.observerFirstIssuableID, 1)
+        XCTAssertEqual(sequentialSnapshot.waiterFirstIssuableID, 1)
+        XCTAssertEqual(sequentialSnapshot.observerLastIssuedID, 2)
+        XCTAssertEqual(sequentialSnapshot.waiterLastIssuedID, 2)
+        XCTAssertEqual(sequentialSnapshot.observerIssuanceExhaustedCount, 0)
+        XCTAssertEqual(sequentialSnapshot.waiterIssuanceExhaustedCount, 0)
+        await sequentialGate.close()
+
+        let exhaustionGate = AsyncGate(
+            observerStartingIDForTest: maximumIssuedID,
+            waiterStartingIDForTest: maximumIssuedID)
+        let finalObserver = await exhaustionGate.tryRegisterObserver()
+        let finalWaiter = await exhaustionGate.tryRegisterWaiter()
+        XCTAssertEqual(finalObserver?.id, maximumIssuedID)
+        XCTAssertEqual(finalWaiter?.id, maximumIssuedID)
+        let exhaustedObserver = await exhaustionGate.tryRegisterObserver()
+        let exhaustedWaiter = await exhaustionGate.tryRegisterWaiter()
+        XCTAssertNil(exhaustedObserver)
+        XCTAssertNil(exhaustedWaiter)
+        await exhaustionGate.close()
+        let exhaustedObserverReceipt = await exhaustionGate.waitForObserverParked(
+            AsyncGate.ObserverToken(id: maximumIssuedID))
+        let exhaustedWaiterReceipt = await exhaustionGate.waitForWaiterParked(
+            AsyncGate.WaiterToken(id: maximumIssuedID))
+        let reservedObserverReceipt = await exhaustionGate.waitForObserverParked(
+            AsyncGate.ObserverToken(id: reservedHighID))
+        let reservedWaiterReceipt = await exhaustionGate.waitForWaiterParked(
+            AsyncGate.WaiterToken(id: UInt64.max))
+        XCTAssertEqual(exhaustedObserverReceipt, .closedOrConsumed,
+                       "the last actually-issued observer remains previously issued")
+        XCTAssertEqual(exhaustedWaiterReceipt, .closedOrConsumed,
+                       "the last actually-issued waiter remains previously issued")
+        XCTAssertEqual(reservedObserverReceipt, .unknown)
+        XCTAssertEqual(reservedWaiterReceipt, .unknown)
+        let exhaustedSnapshot = await exhaustionGate.snapshot()
+        XCTAssertEqual(exhaustedSnapshot.observerLastIssuedID, maximumIssuedID)
+        XCTAssertEqual(exhaustedSnapshot.waiterLastIssuedID, maximumIssuedID)
+        XCTAssertEqual(exhaustedSnapshot.observerIssuanceExhaustedCount, 1)
+        XCTAssertEqual(exhaustedSnapshot.waiterIssuanceExhaustedCount, 1)
     }
 
     // MARK: - Hicks B: bounded post-close state
@@ -4446,6 +4872,8 @@ final class PredictiveViewModelTests: XCTestCase {
                 branchCheckpoint: branchCheckpoint,
                 processingCheckpoint: processingCheckpoint)
         }
+        branchCheckpoint.armRescue(.rescuedMissingPublication)
+        processingCheckpoint.armRescue(.rescuedMissingPublication)
         let branch = await branchCheckpoint.value()
         dupAttempt.releaseSuspensionForTest()
         let processing = await processingCheckpoint.value()
@@ -4454,15 +4882,18 @@ final class PredictiveViewModelTests: XCTestCase {
         // Wait-for graph: close and the caller-owned original suspension
         // rescue both run before the only child join.
         await gate.close()
-        dupAttempt.releaseSuspensionForTest()
         dupAttempt.rescueCancellationOutcomeIfNeeded()
         origAttempt.releaseSuspensionForTest()
         await duplicate.value
         await original.value
         XCTAssertEqual(branch, .duplicateAfterParked)
         XCTAssertEqual(processing, .processed(.processedIgnoredMismatch))
-        XCTAssertEqual(branchCheckpoint.rescueCountForTest, 0)
-        XCTAssertEqual(processingCheckpoint.rescueCountForTest, 0)
+        assertExactNormalDelivery(branchCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(processingCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(dupAttempt.suspensionDeliveryForTest)
+        assertExactNormalDelivery(origAttempt.suspensionDeliveryForTest)
+        XCTAssertEqual(dupAttempt.rescuePublicationInvocationCountForTest, 1)
+        XCTAssertEqual(dupAttempt.rescuePublicationCountForTest, 0)
 
         // SYNCHRONOUS peek: nil = complete-onCancel-removal or
         // state-transition-without-task mutation (no publisher).
@@ -4551,20 +4982,25 @@ final class PredictiveViewModelTests: XCTestCase {
                 branchCheckpoint: branchCheckpoint,
                 processingCheckpoint: processingCheckpoint)
         }
+        branchCheckpoint.armRescue(.rescuedMissingPublication)
+        processingCheckpoint.armRescue(.rescuedMissingPublication)
         let branch = await branchCheckpoint.value()
         dupAttempt.releaseSuspensionForTest()
         let processing = await processingCheckpoint.value()
         await gate.open()
         await gate.close()
-        dupAttempt.releaseSuspensionForTest()
         dupAttempt.rescueCancellationOutcomeIfNeeded()
         origAttempt.releaseSuspensionForTest()
         await duplicate.value
         await original.value
         XCTAssertEqual(branch, .duplicateAfterParked)
         XCTAssertEqual(processing, .processed(.processedIgnoredMismatch))
-        XCTAssertEqual(branchCheckpoint.rescueCountForTest, 0)
-        XCTAssertEqual(processingCheckpoint.rescueCountForTest, 0)
+        assertExactNormalDelivery(branchCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(processingCheckpoint.deliverySnapshotForTest)
+        assertExactNormalDelivery(dupAttempt.suspensionDeliveryForTest)
+        assertExactNormalDelivery(origAttempt.suspensionDeliveryForTest)
+        XCTAssertEqual(dupAttempt.rescuePublicationInvocationCountForTest, 1)
+        XCTAssertEqual(dupAttempt.rescuePublicationCountForTest, 0)
 
         // SYNCHRONOUS peek — see observer variant for full rationale.
         guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
@@ -4651,11 +5087,16 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.completedWaiterCount, 0)
         XCTAssertEqual(snap.observerFateCounts[.signaledWhileParked] ?? 0, iterations,
                        "aggregate: every iteration resumed via signal")
-        XCTAssertEqual(snap.observerResumeCounts[.parkedResumedBySignal] ?? 0, iterations,
-                       "actual continuation resumed exactly \(iterations) times")
         // Unconditional teardown, then drain all signal-resumed tasks.
         await gate.close()
         for t in tasks { await t.value }
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedBySignal] ?? 0, iterations,
+                       "actual continuation resumed exactly \(iterations) times")
+        XCTAssertEqual(final.observerInFlightDelivery.normalObservationCount, iterations)
+        XCTAssertEqual(final.observerInFlightDelivery.rescueInvocationCount, iterations)
+        XCTAssertEqual(final.observerInFlightDelivery.rescueTakeoverCount, 0)
+        XCTAssertEqual(final.observerInFlightDelivery.activeCount, 0)
     }
 
     /// LONG-LIVED opened-waiter gate: after `open()`, subsequent
@@ -4714,10 +5155,15 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertTrue(snap.waiterFates.isEmpty,
                       "open-drained waiters must not retain per-token fates")
         XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, n)
-        XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByOpen] ?? 0, n)
         // Unconditional teardown, then drain all open-resumed tasks.
         await gate.close()
         for t in tasks { await t.value }
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByOpen] ?? 0, n)
+        XCTAssertEqual(final.waiterInFlightDelivery.normalObservationCount, n)
+        XCTAssertEqual(final.waiterInFlightDelivery.rescueInvocationCount, n)
+        XCTAssertEqual(final.waiterInFlightDelivery.rescueTakeoverCount, 0)
+        XCTAssertEqual(final.waiterInFlightDelivery.activeCount, 0)
     }
 
     /// Latch consumption prunes per-token fate atomically.
@@ -5129,12 +5575,205 @@ private enum ConsumerInstallationResult: Sendable, Equatable {
     case rescuedMissingPublication
 }
 
+private enum RecoverableDeliveryOrigin: Sendable, Equatable {
+    case normal
+    case rescue
+}
+
+private struct RecoverableDeliverySnapshot: Sendable, Equatable {
+    let normalRequestCount: Int
+    let normalEnqueueCount: Int
+    let normalObservationCount: Int
+    let rescueInvocationCount: Int
+    let rescueEnqueueCount: Int
+    let rescueTakeoverCount: Int
+    let waiterInstallationCount: Int
+
+    var exactNormalDeliveryObserved: Bool {
+        normalRequestCount == 1
+            && normalEnqueueCount == 1
+            && normalObservationCount == 1
+            && rescueTakeoverCount == 0
+    }
+}
+
+private struct RecoverableDeliveryObservation<Value: Sendable>: Sendable {
+    let value: Value
+    let origin: RecoverableDeliveryOrigin
+}
+
+/// A single-consumer delivery channel with two independently reachable
+/// publishers. Normal publication always gets the first enqueue attempt.
+/// Rescue can be armed before that attempt or invoked after an external claim.
+/// `AsyncStream.Continuation.yield` is idempotent and reports enqueue/drop/
+/// termination, so rescue never double-resumes a checked continuation.
+private final class RecoverableDelivery<Value: Sendable>: @unchecked Sendable {
+    private struct Envelope: Sendable {
+        let value: Value
+        let origin: RecoverableDeliveryOrigin
+    }
+
+    private let lock = NSLock()
+    private let stream: AsyncStream<Envelope>
+    private let continuation: AsyncStream<Envelope>.Continuation
+    private let suppressNormalDeliveryForTest: Bool
+
+    private var normalWasRequested = false
+    private var normalAttemptCompleted = false
+    private var rescueValue: Value?
+    private var observedOrigin: RecoverableDeliveryOrigin?
+    private var normalRequestCount = 0
+    private var normalEnqueueCount = 0
+    private var normalObservationCount = 0
+    private var rescueInvocationCount = 0
+    private var rescueEnqueueCount = 0
+    private var rescueTakeoverCount = 0
+    private var waiterInstallationCount = 0
+
+    init(suppressNormalDeliveryForTest: Bool = false) {
+        let pair = AsyncStream<Envelope>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        stream = pair.stream
+        continuation = pair.continuation
+        self.suppressNormalDeliveryForTest = suppressNormalDeliveryForTest
+    }
+
+    @discardableResult
+    func requestNormal(_ value: Value) -> Bool {
+        lock.lock()
+        guard !normalWasRequested else {
+            lock.unlock()
+            return false
+        }
+        normalWasRequested = true
+        normalRequestCount += 1
+        lock.unlock()
+
+        if !suppressNormalDeliveryForTest {
+            recordYield(value: value, origin: .normal)
+        }
+
+        lock.lock()
+        normalAttemptCompleted = true
+        let armedRescue = observedOrigin == nil ? rescueValue : nil
+        lock.unlock()
+        if let armedRescue {
+            recordYield(value: armedRescue, origin: .rescue)
+        }
+        return true
+    }
+
+    /// Arms rescue without allowing it to overtake a normal publication that
+    /// has not attempted its physical enqueue yet.
+    func armRescue(_ value: Value) {
+        invokeRescue(value, deliveryWasClaimed: false)
+    }
+
+    /// Invokes rescue after an independently observed producer claim.
+    func rescueAfterClaim(_ value: Value) {
+        invokeRescue(value, deliveryWasClaimed: true)
+    }
+
+    func value() async -> RecoverableDeliveryObservation<Value> {
+        installWaiter()
+
+        // AsyncStream terminates an iterator owned directly by a cancelled
+        // task. The short-lived reader is intentionally not stored anywhere:
+        // cancellation remains owned by the surrounding handler, while this
+        // read stays alive long enough to observe that handler's publication.
+        let stream = stream
+        let reader = Task {
+            var iterator = stream.makeAsyncIterator()
+            return await iterator.next()
+        }
+        guard let envelope = await reader.value else {
+            fatalError("recoverable delivery terminated before observation")
+        }
+
+        recordObservation(envelope.origin)
+        continuation.finish()
+        return RecoverableDeliveryObservation(value: envelope.value, origin: envelope.origin)
+    }
+
+    private func installWaiter() {
+        lock.lock()
+        precondition(waiterInstallationCount == 0, "recoverable delivery supports exactly one waiter")
+        waiterInstallationCount = 1
+        lock.unlock()
+    }
+
+    private func recordObservation(_ origin: RecoverableDeliveryOrigin) {
+        lock.lock()
+        precondition(observedOrigin == nil, "recoverable delivery was observed more than once")
+        observedOrigin = origin
+        switch origin {
+        case .normal:
+            normalObservationCount += 1
+        case .rescue:
+            rescueTakeoverCount += 1
+        }
+        lock.unlock()
+    }
+
+    var snapshotForTest: RecoverableDeliverySnapshot {
+        lock.lock(); defer { lock.unlock() }
+        return RecoverableDeliverySnapshot(
+            normalRequestCount: normalRequestCount,
+            normalEnqueueCount: normalEnqueueCount,
+            normalObservationCount: normalObservationCount,
+            rescueInvocationCount: rescueInvocationCount,
+            rescueEnqueueCount: rescueEnqueueCount,
+            rescueTakeoverCount: rescueTakeoverCount,
+            waiterInstallationCount: waiterInstallationCount)
+    }
+
+    private func invokeRescue(_ value: Value, deliveryWasClaimed: Bool) {
+        lock.lock()
+        if rescueValue == nil {
+            rescueValue = value
+            rescueInvocationCount += 1
+        }
+        let selectedValue = rescueValue!
+        let shouldYield = observedOrigin == nil
+            && (normalAttemptCompleted || deliveryWasClaimed)
+        lock.unlock()
+        if shouldYield {
+            recordYield(value: selectedValue, origin: .rescue)
+        }
+    }
+
+    private func recordYield(value: Value, origin: RecoverableDeliveryOrigin) {
+        let result = continuation.yield(Envelope(value: value, origin: origin))
+        lock.lock()
+        switch (origin, result) {
+        case (.normal, .enqueued):
+            normalEnqueueCount += 1
+        case (.rescue, .enqueued):
+            rescueEnqueueCount += 1
+        case (_, .dropped), (_, .terminated):
+            break
+        @unknown default:
+            break
+        }
+        lock.unlock()
+    }
+
+    deinit {
+        continuation.finish()
+    }
+}
+
 private enum ConsumerCleanupResult: Sendable, Equatable {
     case removedAutomatically
     case cancelled
     case resolvedBySource
     case staleIdentity
     case ownerReleased
+}
+
+private enum ConsumerCleanupCause: Sendable {
+    case deinitialized
+    case cancelled
+    case deliveryObserved(RecoverableDeliveryOrigin)
 }
 
 private final class ConsumerCleanupEvidence: @unchecked Sendable {
@@ -5160,15 +5799,21 @@ private final class BufferedConsumer<Value: Sendable>: @unchecked Sendable {
     let cleanupEvidence = ConsumerCleanupEvidence()
 
     private let lock = NSLock()
-    private var result: Value?
-    private var continuation: CheckedContinuation<Value, Never>?
-    private var subscriptionCleanup: (@Sendable (Bool) -> ConsumerCleanupResult)?
+    private let delivery: RecoverableDelivery<Value>
+    private var normalValue: Value?
+    private var observedValue: Value?
+    private var subscriptionCleanup:
+        (@Sendable (ConsumerCleanupCause) -> ConsumerCleanupResult)?
     private var resolutionCallback: (@Sendable (Value) -> Void)?
-    private var rescueCount = 0
     private var installationCount = 0
 
+    init(suppressNormalDeliveryForTest: Bool = false) {
+        delivery = RecoverableDelivery(
+            suppressNormalDeliveryForTest: suppressNormalDeliveryForTest)
+    }
+
     fileprivate func attachSubscriptionCleanup(
-        _ cleanup: @escaping @Sendable (Bool) -> ConsumerCleanupResult
+        _ cleanup: @escaping @Sendable (ConsumerCleanupCause) -> ConsumerCleanupResult
     ) {
         lock.lock()
         subscriptionCleanup = cleanup
@@ -5176,96 +5821,77 @@ private final class BufferedConsumer<Value: Sendable>: @unchecked Sendable {
     }
 
     fileprivate func resolveFromSource(_ value: Value) {
-        var callback: (@Sendable (Value) -> Void)?
-        var didResolve = false
         lock.lock()
-        if result == nil {
-            result = value
-            subscriptionCleanup = nil
-            callback = resolutionCallback
-            didResolve = true
+        guard normalValue == nil else {
+            lock.unlock()
+            return
         }
+        normalValue = value
         lock.unlock()
-        guard didResolve else { return }
-
-        cleanupEvidence.resolve(.resolvedBySource)
-        callback?(value)
-        _ = deliverBufferedResultIfPending()
+        delivery.armRescue(value)
+        _ = delivery.requestNormal(value)
     }
 
     func resolve(_ value: Value) {
-        var callback: (@Sendable (Value) -> Void)?
-        var didResolve = false
         lock.lock()
-        if result == nil {
-            result = value
-            callback = resolutionCallback
-            didResolve = true
+        guard normalValue == nil else {
+            lock.unlock()
+            return
         }
+        normalValue = value
         lock.unlock()
-        guard didResolve else { return }
-
-        callback?(value)
-        _ = deliverBufferedResultIfPending()
+        delivery.armRescue(value)
+        _ = delivery.requestNormal(value)
     }
 
-    func rescue(_ value: Value) {
-        var callback: (@Sendable (Value) -> Void)?
-        var installedFallback = false
-        lock.lock()
-        if result == nil {
-            result = value
-            callback = resolutionCallback
-            installedFallback = true
-        }
-        lock.unlock()
+    /// Arms a bounded fallback before the producer has claimed publication.
+    func armRescue(_ value: Value) {
+        delivery.armRescue(value)
+    }
 
-        callback?(value)
-        let resumedPendingContinuation = deliverBufferedResultIfPending()
-        if installedFallback || resumedPendingContinuation {
-            lock.lock()
-            rescueCount += 1
-            lock.unlock()
-        }
+    /// Invokes fallback after the caller has independently observed the
+    /// producer claim or terminal transition.
+    func rescue(_ value: Value) {
+        delivery.rescueAfterClaim(value)
     }
 
     func value(
         installationAck: BufferedConsumer<ConsumerInstallationResult>? = nil,
         cancellationValue: Value? = nil
     ) async -> Value {
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                var immediate: Value?
-                var installationResult = ConsumerInstallationResult.installed
-                lock.lock()
-                if let result {
-                    immediate = result
-                    installationResult = .completedFromBuffer
-                } else {
-                    precondition(continuation == nil, "a buffered consumer supports exactly one waiter")
-                    continuation = c
-                    installationCount += 1
-                }
-                lock.unlock()
+        let installationResult = recordWaiterInstallation()
+        installationAck?.armRescue(.rescuedMissingPublication)
+        installationAck?.resolve(installationResult)
 
-                installationAck?.resolve(installationResult)
-                installationAck?.rescue(.rescuedMissingPublication)
-                if let immediate {
-                    c.resume(returning: immediate)
-                }
-            }
+        let observation = await withTaskCancellationHandler {
+            await delivery.value()
         } onCancel: {
             if let cancellationValue {
                 self.cancel(with: cancellationValue)
             }
         }
+        finishObservation(observation)
+        return observation.value
+    }
+
+    private func recordWaiterInstallation() -> ConsumerInstallationResult {
+        lock.lock()
+        let result: ConsumerInstallationResult
+        if normalValue == nil {
+            installationCount += 1
+            result = .installed
+        } else {
+            result = .completedFromBuffer
+        }
+        lock.unlock()
+        return result
     }
 
     func setResolutionCallback(_ callback: @escaping @Sendable (Value) -> Void) {
         var immediate: Value?
         lock.lock()
-        if let result {
-            immediate = result
+        if let observedValue {
+            immediate = observedValue
         } else {
             precondition(resolutionCallback == nil, "a buffered consumer supports one resolution callback")
             resolutionCallback = callback
@@ -5277,36 +5903,49 @@ private final class BufferedConsumer<Value: Sendable>: @unchecked Sendable {
     }
 
     private func cancel(with value: Value) {
-        var cleanup: (@Sendable (Bool) -> ConsumerCleanupResult)?
+        var cleanup: (@Sendable (ConsumerCleanupCause) -> ConsumerCleanupResult)?
         lock.lock()
         cleanup = subscriptionCleanup
         subscriptionCleanup = nil
         lock.unlock()
-        cleanupEvidence.resolve(cleanup?(true) ?? .ownerReleased)
-        rescue(value)
+        cleanupEvidence.resolve(cleanup?(.cancelled) ?? .ownerReleased)
+        delivery.rescueAfterClaim(value)
     }
 
-    @discardableResult
-    private func deliverBufferedResultIfPending() -> Bool {
-        var continuationToResume: CheckedContinuation<Value, Never>?
-        var value: Value?
+    private func finishObservation(
+        _ observation: RecoverableDeliveryObservation<Value>
+    ) {
+        var cleanup: (@Sendable (ConsumerCleanupCause) -> ConsumerCleanupResult)?
+        var callback: (@Sendable (Value) -> Void)?
         lock.lock()
-        if let result, let continuation {
-            value = result
-            continuationToResume = continuation
-            self.continuation = nil
+        if observedValue == nil {
+            observedValue = observation.value
+            cleanup = subscriptionCleanup
+            subscriptionCleanup = nil
+            callback = resolutionCallback
+            resolutionCallback = nil
         }
         lock.unlock()
-        if let continuationToResume, let value {
-            continuationToResume.resume(returning: value)
-            return true
+        if let cleanup {
+            cleanupEvidence.resolve(cleanup(.deliveryObserved(observation.origin)))
         }
-        return false
+        callback?(observation.value)
+    }
+
+    var deliverySnapshotForTest: RecoverableDeliverySnapshot {
+        delivery.snapshotForTest
+    }
+
+    var rescueInvocationCountForTest: Int {
+        delivery.snapshotForTest.rescueInvocationCount
+    }
+
+    var rescueTakeoverCountForTest: Int {
+        delivery.snapshotForTest.rescueTakeoverCount
     }
 
     var rescueCountForTest: Int {
-        lock.lock(); defer { lock.unlock() }
-        return rescueCount
+        rescueTakeoverCountForTest
     }
 
     var installationCountForTest: Int {
@@ -5315,17 +5954,18 @@ private final class BufferedConsumer<Value: Sendable>: @unchecked Sendable {
     }
 
     var hasPendingContinuationForTest: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return continuation != nil
+        let snapshot = delivery.snapshotForTest
+        return snapshot.waiterInstallationCount == 1
+            && snapshot.normalObservationCount + snapshot.rescueTakeoverCount == 0
     }
 
     deinit {
-        var cleanup: (@Sendable (Bool) -> ConsumerCleanupResult)?
+        var cleanup: (@Sendable (ConsumerCleanupCause) -> ConsumerCleanupResult)?
         lock.lock()
         cleanup = subscriptionCleanup
         subscriptionCleanup = nil
         lock.unlock()
-        cleanupEvidence.resolve(cleanup?(false) ?? .ownerReleased)
+        cleanupEvidence.resolve(cleanup?(.deinitialized) ?? .ownerReleased)
     }
 }
 
@@ -5343,23 +5983,38 @@ private final class BufferedFanoutSource<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var result: Value?
     private var consumers: [UUID: WeakConsumerBox<Value>] = [:]
+    private var normalFanoutAttemptCompleted = false
+    private var rescueValue: Value?
+    private var rescueInvocationCount = 0
+    private var normalObservationCount = 0
+    private var rescueTakeoverCount = 0
 
-    func subscribe() -> BufferedConsumer<Value> {
-        let consumer = BufferedConsumer<Value>()
+    func subscribe(
+        suppressNormalDeliveryForTest: Bool = false
+    ) -> BufferedConsumer<Value> {
+        let consumer = BufferedConsumer<Value>(
+            suppressNormalDeliveryForTest: suppressNormalDeliveryForTest)
         var immediate: Value?
+        var armedRescue: Value?
         lock.lock()
         if let result {
             immediate = result
+            if normalFanoutAttemptCompleted {
+                armedRescue = rescueValue
+            }
         } else {
             let identity = consumer.identity
-            consumer.attachSubscriptionCleanup { [weak self] cancelled in
-                self?.remove(identity: identity, cancelled: cancelled) ?? .ownerReleased
+            consumer.attachSubscriptionCleanup { [weak self] cause in
+                self?.remove(identity: identity, cause: cause) ?? .ownerReleased
             }
             consumers[identity] = WeakConsumerBox(consumer: consumer)
         }
         lock.unlock()
         if let immediate {
             consumer.resolveFromSource(immediate)
+            if let armedRescue {
+                consumer.rescue(armedRescue)
+            }
         }
         return consumer
     }
@@ -5373,23 +6028,76 @@ private final class BufferedFanoutSource<Value: Sendable>: @unchecked Sendable {
             return false
         }
         result = value
+        normalFanoutAttemptCompleted = false
+        if rescueValue == nil {
+            rescueValue = value
+            rescueInvocationCount += 1
+        }
         consumersToResolve = consumers.values.compactMap(\.ref)
-        consumers.removeAll()
         lock.unlock()
         for consumer in consumersToResolve {
+            consumer.armRescue(value)
             consumer.resolveFromSource(value)
+        }
+
+        lock.lock()
+        normalFanoutAttemptCompleted = true
+        let armedRescue = rescueValue
+        let consumersToRescue = armedRescue == nil
+            ? []
+            : consumers.values.compactMap(\.ref)
+        lock.unlock()
+        if let armedRescue {
+            for consumer in consumersToRescue {
+                consumer.rescue(armedRescue)
+            }
         }
         return true
     }
 
-    private func remove(identity: UUID, cancelled: Bool) -> ConsumerCleanupResult {
+    func rescue(_ value: Value) {
+        lock.lock()
+        if rescueValue == nil {
+            rescueValue = value
+            rescueInvocationCount += 1
+        }
+        let selectedValue = rescueValue!
+        let shouldDeliver = result != nil && normalFanoutAttemptCompleted
+        let consumersToRescue = shouldDeliver
+            ? consumers.values.compactMap(\.ref)
+            : []
+        lock.unlock()
+        for consumer in consumersToRescue {
+            consumer.rescue(selectedValue)
+        }
+    }
+
+    private func remove(
+        identity: UUID,
+        cause: ConsumerCleanupCause
+    ) -> ConsumerCleanupResult {
         lock.lock()
         guard consumers.removeValue(forKey: identity) != nil else {
             lock.unlock()
             return .staleIdentity
         }
+        let result: ConsumerCleanupResult
+        switch cause {
+        case .deinitialized:
+            result = .removedAutomatically
+        case .cancelled:
+            result = .cancelled
+        case .deliveryObserved(let origin):
+            result = .resolvedBySource
+            switch origin {
+            case .normal:
+                normalObservationCount += 1
+            case .rescue:
+                rescueTakeoverCount += 1
+            }
+        }
         lock.unlock()
-        return cancelled ? .cancelled : .removedAutomatically
+        return result
     }
 
     var subscriberCountForTest: Int {
@@ -5405,6 +6113,21 @@ private final class BufferedFanoutSource<Value: Sendable>: @unchecked Sendable {
     var resultForTest: Value? {
         lock.lock(); defer { lock.unlock() }
         return result
+    }
+
+    var rescueInvocationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return rescueInvocationCount
+    }
+
+    var normalObservationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return normalObservationCount
+    }
+
+    var rescueTakeoverCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return rescueTakeoverCount
     }
 
     func trySubscriberCountsForTest() -> (raw: Int, live: Int)? {
@@ -5476,6 +6199,164 @@ private enum AwaitSuspensionReleaseSite: Sendable, Equatable {
     case testRescue
 }
 
+private struct AwaitSuspensionDeliveryRequest: Sendable {
+    let observedSite: AwaitSuspensionReleaseSite
+    let requestedBy: AwaitSuspensionReleaseSite
+    let onNormalObservation: @Sendable () -> Void
+}
+
+private final class AwaitSuspensionChannel: @unchecked Sendable {
+    private let lock = NSLock()
+    private let delivery: RecoverableDelivery<AwaitSuspensionDeliveryRequest>
+    private var waiterInstalled = false
+    private var releaseRequestedBy: AwaitSuspensionReleaseSite?
+    private var observationCallback:
+        (@Sendable (RecoverableDeliveryOrigin) -> Void)?
+
+    init(suppressNormalDeliveryForTest: Bool = false) {
+        delivery = RecoverableDelivery(
+            suppressNormalDeliveryForTest: suppressNormalDeliveryForTest)
+    }
+
+    func installWaiter() {
+        lock.lock()
+        precondition(!waiterInstalled, "an await attempt supports exactly one suspension")
+        waiterInstalled = true
+        lock.unlock()
+    }
+
+    @discardableResult
+    func requestRelease(
+        at site: AwaitSuspensionReleaseSite,
+        onClaim: @escaping @Sendable () -> Void,
+        onNormalObservation: @escaping @Sendable () -> Void,
+        onObservation: @escaping @Sendable (RecoverableDeliveryOrigin) -> Void
+    ) -> Bool {
+        lock.lock()
+        guard releaseRequestedBy == nil else {
+            lock.unlock()
+            return false
+        }
+        releaseRequestedBy = site
+        observationCallback = onObservation
+        let observedSite: AwaitSuspensionReleaseSite =
+            waiterInstalled ? site : .installAfterPriorRelease
+        lock.unlock()
+        onClaim()
+        return delivery.requestNormal(AwaitSuspensionDeliveryRequest(
+            observedSite: observedSite,
+            requestedBy: site,
+            onNormalObservation: onNormalObservation))
+    }
+
+    func wait(
+        recordingWith recorder: AttemptLifecycleRecorder
+    ) async -> RecoverableDeliveryOrigin {
+        let observation = await delivery.value()
+        if observation.origin == .normal {
+            recorder.record(.suspensionResumed(
+                site: observation.value.observedSite,
+                requestedBy: observation.value.requestedBy))
+            observation.value.onNormalObservation()
+        }
+        takeObservationCallback()?(observation.origin)
+        return observation.origin
+    }
+
+    func invokeRescue() {
+        delivery.armRescue(AwaitSuspensionDeliveryRequest(
+            observedSite: .testRescue,
+            requestedBy: .testRescue,
+            onNormalObservation: {}))
+    }
+
+    var snapshotForTest: RecoverableDeliverySnapshot {
+        delivery.snapshotForTest
+    }
+
+    private func takeObservationCallback()
+        -> (@Sendable (RecoverableDeliveryOrigin) -> Void)?
+    {
+        lock.lock()
+        let callback = observationCallback
+        observationCallback = nil
+        lock.unlock()
+        return callback
+    }
+}
+
+private final class GateResumeEvidence<Site: Sendable & Hashable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [Site: Int] = [:]
+
+    func record(_ site: Site) {
+        lock.lock()
+        counts[site, default: 0] += 1
+        lock.unlock()
+    }
+
+    var countsForTest: [Site: Int] {
+        lock.lock(); defer { lock.unlock() }
+        return counts
+    }
+}
+
+private struct InFlightDeliverySnapshot: Sendable, Equatable {
+    let activeCount: Int
+    let requestCount: Int
+    let rescueInvocationCount: Int
+    let normalObservationCount: Int
+    let rescueTakeoverCount: Int
+}
+
+private final class InFlightDeliveryRegistry<Attempt: AnyObject>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var attempts: [UUID: Attempt] = [:]
+    private var requestCount = 0
+    private var rescueInvocationCount = 0
+    private var normalObservationCount = 0
+    private var rescueTakeoverCount = 0
+
+    func insert(
+        _ attempt: Attempt,
+        id: UUID,
+        rescueWasInvoked: Bool
+    ) {
+        lock.lock()
+        precondition(attempts[id] == nil, "attempt delivery registered twice")
+        attempts[id] = attempt
+        requestCount += 1
+        if rescueWasInvoked {
+            rescueInvocationCount += 1
+        }
+        lock.unlock()
+    }
+
+    func observe(id: UUID, origin: RecoverableDeliveryOrigin) {
+        lock.lock()
+        precondition(
+            attempts.removeValue(forKey: id) != nil,
+            "unregistered attempt delivery observed")
+        switch origin {
+        case .normal:
+            normalObservationCount += 1
+        case .rescue:
+            rescueTakeoverCount += 1
+        }
+        lock.unlock()
+    }
+
+    var snapshotForTest: InFlightDeliverySnapshot {
+        lock.lock(); defer { lock.unlock() }
+        return InFlightDeliverySnapshot(
+            activeCount: attempts.count,
+            requestCount: requestCount,
+            rescueInvocationCount: rescueInvocationCount,
+            normalObservationCount: normalObservationCount,
+            rescueTakeoverCount: rescueTakeoverCount)
+    }
+}
+
 private enum AttemptLifecyclePhase: Sendable, Equatable {
     case suspensionResumed(
         site: AwaitSuspensionReleaseSite,
@@ -5498,8 +6379,9 @@ private final class AttemptLifecycleRecorder: @unchecked Sendable {
     @discardableResult
     func record(_ phase: AttemptLifecyclePhase) -> AttemptLifecycleEvent {
         lock.lock()
+        precondition(nextID < UInt64.max, "attempt lifecycle event identity exhausted")
         let event = AttemptLifecycleEvent(id: nextID, phase: phase)
-        nextID &+= 1
+        nextID += 1
         events.append(event)
         lock.unlock()
         return event
@@ -5574,9 +6456,6 @@ private final class TicketResolutionEndpoint<Value: Sendable>: @unchecked Sendab
     let cleanupEvidence = TicketCleanupEvidence()
     let source = BufferedFanoutSource<Value>()
 
-    private let lock = NSLock()
-    private var rescueCount = 0
-
     @discardableResult
     func resolve(_ value: Value, cleanupResult: TicketCleanupResult) -> Bool {
         guard source.resolve(value) else { return false }
@@ -5585,15 +6464,23 @@ private final class TicketResolutionEndpoint<Value: Sendable>: @unchecked Sendab
     }
 
     func rescue(_ value: Value) {
-        guard source.resolve(value) else { return }
-        lock.lock()
-        rescueCount += 1
-        lock.unlock()
+        source.rescue(value)
+    }
+
+    var rescueInvocationCountForTest: Int {
+        source.rescueInvocationCountForTest
+    }
+
+    var normalObservationCountForTest: Int {
+        source.normalObservationCountForTest
+    }
+
+    var rescueTakeoverCountForTest: Int {
+        source.rescueTakeoverCountForTest
     }
 
     var rescueCountForTest: Int {
-        lock.lock(); defer { lock.unlock() }
-        return rescueCount
+        rescueTakeoverCountForTest
     }
 }
 
@@ -5623,58 +6510,49 @@ final class ObserverAwaitAttempt: @unchecked Sendable {
     private let lock = NSLock()
     private let lifecycleRecorder = AttemptLifecycleRecorder()
     private let outcomeSource = BufferedFanoutSource<Outcome>()
+    private let suspensionChannel: AwaitSuspensionChannel
     private var state: State = .active
     private var outcomeValue: Outcome?
-    private var suspension: CheckedContinuation<Void, Never>?
-    private var releaseRequestedBy: AwaitSuspensionReleaseSite?
-    private var suspensionWasResumed = false
     private var hopFingerprint: HopFingerprint?
     private var cancelHandlerInvocationCount = 0
     private var normalPublicationCount = 0
+    private var rescuePublicationInvocationCount = 0
     private var rescuePublicationCount = 0
 
-    @discardableResult
-    fileprivate func installSuspension(_ continuation: CheckedContinuation<Void, Never>) -> Bool {
-        var requestedBy: AwaitSuspensionReleaseSite?
-        lock.lock()
-        precondition(suspension == nil, "an await attempt supports one suspension")
-        if let releaseRequestedBy, !suspensionWasResumed {
-            suspensionWasResumed = true
-            requestedBy = releaseRequestedBy
-        } else {
-            suspension = continuation
-        }
-        lock.unlock()
-        guard let requestedBy else { return false }
-        lifecycleRecorder.record(.suspensionResumed(
-            site: .installAfterPriorRelease,
-            requestedBy: requestedBy))
-        continuation.resume()
-        return true
+    init(suppressNormalSuspensionDeliveryForTest: Bool = false) {
+        suspensionChannel = AwaitSuspensionChannel(
+            suppressNormalDeliveryForTest: suppressNormalSuspensionDeliveryForTest)
+    }
+
+    fileprivate func prepareSuspensionWait() {
+        suspensionChannel.installWaiter()
     }
 
     @discardableResult
-    fileprivate func releaseSuspension(at site: AwaitSuspensionReleaseSite) -> Bool {
-        var continuationToResume: CheckedContinuation<Void, Never>?
-        lock.lock()
-        if releaseRequestedBy == nil {
-            releaseRequestedBy = site
-        }
-        if !suspensionWasResumed, let suspension {
-            suspensionWasResumed = true
-            continuationToResume = suspension
-            self.suspension = nil
-        }
-        lock.unlock()
-        guard let continuationToResume else { return false }
-        lifecycleRecorder.record(.suspensionResumed(site: site, requestedBy: site))
-        continuationToResume.resume()
-        return true
+    fileprivate func awaitSuspensionDelivery() async -> RecoverableDeliveryOrigin {
+        await suspensionChannel.wait(recordingWith: lifecycleRecorder)
     }
 
     @discardableResult
-    fileprivate func releaseSuspensionForTest() -> Bool {
-        releaseSuspension(at: .testRescue)
+    fileprivate func releaseSuspension(
+        at site: AwaitSuspensionReleaseSite,
+        onClaim: @escaping @Sendable () -> Void = {},
+        onNormalObservation: @escaping @Sendable () -> Void = {},
+        onObservation: @escaping @Sendable (RecoverableDeliveryOrigin) -> Void = { _ in }
+    ) -> Bool {
+        suspensionChannel.requestRelease(
+            at: site,
+            onClaim: onClaim,
+            onNormalObservation: onNormalObservation,
+            onObservation: onObservation)
+    }
+
+    fileprivate func invokeSuspensionRescueForTest() {
+        suspensionChannel.invokeRescue()
+    }
+
+    fileprivate func releaseSuspensionForTest() {
+        invokeSuspensionRescueForTest()
     }
 
     fileprivate func beginCancellationIfActive(
@@ -5691,7 +6569,6 @@ final class ObserverAwaitAttempt: @unchecked Sendable {
         }
         state = .cancellationInitiated
         lock.unlock()
-        _ = releaseSuspension(at: .cancellationHandler)
         return true
     }
 
@@ -5743,6 +6620,7 @@ final class ObserverAwaitAttempt: @unchecked Sendable {
         let outcome = Outcome.cancelled(receipt)
         var didPublish = false
         lock.lock()
+        rescuePublicationInvocationCount += 1
         if state == .cancellationInitiated, outcomeValue == nil {
             outcomeValue = outcome
             rescuePublicationCount += 1
@@ -5797,6 +6675,11 @@ final class ObserverAwaitAttempt: @unchecked Sendable {
         return rescuePublicationCount
     }
 
+    fileprivate var rescuePublicationInvocationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return rescuePublicationInvocationCount
+    }
+
     fileprivate var outcomeSubscriberCountForTest: Int {
         outcomeSource.subscriberCountForTest
     }
@@ -5807,6 +6690,10 @@ final class ObserverAwaitAttempt: @unchecked Sendable {
 
     fileprivate var lifecycleEventsForTest: [AttemptLifecycleEvent] {
         lifecycleRecorder.eventsForTest
+    }
+
+    fileprivate var suspensionDeliveryForTest: RecoverableDeliverySnapshot {
+        suspensionChannel.snapshotForTest
     }
 
     fileprivate var cancellationReleaseSucceededForTest: Bool {
@@ -5863,58 +6750,49 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
     private let lock = NSLock()
     private let lifecycleRecorder = AttemptLifecycleRecorder()
     private let outcomeSource = BufferedFanoutSource<Outcome>()
+    private let suspensionChannel: AwaitSuspensionChannel
     private var state: State = .active
     private var outcomeValue: Outcome?
-    private var suspension: CheckedContinuation<Void, Never>?
-    private var releaseRequestedBy: AwaitSuspensionReleaseSite?
-    private var suspensionWasResumed = false
     private var hopFingerprint: HopFingerprint?
     private var cancelHandlerInvocationCount = 0
     private var normalPublicationCount = 0
+    private var rescuePublicationInvocationCount = 0
     private var rescuePublicationCount = 0
 
-    @discardableResult
-    fileprivate func installSuspension(_ continuation: CheckedContinuation<Void, Never>) -> Bool {
-        var requestedBy: AwaitSuspensionReleaseSite?
-        lock.lock()
-        precondition(suspension == nil, "an await attempt supports one suspension")
-        if let releaseRequestedBy, !suspensionWasResumed {
-            suspensionWasResumed = true
-            requestedBy = releaseRequestedBy
-        } else {
-            suspension = continuation
-        }
-        lock.unlock()
-        guard let requestedBy else { return false }
-        lifecycleRecorder.record(.suspensionResumed(
-            site: .installAfterPriorRelease,
-            requestedBy: requestedBy))
-        continuation.resume()
-        return true
+    init(suppressNormalSuspensionDeliveryForTest: Bool = false) {
+        suspensionChannel = AwaitSuspensionChannel(
+            suppressNormalDeliveryForTest: suppressNormalSuspensionDeliveryForTest)
+    }
+
+    fileprivate func prepareSuspensionWait() {
+        suspensionChannel.installWaiter()
     }
 
     @discardableResult
-    fileprivate func releaseSuspension(at site: AwaitSuspensionReleaseSite) -> Bool {
-        var continuationToResume: CheckedContinuation<Void, Never>?
-        lock.lock()
-        if releaseRequestedBy == nil {
-            releaseRequestedBy = site
-        }
-        if !suspensionWasResumed, let suspension {
-            suspensionWasResumed = true
-            continuationToResume = suspension
-            self.suspension = nil
-        }
-        lock.unlock()
-        guard let continuationToResume else { return false }
-        lifecycleRecorder.record(.suspensionResumed(site: site, requestedBy: site))
-        continuationToResume.resume()
-        return true
+    fileprivate func awaitSuspensionDelivery() async -> RecoverableDeliveryOrigin {
+        await suspensionChannel.wait(recordingWith: lifecycleRecorder)
     }
 
     @discardableResult
-    fileprivate func releaseSuspensionForTest() -> Bool {
-        releaseSuspension(at: .testRescue)
+    fileprivate func releaseSuspension(
+        at site: AwaitSuspensionReleaseSite,
+        onClaim: @escaping @Sendable () -> Void = {},
+        onNormalObservation: @escaping @Sendable () -> Void = {},
+        onObservation: @escaping @Sendable (RecoverableDeliveryOrigin) -> Void = { _ in }
+    ) -> Bool {
+        suspensionChannel.requestRelease(
+            at: site,
+            onClaim: onClaim,
+            onNormalObservation: onNormalObservation,
+            onObservation: onObservation)
+    }
+
+    fileprivate func invokeSuspensionRescueForTest() {
+        suspensionChannel.invokeRescue()
+    }
+
+    fileprivate func releaseSuspensionForTest() {
+        invokeSuspensionRescueForTest()
     }
 
     fileprivate func beginCancellationIfActive(
@@ -5931,7 +6809,6 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
         }
         state = .cancellationInitiated
         lock.unlock()
-        _ = releaseSuspension(at: .cancellationHandler)
         return true
     }
 
@@ -5983,6 +6860,7 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
         let outcome = Outcome.cancelled(receipt)
         var didPublish = false
         lock.lock()
+        rescuePublicationInvocationCount += 1
         if state == .cancellationInitiated, outcomeValue == nil {
             outcomeValue = outcome
             rescuePublicationCount += 1
@@ -6037,6 +6915,11 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
         return rescuePublicationCount
     }
 
+    fileprivate var rescuePublicationInvocationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return rescuePublicationInvocationCount
+    }
+
     fileprivate var outcomeSubscriberCountForTest: Int {
         outcomeSource.subscriberCountForTest
     }
@@ -6047,6 +6930,10 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
 
     fileprivate var lifecycleEventsForTest: [AttemptLifecycleEvent] {
         lifecycleRecorder.eventsForTest
+    }
+
+    fileprivate var suspensionDeliveryForTest: RecoverableDeliverySnapshot {
+        suspensionChannel.snapshotForTest
     }
 
     fileprivate var cancellationReleaseSucceededForTest: Bool {
@@ -6106,8 +6993,11 @@ final class ObserverParkAckTicket: @unchecked Sendable {
         _ = endpoint.resolve(value, cleanupResult: .resolvedByGate)
     }
 
-    fileprivate func subscribeForValue() -> BufferedConsumer<AsyncGate.ParkAckResult> {
-        endpoint.source.subscribe()
+    fileprivate func subscribeForValue(
+        suppressNormalDeliveryForTest: Bool = false
+    ) -> BufferedConsumer<AsyncGate.ParkAckResult> {
+        endpoint.source.subscribe(
+            suppressNormalDeliveryForTest: suppressNormalDeliveryForTest)
     }
 
     fileprivate func value() async -> AsyncGate.ParkAckResult {
@@ -6136,6 +7026,18 @@ final class ObserverParkAckTicket: @unchecked Sendable {
 
     fileprivate var rescueCountForTest: Int {
         endpoint.rescueCountForTest
+    }
+
+    fileprivate var rescueInvocationCountForTest: Int {
+        endpoint.rescueInvocationCountForTest
+    }
+
+    fileprivate var normalObservationCountForTest: Int {
+        endpoint.normalObservationCountForTest
+    }
+
+    fileprivate var rescueTakeoverCountForTest: Int {
+        endpoint.rescueTakeoverCountForTest
     }
 
     deinit {
@@ -6175,8 +7077,11 @@ final class WaiterParkAckTicket: @unchecked Sendable {
         _ = endpoint.resolve(value, cleanupResult: .resolvedByGate)
     }
 
-    fileprivate func subscribeForValue() -> BufferedConsumer<AsyncGate.ParkAckResult> {
-        endpoint.source.subscribe()
+    fileprivate func subscribeForValue(
+        suppressNormalDeliveryForTest: Bool = false
+    ) -> BufferedConsumer<AsyncGate.ParkAckResult> {
+        endpoint.source.subscribe(
+            suppressNormalDeliveryForTest: suppressNormalDeliveryForTest)
     }
 
     fileprivate func value() async -> AsyncGate.ParkAckResult {
@@ -6205,6 +7110,18 @@ final class WaiterParkAckTicket: @unchecked Sendable {
 
     fileprivate var rescueCountForTest: Int {
         endpoint.rescueCountForTest
+    }
+
+    fileprivate var rescueInvocationCountForTest: Int {
+        endpoint.rescueInvocationCountForTest
+    }
+
+    fileprivate var normalObservationCountForTest: Int {
+        endpoint.normalObservationCountForTest
+    }
+
+    fileprivate var rescueTakeoverCountForTest: Int {
+        endpoint.rescueTakeoverCountForTest
     }
 
     deinit {
@@ -6468,6 +7385,18 @@ private actor AsyncGate {
         let waiterParkAckTicketCount: Int
         let observerParkAckTicketBackingKeyCount: Int
         let waiterParkAckTicketBackingKeyCount: Int
+
+        // Exact bounded issuance ranges. `nil` last-issued means this kind
+        // has not emitted a token. Exhaustion is aggregate-only.
+        let observerFirstIssuableID: UInt64
+        let waiterFirstIssuableID: UInt64
+        let observerLastIssuedID: UInt64?
+        let waiterLastIssuedID: UInt64?
+        let observerIssuanceExhaustedCount: Int
+        let waiterIssuanceExhaustedCount: Int
+
+        let observerInFlightDelivery: InFlightDeliverySnapshot
+        let waiterInFlightDelivery: InFlightDeliverySnapshot
     }
 
     // MARK: Debug metrics (test-only)
@@ -6507,16 +7436,18 @@ private actor AsyncGate {
     }
 
     // MARK: State
-    // Hicks addendum Point 5: kind-correct issuance high-water counters.
-    // Prior single `nextID` allowed cross-kind fabricated-token
-    // misclassification (an ObserverToken(id:) with an id only ever
-    // issued to a waiter would satisfy `id < nextID` and be classified
-    // as `.closedOrConsumed` / previously-issued observer). Separate
-    // per-kind gap-free counters make `token.id >= nextObserverID` /
-    // `token.id >= nextWaiterID` an EXACT non-issuance predicate for
-    // that kind without any per-token set.
-    private var nextObserverID: UInt64 = 1
-    private var nextWaiterID: UInt64 = 1
+    // Reserve Int.max and all larger UInt64 values as never-issued. This
+    // guarantees nonwrapping arithmetic and keeps zero/max fabricated tokens
+    // outside the exact compact issued ranges.
+    private static let maximumIssuedTokenID = UInt64(Int.max) - 1
+    private let observerFirstIssuableID: UInt64
+    private let waiterFirstIssuableID: UInt64
+    private var nextObserverID: UInt64?
+    private var nextWaiterID: UInt64?
+    private var observerLastIssuedID: UInt64?
+    private var waiterLastIssuedID: UInt64?
+    private var observerIssuanceExhaustedCount = 0
+    private var waiterIssuanceExhaustedCount = 0
     // Hicks H5 / addendum: non-reusing per-await identity. UUID guarantees
     // owner/receipt maps cannot alias a prior/wrapped attempt.
     private var parkedObservers: [UInt64: (awaitID: UUID, attempt: ObserverAwaitAttempt)] = [:]
@@ -6546,8 +7477,8 @@ private actor AsyncGate {
     // H3 + Hicks A: park-ACK queues now yield an explicit `ParkAckResult`
     // so callers can distinguish parked / terminal / unknown / closed
     // without inference. Queue only for active-registered tokens.
-    private var observerParkAcks: [UInt64: [CheckedContinuation<ParkAckResult, Never>]] = [:]
-    private var waiterParkAcks: [UInt64: [CheckedContinuation<ParkAckResult, Never>]] = [:]
+    private var observerParkAcks: [UInt64: [BufferedConsumer<ParkAckResult>]] = [:]
+    private var waiterParkAcks: [UInt64: [BufferedConsumer<ParkAckResult>]] = [:]
 
     private nonisolated let observerTicketRegistry =
         TicketRegistry<ObserverParkAckTicket, TicketResolutionEndpoint<ParkAckResult>>()
@@ -6559,13 +7490,41 @@ private actor AsyncGate {
     private var observerPostCloseRegistrationCount = 0
     private var waiterPostCloseRegistrationCount = 0
 
-    // Hicks C: per-site actual-resume counters — one increment per real
-    // `CheckedContinuation.resume()`. Distinct from fateCounts (seals).
-    private var observerResumeCounts: [ObserverResumeSite: Int] = [:]
-    private var waiterResumeCounts: [WaiterResumeSite: Int] = [:]
+    // Per-site delivery-observation counters. A request does not count:
+    // only the resumed waiter ACK records success.
+    private nonisolated let observerResumeEvidence =
+        GateResumeEvidence<ObserverResumeSite>()
+    private nonisolated let waiterResumeEvidence =
+        GateResumeEvidence<WaiterResumeSite>()
+    private nonisolated let observerInFlightDelivery =
+        InFlightDeliveryRegistry<ObserverAwaitAttempt>()
+    private nonisolated let waiterInFlightDelivery =
+        InFlightDeliveryRegistry<WaiterAwaitAttempt>()
 
     private var observerCancelInvocationCount = 0
     private var waiterCancelInvocationCount = 0
+
+    init(
+        observerStartingIDForTest: UInt64 = 1,
+        waiterStartingIDForTest: UInt64 = 1
+    ) {
+        precondition(
+            observerStartingIDForTest > 0
+                && observerStartingIDForTest <= Self.maximumIssuedTokenID,
+            "observer token start must be in the issuable range")
+        precondition(
+            waiterStartingIDForTest > 0
+                && waiterStartingIDForTest <= Self.maximumIssuedTokenID,
+            "waiter token start must be in the issuable range")
+        observerFirstIssuableID = observerStartingIDForTest
+        waiterFirstIssuableID = waiterStartingIDForTest
+        nextObserverID = observerStartingIDForTest
+        nextWaiterID = waiterStartingIDForTest
+    }
+
+    nonisolated static var maximumIssuedTokenIDForTest: UInt64 {
+        maximumIssuedTokenID
+    }
 
     // MARK: Observer (entry-side)
 
@@ -6578,7 +7537,14 @@ private actor AsyncGate {
     /// `awaitObserver(postCloseToken)` hits the branch-3 unknown path
     /// (also bounded), which increments `observerUnknownAwaitCount`.
     func registerObserver() -> ObserverToken {
-        let id = nextObserverID; nextObserverID &+= 1
+        guard let token = tryRegisterObserver() else {
+            preconditionFailure("observer token issuance exhausted")
+        }
+        return token
+    }
+
+    func tryRegisterObserver() -> ObserverToken? {
+        guard let id = issueObserverID() else { return nil }
         if closed {
             observerPostCloseRegistrationCount += 1
         } else if pendingEntrySignals > 0 {
@@ -6616,57 +7582,54 @@ private actor AsyncGate {
     func awaitObserver(_ token: ObserverToken, attempt: ObserverAwaitAttempt) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                // (1) Before-park latch present → consume it and
-                //     prune per-token state atomically. Bishop F1:
-                //     both `completedObservers` and `observerFates`
-                //     entries removed together so the token leaves
-                //     no residual per-token history.
-                if completedObservers.remove(token.id) != nil {
-                    observerFates.removeValue(forKey: token.id)
-                    if attempt.releaseSuspension(at: .latchConsumed) {
-                        observerResumeCounts[.latchConsumed, default: 0] += 1
-                    }
-                    return
-                }
-                // (2) Same token already has a live parked continuation.
-                //     Second concurrent await is a bug; reject the second
-                //     without touching the first parked continuation.
-                if parkedObservers[token.id] != nil {
-                    observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        observerResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    return
-                }
-                // (3) Currently registered (in observerOrder).
-                if observerOrder.contains(token.id) {
-                    if closed {
-                        observerOrder.removeAll { $0 == token.id }
-                        sealObserverOutcome(id: token.id, reason: .closedBeforePark)
-                        if attempt.releaseSuspension(at: .closedImmediate) {
-                            observerResumeCounts[.closedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
+            attempt.prepareSuspensionWait()
+            // (1) Before-park latch present → consume it and
+            //     prune per-token state atomically. Bishop F1:
+            //     both `completedObservers` and `observerFates`
+            //     entries removed together so the token leaves
+            //     no residual per-token history.
+            if completedObservers.remove(token.id) != nil {
+                observerFates.removeValue(forKey: token.id)
+                requestObserverRelease(
+                    attempt,
+                    at: .latchConsumed,
+                    resumeSite: .latchConsumed)
+            // (2) Same token already has a live parked waiter. Reject this
+            //     invocation without touching the original.
+            } else if parkedObservers[token.id] != nil {
+                observerDuplicateAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+            // (3) Currently registered (in observerOrder).
+            } else if observerOrder.contains(token.id) {
+                if closed {
+                    observerOrder.removeAll { $0 == token.id }
+                    sealObserverOutcome(id: token.id, reason: .closedBeforePark)
+                    requestObserverRelease(
+                        attempt,
+                        at: .closedImmediate,
+                        resumeSite: .closedImmediate)
+                } else {
                     parkedObservers[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushObserverParkAcks(id: token.id, result: .parked)
-                    return
                 }
-                // (4) Not active.
-                if token.id >= nextObserverID {
-                    observerUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        observerResumeCounts[.unknownToken, default: 0] += 1
-                    }
-                } else {
-                    observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        observerResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
-                }
+            // (4) Not active: exact issued-range classification.
+            } else if !wasObserverIDIssued(token.id) {
+                observerUnknownAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .unknownToken,
+                    resumeSite: .unknownToken)
+            } else {
+                observerDuplicateAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .duplicateAfterFated,
+                    resumeSite: .duplicateAfterFated)
             }
+            _ = await attempt.awaitSuspensionDelivery()
             if attempt.publishNaturalIfActive() == nil, attempt.cancellationWasInitiated {
                 let receipt = cancelObserver(
                     id: token.id,
@@ -6675,7 +7638,9 @@ private actor AsyncGate {
                 attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            _ = attempt.beginCancellationIfActive()
+            if attempt.beginCancellationIfActive() {
+                ensureObserverCancellationRelease(attempt)
+            }
         }
     }
 
@@ -6685,40 +7650,33 @@ private actor AsyncGate {
         branchCheckpoint: BufferedConsumer<DuplicateBranchCheckpoint>,
         processingCheckpoint: BufferedConsumer<ObserverCancelProcessingCheckpoint>
     ) async {
-        defer {
-            branchCheckpoint.rescue(.rescuedMissingPublication)
-            processingCheckpoint.rescue(.rescuedMissingPublication)
-        }
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                if parkedObservers[token.id] != nil {
-                    observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        observerResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    let rescueUsed = attempt.releaseSuspensionForTest()
-                    branchCheckpoint.resolve(
-                        rescueUsed ? .rescuedMissingRelease : .duplicateAfterParked)
-                    branchCheckpoint.rescue(.rescuedMissingPublication)
-                    return
-                }
-
+            attempt.prepareSuspensionWait()
+            if parkedObservers[token.id] != nil {
+                observerDuplicateAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+                branchCheckpoint.resolve(.duplicateAfterParked)
+            } else {
                 branchCheckpoint.resolve(.notDuplicate)
-                branchCheckpoint.rescue(.rescuedMissingPublication)
-                if token.id >= nextObserverID {
+                if !wasObserverIDIssued(token.id) {
                     observerUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        observerResumeCounts[.unknownToken, default: 0] += 1
-                    }
+                    requestObserverRelease(
+                        attempt,
+                        at: .unknownToken,
+                        resumeSite: .unknownToken)
                 } else {
                     observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        observerResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
+                    requestObserverRelease(
+                        attempt,
+                        at: .duplicateAfterFated,
+                        resumeSite: .duplicateAfterFated)
                 }
             }
+            _ = await attempt.awaitSuspensionDelivery()
 
             withUnsafeCurrentTask { task in
                 task?.cancel()
@@ -6733,9 +7691,10 @@ private actor AsyncGate {
             } else {
                 processingCheckpoint.resolve(.naturalCompletion)
             }
-            processingCheckpoint.rescue(.rescuedMissingPublication)
         } onCancel: {
-            _ = attempt.beginCancellationIfActive()
+            if attempt.beginCancellationIfActive() {
+                ensureObserverCancellationRelease(attempt)
+            }
         }
     }
 
@@ -6783,9 +7742,6 @@ private actor AsyncGate {
         // Bishop F1: cancelled tokens resume the parked continuation now,
         // so aggregate-only accounting (no per-token fate stored).
         sealObserverOutcome(id: id, reason: .cancelledWhileParked)
-        if attempt.cancellationReleaseSucceededForTest {
-            observerResumeCounts[.parkedResumedByCancel, default: 0] += 1
-        }
         return .processedMatched
     }
 
@@ -6816,18 +7772,21 @@ private actor AsyncGate {
         if let reason = observerFates[token.id] { return .terminal(reason) }
         if observerOrder.contains(token.id) {
             if closed { return .closedOrConsumed }
-            return await withCheckedContinuation { c in
-                observerParkAcks[token.id, default: []].append(c)
-            }
+            let delivery = BufferedConsumer<ParkAckResult>()
+            observerParkAcks[token.id, default: []].append(delivery)
+            delivery.armRescue(.consumerCancelled)
+            return await delivery.value(cancellationValue: .consumerCancelled)
         }
         // Not active: fabricated (never issued) vs previously-issued.
-        if token.id >= nextObserverID { return .unknown }
+        if !wasObserverIDIssued(token.id) { return .unknown }
         return .closedOrConsumed
     }
 
     private func flushObserverParkAcks(id: UInt64, result: ParkAckResult) {
-        if let cs = observerParkAcks.removeValue(forKey: id) {
-            for c in cs { c.resume(returning: result) }
+        if let deliveries = observerParkAcks.removeValue(forKey: id) {
+            for delivery in deliveries {
+                delivery.resolve(result)
+            }
         }
         for endpoint in observerTicketRegistry.take(tokenID: id) {
             _ = endpoint.resolve(result, cleanupResult: .resolvedByGate)
@@ -6845,8 +7804,15 @@ private actor AsyncGate {
     /// Hicks B: closed-path is now a bounded aggregate counter, no
     /// per-token fate/completed insertion.
     func registerWaiter() -> WaiterToken {
+        guard let token = tryRegisterWaiter() else {
+            preconditionFailure("waiter token issuance exhausted")
+        }
+        return token
+    }
+
+    func tryRegisterWaiter() -> WaiterToken? {
+        guard let id = issueWaiterID() else { return nil }
         if !closed { signalEntryLocked() }
-        let id = nextWaiterID; nextWaiterID &+= 1
         if closed {
             waiterPostCloseRegistrationCount += 1
         } else if opened {
@@ -6872,55 +7838,52 @@ private actor AsyncGate {
     func awaitWaiter(_ token: WaiterToken, attempt: WaiterAwaitAttempt) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                if completedWaiters.remove(token.id) != nil {
-                    waiterFates.removeValue(forKey: token.id)
-                    if attempt.releaseSuspension(at: .latchConsumed) {
-                        waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    }
-                    return
-                }
-                if parkedWaiters[token.id] != nil {
-                    waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    return
-                }
-                if waiterOrder.contains(token.id) {
-                    if closed {
-                        waiterOrder.removeAll { $0 == token.id }
-                        sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
-                        if attempt.releaseSuspension(at: .closedImmediate) {
-                            waiterResumeCounts[.closedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
-                    if opened {
-                        waiterOrder.removeAll { $0 == token.id }
-                        sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
-                        if attempt.releaseSuspension(at: .openedImmediate) {
-                            waiterResumeCounts[.openedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
+            attempt.prepareSuspensionWait()
+            if completedWaiters.remove(token.id) != nil {
+                waiterFates.removeValue(forKey: token.id)
+                requestWaiterRelease(
+                    attempt,
+                    at: .latchConsumed,
+                    resumeSite: .latchConsumed)
+            } else if parkedWaiters[token.id] != nil {
+                waiterDuplicateAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+            } else if waiterOrder.contains(token.id) {
+                if closed {
+                    waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
+                    requestWaiterRelease(
+                        attempt,
+                        at: .closedImmediate,
+                        resumeSite: .closedImmediate)
+                } else if opened {
+                    waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
+                    requestWaiterRelease(
+                        attempt,
+                        at: .openedImmediate,
+                        resumeSite: .openedImmediate)
+                } else {
                     parkedWaiters[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushWaiterParkAcks(id: token.id, result: .parked)
-                    return
                 }
-                if token.id >= nextWaiterID {
-                    waiterUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        waiterResumeCounts[.unknownToken, default: 0] += 1
-                    }
-                } else {
-                    waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
-                }
+            } else if !wasWaiterIDIssued(token.id) {
+                waiterUnknownAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .unknownToken,
+                    resumeSite: .unknownToken)
+            } else {
+                waiterDuplicateAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .duplicateAfterFated,
+                    resumeSite: .duplicateAfterFated)
             }
+            _ = await attempt.awaitSuspensionDelivery()
             if attempt.publishNaturalIfActive() == nil, attempt.cancellationWasInitiated {
                 let receipt = cancelWaiter(
                     id: token.id,
@@ -6929,7 +7892,9 @@ private actor AsyncGate {
                 attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            _ = attempt.beginCancellationIfActive()
+            if attempt.beginCancellationIfActive() {
+                ensureWaiterCancellationRelease(attempt)
+            }
         }
     }
 
@@ -6939,40 +7904,33 @@ private actor AsyncGate {
         branchCheckpoint: BufferedConsumer<DuplicateBranchCheckpoint>,
         processingCheckpoint: BufferedConsumer<WaiterCancelProcessingCheckpoint>
     ) async {
-        defer {
-            branchCheckpoint.rescue(.rescuedMissingPublication)
-            processingCheckpoint.rescue(.rescuedMissingPublication)
-        }
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                if parkedWaiters[token.id] != nil {
-                    waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    let rescueUsed = attempt.releaseSuspensionForTest()
-                    branchCheckpoint.resolve(
-                        rescueUsed ? .rescuedMissingRelease : .duplicateAfterParked)
-                    branchCheckpoint.rescue(.rescuedMissingPublication)
-                    return
-                }
-
+            attempt.prepareSuspensionWait()
+            if parkedWaiters[token.id] != nil {
+                waiterDuplicateAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+                branchCheckpoint.resolve(.duplicateAfterParked)
+            } else {
                 branchCheckpoint.resolve(.notDuplicate)
-                branchCheckpoint.rescue(.rescuedMissingPublication)
-                if token.id >= nextWaiterID {
+                if !wasWaiterIDIssued(token.id) {
                     waiterUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        waiterResumeCounts[.unknownToken, default: 0] += 1
-                    }
+                    requestWaiterRelease(
+                        attempt,
+                        at: .unknownToken,
+                        resumeSite: .unknownToken)
                 } else {
                     waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
+                    requestWaiterRelease(
+                        attempt,
+                        at: .duplicateAfterFated,
+                        resumeSite: .duplicateAfterFated)
                 }
             }
+            _ = await attempt.awaitSuspensionDelivery()
 
             withUnsafeCurrentTask { task in
                 task?.cancel()
@@ -6987,9 +7945,10 @@ private actor AsyncGate {
             } else {
                 processingCheckpoint.resolve(.naturalCompletion)
             }
-            processingCheckpoint.rescue(.rescuedMissingPublication)
         } onCancel: {
-            _ = attempt.beginCancellationIfActive()
+            if attempt.beginCancellationIfActive() {
+                ensureWaiterCancellationRelease(attempt)
+            }
         }
     }
 
@@ -7023,9 +7982,6 @@ private actor AsyncGate {
         parkedWaiters.removeValue(forKey: id)
         waiterOrder.removeAll { $0 == id }
         sealWaiterOutcome(id: id, reason: .cancelledWhileParked)
-        if attempt.cancellationReleaseSucceededForTest {
-            waiterResumeCounts[.parkedResumedByCancel, default: 0] += 1
-        }
         return .processedMatched
     }
 
@@ -7042,17 +7998,20 @@ private actor AsyncGate {
         if let reason = waiterFates[token.id] { return .terminal(reason) }
         if waiterOrder.contains(token.id) {
             if closed { return .closedOrConsumed }
-            return await withCheckedContinuation { c in
-                waiterParkAcks[token.id, default: []].append(c)
-            }
+            let delivery = BufferedConsumer<ParkAckResult>()
+            waiterParkAcks[token.id, default: []].append(delivery)
+            delivery.armRescue(.consumerCancelled)
+            return await delivery.value(cancellationValue: .consumerCancelled)
         }
-        if token.id >= nextWaiterID { return .unknown }
+        if !wasWaiterIDIssued(token.id) { return .unknown }
         return .closedOrConsumed
     }
 
     private func flushWaiterParkAcks(id: UInt64, result: ParkAckResult) {
-        if let cs = waiterParkAcks.removeValue(forKey: id) {
-            for c in cs { c.resume(returning: result) }
+        if let deliveries = waiterParkAcks.removeValue(forKey: id) {
+            for delivery in deliveries {
+                delivery.resolve(result)
+            }
         }
         for endpoint in waiterTicketRegistry.take(tokenID: id) {
             _ = endpoint.resolve(result, cleanupResult: .resolvedByGate)
@@ -7093,7 +8052,7 @@ private actor AsyncGate {
             }
             return ticket
         }
-        if token.id >= nextObserverID {
+        if !wasObserverIDIssued(token.id) {
             ticket.resolve(.unknown)
         } else {
             ticket.resolve(.closedOrConsumed)
@@ -7131,7 +8090,7 @@ private actor AsyncGate {
             }
             return ticket
         }
-        if token.id >= nextWaiterID {
+        if !wasWaiterIDIssued(token.id) {
             ticket.resolve(.unknown)
         } else {
             ticket.resolve(.closedOrConsumed)
@@ -7158,47 +8117,45 @@ private actor AsyncGate {
     ) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                if completedObservers.remove(token.id) != nil {
-                    observerFates.removeValue(forKey: token.id)
-                    if attempt.releaseSuspension(at: .latchConsumed) {
-                        observerResumeCounts[.latchConsumed, default: 0] += 1
-                    }
-                    return
-                }
-                if parkedObservers[token.id] != nil {
-                    observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        observerResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    return
-                }
-                if observerOrder.contains(token.id) {
-                    if closed {
-                        observerOrder.removeAll { $0 == token.id }
-                        sealObserverOutcome(id: token.id, reason: .closedBeforePark)
-                        if attempt.releaseSuspension(at: .closedImmediate) {
-                            observerResumeCounts[.closedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
+            attempt.prepareSuspensionWait()
+            if completedObservers.remove(token.id) != nil {
+                observerFates.removeValue(forKey: token.id)
+                requestObserverRelease(
+                    attempt,
+                    at: .latchConsumed,
+                    resumeSite: .latchConsumed)
+            } else if parkedObservers[token.id] != nil {
+                observerDuplicateAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+            } else if observerOrder.contains(token.id) {
+                if closed {
+                    observerOrder.removeAll { $0 == token.id }
+                    sealObserverOutcome(id: token.id, reason: .closedBeforePark)
+                    requestObserverRelease(
+                        attempt,
+                        at: .closedImmediate,
+                        resumeSite: .closedImmediate)
+                } else {
                     parkedObservers[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushObserverParkAcks(id: token.id, result: .parked)
-                    return
                 }
-                if token.id >= nextObserverID {
-                    observerUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        observerResumeCounts[.unknownToken, default: 0] += 1
-                    }
-                } else {
-                    observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        observerResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
-                }
+            } else if !wasObserverIDIssued(token.id) {
+                observerUnknownAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .unknownToken,
+                    resumeSite: .unknownToken)
+            } else {
+                observerDuplicateAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .duplicateAfterFated,
+                    resumeSite: .duplicateAfterFated)
             }
+            _ = await attempt.awaitSuspensionDelivery()
             await holdGate.awaitWaiter(holdToken)
             if attempt.publishNaturalIfActive() == nil, attempt.cancellationWasInitiated {
                 let receipt = cancelObserver(
@@ -7208,7 +8165,9 @@ private actor AsyncGate {
                 attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            _ = attempt.beginCancellationIfActive()
+            if attempt.beginCancellationIfActive() {
+                ensureObserverCancellationRelease(attempt)
+            }
         }
     }
 
@@ -7230,55 +8189,52 @@ private actor AsyncGate {
     ) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                if completedWaiters.remove(token.id) != nil {
-                    waiterFates.removeValue(forKey: token.id)
-                    if attempt.releaseSuspension(at: .latchConsumed) {
-                        waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    }
-                    return
-                }
-                if parkedWaiters[token.id] != nil {
-                    waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    return
-                }
-                if waiterOrder.contains(token.id) {
-                    if closed {
-                        waiterOrder.removeAll { $0 == token.id }
-                        sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
-                        if attempt.releaseSuspension(at: .closedImmediate) {
-                            waiterResumeCounts[.closedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
-                    if opened {
-                        waiterOrder.removeAll { $0 == token.id }
-                        sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
-                        if attempt.releaseSuspension(at: .openedImmediate) {
-                            waiterResumeCounts[.openedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
+            attempt.prepareSuspensionWait()
+            if completedWaiters.remove(token.id) != nil {
+                waiterFates.removeValue(forKey: token.id)
+                requestWaiterRelease(
+                    attempt,
+                    at: .latchConsumed,
+                    resumeSite: .latchConsumed)
+            } else if parkedWaiters[token.id] != nil {
+                waiterDuplicateAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+            } else if waiterOrder.contains(token.id) {
+                if closed {
+                    waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
+                    requestWaiterRelease(
+                        attempt,
+                        at: .closedImmediate,
+                        resumeSite: .closedImmediate)
+                } else if opened {
+                    waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
+                    requestWaiterRelease(
+                        attempt,
+                        at: .openedImmediate,
+                        resumeSite: .openedImmediate)
+                } else {
                     parkedWaiters[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushWaiterParkAcks(id: token.id, result: .parked)
-                    return
                 }
-                if token.id >= nextWaiterID {
-                    waiterUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        waiterResumeCounts[.unknownToken, default: 0] += 1
-                    }
-                } else {
-                    waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
-                }
+            } else if !wasWaiterIDIssued(token.id) {
+                waiterUnknownAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .unknownToken,
+                    resumeSite: .unknownToken)
+            } else {
+                waiterDuplicateAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .duplicateAfterFated,
+                    resumeSite: .duplicateAfterFated)
             }
+            _ = await attempt.awaitSuspensionDelivery()
             await holdGate.awaitWaiter(holdToken)
             if attempt.publishNaturalIfActive() == nil, attempt.cancellationWasInitiated {
                 let receipt = cancelWaiter(
@@ -7288,7 +8244,9 @@ private actor AsyncGate {
                 attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            _ = attempt.beginCancellationIfActive()
+            if attempt.beginCancellationIfActive() {
+                ensureWaiterCancellationRelease(attempt)
+            }
         }
     }
 
@@ -7301,47 +8259,45 @@ private actor AsyncGate {
     ) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                if completedObservers.remove(token.id) != nil {
-                    observerFates.removeValue(forKey: token.id)
-                    if attempt.releaseSuspension(at: .latchConsumed) {
-                        observerResumeCounts[.latchConsumed, default: 0] += 1
-                    }
-                    return
-                }
-                if parkedObservers[token.id] != nil {
-                    observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        observerResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    return
-                }
-                if observerOrder.contains(token.id) {
-                    if closed {
-                        observerOrder.removeAll { $0 == token.id }
-                        sealObserverOutcome(id: token.id, reason: .closedBeforePark)
-                        if attempt.releaseSuspension(at: .closedImmediate) {
-                            observerResumeCounts[.closedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
+            attempt.prepareSuspensionWait()
+            if completedObservers.remove(token.id) != nil {
+                observerFates.removeValue(forKey: token.id)
+                requestObserverRelease(
+                    attempt,
+                    at: .latchConsumed,
+                    resumeSite: .latchConsumed)
+            } else if parkedObservers[token.id] != nil {
+                observerDuplicateAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+            } else if observerOrder.contains(token.id) {
+                if closed {
+                    observerOrder.removeAll { $0 == token.id }
+                    sealObserverOutcome(id: token.id, reason: .closedBeforePark)
+                    requestObserverRelease(
+                        attempt,
+                        at: .closedImmediate,
+                        resumeSite: .closedImmediate)
+                } else {
                     parkedObservers[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushObserverParkAcks(id: token.id, result: .parked)
-                    return
                 }
-                if token.id >= nextObserverID {
-                    observerUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        observerResumeCounts[.unknownToken, default: 0] += 1
-                    }
-                } else {
-                    observerDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        observerResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
-                }
+            } else if !wasObserverIDIssued(token.id) {
+                observerUnknownAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .unknownToken,
+                    resumeSite: .unknownToken)
+            } else {
+                observerDuplicateAwaitCount += 1
+                requestObserverRelease(
+                    attempt,
+                    at: .duplicateAfterFated,
+                    resumeSite: .duplicateAfterFated)
             }
+            _ = await attempt.awaitSuspensionDelivery()
             if let publication = attempt.publishNaturalIfActive() {
                 attempt.publishAcknowledgement(acknowledgement, after: publication)
                 withUnsafeCurrentTask { task in
@@ -7349,7 +8305,9 @@ private actor AsyncGate {
                 }
             }
         } onCancel: {
-            _ = attempt.beginCancellationIfActive(observing: acknowledgement)
+            if attempt.beginCancellationIfActive(observing: acknowledgement) {
+                ensureObserverCancellationRelease(attempt)
+            }
         }
     }
 
@@ -7360,55 +8318,52 @@ private actor AsyncGate {
     ) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
-            await withCheckedContinuation { c in
-                attempt.installSuspension(c)
-                if completedWaiters.remove(token.id) != nil {
-                    waiterFates.removeValue(forKey: token.id)
-                    if attempt.releaseSuspension(at: .latchConsumed) {
-                        waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    }
-                    return
-                }
-                if parkedWaiters[token.id] != nil {
-                    waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterParked) {
-                        waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    }
-                    return
-                }
-                if waiterOrder.contains(token.id) {
-                    if closed {
-                        waiterOrder.removeAll { $0 == token.id }
-                        sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
-                        if attempt.releaseSuspension(at: .closedImmediate) {
-                            waiterResumeCounts[.closedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
-                    if opened {
-                        waiterOrder.removeAll { $0 == token.id }
-                        sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
-                        if attempt.releaseSuspension(at: .openedImmediate) {
-                            waiterResumeCounts[.openedImmediate, default: 0] += 1
-                        }
-                        return
-                    }
+            attempt.prepareSuspensionWait()
+            if completedWaiters.remove(token.id) != nil {
+                waiterFates.removeValue(forKey: token.id)
+                requestWaiterRelease(
+                    attempt,
+                    at: .latchConsumed,
+                    resumeSite: .latchConsumed)
+            } else if parkedWaiters[token.id] != nil {
+                waiterDuplicateAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .duplicateAfterParked,
+                    resumeSite: .duplicateAfterParked)
+            } else if waiterOrder.contains(token.id) {
+                if closed {
+                    waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
+                    requestWaiterRelease(
+                        attempt,
+                        at: .closedImmediate,
+                        resumeSite: .closedImmediate)
+                } else if opened {
+                    waiterOrder.removeAll { $0 == token.id }
+                    sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
+                    requestWaiterRelease(
+                        attempt,
+                        at: .openedImmediate,
+                        resumeSite: .openedImmediate)
+                } else {
                     parkedWaiters[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushWaiterParkAcks(id: token.id, result: .parked)
-                    return
                 }
-                if token.id >= nextWaiterID {
-                    waiterUnknownAwaitCount += 1
-                    if attempt.releaseSuspension(at: .unknownToken) {
-                        waiterResumeCounts[.unknownToken, default: 0] += 1
-                    }
-                } else {
-                    waiterDuplicateAwaitCount += 1
-                    if attempt.releaseSuspension(at: .duplicateAfterFated) {
-                        waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
-                    }
-                }
+            } else if !wasWaiterIDIssued(token.id) {
+                waiterUnknownAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .unknownToken,
+                    resumeSite: .unknownToken)
+            } else {
+                waiterDuplicateAwaitCount += 1
+                requestWaiterRelease(
+                    attempt,
+                    at: .duplicateAfterFated,
+                    resumeSite: .duplicateAfterFated)
             }
+            _ = await attempt.awaitSuspensionDelivery()
             if let publication = attempt.publishNaturalIfActive() {
                 attempt.publishAcknowledgement(acknowledgement, after: publication)
                 withUnsafeCurrentTask { task in
@@ -7416,7 +8371,9 @@ private actor AsyncGate {
                 }
             }
         } onCancel: {
-            _ = attempt.beginCancellationIfActive(observing: acknowledgement)
+            if attempt.beginCancellationIfActive(observing: acknowledgement) {
+                ensureWaiterCancellationRelease(attempt)
+            }
         }
     }
 
@@ -7434,9 +8391,10 @@ private actor AsyncGate {
         for id in ids {
             if let entry = parkedWaiters.removeValue(forKey: id) {
                 sealWaiterOutcome(id: id, reason: .openedWhileParked)
-                if entry.attempt.releaseSuspension(at: .open) {
-                    waiterResumeCounts[.parkedResumedByOpen, default: 0] += 1
-                }
+                requestWaiterRelease(
+                    entry.attempt,
+                    at: .open,
+                    resumeSite: .parkedResumedByOpen)
             } else {
                 latchWaiterBeforePark(id: id, reason: .openedBeforePark)
             }
@@ -7470,9 +8428,10 @@ private actor AsyncGate {
         for id in wIds {
             if let entry = parkedWaiters.removeValue(forKey: id) {
                 sealWaiterOutcome(id: id, reason: .closedWhileParked)
-                if entry.attempt.releaseSuspension(at: .close) {
-                    waiterResumeCounts[.parkedResumedByClose, default: 0] += 1
-                }
+                requestWaiterRelease(
+                    entry.attempt,
+                    at: .close,
+                    resumeSite: .parkedResumedByClose)
             } else {
                 sealWaiterOutcome(id: id, reason: .closedBeforePark)
             }
@@ -7482,9 +8441,10 @@ private actor AsyncGate {
         for id in oIds {
             if let entry = parkedObservers.removeValue(forKey: id) {
                 sealObserverOutcome(id: id, reason: .closedWhileParked)
-                if entry.attempt.releaseSuspension(at: .close) {
-                    observerResumeCounts[.parkedResumedByClose, default: 0] += 1
-                }
+                requestObserverRelease(
+                    entry.attempt,
+                    at: .close,
+                    resumeSite: .parkedResumedByClose)
             } else {
                 sealObserverOutcome(id: id, reason: .closedBeforePark)
             }
@@ -7500,10 +8460,18 @@ private actor AsyncGate {
         // callers get a bounded, explicit outcome (Hicks A).
         let obsAcks = observerParkAcks
         observerParkAcks.removeAll()
-        for (_, cs) in obsAcks { for c in cs { c.resume(returning: .closedOrConsumed) } }
+        for (_, deliveries) in obsAcks {
+            for delivery in deliveries {
+                delivery.resolve(.closedOrConsumed)
+            }
+        }
         let wAcks = waiterParkAcks
         waiterParkAcks.removeAll()
-        for (_, cs) in wAcks { for c in cs { c.resume(returning: .closedOrConsumed) } }
+        for (_, deliveries) in wAcks {
+            for delivery in deliveries {
+                delivery.resolve(.closedOrConsumed)
+            }
+        }
         // Hicks R1 addendum: the gate no longer stores per-attempt
         // cancellation receipts (state lives in caller-owned
         // `AwaitAttempt` contexts). Cancellation that races with close()
@@ -7545,8 +8513,8 @@ private actor AsyncGate {
             waiterUnknownAwaitCount: waiterUnknownAwaitCount,
             observerPostCloseRegistrationCount: observerPostCloseRegistrationCount,
             waiterPostCloseRegistrationCount: waiterPostCloseRegistrationCount,
-            observerResumeCounts: observerResumeCounts,
-            waiterResumeCounts: waiterResumeCounts,
+            observerResumeCounts: observerResumeEvidence.countsForTest,
+            waiterResumeCounts: waiterResumeEvidence.countsForTest,
             observerCancelInvocationCount: observerCancelInvocationCount,
             waiterCancelInvocationCount: waiterCancelInvocationCount,
             observerParkAckQueueTotal: observerParkAcks.values.reduce(0) { $0 + $1.count },
@@ -7554,20 +8522,151 @@ private actor AsyncGate {
             observerParkAckTicketCount: observerTicketRegistry.rawBoxCount,
             waiterParkAckTicketCount: waiterTicketRegistry.rawBoxCount,
             observerParkAckTicketBackingKeyCount: observerTicketRegistry.rawKeyCount,
-            waiterParkAckTicketBackingKeyCount: waiterTicketRegistry.rawKeyCount
+            waiterParkAckTicketBackingKeyCount: waiterTicketRegistry.rawKeyCount,
+            observerFirstIssuableID: observerFirstIssuableID,
+            waiterFirstIssuableID: waiterFirstIssuableID,
+            observerLastIssuedID: observerLastIssuedID,
+            waiterLastIssuedID: waiterLastIssuedID,
+            observerIssuanceExhaustedCount: observerIssuanceExhaustedCount,
+            waiterIssuanceExhaustedCount: waiterIssuanceExhaustedCount,
+            observerInFlightDelivery: observerInFlightDelivery.snapshotForTest,
+            waiterInFlightDelivery: waiterInFlightDelivery.snapshotForTest
         )
     }
 
     // MARK: Private helpers
+
+    nonisolated private func requestObserverRelease(
+        _ attempt: ObserverAwaitAttempt,
+        at releaseSite: AwaitSuspensionReleaseSite,
+        resumeSite: ObserverResumeSite
+    ) {
+        let evidence = observerResumeEvidence
+        let registry = observerInFlightDelivery
+        let attemptID = attempt.id
+        _ = attempt.releaseSuspension(
+            at: releaseSite,
+            onClaim: {
+                attempt.invokeSuspensionRescueForTest()
+                registry.insert(
+                    attempt,
+                    id: attemptID,
+                    rescueWasInvoked:
+                        attempt.suspensionDeliveryForTest.rescueInvocationCount == 1)
+            },
+            onNormalObservation: {
+                evidence.record(resumeSite)
+            },
+            onObservation: { origin in
+                registry.observe(id: attemptID, origin: origin)
+            })
+    }
+
+    nonisolated private func requestWaiterRelease(
+        _ attempt: WaiterAwaitAttempt,
+        at releaseSite: AwaitSuspensionReleaseSite,
+        resumeSite: WaiterResumeSite
+    ) {
+        let evidence = waiterResumeEvidence
+        let registry = waiterInFlightDelivery
+        let attemptID = attempt.id
+        _ = attempt.releaseSuspension(
+            at: releaseSite,
+            onClaim: {
+                attempt.invokeSuspensionRescueForTest()
+                registry.insert(
+                    attempt,
+                    id: attemptID,
+                    rescueWasInvoked:
+                        attempt.suspensionDeliveryForTest.rescueInvocationCount == 1)
+            },
+            onNormalObservation: {
+                evidence.record(resumeSite)
+            },
+            onObservation: { origin in
+                registry.observe(id: attemptID, origin: origin)
+            })
+    }
+
+    nonisolated private func ensureObserverCancellationRelease(
+        _ attempt: ObserverAwaitAttempt
+    ) {
+        let delivery = attempt.suspensionDeliveryForTest
+        if delivery.normalRequestCount == 0 {
+            requestObserverRelease(
+                attempt,
+                at: .cancellationHandler,
+                resumeSite: .parkedResumedByCancel)
+        } else if delivery.normalObservationCount == 0
+                    && delivery.rescueTakeoverCount == 0 {
+            attempt.invokeSuspensionRescueForTest()
+        }
+    }
+
+    nonisolated private func ensureWaiterCancellationRelease(
+        _ attempt: WaiterAwaitAttempt
+    ) {
+        let delivery = attempt.suspensionDeliveryForTest
+        if delivery.normalRequestCount == 0 {
+            requestWaiterRelease(
+                attempt,
+                at: .cancellationHandler,
+                resumeSite: .parkedResumedByCancel)
+        } else if delivery.normalObservationCount == 0
+                    && delivery.rescueTakeoverCount == 0 {
+            attempt.invokeSuspensionRescueForTest()
+        }
+    }
+
+    private func issueObserverID() -> UInt64? {
+        guard let id = nextObserverID else {
+            observerIssuanceExhaustedCount += 1
+            return nil
+        }
+        precondition(
+            id > 0 && id <= Self.maximumIssuedTokenID,
+            "observer token allocator escaped its bounded range")
+        observerLastIssuedID = id
+        nextObserverID = id == Self.maximumIssuedTokenID ? nil : id + 1
+        return id
+    }
+
+    private func issueWaiterID() -> UInt64? {
+        guard let id = nextWaiterID else {
+            waiterIssuanceExhaustedCount += 1
+            return nil
+        }
+        precondition(
+            id > 0 && id <= Self.maximumIssuedTokenID,
+            "waiter token allocator escaped its bounded range")
+        waiterLastIssuedID = id
+        nextWaiterID = id == Self.maximumIssuedTokenID ? nil : id + 1
+        return id
+    }
+
+    private func wasObserverIDIssued(_ id: UInt64) -> Bool {
+        guard id >= observerFirstIssuableID, let observerLastIssuedID else {
+            return false
+        }
+        return id <= observerLastIssuedID
+    }
+
+    private func wasWaiterIDIssued(_ id: UInt64) -> Bool {
+        guard id >= waiterFirstIssuableID, let waiterLastIssuedID else {
+            return false
+        }
+        return id <= waiterLastIssuedID
+    }
 
     private func signalEntryLocked() {
         if let id = observerOrder.first {
             observerOrder.removeFirst()
             if let entry = parkedObservers.removeValue(forKey: id) {
                 sealObserverOutcome(id: id, reason: .signaledWhileParked)
-                if entry.attempt.releaseSuspension(at: .signal) {
-                    observerResumeCounts[.parkedResumedBySignal, default: 0] += 1
-                }
+                requestObserverRelease(
+                    entry.attempt,
+                    at: .signal,
+                    resumeSite: .parkedResumedBySignal)
             } else {
                 latchObserverBeforePark(id: id, reason: .signaledBeforePark)
             }
