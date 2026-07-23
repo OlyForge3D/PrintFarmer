@@ -613,9 +613,9 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         // observes a missing file (default payload) and the exact-equality
         // check fails, throwing the typed error.
         addTeardownBlock {
-            FarmSnapshotDurableAuthorityRecord.testInterceptAfterAtomicWrite = nil
+            record.setAfterAtomicWriteHookForTesting(nil)
         }
-        FarmSnapshotDurableAuthorityRecord.testInterceptAfterAtomicWrite = { url in
+        record.setAfterAtomicWriteHookForTesting { url in
             try? FileManager.default.removeItem(at: url)
         }
 
@@ -625,7 +625,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         }
 
         // Clear the injection so we can re-observe durable state.
-        FarmSnapshotDurableAuthorityRecord.testInterceptAfterAtomicWrite = nil
+        record.setAfterAtomicWriteHookForTesting(nil)
 
         // State-advance invariant: the failed reserve MUST NOT have advanced
         // the durable counter. A caller who observed .persistenceFailure and

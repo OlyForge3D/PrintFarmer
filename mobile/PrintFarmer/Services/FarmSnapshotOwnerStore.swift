@@ -185,9 +185,21 @@ enum FarmSnapshotAuthorityError: Error, Equatable, Sendable {
     /// The 64-bit token space is exhausted; caller must fail closed. Bounded to
     /// UInt64.max via `addingReportingOverflow` — no trap.
     case tokenSpaceExhausted
-    /// The durable reservation write failed (verified re-read didn't observe it).
-    /// The caller MUST NOT publish or return a token.
+    /// The durable reservation write failed (verified re-read didn't observe it),
+    /// OR an existing record was unreadable/undecodable/semantically invalid, OR
+    /// a permission/traversal/metadata error prevented a fail-closed read. The
+    /// caller MUST NOT publish or return a token. When a write fails but the exact
+    /// prior bytes were successfully restored, this is the surfaced error (the
+    /// record is left byte-identical to before the failed mutation).
     case persistenceFailure
+    /// C (issue #816 reject, Hicks + replacement Vasquez): a durable write failed
+    /// AND the subsequent restoration of the exact prior bytes ALSO failed, so the
+    /// record may be left holding neither the old nor the new payload. Both the
+    /// primary (write/verify) failure and the recovery (restore) failure context
+    /// are retained here rather than swallowed, so the caller can surface a
+    /// genuine double-fault instead of a plain persistence failure. String
+    /// descriptions keep the typed error `Equatable`/`Sendable`.
+    case restorationFailure(primary: String, recovery: String)
 }
 
 /// Persistent record of purged server UUIDs plus TWO durable, atomic monotonic
@@ -358,12 +370,42 @@ final class FarmSnapshotTombstoneStore: @unchecked Sendable {
         return true
     }
 
-    /// The persisted tombstone set (server UUIDs).
+    /// The persisted tombstone set (server UUIDs). Lenient: silently drops any
+    /// malformed entry. Retained for non-authority callers; the authority
+    /// hydration path MUST use `loadStrict()` so a corrupt UserDefaults store
+    /// fails closed instead of silently shrinking the tombstone set.
     func load() -> Set<UUID> {
         lock.lock()
         defer { lock.unlock() }
         guard let raw = userDefaults.array(forKey: Self.key) as? [String] else { return [] }
         return Set(raw.compactMap(UUID.init(uuidString:)))
+    }
+
+    /// B (issue #816 reject, Hicks + replacement Vasquez): strict, fail-closed
+    /// load of the durable UserDefaults tombstone set. NEVER `compactMap`s
+    /// malformed entries: a value that is not a `[String]`, an element that is
+    /// not a valid UUID, or a duplicate UUID makes the whole store
+    /// schema-inconsistent and throws `.persistenceFailure`. The authority
+    /// coordinator uses this so a tampered/corrupt tombstone store cannot
+    /// silently drop a purged server (which would let it re-activate).
+    func loadStrict() throws -> Set<UUID> {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let stored = userDefaults.object(forKey: Self.key) else { return [] }
+        guard let raw = stored as? [String] else {
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
+        var set = Set<UUID>()
+        for element in raw {
+            guard let uuid = UUID(uuidString: element) else {
+                throw FarmSnapshotAuthorityError.persistenceFailure
+            }
+            let (inserted, _) = set.insert(uuid)
+            guard inserted else {
+                throw FarmSnapshotAuthorityError.persistenceFailure
+            }
+        }
+        return set
     }
 
     /// Durably mark a server as tombstoned. Idempotent.

@@ -71,7 +71,26 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
         // corrupt bytes. Mutations subsequently fail closed at their entry
         // points, so no purged server can silently re-activate and no token
         // can be minted against a poisoned authority.
-        var seed = tombstoneStore.load()
+        // H1 (issue #816 reject, Vasquez): if the file record is corrupt at
+        // hydration, mark the coordinator poisoned and do NOT hydrate any
+        // tombstones from it. The UserDefaults tombstone seed alone survives —
+        // no attempt to guess bytes, no publish of blank state, no clear of
+        // corrupt bytes. Mutations subsequently fail closed at their entry
+        // points, so no purged server can silently re-activate and no token
+        // can be minted against a poisoned authority.
+        //
+        // B (issue #816 reject, Hicks + replacement Vasquez): the UserDefaults
+        // tombstone seed is also read fail-closed (`loadStrict`). A corrupt /
+        // schema-inconsistent UserDefaults authority store (non-`[String]`,
+        // invalid UUID, or duplicate) poisons the coordinator instead of
+        // silently `compactMap`-dropping a purged server from the set.
+        var seed: Set<UUID>
+        do {
+            seed = try tombstoneStore.loadStrict()
+        } catch {
+            seed = []
+            self.durableRecordPoisoned = true
+        }
         if let durableRecord {
             do {
                 seed.formUnion(try durableRecord.loadTombstones())
@@ -96,18 +115,32 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
     private static let registryLock = NSLock()
     nonisolated(unsafe) private static var registry: [String: Weak] = [:]
 
-    /// Resolve (or lazily create) the coordinator for a persistence domain. All
-    /// Authorities that pass the same `tombstoneStore.domain` share ONE
-    /// coordinator, so their `current`/`tombstones`/`withPromotion` observe the
-    /// same in-memory state.
+    /// Resolve (or lazily create) the coordinator for a persistence domain.
+    ///
+    /// B (issue #816 reject, Hicks + replacement Vasquez): the registry is keyed
+    /// on BOTH the UserDefaults domain AND the durable file record's canonical
+    /// physical root — not the domain alone. Two live containers that share a
+    /// UserDefaults suite but point at DIFFERENT durable roots therefore resolve
+    /// to DIFFERENT coordinators and can never share/discard one file record; and
+    /// a rootless (`durableRecord == nil`) composition is keyed distinctly from a
+    /// rooted one, so incompatible reuse is rejected by construction rather than
+    /// silently sharing an unrelated record.
+    static func registryKey(
+        domain: String,
+        durableRecord: FarmSnapshotDurableAuthorityRecord?
+    ) -> String {
+        "\(domain)|root=\(durableRecord?.canonicalPathIdentity ?? "none")"
+    }
+
     static func coordinator(
         for tombstoneStore: FarmSnapshotTombstoneStore,
         durableRecord: FarmSnapshotDurableAuthorityRecord? = nil
     ) -> FarmSnapshotDomainCoordinator {
         let identifier = tombstoneStore.domain
+        let key = registryKey(domain: identifier, durableRecord: durableRecord)
         registryLock.lock()
         defer { registryLock.unlock() }
-        if let existing = registry[identifier]?.value {
+        if let existing = registry[key]?.value {
             return existing
         }
         // Clean up dead entries lazily so the registry cannot grow unbounded even
@@ -119,16 +152,21 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
             tombstoneStore: tombstoneStore,
             durableRecord: durableRecord
         )
-        registry[identifier] = Weak(created)
+        registry[key] = Weak(created)
         return created
     }
 
-    /// Test / suite-teardown helper: forcibly drop the coordinator entry for a
-    /// domain. Only safe when no live Authority still holds a reference.
+    /// Test / suite-teardown helper: forcibly drop coordinator entries for a
+    /// domain. Only safe when no live Authority still holds a reference. Because
+    /// the registry key now composes the durable root, all root variants for the
+    /// domain are removed.
     static func releaseCoordinator(forDomain identifier: String) {
         registryLock.lock()
         defer { registryLock.unlock() }
-        registry.removeValue(forKey: identifier)
+        let prefix = "\(identifier)|root="
+        for key in registry.keys where key == identifier || key.hasPrefix(prefix) {
+            registry.removeValue(forKey: key)
+        }
     }
 
     // MARK: Shared state — current session
@@ -320,47 +358,121 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
 
     private let recordURL: URL
     private let fileManager = FileManager.default
-    /// H2 (issue #816 reject, Vasquez): the read-modify-write lock is
-    /// canonicalized by absolute file path so that two record instances
-    /// pointing at the same file share the same critical section. Without
-    /// this, distinct instances would each hold their own `NSLock` and two
-    /// concurrent read-modify-write sequences on the same file could
-    /// interleave (same-domain, different-object bug).
-    private let lock: NSLock
+    /// B (issue #816 reject, Hicks + replacement Vasquez): the read-modify-write
+    /// lock is shared by *canonical physical identity* (not merely
+    /// `standardizedFileURL.path`) so symlink aliases and case aliases that
+    /// resolve to the SAME physical file share ONE critical section. The lease
+    /// is reference-counted via a weak registry: the record holds the lease
+    /// strongly, so the lock lives exactly as long as any live record on that
+    /// physical path — a force-release while a live record still holds the lease
+    /// is refused.
+    private let lockLease: PathLockLease
+    private var lock: NSLock { lockLease.lock }
+
+    /// The canonical physical identity of this record's file, used both as the
+    /// shared-lock key (B) and as part of the coordinator registry key so two
+    /// containers with different durable roots never share/discard one record.
+    let canonicalPathIdentity: String
+
+    // MARK: F — instance-scoped, synchronized test seam (no shipping global)
+
+    /// F (issue #816 reject): per-instance hook invoked AFTER the atomic write and
+    /// BEFORE the verifying re-read, used by tests to inject an
+    /// acknowledged-but-lost persistence event. Replaces the previous
+    /// module-global `nonisolated(unsafe) static var` — there is no shipping
+    /// global mutable test state. It is owned by exactly one record instance,
+    /// guarded by its own lock, keyed implicitly to that record's physical path,
+    /// and reset by test teardown. Nil in every production composition.
+    private let hookLock = NSLock()
+    private var afterAtomicWriteHook: (@Sendable (URL) -> Void)?
 
     /// Path relative to the snapshot root. The file name is stable so multiple
     /// instances pointing at the same root converge on the same file.
     static let filename = "farm_snapshot_authority.json"
 
-    /// H2 cross-instance file-path lock registry. Every record instance
-    /// resolves its lock through this registry keyed on the standardized
-    /// file path, so two records pointing at the same file share a lock.
-    private static let pathLocksLock = NSLock()
-    nonisolated(unsafe) private static var pathLocks: [String: NSLock] = [:]
+    /// B: a reference-counted lock lease. The registry holds it weakly; live
+    /// records hold it strongly. When the last record on a physical path dies the
+    /// lease deinits and is evicted automatically — so the registry cannot retain
+    /// dead paths forever, and no two live locks can exist for one physical file.
+    final class PathLockLease {
+        let lock = NSLock()
+        let key: String
+        init(key: String) { self.key = key }
+    }
 
-    private static func lock(forPath path: String) -> NSLock {
+    private final class WeakLease {
+        weak var value: PathLockLease?
+        init(_ value: PathLockLease) { self.value = value }
+    }
+
+    private static let pathLocksLock = NSLock()
+    nonisolated(unsafe) private static var pathLeases: [String: WeakLease] = [:]
+
+    /// B: derive a canonical *physical* identity for `url`, safe BEFORE the file
+    /// exists. Resolves symlinks on the (already-existing-or-createable) parent
+    /// directory, re-appends the stable filename, applies canonical Unicode
+    /// mapping, and lowercases (default APFS/HFS+ are case-insensitive, so case
+    /// aliases must map to one identity). This closes the symlink/case-alias
+    /// lock-split the reject called out.
+    static func canonicalIdentity(for url: URL) -> String {
+        let standardized = url.standardizedFileURL
+        let parent = standardized.deletingLastPathComponent()
+        let resolvedParent = parent.resolvingSymlinksInPath()
+        let combined = resolvedParent.appendingPathComponent(standardized.lastPathComponent, isDirectory: false)
+        return combined.path.precomposedStringWithCanonicalMapping.lowercased()
+    }
+
+    private static func lease(forIdentity identity: String) -> PathLockLease {
         pathLocksLock.lock()
         defer { pathLocksLock.unlock() }
-        if let existing = pathLocks[path] { return existing }
-        let created = NSLock()
-        pathLocks[path] = created
+        if let existing = pathLeases[identity]?.value { return existing }
+        // Evict dead entries lazily so the registry cannot grow unbounded.
+        pathLeases = pathLeases.filter { $0.value.value != nil }
+        let created = PathLockLease(key: identity)
+        pathLeases[identity] = WeakLease(created)
         return created
     }
 
-    /// Test / suite-teardown helper: forcibly drop the cached lock entry for a
-    /// canonical path. Only safe when no live record on that path is still in
-    /// use. Symmetric with `FarmSnapshotTombstoneStore.releaseCoordinator`.
-    static func releasePathLock(forURL url: URL) {
-        let key = url.standardizedFileURL.path
+    /// Test / suite-teardown helper: drop the cached lease entry for a physical
+    /// path ONLY if no live record still holds it. B: force-release while a live
+    /// record retains the lease is refused (the entry is left in place), so a
+    /// live record can never have its lock silently swapped out from under it.
+    @discardableResult
+    static func releasePathLock(forURL url: URL) -> Bool {
+        let identity = canonicalIdentity(for: url)
         pathLocksLock.lock()
         defer { pathLocksLock.unlock() }
-        pathLocks.removeValue(forKey: key)
+        if pathLeases[identity]?.value != nil {
+            // A live record still holds the lease — refuse to force-release.
+            return false
+        }
+        pathLeases.removeValue(forKey: identity)
+        return true
     }
 
     init(rootURL: URL) {
         let url = rootURL.appendingPathComponent(Self.filename, isDirectory: false)
         self.recordURL = url
-        self.lock = FarmSnapshotDurableAuthorityRecord.lock(forPath: url.standardizedFileURL.path)
+        let identity = FarmSnapshotDurableAuthorityRecord.canonicalIdentity(for: url)
+        self.canonicalPathIdentity = identity
+        self.lockLease = FarmSnapshotDurableAuthorityRecord.lease(forIdentity: identity)
+    }
+
+    #if DEBUG
+    /// F: install/clear the per-instance after-atomic-write hook. DEBUG-only so
+    /// it cannot exist in a Release build. Synchronized; each test owns exactly
+    /// one record instance and resets the hook in teardown.
+    func setAfterAtomicWriteHookForTesting(_ hook: (@Sendable (URL) -> Void)?) {
+        hookLock.lock()
+        defer { hookLock.unlock() }
+        afterAtomicWriteHook = hook
+    }
+    #endif
+
+    private func currentAfterAtomicWriteHook() -> (@Sendable (URL) -> Void)? {
+        hookLock.lock()
+        defer { hookLock.unlock() }
+        return afterAtomicWriteHook
     }
 
     // MARK: Read / write primitives
@@ -377,16 +489,57 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         case corrupt(underlying: Error?)
     }
 
+    /// A (issue #816 reject): distinguish a *true* file-not-found (ENOENT →
+    /// initialize-to-empty is legitimate) from any other read failure
+    /// (permission, traversal, I/O, metadata → corrupt/fail-closed). A generic
+    /// `fileExists == false` is NEVER treated as absence, because `stat` can fail
+    /// for reasons other than non-existence.
+    private static func isFileNotFound(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain,
+           ns.code == NSFileReadNoSuchFileError || ns.code == NSFileNoSuchFileError {
+            return true
+        }
+        if ns.domain == NSPOSIXErrorDomain, ns.code == Int(ENOENT) { return true }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            if underlying.domain == NSPOSIXErrorDomain, underlying.code == Int(ENOENT) { return true }
+            if underlying.domain == NSCocoaErrorDomain,
+               underlying.code == NSFileReadNoSuchFileError || underlying.code == NSFileNoSuchFileError {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// B (issue #816 reject): validate a decoded payload's semantics. A payload
+    /// whose invariants are violated is `corrupt`, NOT silently repaired:
+    ///   * `reservedHighWater` must be >= `adoptedHighWater` (a reservation
+    ///     high-water below the adopted high-water is impossible for a
+    ///     well-formed authority record).
+    ///   * every tombstone string must be a valid UUID (never `compactMap`ped
+    ///     away) and must be unique (no duplicate/aliased entries).
+    private static func isSemanticallyValid(_ payload: Payload) -> Bool {
+        guard payload.reservedHighWater >= payload.adoptedHighWater else { return false }
+        var seen = Set<UUID>()
+        for raw in payload.tombstones {
+            guard let uuid = UUID(uuidString: raw) else { return false }
+            let (inserted, _) = seen.insert(uuid)
+            guard inserted else { return false }
+        }
+        return true
+    }
+
     private func classifyReadLocked() -> ReadOutcome {
-        guard fileManager.fileExists(atPath: recordURL.path) else { return .absent }
         let data: Data
         do {
             data = try Data(contentsOf: recordURL)
         } catch {
-            return .corrupt(underlying: error)
+            // A: only a genuine ENOENT is absence; everything else fails closed.
+            return Self.isFileNotFound(error) ? .absent : .corrupt(underlying: error)
         }
         do {
             let decoded = try JSONDecoder().decode(Payload.self, from: data)
+            guard Self.isSemanticallyValid(decoded) else { return .corrupt(underlying: nil) }
             return .present(decoded)
         } catch {
             return .corrupt(underlying: error)
@@ -398,50 +551,69 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         case .absent: return .empty
         case .present(let payload): return payload
         case .corrupt:
-            // H1: an existing-but-unreadable/undecodable file MUST propagate
-            // as the exact typed error. Callers use this to fail closed;
-            // there is no code path that silently overwrites corrupt bytes.
+            // A/H1: an existing-but-unreadable/undecodable/semantically-invalid
+            // file MUST propagate as the exact typed error. Callers use this to
+            // fail closed; there is no code path that silently overwrites corrupt
+            // bytes.
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
+    }
+
+    /// C (issue #816 reject): throwing raw-byte read of an existing present
+    /// record, with NO `try?`. A present payload whose bytes cannot be re-read
+    /// (permission/I/O) fails closed rather than proceeding with a nil backup.
+    private func readPresentBytesLocked() throws -> Data {
+        do {
+            return try Data(contentsOf: recordURL)
+        } catch {
             throw FarmSnapshotAuthorityError.persistenceFailure
         }
     }
 
     private func writeLocked(_ payload: Payload) throws {
-        try fileManager.createDirectory(
-            at: recordURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        // H3 (issue #816 reject, Vasquez): capture the exact prior-verified
-        // bytes BEFORE the atomic write so that a write/verify failure can
-        // restore them and never leave the record with data neither the old
-        // payload nor the new payload matches. Prior bytes are captured
-        // only when the current file is a valid `present` payload (absent →
-        // nothing to restore; corrupt → refuse to write at all).
+        do {
+            try fileManager.createDirectory(
+                at: recordURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            // A: a directory-creation failure (permission/traversal) is a typed
+            // persistence failure — never a silently-swallowed no-op.
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
+        // C (issue #816 reject, Hicks + replacement Vasquez): capture the exact
+        // prior-verified bytes BEFORE the atomic write so a write/verify failure
+        // can restore them byte-for-byte. NO `try?`: a present record whose bytes
+        // cannot be re-read fails closed; absent → nothing to restore; corrupt →
+        // refuse to write at all.
         let priorBytes: Data?
         switch classifyReadLocked() {
         case .absent:
             priorBytes = nil
         case .present:
-            priorBytes = try? Data(contentsOf: recordURL)
+            priorBytes = try readPresentBytesLocked()
         case .corrupt:
-            // Never overwrite corrupt bytes; a mutation on a corrupt record
-            // must fail closed with no side effects (H1 invariant).
             throw FarmSnapshotAuthorityError.persistenceFailure
         }
 
         let encoded = try JSONEncoder().encode(payload)
-        try encoded.write(to: recordURL, options: [.atomic])
-        // H (issue #816 reject, Hicks): test-only injection point BETWEEN the
-        // acknowledged write and the verifying re-read, so an
-        // acknowledged-but-lost persistence event can be deterministically
-        // reproduced (delete the file to simulate loss). The interceptor is a
-        // static test hook: production callers never touch it, and it is nil
-        // in every production composition.
-        Self.testInterceptAfterAtomicWrite?(recordURL)
+        do {
+            try encoded.write(to: recordURL, options: [.atomic])
+        } catch {
+            // The atomic write itself failed — the OS rename never landed, so the
+            // prior bytes are still intact. Surface as a typed failure.
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
+        // F: per-instance test hook between the acknowledged write and the
+        // verifying re-read, so an acknowledged-but-lost persistence event can be
+        // deterministically reproduced. Nil in production.
+        currentAfterAtomicWriteHook()?(recordURL)
         // Verify via re-read — if the OS reported success but a crash / partial
-        // flush left different bytes, we must surface that as a typed failure.
-        // H3: on failure, restore the exact captured prior bytes (or remove
-        // the file if there were none) so the record is never left holding
-        // the failed write's partially-applied state.
+        // flush left different bytes, surface that as a typed failure. C: on
+        // failure, restore the exact captured prior bytes (or remove the file if
+        // there were none); if restoration ALSO fails, surface a typed COMPOSITE
+        // failure retaining both contexts rather than swallowing the recovery
+        // error.
         let verifiedOK: Bool
         switch classifyReadLocked() {
         case .absent, .corrupt:
@@ -450,30 +622,33 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
             verifiedOK = verified == payload
         }
         guard verifiedOK else {
-            restoreLocked(bytes: priorBytes)
+            try restoreLocked(bytes: priorBytes, primaryContext: "durable write verification failed")
             throw FarmSnapshotAuthorityError.persistenceFailure
         }
     }
 
-    /// H3: restore captured prior-verified bytes best-effort. A failed
-    /// restore leaves the file in whatever state the failed write left it,
-    /// but the caller has already thrown `.persistenceFailure` so no
-    /// downstream publication can happen.
-    private func restoreLocked(bytes priorBytes: Data?) {
-        if let priorBytes {
-            try? priorBytes.write(to: recordURL, options: [.atomic])
-        } else {
-            try? fileManager.removeItem(at: recordURL)
+    /// C: restore captured prior-verified bytes. NO `try?`: on a restore failure
+    /// the recovery error is captured and re-thrown as a typed composite
+    /// `.restorationFailure(primary:recovery:)` so a genuine double-fault is
+    /// surfaced (never swallowed). A successful restore returns normally and the
+    /// caller then throws the primary `.persistenceFailure` — the record is left
+    /// byte-identical to before the failed mutation.
+    private func restoreLocked(bytes priorBytes: Data?, primaryContext: String) throws {
+        do {
+            if let priorBytes {
+                try priorBytes.write(to: recordURL, options: [.atomic])
+            } else {
+                if fileManager.fileExists(atPath: recordURL.path) {
+                    try fileManager.removeItem(at: recordURL)
+                }
+            }
+        } catch {
+            throw FarmSnapshotAuthorityError.restorationFailure(
+                primary: primaryContext,
+                recovery: String(describing: error)
+            )
         }
     }
-
-    /// H (issue #816 reject, Hicks): test-only static interceptor invoked
-    /// AFTER the atomic write and BEFORE the verifying re-read of the durable
-    /// file record. Tests set this to inject an acknowledged-but-lost
-    /// persistence event (e.g. delete the file), driving the exact typed
-    /// `.persistenceFailure` throw path deterministically. MUST be nil in
-    /// production; MUST be reset by test teardown.
-    nonisolated(unsafe) static var testInterceptAfterAtomicWrite: (@Sendable (URL) -> Void)?
 
     // MARK: Public API
 
@@ -492,13 +667,24 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         return try readLocked().adoptedHighWater
     }
 
-    /// H1: throwing accessor — corrupt → `.persistenceFailure`, absent → ∅.
-    /// A caller that fails to propagate this throw would silently drop
-    /// durable tombstones (letting a purged server reactivate), so it must
-    /// be handled explicitly by every reader.
+    /// H1/B: throwing accessor — corrupt/invalid → `.persistenceFailure`,
+    /// absent → ∅. Uses the semantically-validated payload (`readLocked`), so a
+    /// tombstone list containing an invalid or duplicate UUID has ALREADY failed
+    /// closed before this point — the map below can never silently drop an entry.
+    /// A caller that fails to propagate this throw would silently drop durable
+    /// tombstones (letting a purged server reactivate), so it must be handled
+    /// explicitly by every reader.
     func loadTombstones() throws -> Set<UUID> {
         lock.lock(); defer { lock.unlock() }
-        return Set(try readLocked().tombstones.compactMap(UUID.init(uuidString:)))
+        let payload = try readLocked()
+        var set = Set<UUID>()
+        for raw in payload.tombstones {
+            guard let uuid = UUID(uuidString: raw) else {
+                throw FarmSnapshotAuthorityError.persistenceFailure
+            }
+            set.insert(uuid)
+        }
+        return set
     }
 
     /// Atomically reserve the next token — durable BEFORE return. Throws typed
