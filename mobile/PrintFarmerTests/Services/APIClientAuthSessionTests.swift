@@ -387,12 +387,14 @@ final class APIClientAuthSessionTests: XCTestCase {
         let transport = MockURLProtocol.makeSession()
 
         // Construct client with T2 identity ATOMICALLY (as production now does).
+        // J4: authenticated construction requires a stable serverID.
         let client = APIClient(
             baseURL: URL(string: "https://a.example.com")!,
             session: transport.urlSession,
             serverGeneration: gen,
             accessToken: "bearer-T2",
-            authSessionToken: 42
+            authSessionToken: 42,
+            serverID: UUID()
         )
 
         transport.requestHandler = { req in

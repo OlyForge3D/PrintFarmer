@@ -410,13 +410,14 @@ final class ServerRegistryTests: XCTestCase {
             serverRegistry: registry,
             credentialsStore: credentialsStore,
             userDefaultsBox: AuthServiceUserDefaultsBox(userDefaults),
-            apiClientFactory: { baseURL, generation, accessToken, authSessionToken in
+            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
                 APIClient(
                     baseURL: baseURL,
                     session: self.mockAPIClient.urlSession,
                     serverGeneration: generation,
                     accessToken: accessToken,
-                    authSessionToken: authSessionToken
+                    authSessionToken: authSessionToken,
+                    serverID: serverID
                 )
             },
             signalRServiceFactory: { baseURL, client in

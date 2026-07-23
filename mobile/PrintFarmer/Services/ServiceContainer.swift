@@ -6,7 +6,7 @@ import Observation
 @MainActor
 @Observable
 final class ServiceContainer: @unchecked Sendable {
-    typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?, Int?) -> APIClient
+    typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?, Int?, UUID?) -> APIClient
     typealias SignalRServiceFactory = @MainActor (URL, APIClient) -> any SignalRServiceProtocol
 
     var apiClient: APIClient?
@@ -128,8 +128,8 @@ final class ServiceContainer: @unchecked Sendable {
         /// (instead of a temp-rooted pre-built record) exercises exactly
         /// the shipping composition path.
         farmSnapshotRootURL: URL? = nil,
-        apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken)
+        apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
+            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken, serverID: serverID)
         },
         signalRServiceFactory: @escaping SignalRServiceFactory = { baseURL, client in
             SignalRService(
@@ -197,7 +197,12 @@ final class ServiceContainer: @unchecked Sendable {
         // fire-and-forget Task cannot read a newer epoch and clobber this client's
         // identity with a superseded operation's token.
         let reconstructedAuthToken = accessToken == nil ? nil : authOperationEpoch.current
-        let client = apiClientFactory(resolvedURL, activeGeneration, accessToken, reconstructedAuthToken)
+        // J4 (issue #816 reject, Hicks): reconstructing an authenticated
+        // APIClient requires the stable serverID atomically at construction.
+        // The active server IS the identity this reconstructed session was
+        // established for.
+        let reconstructedServerID = accessToken == nil ? nil : activeServer?.id
+        let client = apiClientFactory(resolvedURL, activeGeneration, accessToken, reconstructedAuthToken, reconstructedServerID)
 
         self.apiClient = client
         self.authService = AuthService(
@@ -740,7 +745,9 @@ final class ServiceContainer: @unchecked Sendable {
         // APIClient construction. A superseded operation cannot later overwrite this
         // client's identity because the identity is fixed at init.
         let reconstructedAuthToken = accessToken == nil ? nil : authOperationEpoch.current
-        let client = apiClientFactory(baseURL, activeGeneration, accessToken, reconstructedAuthToken)
+        // J4: same atomic serverID binding on rebuild after a server switch.
+        let reconstructedServerID = accessToken == nil ? nil : server?.id
+        let client = apiClientFactory(baseURL, activeGeneration, accessToken, reconstructedAuthToken, reconstructedServerID)
         self.apiClient = client
         self.authService = AuthService(
             apiClient: client,
@@ -844,8 +851,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.serverRegistry = serverRegistry
         self.credentialsStore = ServerCredentialsStore()
         self.userDefaultsBox = AuthServiceUserDefaultsBox(.standard)
-        self.apiClientFactory = { baseURL, generation, accessToken, authSessionToken in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken)
+        self.apiClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
+            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken, serverID: serverID)
         }
         self.signalRServiceFactory = { baseURL, client in
             SignalRService(

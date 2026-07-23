@@ -63,7 +63,7 @@ final class AuthSnapshotIdentityTests: XCTestCase {
 
     // MARK: Token-only verified identity
 
-    func testTokenOnlyLoginWithUnverifiableIdentityClearsStalePriorOwner() async throws {
+    func testTokenOnlyLoginWithUnverifiableIdentityThrowsAndPreservesPriorOwner() async throws {
         // A prior owner exists for this server.
         let priorUser = UUID()
         owners.setOwner(userID: priorUser, serverID: serverID)
@@ -74,10 +74,28 @@ final class AuthSnapshotIdentityTests: XCTestCase {
             "/api/auth/me": (401, "{}")
         ])
 
-        _ = try await authService.login(serverURL: "https://a.example.com", username: "u", password: "p")
+        // J2 (issue #816 reject, Hicks): required identity verification failure
+        // MUST throw and publish nothing. The prior owner survives untouched
+        // because no publication ever happened — the previous behavior of
+        // silently clearing prior owner on token-only login with a failing
+        // /me was itself the bug (it published an unauthenticated identity
+        // for the server via the else-branch of `if let user else clearOwner`).
+        do {
+            _ = try await authService.login(serverURL: "https://a.example.com", username: "u", password: "p")
+            XCTFail("J2: login MUST throw when identity verification fails")
+        } catch let error as NetworkError {
+            if case .authFailed = error {
+                // Expected.
+            } else {
+                XCTFail("J2: expected NetworkError.authFailed, got \(error)")
+            }
+        }
 
-        // Fail closed: the stale prior owner must NOT survive a token-only login.
-        XCTAssertNil(owners.ownerUserID(serverID: serverID))
+        // J2 invariant: the prior owner is preserved untouched — no destination
+        // received this operation's state, so nothing was cleared or
+        // overwritten.
+        XCTAssertEqual(owners.ownerUserID(serverID: serverID), priorUser,
+                       "J2: unverifiable identity MUST NOT clear prior owner (no publication happened)")
     }
 
     func testTokenOnlyLoginVerifiesOwnerViaCurrentUser() async throws {
