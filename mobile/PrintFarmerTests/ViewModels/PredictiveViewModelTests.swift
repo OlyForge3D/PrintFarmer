@@ -2034,7 +2034,8 @@ final class PredictiveViewModelTests: XCTestCase {
     func testAsyncGateParkAckAfterParkIsImmediate() async {
         let gate = AsyncGate()
         let token = await gate.registerObserver()
-        let t = Task { await gate.awaitObserver(token) }
+        let attempt = ObserverAwaitAttempt()
+        let t = Task { await gate.awaitObserver(token, attempt: attempt) }
 
         // Causal park proof: block until the parking task has actually
         // installed the continuation. `waitForObserverParked` returns
@@ -2045,20 +2046,56 @@ final class PredictiveViewModelTests: XCTestCase {
 
         // Enter ticket AFTER parked-proof. `enterObserverParkAck` runs
         // synchronously on the actor: its `parkedObservers[token.id] != nil`
-        // branch calls `ticket.resolve(.parked)` and returns. The ticket
-        // MUST be resolved on return; `.value()` MUST be exactly `.parked`.
+        // branch calls `ticket.resolve(.parked)` and returns without
+        // inserting into `observerActiveParkAckTickets`.
         let ticket = await gate.enterObserverParkAck(token)
-        XCTAssertTrue(ticket.isResolved,
-                      "ticket entered against a parked token must be resolved synchronously by enterObserverParkAck")
 
-        let r = await ticket.value()
-        XCTAssertEqual(r, .parked,
-                       "ticket entered after park must resolve exactly .parked; got \(r)")
+        // Reviewer finding E (Hicks, MEDIUM): capture the sync-resolution
+        // state IMMEDIATELY — BEFORE any await. The prior version used
+        // \`XCTAssertTrue(ticket.isResolved)\` (non-fatal) then
+        // \`await ticket.value()\` right after. If synchronous resolution
+        // regressed AND the ticket wasn't inserted into the actor's
+        // active-ticket map, \`.value()\` would hang before close was
+        // ever reached (with no rescuer). Capturing \`isResolved\`
+        // synchronously ensures the resolution proof runs before ANY
+        // suspension edge.
+        let syncResolved = ticket.isResolved
 
-        // Close for bounded teardown; drains the parked continuation via
-        // .closedWhileParked (does not affect the already-resolved ticket).
+        // Fail-safe close+drain BEFORE awaiting ticket.value. This
+        // guarantees an INDEPENDENT resolver for the ticket in every
+        // regression scenario:
+        //   (a) sync resolution regressed but map insert happened —
+        //       close drains the parked observer via
+        //       \`flushObserverParkAcks(id:, .terminal(.closedWhileParked))\`,
+        //       which resolves the ticket to .terminal(.closedWhileParked).
+        //   (b) sync resolution + map insert BOTH regressed — ticket
+        //       has no resolver; the syncResolved guard below catches
+        //       this before any \`.value()\` await, preventing hang.
+        //   (c) happy path — ticket was resolved .parked at enter
+        //       time; close-drain does not affect the already-resolved
+        //       ticket (\`resolve(_)\` is idempotent by construction).
+        // Every await below is bounded by close-drain.
         await gate.close()
         await t.value
+
+        // Assert the sync-resolution invariant now that teardown is
+        // done. Non-blocking: syncResolved was captured before any
+        // await, so regression (b) fails HERE with an early return
+        // instead of hanging.
+        guard syncResolved else {
+            XCTFail("ticket entered against a parked token must be resolved SYNCHRONOUSLY by enterObserverParkAck (got isResolved=false at enter time)")
+            return
+        }
+
+        // Ticket is proven resolved (syncResolved=true) → \`.value()\` is
+        // bounded because the buffered latch has a stored result.
+        // The exact \`.parked\` equality catches regression (a) — if
+        // sync resolved was true but with the WRONG value, or if
+        // sync failed and close-drain resolved to
+        // .terminal(.closedWhileParked), this assertion fails.
+        let r = await ticket.value()
+        XCTAssertEqual(r, .parked,
+                       "ticket entered after park must resolve exactly .parked (immediate at enter time); got \(r)")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
