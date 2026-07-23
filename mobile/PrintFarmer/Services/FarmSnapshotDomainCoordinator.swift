@@ -40,6 +40,13 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
 
     private var current: FarmSnapshotSession?
     private var tombstoneCache: Set<UUID>
+    /// H1 (issue #816 reject, Vasquez): set when the durable record threw
+    /// `.persistenceFailure` at coordinator hydration (corrupt/unreadable
+    /// existing file). Any subsequent reserve/mint/adopt/tombstone
+    /// operation MUST fail closed with the same typed throw — there is no
+    /// path that silently proceeds on a poisoned record. Reset ONLY by
+    /// discarding this coordinator (release + rebuild).
+    private var durableRecordPoisoned: Bool = false
 
     fileprivate init(
         domainIdentifier: String,
@@ -56,9 +63,21 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
         // (even when the UserDefaults suite is empty), otherwise a purged server
         // could be silently re-activated after a crash between the record write
         // and the UserDefaults write.
+        //
+        // H1 (issue #816 reject, Vasquez): if the file record is corrupt at
+        // hydration, mark the coordinator poisoned and do NOT hydrate any
+        // tombstones from it. The UserDefaults tombstone seed alone survives —
+        // no attempt to guess bytes, no publish of blank state, no clear of
+        // corrupt bytes. Mutations subsequently fail closed at their entry
+        // points, so no purged server can silently re-activate and no token
+        // can be minted against a poisoned authority.
         var seed = tombstoneStore.load()
         if let durableRecord {
-            seed.formUnion(durableRecord.loadTombstones())
+            do {
+                seed.formUnion(try durableRecord.loadTombstones())
+            } catch {
+                self.durableRecordPoisoned = true
+            }
         }
         self.tombstoneCache = seed
     }
@@ -126,8 +145,19 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
 
     // MARK: Shared state — reserve/mint/adopt (delegates durable CAS)
 
+    /// H1 (issue #816 reject, Vasquez): every mutation entry point on a poisoned
+    /// coordinator fails closed with the exact typed error. The coordinator
+    /// cannot resurrect itself by continuing on partial state, so the caller
+    /// must observe `.persistenceFailure` and refuse to publish anything.
+    private func throwIfPoisonedLocked() throws {
+        if durableRecordPoisoned {
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
+    }
+
     func reserve(namespace: FarmSnapshotNamespace, generation: Int) throws -> FarmSnapshotSession? {
         lock.lock(); defer { lock.unlock() }
+        try throwIfPoisonedLocked()
         guard !tombstoneCache.contains(namespace.serverID) else { return nil }
         let reserved: UInt64
         if let durableRecord {
@@ -141,6 +171,7 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
 
     func mint(namespace: FarmSnapshotNamespace, generation: Int) throws -> FarmSnapshotSession? {
         lock.lock(); defer { lock.unlock() }
+        try throwIfPoisonedLocked()
         guard !tombstoneCache.contains(namespace.serverID) else { return nil }
         let reserved: UInt64
         let adopted: Bool
@@ -162,6 +193,7 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
     @discardableResult
     func adopt(_ session: FarmSnapshotSession) throws -> Bool {
         lock.lock(); defer { lock.unlock() }
+        try throwIfPoisonedLocked()
         guard !tombstoneCache.contains(session.serverID) else { return false }
         if session == current { return true }
         let accepted: Bool
@@ -200,6 +232,7 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
     /// `current` if it matches.
     func tombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
+        try throwIfPoisonedLocked()
         // Durable file record first (throws on verified-read mismatch). If this
         // throws, nothing observable changes and purge/promotion callers can
         // refuse to proceed.
@@ -218,6 +251,7 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
     /// place (fail-closed for the tombstone barrier) and surfaces to the caller.
     func clearTombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
+        try throwIfPoisonedLocked()
         if let durableRecord {
             try durableRecord.removeTombstone(serverID)
         }
@@ -276,34 +310,99 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
 // (UserDefaults) and the file record; when absent, tombstone store alone
 // remains the durable source.
 final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
-    private struct Payload: Codable {
+    private struct Payload: Codable, Equatable {
         var reservedHighWater: UInt64
         var adoptedHighWater: UInt64
         var tombstones: [String]
+
+        static let empty = Payload(reservedHighWater: 0, adoptedHighWater: 0, tombstones: [])
     }
 
     private let recordURL: URL
     private let fileManager = FileManager.default
-    private let lock = NSLock()
+    /// H2 (issue #816 reject, Vasquez): the read-modify-write lock is
+    /// canonicalized by absolute file path so that two record instances
+    /// pointing at the same file share the same critical section. Without
+    /// this, distinct instances would each hold their own `NSLock` and two
+    /// concurrent read-modify-write sequences on the same file could
+    /// interleave (same-domain, different-object bug).
+    private let lock: NSLock
 
     /// Path relative to the snapshot root. The file name is stable so multiple
     /// instances pointing at the same root converge on the same file.
     static let filename = "farm_snapshot_authority.json"
 
+    /// H2 cross-instance file-path lock registry. Every record instance
+    /// resolves its lock through this registry keyed on the standardized
+    /// file path, so two records pointing at the same file share a lock.
+    private static let pathLocksLock = NSLock()
+    nonisolated(unsafe) private static var pathLocks: [String: NSLock] = [:]
+
+    private static func lock(forPath path: String) -> NSLock {
+        pathLocksLock.lock()
+        defer { pathLocksLock.unlock() }
+        if let existing = pathLocks[path] { return existing }
+        let created = NSLock()
+        pathLocks[path] = created
+        return created
+    }
+
+    /// Test / suite-teardown helper: forcibly drop the cached lock entry for a
+    /// canonical path. Only safe when no live record on that path is still in
+    /// use. Symmetric with `FarmSnapshotTombstoneStore.releaseCoordinator`.
+    static func releasePathLock(forURL url: URL) {
+        let key = url.standardizedFileURL.path
+        pathLocksLock.lock()
+        defer { pathLocksLock.unlock() }
+        pathLocks.removeValue(forKey: key)
+    }
+
     init(rootURL: URL) {
-        self.recordURL = rootURL.appendingPathComponent(Self.filename, isDirectory: false)
+        let url = rootURL.appendingPathComponent(Self.filename, isDirectory: false)
+        self.recordURL = url
+        self.lock = FarmSnapshotDurableAuthorityRecord.lock(forPath: url.standardizedFileURL.path)
     }
 
     // MARK: Read / write primitives
 
-    private func readLocked() -> Payload {
-        guard fileManager.fileExists(atPath: recordURL.path),
-              let data = try? Data(contentsOf: recordURL),
-              let decoded = try? JSONDecoder().decode(Payload.self, from: data)
-        else {
-            return Payload(reservedHighWater: 0, adoptedHighWater: 0, tombstones: [])
+    /// H1 (issue #816 reject, Vasquez): classify a physical read into three
+    /// exact outcomes so `absent` (initialize-to-empty) can NEVER be
+    /// conflated with `corrupt` (unreadable or undecodable existing file).
+    /// The corrupt case is what a silent `try?` used to swallow into an
+    /// empty payload, silently resetting authority state; classified this
+    /// way, corrupt propagates through `readLocked` as a typed throw.
+    private enum ReadOutcome {
+        case absent
+        case present(Payload)
+        case corrupt(underlying: Error?)
+    }
+
+    private func classifyReadLocked() -> ReadOutcome {
+        guard fileManager.fileExists(atPath: recordURL.path) else { return .absent }
+        let data: Data
+        do {
+            data = try Data(contentsOf: recordURL)
+        } catch {
+            return .corrupt(underlying: error)
         }
-        return decoded
+        do {
+            let decoded = try JSONDecoder().decode(Payload.self, from: data)
+            return .present(decoded)
+        } catch {
+            return .corrupt(underlying: error)
+        }
+    }
+
+    private func readLocked() throws -> Payload {
+        switch classifyReadLocked() {
+        case .absent: return .empty
+        case .present(let payload): return payload
+        case .corrupt:
+            // H1: an existing-but-unreadable/undecodable file MUST propagate
+            // as the exact typed error. Callers use this to fail closed;
+            // there is no code path that silently overwrites corrupt bytes.
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
     }
 
     private func writeLocked(_ payload: Payload) throws {
@@ -311,6 +410,24 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
             at: recordURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+        // H3 (issue #816 reject, Vasquez): capture the exact prior-verified
+        // bytes BEFORE the atomic write so that a write/verify failure can
+        // restore them and never leave the record with data neither the old
+        // payload nor the new payload matches. Prior bytes are captured
+        // only when the current file is a valid `present` payload (absent →
+        // nothing to restore; corrupt → refuse to write at all).
+        let priorBytes: Data?
+        switch classifyReadLocked() {
+        case .absent:
+            priorBytes = nil
+        case .present:
+            priorBytes = try? Data(contentsOf: recordURL)
+        case .corrupt:
+            // Never overwrite corrupt bytes; a mutation on a corrupt record
+            // must fail closed with no side effects (H1 invariant).
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
+
         let encoded = try JSONEncoder().encode(payload)
         try encoded.write(to: recordURL, options: [.atomic])
         // H (issue #816 reject, Hicks): test-only injection point BETWEEN the
@@ -322,12 +439,31 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         Self.testInterceptAfterAtomicWrite?(recordURL)
         // Verify via re-read — if the OS reported success but a crash / partial
         // flush left different bytes, we must surface that as a typed failure.
-        let verified = readLocked()
-        guard verified.reservedHighWater == payload.reservedHighWater,
-              verified.adoptedHighWater == payload.adoptedHighWater,
-              Set(verified.tombstones) == Set(payload.tombstones)
-        else {
+        // H3: on failure, restore the exact captured prior bytes (or remove
+        // the file if there were none) so the record is never left holding
+        // the failed write's partially-applied state.
+        let verifiedOK: Bool
+        switch classifyReadLocked() {
+        case .absent, .corrupt:
+            verifiedOK = false
+        case .present(let verified):
+            verifiedOK = verified == payload
+        }
+        guard verifiedOK else {
+            restoreLocked(bytes: priorBytes)
             throw FarmSnapshotAuthorityError.persistenceFailure
+        }
+    }
+
+    /// H3: restore captured prior-verified bytes best-effort. A failed
+    /// restore leaves the file in whatever state the failed write left it,
+    /// but the caller has already thrown `.persistenceFailure` so no
+    /// downstream publication can happen.
+    private func restoreLocked(bytes priorBytes: Data?) {
+        if let priorBytes {
+            try? priorBytes.write(to: recordURL, options: [.atomic])
+        } else {
+            try? fileManager.removeItem(at: recordURL)
         }
     }
 
@@ -341,27 +477,37 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
 
     // MARK: Public API
 
-    func loadReservedHighWater() -> UInt64 {
+    /// H1 (issue #816 reject, Vasquez): throwing accessor — a corrupt on-disk
+    /// record surfaces as `.persistenceFailure` instead of silently
+    /// returning zero. An absent file returns zero. Callers that participate
+    /// in the fail-closed contract MUST use this.
+    func loadReservedHighWater() throws -> UInt64 {
         lock.lock(); defer { lock.unlock() }
-        return readLocked().reservedHighWater
+        return try readLocked().reservedHighWater
     }
 
-    func loadAdoptedHighWater() -> UInt64 {
+    /// H1: throwing accessor — corrupt → `.persistenceFailure`, absent → 0.
+    func loadAdoptedHighWater() throws -> UInt64 {
         lock.lock(); defer { lock.unlock() }
-        return readLocked().adoptedHighWater
+        return try readLocked().adoptedHighWater
     }
 
-    func loadTombstones() -> Set<UUID> {
+    /// H1: throwing accessor — corrupt → `.persistenceFailure`, absent → ∅.
+    /// A caller that fails to propagate this throw would silently drop
+    /// durable tombstones (letting a purged server reactivate), so it must
+    /// be handled explicitly by every reader.
+    func loadTombstones() throws -> Set<UUID> {
         lock.lock(); defer { lock.unlock() }
-        return Set(readLocked().tombstones.compactMap(UUID.init(uuidString:)))
+        return Set(try readLocked().tombstones.compactMap(UUID.init(uuidString:)))
     }
 
     /// Atomically reserve the next token — durable BEFORE return. Throws typed
     /// `.tokenSpaceExhausted` on UInt64 overflow, or `.persistenceFailure` on
-    /// verified-read mismatch.
+    /// verified-read mismatch. H1: also throws `.persistenceFailure` when the
+    /// existing file is unreadable/undecodable (never resets to zero).
     func reserveNextToken(atLeast: UInt64 = 0) throws -> UInt64 {
         lock.lock(); defer { lock.unlock() }
-        var payload = readLocked()
+        var payload = try readLocked()
         let base = max(payload.reservedHighWater, atLeast)
         let (next, overflow) = base.addingReportingOverflow(1)
         guard !overflow else { throw FarmSnapshotAuthorityError.tokenSpaceExhausted }
@@ -372,10 +518,10 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
 
     /// Attempt to durably adopt `token`. Returns false when a peer has already
     /// adopted this-or-higher (delayed old). Throws `.persistenceFailure` on
-    /// verified-read mismatch.
+    /// verified-read mismatch or a corrupt existing record (H1).
     func tryAdopt(token: UInt64) throws -> Bool {
         lock.lock(); defer { lock.unlock() }
-        var payload = readLocked()
+        var payload = try readLocked()
         guard token > payload.adoptedHighWater else { return false }
         payload.adoptedHighWater = token
         if token > payload.reservedHighWater { payload.reservedHighWater = token }
@@ -386,11 +532,12 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
     /// H (issue #816 reject, Hicks): verified, throwing durable tombstone insert.
     /// Writes atomically and re-reads to confirm the tombstone is now durably
     /// present; throws `.persistenceFailure` on a verified-read mismatch or
-    /// underlying I/O failure. Callers MUST NOT report a tombstone as durable
-    /// on failure (purge fails closed).
+    /// underlying I/O failure or when the existing file is corrupt (H1).
+    /// Callers MUST NOT report a tombstone as durable on failure (purge fails
+    /// closed).
     func insertTombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
-        var payload = readLocked()
+        var payload = try readLocked()
         var set = Set(payload.tombstones)
         set.insert(serverID.uuidString)
         payload.tombstones = Array(set)
@@ -398,7 +545,7 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         // Explicit verification: the re-read set MUST include this server ID.
         // (writeLocked already verifies exact equality; this is a belt-and-braces
         // check that surfaces any future writeLocked semantics regression.)
-        let verified = readLocked()
+        let verified = try readLocked()
         guard Set(verified.tombstones).contains(serverID.uuidString) else {
             throw FarmSnapshotAuthorityError.persistenceFailure
         }
@@ -406,15 +553,16 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
 
     /// H (issue #816 reject, Hicks): verified, throwing durable tombstone
     /// removal. Symmetric with `insertTombstone` — fails closed if the
-    /// atomic write or verified re-read does not observe the tombstone gone.
+    /// atomic write or verified re-read does not observe the tombstone gone,
+    /// or when the existing file is corrupt (H1).
     func removeTombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
-        var payload = readLocked()
+        var payload = try readLocked()
         var set = Set(payload.tombstones)
         set.remove(serverID.uuidString)
         payload.tombstones = Array(set)
         try writeLocked(payload)
-        let verified = readLocked()
+        let verified = try readLocked()
         guard !Set(verified.tombstones).contains(serverID.uuidString) else {
             throw FarmSnapshotAuthorityError.persistenceFailure
         }

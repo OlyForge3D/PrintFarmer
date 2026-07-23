@@ -664,7 +664,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let ns = FarmSnapshotFixtures.namespace()
         let s1 = try container1.farmSnapshotAuthority.mint(namespace: ns, generation: 0)!
         XCTAssertGreaterThan(s1.token, 0)
-        XCTAssertEqual(record1.loadReservedHighWater(), s1.token,
+        XCTAssertEqual(try record1.loadReservedHighWater(), s1.token,
                        "record1 MUST observe the mint (durable record IS wired into the coordinator)")
 
         // Simulate an app relaunch: drop the coordinator+tombstone-store shared
@@ -686,7 +686,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             farmSnapshotDurableAuthorityRecord: record2
         )
         XCTAssertTrue(container2.farmSnapshotDurableRecord === record2)
-        XCTAssertEqual(record2.loadReservedHighWater(), s1.token,
+        XCTAssertEqual(try record2.loadReservedHighWater(), s1.token,
                        "distinct record object at same path MUST observe s1's durable reservation")
 
         let s2 = try container2.farmSnapshotAuthority.mint(namespace: ns, generation: 0)!

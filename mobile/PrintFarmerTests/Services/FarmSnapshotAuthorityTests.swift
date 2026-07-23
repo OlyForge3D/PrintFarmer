@@ -606,7 +606,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         // Baseline: first reserve succeeds → durable high-water = 1.
         let baseline = try record.reserveNextToken()
         XCTAssertEqual(baseline, 1)
-        XCTAssertEqual(record.loadReservedHighWater(), 1)
+        XCTAssertEqual(try record.loadReservedHighWater(), 1)
 
         // Inject the acknowledged-but-lost persistence event: delete the file
         // BETWEEN the atomic write and the verifying re-read. The re-read
@@ -682,7 +682,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         // Pre-seed the file record at UInt64.max via direct adopt.
         let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
         XCTAssertTrue(try record.tryAdopt(token: UInt64.max))
-        XCTAssertEqual(record.loadReservedHighWater(), UInt64.max)
+        XCTAssertEqual(try record.loadReservedHighWater(), UInt64.max)
 
         XCTAssertThrowsError(try record.reserveNextToken()) { err in
             XCTAssertEqual(err as? FarmSnapshotAuthorityError, .tokenSpaceExhausted)
