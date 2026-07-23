@@ -37,6 +37,14 @@ Before configuring your slicer, you need to generate an API key in PrintFarmer:
 4. Give the key a descriptive name (e.g., "PrusaSlicer on Workstation")
 5. Copy the generated API key (you won't be able to see it again)
 
+> **Note:** API keys created here default to the **OctoPrint** purpose, which is what slicers need
+> for OctoPrint-compatible uploads. A separate **Desktop** purpose exists for the PrintFarmer
+> Desktop app; Desktop-purpose keys require explicit scopes and receive a 90-day expiry by
+> default, and are never valid for slicer uploads. See
+> [Desktop API-Key Exchange](#desktop-api-key-exchange) below for how Desktop-purpose keys are
+> exchanged for a short-lived token. Provider migrations and the reserved authentication,
+> audit, expiry, scope, and redaction test tranche remain in #839.
+
 ### 2. Configure PrusaSlicer
 
 1. Open PrusaSlicer
@@ -207,6 +215,98 @@ To manage multiple PrintFarmer instances:
 - [API Documentation](API.md) - Complete PrintFarmer API reference
 - [Print Approval Workflow](ARCHITECTURE.md#print-approval-workflow) - Architecture details
 - [OctoPrint API Specification](https://docs.octoprint.org/en/master/api/) - Original OctoPrint API
+
+## Desktop API-Key Exchange
+
+The PrintFarmer Desktop app authenticates with a **Desktop**-purpose API key (see the note under
+[Generate API Key](#1-generate-api-key)), but never sends that key on every request. Instead it
+exchanges the key once for a short-lived JWT, which is what the main API and the standalone
+slicer host both accept for model/library requests.
+
+### Exchange Endpoint
+
+```http
+POST /api/auth/api-key/exchange
+Content-Type: application/json
+
+{
+  "apiKey": "your-desktop-api-key-here"
+}
+```
+
+**Response** (200 OK):
+
+```json
+{
+  "token": "eyJhbGciOi...",
+  "expiresAt": "2026-01-20T12:15:00Z",
+  "scopes": ["ModelRead", "ModelWrite"]
+}
+```
+
+**Response** (401 Unauthorized) - returned uniformly for a missing, malformed, unknown, revoked,
+expired, wrong-purpose (non-Desktop), or under-scoped (no scopes granted) key, and never reveals
+which of these applies:
+
+```json
+{
+  "error": "Invalid API key"
+}
+```
+
+The endpoint is rate-limited per client IP address (`RateLimiting:Authentication:MaxApiKeyExchangeAttemptsPerMinute`,
+default 5/minute) to resist brute-force and enumeration attempts, and every exchange attempt
+(success or failure) is recorded in the authentication audit log. The raw API key, its hash, and
+the issued JWT are never written to logs or audit records.
+
+### Token Claims and Lifetime
+
+The issued token is a normal JWT signed with the same `Jwt:Key`/`Jwt:Issuer`/`Jwt:Audience`
+configuration as login tokens, so it validates identically wherever those settings match, but it
+carries a deliberately minimal claim set: the owning user's identity, a `token_use=desktop_exchange`
+marker, the API key's ID, and one `scope` claim per scope granted to the exchanged key
+(`ModelRead`, `ModelWrite`, `LibrarySync`) - no role or permission claims. Its lifetime is
+configurable via `Jwt:DesktopExchangeLifetimeMinutes` (default 15 minutes) and is independent of,
+and much shorter than, the API key's own 90-day expiry.
+
+### Authorization Policies
+
+`ModelRead`, `ModelWrite`, and `LibrarySync` authorization policies gate the corresponding
+model/library endpoints on both the main API (`GcodeLibraryController`) and the slicer host
+(`Model3DFilesController`). A normal login/session token is unaffected by these policies (they
+only constrain principals carrying the `token_use=desktop_exchange` claim), and legacy/unscoped
+**OctoPrint**-purpose keys can never obtain a Desktop-exchange token, since the exchange endpoint
+rejects any key whose `Purpose` is not `Desktop`.
+
+### Database Migrations
+
+The `ApiKeys` table's `Purpose` and `Scopes` columns are provisioned by the
+`AddApiKeyPurposeAndScopes` EF Core migration, present for both the PostgreSQL and SQL Server
+providers (`src/migrations/Farm.Migrations.PostgreSQL` and `src/migrations/Farm.Migrations.SqlServer`).
+Both columns default to `0` (`ApiKeyPurpose.OctoPrint` / `ApiKeyScope.None`), so every pre-existing
+key upgrades in place as an unscoped, OctoPrint-purpose key - it keeps working for slicer uploads
+exactly as before and is never implicitly granted Desktop model/library access. Run
+`dotnet ef database update` (with `DB_PROVIDER` set to `postgres` or `sqlserver`) to apply the
+migration; SQLite deployments continue to use `EnsureCreated()` and pick up the columns automatically.
+
+### Slicer Host Configuration
+
+To accept Desktop-exchanged tokens, the standalone slicer host needs the same JWT signing
+configuration as the main API - see `Jwt__Key`, `Jwt__Issuer`, and `Jwt__Audience` in
+`scripts/docker/compose-templates/docker-compose.slicer-host.yml`. If `Jwt__Key` is not configured
+(or shorter than 32 characters), the slicer host runs in its existing standalone mode: no JWT
+Bearer scheme is registered and every request authenticates as an admin, exactly as before this
+feature was added.
+
+**Security note:** unlike the main API (which refuses to start without an explicit `Jwt__Key`),
+the slicer-host compose template deliberately ships with `Jwt__Key` **unset by default** so
+standalone-only deployments keep working with zero JWT configuration. Never set `Jwt__Key` in
+either service to the well-known placeholder value that appears anywhere in this repository's
+committed example configuration - a shared/known signing key lets anyone mint their own valid
+`ModelWrite`/`LibrarySync`-scoped tokens. Always generate a real random secret (e.g.
+`openssl rand -base64 48`) and set the identical value for both the `api` and `slicer-host`
+services via environment variables or a secrets manager, never by committing it to source
+control.
 
 ## Support
 

@@ -20,13 +20,21 @@ public class EfApiKeyRepository(AppDbContext db) : IApiKeyRepository
 
     public async Task<ApiKey?> GetByKeyHashAsync(string keyHash)
     {
-        return await _db.Set<ApiKey>().FirstOrDefaultAsync(a => a.KeyHash == keyHash && a.IsActive);
+        DateTime utcNow = DateTime.UtcNow;
+        return await _db.Set<ApiKey>().FirstOrDefaultAsync(
+            a => a.KeyHash == keyHash
+                && a.IsActive
+                && (!a.ExpiresAt.HasValue || a.ExpiresAt > utcNow));
     }
 
     public async Task<ApiKey?> GetByRawKeyAsync(string rawKey)
     {
         // When hashing is disabled, the raw key is stored in KeyHash field
-        return await _db.Set<ApiKey>().FirstOrDefaultAsync(a => a.KeyHash == rawKey && a.IsActive);
+        DateTime utcNow = DateTime.UtcNow;
+        return await _db.Set<ApiKey>().FirstOrDefaultAsync(
+            a => a.KeyHash == rawKey
+                && a.IsActive
+                && (!a.ExpiresAt.HasValue || a.ExpiresAt > utcNow));
     }
 
     public async Task<IEnumerable<ApiKey>> GetByUserIdAsync(Guid userId)

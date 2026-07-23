@@ -54,6 +54,11 @@
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Sdcp\Farm.Backend.Plugin.Sdcp.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.OctoPrint\Farm.Backend.Plugin.OctoPrint.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />
+    <!-- Provider migration assemblies (issue #839): referenced so migration-content tests can
+         assert on the generated Up()/Down() operations without needing a live Postgres/SQL
+         Server connection. -->
+    <ProjectReference Include="..\..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
   </ItemGroup>
 
   <!-- Exclude Docker integration tests moved to Farm.Web.IntegrationTests -->
