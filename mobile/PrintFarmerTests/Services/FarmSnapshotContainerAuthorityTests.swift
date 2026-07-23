@@ -564,6 +564,35 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         return (container, store, a.id, userA)
     }
 
+    // MARK: C — real signalR is disconnected (not orphaned) when demo supersedes
+
+    func testSwitchToDemoDisconnectsDisplacedRealSignalR() async throws {
+        let reg = registry()
+        _ = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        try reg.setActive(id: reg.servers[0].id)
+
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: false)
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
+            farmSnapshotAuthority: FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!),
+            farmSnapshotStore: FarmSnapshotStore(authority: FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("t2"))!)), rootURL: newRoot()),
+            farmSnapshotOwnerStore: ownerStore(),
+            signalRServiceFactory: recorder.factory
+        )
+        // The initial real signalR (created for the active server at init).
+        let realService = recorder.service(forHost: "a.example.com")
+        XCTAssertNotNil(realService)
+        let disconnected = AsyncBarrier()
+        realService?.disconnectHook = { disconnected.signal() }
+
+        // Entering demo must disconnect that EXACT displaced real instance, not orphan it.
+        container.switchToDemo()
+        await disconnected.waitUntilArrived()
+
+        XCTAssertTrue(realService?.disconnectCalled ?? false, "displaced real signalR must be disconnected on demo")
+        XCTAssertNil(container.apiClient, "demo composition preserved")
+    }
+
     // MARK: Structural helper — records factory-created services + a first-disconnect barrier
 
     final class SignalRFactoryRecorder: @unchecked Sendable {
