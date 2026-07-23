@@ -2885,43 +2885,43 @@ final class PredictiveViewModelTests: XCTestCase {
 
     // MARK: - Bishop remediation: causal close-first cancellation receipt
 
-    /// Bishop remediation atop 879e1aa00: the previous OR-permissive
-    /// race test could pass by hitting `.processedMatched`, which fails
-    /// to prove the named `.closedBeforeProcessing` semantic. This
-    /// test makes close CAUSALLY precede the cancel-Task dispatch by
-    /// holding the outer `withTaskCancellationHandler` scope open via
-    /// `awaitObserverAndHold`:
+    /// Reviewer finding #3 (MEDIUM): the prior Bishop close-first hold
+    /// tests raced. Nothing proved the child task reached
+    /// `holdGate.awaitWaiter(holdToken)` BEFORE the parent test opened
+    /// hold, and repeated runs observed `.terminal(.openedBeforePark)`
+    /// on the post-hoc holdAck check instead of `.parked`.
     ///
-    ///   1. Primary observer parks on `gate`.
-    ///   2. `gate.close()` drains the parked continuation with
-    ///      `.closedWhileParked` (snapshot proof).
-    ///   3. The task then advances INSIDE its outer cancellation
-    ///      handler and parks on `holdGate.awaitWaiter(holdToken)`.
-    ///      `waitForWaiterParked(holdToken)` structurally proves the
-    ///      outer handler is still installed AFTER close.
-    ///   4. Cancelling the task NOW fires the outer onCancel, which
-    ///      installs `Task { await gate.cancelObserver(...) }`. Because
-    ///      the primary gate is already closed, the closed-guard in
-    ///      `cancelObserver` returns exactly `.closedBeforeProcessing`.
-    ///   5. Assert EQUAL (no OR): `attempt.cancelTask.value ==
-    ///      .closedBeforeProcessing`.
+    /// This revision adds a CAUSAL, FAILURE-SAFE hold-arrival handshake
+    /// BEFORE cancellation/opening:
     ///
-    /// R3 safety-close ordering: release + close hold gate BEFORE
-    /// awaiting task.value; a regression fails an assertion rather
-    /// than hanging.
+    ///   - Pre-registered `holdAck` ticket resolves `.parked` when the
+    ///     body enters hold-await (via the actor's park-flush path).
+    ///   - A watchdog Task awaits `task.value` and, if that returns,
+    ///     closes holdGate. If the body regresses and never reaches
+    ///     hold, `task.value` returns early, watchdog fires, and
+    ///     holdAck resolves `.closedOrConsumed` — the arrival
+    ///     assertion fails LOUDLY instead of hanging.
+    ///   - `await holdAck.value()` is therefore bounded either way,
+    ///     and its assertion strictly requires `.parked` before we
+    ///     invoke `task.cancel()`.
+    ///
+    /// Sequence (all sites structural, no polling / yields / sleeps):
+    ///   1. `gate.close()` drains primary parked with `.closedWhileParked`
+    ///   2. Watchdog Task registered (unblocks holdAck on regression)
+    ///   3. Await holdAck.value(); assert `.parked` — proves body
+    ///      reached `holdGate.awaitWaiter(holdToken)` BEFORE cancel
+    ///   4. `task.cancel()` fires while outer handler is live in hold
+    ///   5. Open + close holdGate (idempotent teardown); await task.value
+    ///   6. Assert exact `.cancelled(.closedBeforeProcessing)` — no OR
+    ///
+    /// The final assertion remains: `attempt.outcome() ==
+    /// .cancelled(.closedBeforeProcessing)` exactly. No either-fate
+    /// weakening.
     func testAsyncGateBishopCloseFirstYieldsClosedBeforeProcessing_observer() async {
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
-        // Coordinator H3 non-stranding redesign: pre-register a buffered
-        // hold-park ACK ticket BEFORE spawning the task. This ticket is
-        // resolved either by the outer body reaching holdGate.awaitWaiter
-        // (=> .parked) or by holdGate.close() below (=> .terminal
-        // (.closedBeforePark)). Either way it CANNOT strand on
-        // regression. It replaces the previous mid-test
-        // `await holdGate.waitForWaiterParked(holdToken)` continuation
-        // wait which would have hung indefinitely if the outer body
-        // never reached the hold-await.
+        // Failure-safe hold-arrival ticket, pre-registered BEFORE spawn.
         let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         let token = await gate.registerObserver()
@@ -2944,45 +2944,51 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(afterClose.observerFateCounts[.closedWhileParked] ?? 0, 1,
                        "close sealed fate .closedWhileParked for the primary observer")
 
+        // Reviewer finding #3: watchdog registered BEFORE we await
+        // holdAck. If the body regresses and never reaches hold-await,
+        // `task.value` returns early, watchdog closes holdGate, and
+        // holdAck resolves `.closedOrConsumed` — the arrival
+        // assertion fails LOUDLY rather than hanging.
+        let watchdog = Task { [holdGate] in
+            _ = await task.value
+            await holdGate.close()
+        }
+
+        // Causal hold-arrival handshake: bounded because either the
+        // body parks in hold (`.parked`) or the watchdog closes
+        // holdGate on early task return (`.closedOrConsumed`).
+        let arrival = await holdAck.value()
+        XCTAssertEqual(arrival, .parked,
+                       "body must reach holdGate.awaitWaiter BEFORE task.cancel(); got \(arrival)")
+
         // Step 2: cancel task. The outer `withTaskCancellationHandler`
-        // scope wraps BOTH the primary `awaitObserver` continuation
-        // (proven active by the primary park ACK above) AND the
-        // subsequent `holdGate.awaitWaiter`. Handler stays installed
-        // throughout body execution. `Task.cancel()` synchronously
-        // invokes active onCancel handlers, so `attempt.cancelTask`
-        // is installed by the time `task.cancel()` returns.
-        // No mid-test hold-park wait is required: the primary-park
-        // proof already establishes handler-installed state, and any
-        // point between that and body-return is inside the handler
-        // scope (either between the two awaits or parked in hold).
+        // is proven live in the hold-await scope by the .parked
+        // arrival assertion above. `Task.cancel()` synchronously
+        // invokes the active outer onCancel, whose
+        // `beginCancellationIfActive()` returns true (state is still
+        // `.active` — awaitObserverAndHold does NOT publish natural
+        // completion until AFTER holdGate.awaitWaiter returns), so a
+        // cancel Task is dispatched. Because the primary gate is
+        // already closed, `cancelObserver`'s closed-guard returns
+        // `.closedBeforeProcessing` exactly.
         task.cancel()
 
-        // R3 safety: unconditional release + close of hold gate BEFORE
-        // any potentially-stranding await. If any regression left the
-        // body parked in hold, close drains it via .closedWhileParked;
-        // if the body already returned, close is a no-op. Either way
-        // subsequent `task.value` and `holdAck.value` are bounded.
+        // Unconditional teardown: release hold, await task/watchdog.
+        // Order: open first to publish `.openedWhileParked` on hold
+        // (harmless — hold is a separate gate we do not assert on
+        // beyond arrival), then close for idempotent safety.
         await holdGate.open()
         await holdGate.close()
-
         await task.value
+        _ = await watchdog.value
+
         // Buffered outcome delivers the authoritative per-attempt
-        // receipt (cancelTask accessor removed). Guaranteed bounded:
-        // cancel Task always calls resolveOutcome exactly once (either
-        // .cancelled(receipt) or the state-gate blocked publication in
-        // which natural won).
+        // receipt. Guaranteed bounded: cancel Task always calls
+        // resolveOutcome exactly once, and by the outcome contract
+        // MUST be exactly `.cancelled(.closedBeforeProcessing)`.
         let outcome = await attempt.outcome()
         XCTAssertEqual(outcome, .cancelled(.closedBeforeProcessing),
                        "close-first ordering MUST yield exact .cancelled(.closedBeforeProcessing) (no OR)")
-        // Post-hoc non-stranding verification of hold-park reachability.
-        // With hold now closed, the buffered ticket is guaranteed
-        // resolved. `.parked` proves body reached hold-await before
-        // close; `.terminal(.closedBeforePark)` would signal a
-        // regression path (body never reached hold-await) — the
-        // assertion below fails-loud rather than hanging.
-        let holdAckResult = await holdAck.value()
-        XCTAssertEqual(holdAckResult, .parked,
-                       "outer body must have reached holdGate.awaitWaiter before hold safety-close")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
@@ -2994,19 +3000,15 @@ final class PredictiveViewModelTests: XCTestCase {
                        "cancelObserver dispatched exactly once (post-close, took closed-guard)")
         XCTAssertEqual(final.observerCancelIgnoredCount, 1,
                        "closed-guard bumps observerCancelIgnoredCount by one; no matching parked entry drained")
-        // Structural absence of any per-attempt receipt map is the
-        // proof of no-storage — the gate has no `receiptStored` fields.
     }
 
     /// Waiter analogue: close-first causal ordering yields exact
-    /// `.closedBeforeProcessing`.
+    /// `.closedBeforeProcessing`. Same causal handshake + watchdog
+    /// pattern as the observer variant.
     func testAsyncGateBishopCloseFirstYieldsClosedBeforeProcessing_waiter() async {
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
-        // Coordinator H3 non-stranding redesign: buffered hold-park
-        // ticket pre-registered before task spawn (see observer variant
-        // for full rationale).
         let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         let token = await gate.registerWaiter()
@@ -3024,22 +3026,27 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(afterClose.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1)
         XCTAssertEqual(afterClose.waiterFateCounts[.closedWhileParked] ?? 0, 1)
 
-        // Cancel immediately: handler wraps both awaits; primary park
-        // proof established handler-installed state. See observer
-        // variant for detailed reasoning.
+        // Failure-safe watchdog: closes holdGate on early task return.
+        let watchdog = Task { [holdGate] in
+            _ = await task.value
+            await holdGate.close()
+        }
+
+        // Causal hold-arrival handshake.
+        let arrival = await holdAck.value()
+        XCTAssertEqual(arrival, .parked,
+                       "waiter body must reach holdGate.awaitWaiter BEFORE task.cancel(); got \(arrival)")
+
         task.cancel()
 
-        // R3 safety: close hold BEFORE any await that could strand.
         await holdGate.open()
         await holdGate.close()
-
         await task.value
+        _ = await watchdog.value
+
         let outcome = await attempt.outcome()
         XCTAssertEqual(outcome, .cancelled(.closedBeforeProcessing),
                        "close-first ordering MUST yield exact .cancelled(.closedBeforeProcessing) (no OR)")
-        let holdAckResult = await holdAck.value()
-        XCTAssertEqual(holdAckResult, .parked,
-                       "outer body must have reached holdGate.awaitWaiter before hold safety-close")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
