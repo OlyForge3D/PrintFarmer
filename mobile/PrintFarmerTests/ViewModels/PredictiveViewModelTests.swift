@@ -663,15 +663,24 @@ final class PredictiveViewModelTests: XCTestCase {
         // via `completedWaiters.remove(id)` and resumes. cancelWaiter
         // that runs afterwards must be a no-op.
         let task = Task { await gate.awaitWaiter(waiterToken) }
-        await task.value
         task.cancel()
+
+        // H3 failure-safe teardown: `open()` above already latched the
+        // not-yet-parked waiter as completed (afterOpen.completedWaiterCount
+        // == 1 — a bounded pre-close proof). Close UNCONDITIONALLY before
+        // awaiting the task so a latch-consumption regression fails the
+        // post-close invariant instead of stranding `task.value`.
+        await gate.close()
+        await task.value
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
         XCTAssertEqual(final.waiterOrder, [])
         XCTAssertEqual(final.completedWaiterCount, 0,
-                       "the awaitWaiter must have removed the latch AND the late cancel must not relatch")
-        await gate.close()
+                       "the latch must be gone AND the late cancel must not relatch")
+        XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0,
+                       "waiter took the latch path (never parked) — close rescued nothing")
+        XCTAssertTrue(final.closed)
     }
 
     /// Symmetric case for observer path: signalEntry latches the observer
@@ -689,15 +698,23 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(afterSignal.observerOrder, [])
 
         let task = Task { await gate.awaitObserver(observerToken) }
-        await task.value
         task.cancel()
+
+        // H3 failure-safe teardown: the observer was already latched
+        // completed by the waiter registration (afterSignal.completedObserverCount
+        // == 1 — bounded pre-close proof). Close UNCONDITIONALLY before the
+        // await so a latch regression fails an assertion, never strands.
+        await gate.close()
+        await task.value
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
         XCTAssertEqual(final.observerOrder, [])
         XCTAssertEqual(final.completedObserverCount, 0,
-                       "awaitObserver must consume the latch AND the late cancel must not relatch")
-        await gate.close()
+                       "the latch must be gone AND the late cancel must not relatch")
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedByClose] ?? 0, 0,
+                       "observer took the latch path (never parked) — close rescued nothing")
+        XCTAssertTrue(final.closed)
     }
 
     /// Open/cancel race — cancel mailboxed BEFORE open. Ordering forced
@@ -715,19 +732,25 @@ final class PredictiveViewModelTests: XCTestCase {
         // AFTER awaitWaiter's park (park runs synchronously in the
         // current actor turn).
         waiterTask.cancel()
-        await waiterTask.value
+        // H3: bounded actor ACK — block until cancelWaiter has dispatched
+        // (drains the parked id as .cancelledWhileParked). Never strands on
+        // the Task's own completion; close() also drains this ACK queue.
+        await gate.waitForWaiterCancelCount(atLeast: 1)
 
         // Then open — waiterOrder is already empty because cancelWaiter
         // drained the id; open finds nothing to drain.
         await gate.open()
 
+        // Pre-close intended-state proof (bounded snapshot read).
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.waiterOrder, [])
         XCTAssertEqual(snap.completedWaiterCount, 0,
                        "cancel-then-open must not leave any completedWaiters latched")
         XCTAssertTrue(snap.opened)
+        // Unconditional teardown, THEN drain the cancelled task.
         await gate.close()
+        await waiterTask.value
     }
 
     /// Open/cancel race — open mailboxed BEFORE cancel. Ordering forced
@@ -745,15 +768,21 @@ final class PredictiveViewModelTests: XCTestCase {
 
         let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
         waiterTask.cancel()
+        // H3: `open()` above latched the not-yet-parked waiter
+        // (afterOpen.completedWaiterCount == 1 — bounded pre-close proof).
+        // Close UNCONDITIONALLY before awaiting so a latch regression fails
+        // the post-close invariant instead of stranding the task.
+        await gate.close()
         await waiterTask.value
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.waiterOrder, [])
         XCTAssertEqual(snap.completedWaiterCount, 0,
-                       "awaitWaiter must remove the latch AND late cancel must not relatch")
+                       "the latch must be gone AND late cancel must not relatch")
         XCTAssertTrue(snap.opened)
-        await gate.close()
+        XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0,
+                       "waiter took the latch path (never parked) — close rescued nothing")
     }
 
     /// Close/cancel race — cancel mailboxed BEFORE close.
@@ -839,14 +868,20 @@ final class PredictiveViewModelTests: XCTestCase {
         let observerToken = await gate.registerObserver()
         _ = await gate.registerWaiter()  // signals observer → completed latch
         let task = Task { await gate.awaitObserver(observerToken) }
-        await task.value        // task completed, handler scope exited
-        task.cancel()           // no-op — no handler installed anymore
+        task.cancel()           // late/no-op — resume path installs no handler
+        // H3: the observer was latched completed by the waiter signal above.
+        // Close UNCONDITIONALLY before awaiting so a resume regression fails
+        // the post-close invariant instead of stranding the task.
+        await gate.close()
+        await task.value
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedObserverCount, 0)
         XCTAssertEqual(snap.observerOrder, [])
         XCTAssertEqual(snap.completedObserverCount, 0)
-        await gate.close()
+        XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByClose] ?? 0, 0,
+                       "observer took the latch path (never parked) — close rescued nothing")
+        XCTAssertTrue(snap.closed)
     }
 
     /// Multi-party FIFO: three observers registered in order, three
@@ -1169,9 +1204,10 @@ final class PredictiveViewModelTests: XCTestCase {
                      "first await has not resumed yet")
 
         // Signal drains the parked continuation via signalEntry (piggybacked
-        // on the waiter registration).
+        // on the waiter registration). signalEntry seals the fate
+        // synchronously (aggregate-only), so the intended state is provable
+        // via a bounded pre-close snapshot without awaiting the task.
         _ = await gate.registerWaiter()
-        await first.value
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedObserverCount, 0)
@@ -1182,12 +1218,15 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.observerDuplicateAwaitCount, 1,
                        "duplicate await counter never rewinds")
 
-        // A THIRD await after the fate is sealed is still rejected.
+        // A THIRD await after the fate is sealed is still rejected (direct
+        // bounded actor call — not a Task, cannot strand).
         await gate.awaitObserver(token)
         let final = await gate.snapshot()
         XCTAssertEqual(final.observerDuplicateAwaitCount, 2)
         XCTAssertEqual(final.parkedObserverCount, 0)
+        // H3: unconditional teardown, then drain the signal-resumed task.
         await gate.close()
+        await first.value
     }
 
     /// Waiter analogue — second await for the same waiter token is
@@ -1206,8 +1245,9 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertNil(midSnap.waiterFates[token.id])
 
         await gate.open()
-        await first.value
 
+        // open() sealed `.openedWhileParked` synchronously (aggregate-only),
+        // so the intended fate is provable via a bounded pre-close snapshot.
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.waiterOrder, [])
@@ -1215,14 +1255,20 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, 1)
         XCTAssertEqual(snap.waiterDuplicateAwaitCount, 1)
 
-        // Post-open, post-resume: another late cancel is a bounded no-op.
+        // H3: unconditional teardown BEFORE awaiting the resumed task. close()
+        // prunes per-token maps but the aggregate fate count survives; a
+        // regression that failed to resume drains as .closedWhileParked.
+        await gate.close()
+        await first.value
+
+        // Post-completion late cancel is a bounded no-op — the task already
+        // finished, so the cancellation handler scope has exited.
         first.cancel()
         let final = await gate.snapshot()
         XCTAssertEqual(final.waiterCancelIgnoredCount, 0,
                        "cancel of an already-completed Task fires no handler")
         XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1,
                        "aggregate count must not grow from a late no-op cancel")
-        await gate.close()
     }
 
     // MARK: - Vasquez remediation: duplicate-await cancellation must not
@@ -1264,20 +1310,14 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         await barrier.waitForWaiterParked(barrierToken)
         dup.cancel()
-        await dup.value
-        // Hicks R1 causal ACK: consume the DUPLICATE attempt's exact
-        // cancel Task result. The task returns from
-        // `cancelObserver(id:awaitID:)` — which is bounded, actor-
-        // synchronous work — so awaiting the attempt outcome proves
-        // the cancel dispatch published BEFORE the following snapshot.
-        // Coordinator remediation: use the authoritative buffered
-        // `outcome()` API rather than the legacy racy `cancelTask`
-        // accessor (which has been removed).
-        let dupOutcome = await dupAttempt.outcome()
-        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
-                       "duplicate cancel with mismatched awaitID must be bounded no-op")
+        // Hicks R1 causal ACK: block until the DUPLICATE's `cancelObserver`
+        // has dispatched on `gate` (mismatched awaitID → bounded no-op).
+        // This bounded actor ACK proves the cancel published BEFORE the
+        // `mid` snapshot WITHOUT awaiting the stranding-capable `dup.value`;
+        // close() also drains this ACK queue, so it cannot hang teardown.
+        await gate.waitForObserverCancelCount(atLeast: 1)
 
-        // After duplicate has finished, evaluate cross-ownership invariant.
+        // After duplicate cancel dispatched, evaluate cross-ownership invariant.
         let mid = await gate.snapshot()
         XCTAssertEqual(mid.parkedObserverCount, 1,
                        "ORIGINAL must remain parked — duplicate cancel must not cross-own token id")
@@ -1304,6 +1344,15 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
         await barrier.close()
         await original.value
+
+        // Now-bounded stranding awaits, after unconditional teardown of both
+        // gates: the duplicate attempt's exact receipt (sealed at the cancel
+        // dispatch proven above, so close cannot alter it) and the dup task
+        // drain. A regression would be drained by close(), never stranded.
+        await dup.value
+        let dupOutcome = await dupAttempt.outcome()
+        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
+                       "duplicate cancel with mismatched awaitID must be bounded no-op")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
@@ -1353,11 +1402,11 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         await barrier.waitForWaiterParked(barrierToken)
         dup.cancel()
-        await dup.value
-        // Hicks R1 causal ACK — consume the duplicate attempt's exact
-        // buffered outcome (authoritative per-attempt receipt).
-        let dupOutcome = await dupAttempt.outcome()
-        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch))
+        // Hicks R1 causal ACK: block until the DUPLICATE's `cancelWaiter`
+        // has dispatched on `gate` (mismatched awaitID → bounded no-op).
+        // Bounded actor ACK proving the cancel published BEFORE `mid` without
+        // awaiting the stranding-capable `dup.value`; close() drains it too.
+        await gate.waitForWaiterCancelCount(atLeast: 1)
 
         let mid = await gate.snapshot()
         XCTAssertEqual(mid.parkedWaiterCount, 1,
@@ -1379,6 +1428,13 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
         await barrier.close()
         await original.value
+
+        // Now-bounded stranding awaits, after unconditional teardown of both
+        // gates: duplicate attempt receipt (sealed at cancel dispatch above)
+        // and the dup task drain. A regression is drained by close().
+        await dup.value
+        let dupOutcome = await dupAttempt.outcome()
+        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch))
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
@@ -1491,7 +1547,13 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.waitForObserverParked(token1)   // waits for park
         await gate.waitForObserverParked(token1)   // already parked → immediate
         _ = await gate.registerWaiter()
-        await task1.value
+        // signalEntry sealed token1 synchronously (aggregate-only); prove the
+        // resume via a bounded snapshot. task1.value is deferred to after the
+        // unconditional close so a lost-wakeup regression fails an assertion
+        // instead of stranding this await.
+        let snap1 = await gate.snapshot()
+        XCTAssertEqual(snap1.observerFateCounts[.signaledWhileParked] ?? 0, 1,
+                       "token1 resumed exactly once via signalEntry")
 
         // Pre-park case — ACK enqueues, resolves after park.
         let token2 = await gate.registerObserver()
@@ -1500,7 +1562,9 @@ final class PredictiveViewModelTests: XCTestCase {
         let ackResult = await ack
         XCTAssertEqual(ackResult, AsyncGate.ParkAckResult.parked)
         _ = await gate.registerWaiter()
-        await task2.value
+        let snap2 = await gate.snapshot()
+        XCTAssertEqual(snap2.observerFateCounts[.signaledWhileParked] ?? 0, 2,
+                       "token2 resumed exactly once via signalEntry")
 
         // Fate-resolved-before-ever-parked case — ACK completes.
         let token3 = await gate.registerObserver()
@@ -1518,7 +1582,12 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(final.observerFateCounts[.signaledBeforePark] ?? 0, 1)
         XCTAssertEqual(final.observerResumeCounts[.latchConsumed] ?? 0, 1,
                        "await consumed the latch")
+        // Unconditional teardown, then drain the two signal-resumed tasks.
+        // A lost-wakeup regression is drained here as .closedWhileParked
+        // rather than stranding these awaits.
         await gate.close()
+        await task1.value
+        await task2.value
     }
 
     /// Open-wins-then-late-cancel: park a waiter, run open(), then
@@ -1531,7 +1600,16 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.waitForWaiterParked(token)   // proof: parked
 
         await gate.open()                        // open wins
-        await task.value                         // task completed
+        // open() sealed .openedWhileParked synchronously (aggregate + per-token
+        // pruned to the resume path); prove via a bounded snapshot before the
+        // deferred task drain.
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.parkedWaiterCount, 0)
+        XCTAssertEqual(mid.waiterFateCounts[.openedWhileParked] ?? 0, 1)
+        // Unconditional teardown BEFORE draining the open-resumed task, so an
+        // open regression is drained by close() rather than stranding.
+        await gate.close()
+        await task.value                         // resumed by open; bounded post-close
         task.cancel()                            // late — handler no longer active
 
         let snap = await gate.snapshot()
@@ -1541,7 +1619,6 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, 1)
         XCTAssertEqual(snap.waiterCancelIgnoredCount, 0,
                        "cancel on a completed Task does not fire the handler")
-        await gate.close()
     }
 
     /// Cancel-wins-then-open: park a waiter, cancel first, THEN open.
@@ -1554,7 +1631,11 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.waitForWaiterParked(token)   // proof: parked
 
         task.cancel()                            // schedules cancelWaiter
-        await task.value                         // fate sealed cancelledWhileParked
+        // Bounded actor ACK: cancelWaiter dispatched and sealed
+        // .cancelledWhileParked synchronously within the actor call. Proves
+        // the fate WITHOUT awaiting the stranding-capable task.value; close()
+        // also drains this ACK queue so it cannot hang teardown.
+        await gate.waitForWaiterCancelCount(atLeast: 1)
         await gate.open()                        // no work to do
 
         let snap = await gate.snapshot()
@@ -1564,7 +1645,9 @@ final class PredictiveViewModelTests: XCTestCase {
                        "open after cancel must not relatch a cancelled id")
         XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked] ?? 0, 1)
         XCTAssertTrue(snap.opened)
+        // Unconditional teardown, then drain the cancelled task.
         await gate.close()
+        await task.value                         // bounded post-close
     }
 
     /// Close-with-actually-parked continuations for BOTH token types.
@@ -1633,13 +1716,15 @@ final class PredictiveViewModelTests: XCTestCase {
         // Convenience observer consumes the pending signal immediately.
         await gate.waitForEntry()
         await gate.open()
-        await waiterTask.value
-
+        // open() sealed the parked waiter as .openedWhileParked synchronously;
+        // prove via a bounded snapshot before the deferred task drain.
         let final = await gate.snapshot()
         XCTAssertEqual(final.pendingEntrySignals, 0)
         XCTAssertEqual(final.parkedWaiterCount, 0)
         XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1)
+        // Unconditional teardown, then drain the open-resumed waiter task.
         await gate.close()
+        await waiterTask.value
     }
 
     /// Convenience API: observer parks first via the split API (proof
@@ -1655,18 +1740,30 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(mid.parkedObserverCount, 1)
         XCTAssertEqual(mid.pendingEntrySignals, 0)
 
-        // Convenience waiter signals the parked observer immediately.
-        let waiterTask = Task { await gate.wait() }
-        await observerTask.value
+        // Convenience waiter signals the parked observer immediately. Use the
+        // split API — which is exactly the inlined body of `wait()`
+        // (registerWaiter + awaitWaiter) — so the entry signal that resumes
+        // the parked observer is provable via a bounded park-ACK instead of
+        // awaiting the stranding-capable observerTask.value.
+        let waiterToken = await gate.registerWaiter()
+        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
+        await gate.waitForWaiterParked(waiterToken)
+        // registerWaiter's signalEntry sealed the observer's
+        // .signaledWhileParked synchronously; prove via a bounded snapshot.
+        let afterSignal = await gate.snapshot()
+        XCTAssertEqual(afterSignal.observerFateCounts[.signaledWhileParked] ?? 0, 1)
+        XCTAssertEqual(afterSignal.parkedObserverCount, 0)
 
         await gate.open()
-        await waiterTask.value
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.observerFateCounts[.signaledWhileParked] ?? 0, 1)
         XCTAssertEqual(final.parkedObserverCount, 0)
         XCTAssertEqual(final.pendingEntrySignals, 0)
+        // Unconditional teardown, then drain both resumed tasks.
         await gate.close()
+        await observerTask.value
+        await waiterTask.value
     }
 
     /// Convenience-API integration: the shipping `wait()` / `waitForEntry()`
@@ -1988,6 +2085,7 @@ final class PredictiveViewModelTests: XCTestCase {
     func testAsyncGateR4TicketNeverAwaitedLeavesZeroGateState_observer() async {
         let gate = AsyncGate()
         let iterations = 100
+        var parkTasks: [Task<Void, Never>] = []
         for _ in 0..<iterations {
             let token = await gate.registerObserver()
             _ = await gate.enterObserverParkAck(token)   // ticket dropped, never awaited
@@ -1999,8 +2097,11 @@ final class PredictiveViewModelTests: XCTestCase {
             let midCheck = await gate.snapshot()
             XCTAssertEqual(midCheck.observerParkAckTicketCount, 0,
                            "actor must remove ticket at resolve, regardless of consumer")
-            await gate.signal()
-            await park.value
+            await gate.signal()   // synchronously seals + resumes this token
+            // Defer park.value to after the single unconditional close so a
+            // lost-wakeup regression fails the aggregate assertion below
+            // rather than stranding this await inside the loop.
+            parkTasks.append(park)
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed, "gate remains open — pre-close boundedness proof")
@@ -2008,7 +2109,9 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertTrue(snap.observerFates.isEmpty,
                       "no per-token fate accumulation across \(iterations) iterations")
         XCTAssertEqual(snap.observerResumeCounts[.parkedResumedBySignal] ?? 0, iterations)
+        // Unconditional teardown, then drain all signal-resumed tasks.
         await gate.close()
+        for park in parkTasks { await park.value }
     }
 
     /// Waiter analogue of the ticket-never-awaited proof.
@@ -2030,13 +2133,16 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTAssertEqual(midCheck.waiterParkAckTicketCount, 0,
                            "no gate-side ticket state after park")
             await gate.open()
-            await park.value
             let post = await gate.snapshot()
             XCTAssertEqual(post.waiterParkAckTicketCount, 0)
             XCTAssertTrue(post.waiterFates.isEmpty,
                           "no per-token fate accumulation per iteration")
             XCTAssertEqual(post.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1)
+            // Unconditional teardown, then drain the open-resumed task. open()
+            // sealed .openedWhileParked synchronously, so the assertions above
+            // hold without the (deferred) park.value.
             await gate.close()
+            await park.value
             totalOpens += 1
         }
         XCTAssertEqual(totalOpens, iterations,
@@ -2060,15 +2166,29 @@ final class PredictiveViewModelTests: XCTestCase {
         _ = await gate.waitForObserverParked(token)
         // Signal resumes the parked continuation naturally.
         await gate.signal()
-        // Wait for natural completion path to publish outcome.
+        // Gate-side resume proof (synchronous seal): fails fast on a lost
+        // wakeup instead of stranding the natural-publish barrier below.
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.observerFateCounts[.signaledWhileParked] ?? 0, 1,
+                       "signal resumed the parked observer (gate-side proof)")
+        XCTAssertEqual(mid.parkedObserverCount, 0)
+        // Required natural-publication ordering barrier: awaiting the attempt's
+        // OWN buffered outcome (bounded by the proven gate resume above) orders
+        // the live-handler late cancel strictly AFTER natural publication. This
+        // is contract-bounded synchronization, not a stranding teardown wait.
         let outcome = await attempt.outcome()
         XCTAssertEqual(outcome, .finishedBeforeProcessing,
                        "natural completion must publish before any cancel")
-        // Late cancel arrives AFTER natural publish; must be a no-op.
+        // Late cancel arrives AFTER natural publish while the handler is still
+        // live; beginCancellationIfActive() returns false, so no cancel Task
+        // is launched — bounded no-op.
         task.cancel()
+        // Unconditional teardown BEFORE awaiting task.value.
+        await gate.close()
         await task.value
 
-        // Outcome remains stable — buffered latch is one-shot.
+        // Outcome remains stable — buffered latch is one-shot (re-read is
+        // synchronous; awaited after close for teardown-final assertion).
         let after = await attempt.outcome()
         XCTAssertEqual(after, .finishedBeforeProcessing,
                        "late cancel must not reverse published outcome")
@@ -2080,7 +2200,6 @@ final class PredictiveViewModelTests: XCTestCase {
         let snap = await gate.snapshot()
         // Cancel invocation count did not increment (Task never launched).
         XCTAssertEqual(snap.observerCancelInvocationCount, 0)
-        await gate.close()
     }
 
     /// Waiter analogue of the natural-wins-over-late-cancel proof.
@@ -2092,9 +2211,20 @@ final class PredictiveViewModelTests: XCTestCase {
         let task = Task { await gate.awaitWaiter(token, attempt: attempt) }
         _ = await gate.waitForWaiterParked(token)
         await gate.open()
+        // Gate-side resume proof (synchronous seal): fails fast on a lost
+        // wakeup instead of stranding the natural-publish barrier below.
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.waiterFateCounts[.openedWhileParked] ?? 0, 1,
+                       "open resumed the parked waiter (gate-side proof)")
+        XCTAssertEqual(mid.parkedWaiterCount, 0)
+        // Required natural-publication ordering barrier (bounded by the proven
+        // gate resume above): orders the live-handler late cancel strictly
+        // AFTER natural publication. Contract-bounded synchronization.
         let outcome = await attempt.outcome()
         XCTAssertEqual(outcome, .finishedBeforeProcessing)
         task.cancel()
+        // Unconditional teardown BEFORE awaiting task.value.
+        await gate.close()
         await task.value
 
         let after = await attempt.outcome()
@@ -2103,7 +2233,6 @@ final class PredictiveViewModelTests: XCTestCase {
                        "waiter: state machine committed natural path — no cancel Task launched")
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.waiterCancelInvocationCount, 0)
-        await gate.close()
     }
 
     /// Hicks H1: opposite race — parked observer is cancelled FIRST.
@@ -2353,14 +2482,11 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         _ = await barrier.waitForWaiterParked(barrierToken)
         dup.cancel()
-        await dup.value
-
-        // R1 authoritative receipt via buffered outcome() API. Legacy
-        // cancelTask accessor removed; outcome() is guaranteed to
-        // resolve because cancel-Task path publishes exactly once.
-        let dupOutcome = await dupAttempt.outcome()
-        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
-                       "duplicate cancel receipt: bounded no-op via mismatched awaitID")
+        // Bounded actor ACK: the duplicate's cancelObserver dispatched on
+        // `gate` (mismatched awaitID → bounded no-op). Proves the dispatch
+        // BEFORE the mid snapshot without awaiting the stranding-capable
+        // dup.value; close() also drains this ACK queue.
+        await gate.waitForObserverCancelCount(atLeast: 1)
 
         // Signal → original resumes naturally. Actor-synchronous state
         // proof of the intended signal-resume BEFORE any cleanup.
@@ -2378,6 +2504,17 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
         await barrier.close()
         await original.value
+
+        // Deferred stranding awaits, after unconditional teardown of both
+        // gates: the duplicate attempt's exact receipt (sealed at the cancel
+        // dispatch proven above) and the dup task drain.
+        await dup.value
+        // R1 authoritative receipt via buffered outcome() API. Legacy
+        // cancelTask accessor removed; outcome() is guaranteed to
+        // resolve because cancel-Task path publishes exactly once.
+        let dupOutcome = await dupAttempt.outcome()
+        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
+                       "duplicate cancel receipt: bounded no-op via mismatched awaitID")
 
         // Original attempt was never cancelled — completed naturally.
         // outcome() is buffered and one-shot, so this is bounded.
@@ -2409,10 +2546,10 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         _ = await barrier.waitForWaiterParked(barrierToken)
         dup.cancel()
-        await dup.value
-
-        let dupOutcome = await dupAttempt.outcome()
-        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch))
+        // Bounded actor ACK: the duplicate's cancelWaiter dispatched on `gate`
+        // (mismatched awaitID → bounded no-op). Proves dispatch before the mid
+        // snapshot without awaiting the stranding-capable dup.value.
+        await gate.waitForWaiterCancelCount(atLeast: 1)
 
         await gate.open()
 
@@ -2426,6 +2563,11 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
         await barrier.close()
         await original.value
+
+        // Deferred stranding awaits after unconditional teardown of both gates.
+        await dup.value
+        let dupOutcome = await dupAttempt.outcome()
+        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch))
 
         let origOutcome = await origAttempt.outcome()
         XCTAssertEqual(origOutcome, .finishedBeforeProcessing)
@@ -2448,18 +2590,24 @@ final class PredictiveViewModelTests: XCTestCase {
 
         // Cancel the ONLY task on the ONLY attempt — matched.
         t.cancel()
-        await t.value
-
-        // Buffered outcome() delivers the definitive per-attempt receipt.
-        let outcome = await attempt.outcome()
-        XCTAssertEqual(outcome, .cancelled(.processedMatched),
-                       "matched cancel drains THIS attempt's parked continuation")
+        // Bounded actor ACK: matched cancelObserver dispatched, sealing this
+        // attempt .cancelledWhileParked and resolving its .processedMatched
+        // receipt. Proves the dispatch before the snapshot without awaiting
+        // the stranding-capable t.value.
+        await gate.waitForObserverCancelCount(atLeast: 1)
 
         let midSnap = await gate.snapshot()
         XCTAssertEqual(midSnap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1)
         XCTAssertEqual(midSnap.observerCancelInvocationCount, 1)
 
         await gate.close()
+        await t.value
+
+        // Buffered outcome() delivers the definitive per-attempt receipt
+        // (sealed at the cancel dispatch above; close cannot alter it).
+        let outcome = await attempt.outcome()
+        XCTAssertEqual(outcome, .cancelled(.processedMatched),
+                       "matched cancel drains THIS attempt's parked continuation")
         _ = await gate.snapshot()
     }
 
@@ -2473,15 +2621,19 @@ final class PredictiveViewModelTests: XCTestCase {
         _ = await gate.waitForWaiterParked(token)
 
         t.cancel()
-        await t.value
-
-        let outcome = await attempt.outcome()
-        XCTAssertEqual(outcome, .cancelled(.processedMatched))
+        // Bounded actor ACK: matched cancelWaiter dispatched, sealing this
+        // attempt and resolving its .processedMatched receipt. Proves dispatch
+        // before the snapshot without awaiting the stranding-capable t.value.
+        await gate.waitForWaiterCancelCount(atLeast: 1)
 
         let midSnap = await gate.snapshot()
         XCTAssertEqual(midSnap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1)
 
         await gate.close()
+        await t.value
+
+        let outcome = await attempt.outcome()
+        XCTAssertEqual(outcome, .cancelled(.processedMatched))
         _ = await gate.snapshot()
     }
 
@@ -2497,14 +2649,21 @@ final class PredictiveViewModelTests: XCTestCase {
     func testAsyncGateR4NoConsumerCancelReceiptLeavesGateZero_observer() async {
         let gate = AsyncGate()
         let iterations = 100
-        for _ in 0..<iterations {
+        var tasks: [Task<Void, Never>] = []
+        for i in 0..<iterations {
             let token = await gate.registerObserver()
             let attempt = ObserverAwaitAttempt()
             let t = Task { await gate.awaitObserver(token, attempt: attempt) }
             _ = await gate.waitForObserverParked(token)
             t.cancel()
-            await t.value
-            // Do NOT await attempt.cancelTask?.value — drop attempt.
+            // Bounded actor ACK: prove THIS iteration's matched cancelObserver
+            // dispatched (bumping the invocation counter and sealing
+            // .parkedResumedByCancel) before proceeding, without awaiting the
+            // stranding-capable t.value.
+            await gate.waitForObserverCancelCount(atLeast: i + 1)
+            // Do NOT await attempt's receipt — drop attempt. Defer t.value to
+            // after the single unconditional close below.
+            tasks.append(t)
             _ = attempt   // silence unused
         }
         let snap = await gate.snapshot()
@@ -2514,27 +2673,35 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.observerCancelInvocationCount, iterations,
                        "aggregate cancel-invocation counter is the only growth")
         XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByCancel] ?? 0, iterations)
+        // Unconditional teardown, then drain all cancelled tasks.
         await gate.close()
+        for t in tasks { await t.value }
     }
 
     /// Waiter analogue of the no-consumer cancel-receipt boundedness proof.
     func testAsyncGateR4NoConsumerCancelReceiptLeavesGateZero_waiter() async {
         let gate = AsyncGate()
         let iterations = 100
-        for _ in 0..<iterations {
+        var tasks: [Task<Void, Never>] = []
+        for i in 0..<iterations {
             let token = await gate.registerWaiter()
             let attempt = WaiterAwaitAttempt()
             let t = Task { await gate.awaitWaiter(token, attempt: attempt) }
             _ = await gate.waitForWaiterParked(token)
             t.cancel()
-            await t.value
+            // Bounded actor ACK: prove THIS iteration's matched cancelWaiter
+            // dispatched before proceeding, without awaiting the stranding t.value.
+            await gate.waitForWaiterCancelCount(atLeast: i + 1)
+            tasks.append(t)
             _ = attempt
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed)
         XCTAssertEqual(snap.waiterCancelInvocationCount, iterations)
         XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, iterations)
+        // Unconditional teardown, then drain all cancelled tasks.
         await gate.close()
+        for t in tasks { await t.value }
     }
 
     // MARK: - Bishop remediation: causal close-first cancellation receipt
@@ -2829,9 +2996,6 @@ final class PredictiveViewModelTests: XCTestCase {
         let ticket = await gate.enterObserverParkAck(fabObs)
         XCTAssertTrue(ticket.isResolved,
                       "fabricated observer id must return an already-resolved ticket")
-        let ticketRes = await ticket.value()
-        XCTAssertEqual(ticketRes, .unknown,
-                       "enterObserverParkAck fabricated-id → immediately-resolved .unknown")
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.observerParkAckTicketCount, 0)
@@ -2840,7 +3004,13 @@ final class PredictiveViewModelTests: XCTestCase {
                        "waitForXParked classification path must NOT increment awaitUnknown counters")
         XCTAssertEqual(snap.waiterUnknownAwaitCount, 0)
 
+        // Ticket already resolved (proven above via isResolved); await its
+        // buffered value AFTER unconditional close. Resolve is exactly-once,
+        // so value() is bounded and still returns .unknown post-close.
         await gate.close()
+        let ticketRes = await ticket.value()
+        XCTAssertEqual(ticketRes, .unknown,
+                       "enterObserverParkAck fabricated-id → immediately-resolved .unknown")
     }
 
     // MARK: - Hicks B: bounded post-close state
@@ -3119,12 +3289,16 @@ final class PredictiveViewModelTests: XCTestCase {
     func testAsyncGateLongLivedSequentialObserversAreBounded() async {
         let gate = AsyncGate()
         let iterations = 200
+        var tasks: [Task<Void, Never>] = []
         for _ in 0..<iterations {
             let token = await gate.registerObserver()
             let t = Task { await gate.awaitObserver(token) }
             _ = await gate.waitForObserverParked(token)   // structural park ACK
             await gate.signal()                            // resumes parked observer
-            await t.value                                  // fully drained
+            // signal sealed + resumed synchronously (aggregate-only); defer
+            // t.value to after the single post-loop close so a lost wakeup
+            // fails the aggregate assertion instead of stranding in-loop.
+            tasks.append(t)
             let mid = await gate.snapshot()
             XCTAssertEqual(mid.parkedObserverCount, 0)
             XCTAssertEqual(mid.observerOrder, [])
@@ -3144,7 +3318,9 @@ final class PredictiveViewModelTests: XCTestCase {
                        "aggregate: every iteration resumed via signal")
         XCTAssertEqual(snap.observerResumeCounts[.parkedResumedBySignal] ?? 0, iterations,
                        "actual continuation resumed exactly \(iterations) times")
+        // Unconditional teardown, then drain all signal-resumed tasks.
         await gate.close()
+        for t in tasks { await t.value }
     }
 
     /// LONG-LIVED opened-waiter gate: after `open()`, subsequent
@@ -3193,8 +3369,9 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(mid.parkedWaiterCount, n)
 
         await gate.open()
-        for t in tasks { await t.value }
-
+        // open() sealed all n parked waiters .openedWhileParked synchronously
+        // (aggregate + resume in one actor call); prove via the snapshot below
+        // before draining the tasks after the unconditional close.
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.waiterOrder, [])
@@ -3203,7 +3380,9 @@ final class PredictiveViewModelTests: XCTestCase {
                       "open-drained waiters must not retain per-token fates")
         XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, n)
         XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByOpen] ?? 0, n)
+        // Unconditional teardown, then drain all open-resumed tasks.
         await gate.close()
+        for t in tasks { await t.value }
     }
 
     /// Latch consumption prunes per-token fate atomically.
