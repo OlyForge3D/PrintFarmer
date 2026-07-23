@@ -120,6 +120,28 @@ public interface IAuthAuditService
     Task LogTokenRevokedAsync(Guid userId, Guid revokedByUserId, string reason, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Log a successful Desktop API key → JWT exchange.
+    /// </summary>
+    /// <param name="userId">The unique identifier of the API key's owner.</param>
+    /// <param name="apiKeyId">The unique identifier of the API key that was exchanged.</param>
+    /// <param name="ipAddress">The IP address from which the exchange occurred.</param>
+    /// <param name="userAgent">The user agent string of the client application.</param>
+    /// <param name="correlationId">Optional correlation identifier for request tracing.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Log a failed Desktop API key exchange attempt. The reason is a safe, generic
+    /// category only (never the raw key, hash, or a distinction that would aid enumeration).
+    /// </summary>
+    /// <param name="reason">A generic failure category (e.g. "invalid_or_expired_key").</param>
+    /// <param name="ipAddress">The IP address from which the exchange attempt occurred.</param>
+    /// <param name="userAgent">The user agent string of the client application.</param>
+    /// <param name="correlationId">Optional correlation identifier for request tracing.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    Task LogApiKeyExchangeFailedAsync(string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get audit log entries for a specific user
     /// </summary>
     /// <param name="userId">The unique identifier of the user to retrieve audit logs for.</param>

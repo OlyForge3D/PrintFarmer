@@ -1,6 +1,8 @@
-﻿using System.Text;
+﻿using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Authorization;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
@@ -8,6 +10,7 @@ using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -44,69 +47,102 @@ builder.Services.AddUnimplementedSlicerServiceStubs();
 // ── Infrastructure services shared with the main API ──────────────────────────
 // ILogger<T> is automatically provided by the DI container
 
-// ── Authentication ────────────────────────────────────────────────────────────
-// Use real JWT Bearer validation when Jwt__Key is provided (deployed behind the
-// same gateway as the main API). Fall back to the pass-through StandaloneAuth
-// handler for local development without a gateway.
+// ── Authentication ─────────────────────────────────────────────────────────
+// Standalone mode auto-authenticates every request as admin (transitional; see
+// StandaloneAuthHandler). When Jwt:Key is configured (the host shares JWT
+// signing configuration with the main API, e.g. because Desktop-exchanged
+// tokens from issue #838 may be presented, or the host is deployed behind
+// the same gateway as the main API), a JWT bearer scheme is also registered.
+// A policy scheme forwards requests carrying a Bearer Authorization header
+// to the JWT handler and everything else to the standalone admin handler,
+// so existing standalone deployments (no Jwt:Key configured) are completely
+// unaffected.
 string? jwtKey = builder.Configuration["Jwt:Key"];
-if (!string.IsNullOrWhiteSpace(jwtKey))
+bool jwtConfigured = !string.IsNullOrWhiteSpace(jwtKey) && jwtKey.Length >= 32;
+
+AuthenticationBuilder authBuilder = builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = "SmartScheme";
+    options.DefaultAuthenticateScheme = "SmartScheme";
+});
+
+authBuilder.AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>("StandaloneScheme", null);
+
+if (jwtConfigured)
 {
     string issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
     string audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
 
-    builder.Services
-        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
+    authBuilder.AddJwtBearer("Bearer", options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
         {
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-                ValidateIssuer = true,
-                ValidIssuer = issuer,
-                ValidateAudience = true,
-                ValidAudience = audience,
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.Zero,
-            };
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!)),
+            ValidateIssuer = true,
+            ValidIssuer = issuer,
+            ValidateAudience = true,
+            ValidAudience = audience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
 
-            // SignalR's WebSocket / Server-Sent-Events transports cannot set the Authorization
-            // header on the browser handshake, so the client sends the JWT as a ?access_token=
-            // query parameter instead. Honour it for hub paths (e.g. /hubs/slicers); without this
-            // the WS upgrade to the [Authorize] hub is rejected 401 and SignalR silently downgrades
-            // to long-polling. The negotiate POST still uses the Authorization header (default).
-            options.Events = new JwtBearerEvents
+        // SignalR's WebSocket / Server-Sent-Events transports cannot set the Authorization
+        // header on the browser handshake, so the client sends the JWT as a ?access_token=
+        // query parameter instead. Honour it for hub paths (e.g. /hubs/slicers); without this
+        // the WS upgrade to the [Authorize] hub is rejected 401 and SignalR silently downgrades
+        // to long-polling. The negotiate POST still uses the Authorization header (default).
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
             {
-                OnMessageReceived = context =>
+                // Authorization header still takes precedence (mirrors the main API): only fall
+                // back to the query token when the header didn't already supply one.
+                if (string.IsNullOrEmpty(context.Token))
                 {
-                    // Authorization header still takes precedence (mirrors the main API): only fall
-                    // back to the query token when the header didn't already supply one.
-                    if (string.IsNullOrEmpty(context.Token))
+                    string? token = SlicerHubAuth.ResolveHubAccessToken(context.Request);
+                    if (token is not null)
                     {
-                        string? token = SlicerHubAuth.ResolveHubAccessToken(context.Request);
-                        if (token is not null)
-                        {
-                            context.Token = token;
-                        }
+                        context.Token = token;
                     }
+                }
 
-                    return Task.CompletedTask;
-                },
-            };
-        });
+                return Task.CompletedTask;
+            },
+        };
+    });
+
+    authBuilder.AddPolicyScheme("SmartScheme", "Bearer token or standalone admin", options =>
+    {
+        options.ForwardDefaultSelector = context =>
+        {
+            string? authHeader = context.Request.Headers.Authorization.ToString();
+            return !string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                ? "Bearer"
+                : "StandaloneScheme";
+        };
+    });
 }
 else
 {
-    builder.Services
-        .AddAuthentication("StandaloneScheme")
-        .AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>(
-            "StandaloneScheme", null);
+    authBuilder.AddPolicyScheme("SmartScheme", "Standalone admin (Jwt:Key not configured)", options =>
+    {
+        options.ForwardDefaultSelector = _ => "StandaloneScheme";
+    });
 }
 
 builder.Services.AddAuthorization(opts =>
 {
     opts.AddPolicy("farm_admin", policy => policy.RequireRole("farm_admin"));
+
+    // Desktop API-key exchange scope policies (issue #838). The standalone admin
+    // principal carries no token_use claim, so DesktopScopeAuthorizationHandler
+    // passes it through unchanged - existing standalone deployments are unaffected.
+    opts.AddPolicy("ModelRead", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelRead")));
+    opts.AddPolicy("ModelWrite", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelWrite")));
+    opts.AddPolicy("LibrarySync", policy => policy.AddRequirements(new DesktopScopeRequirement("LibrarySync")));
 });
+builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
 
 // ── JSON serialisation ────────────────────────────────────────────────────────
 Action<JsonSerializerOptions> configureJson = o =>

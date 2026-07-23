@@ -82,6 +82,23 @@ public interface IRateLimitService
     Task RecordRegisterAttemptAsync(string ipAddress, CancellationToken ct = default);
 
     /// <summary>
+    /// Checks if a Desktop API key exchange attempt is allowed from the specified IP address.
+    /// Keyed by IP (not the key itself) so brute-forcing many different keys from one client
+    /// is still throttled, matching the login/register credential-guessing protections.
+    /// </summary>
+    /// <param name="ipAddress">The IP address to check.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Result indicating whether the exchange is allowed and remaining attempts.</returns>
+    Task<RateLimitResult> CheckApiKeyExchangeLimitAsync(string ipAddress, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records a Desktop API key exchange attempt for rate limiting purposes.
+    /// </summary>
+    /// <param name="ipAddress">The IP address that attempted the exchange.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task RecordApiKeyExchangeAttemptAsync(string ipAddress, CancellationToken ct = default);
+
+    /// <summary>
     /// Checks if an OctoPrint-compatible upload is allowed for the specified key.
     /// </summary>
     /// <param name="key">The rate limit key (API key or IP address).</param>
