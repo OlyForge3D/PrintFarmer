@@ -287,14 +287,36 @@ enum FarmSnapshotFixtures {
     /// Authority backed by a caller-provided, test-owned UserDefaults suite so
     /// durable tombstones never leak into `.standard` or across tests (H4). The
     /// suite MUST be tracked by the test (see `XCTestCase.trackedSuiteName`).
-    static func makeAuthority(tombstoneDefaults: UserDefaults) -> FarmSnapshotAuthority {
-        FarmSnapshotAuthority(tombstoneStore: FarmSnapshotTombstoneStore(userDefaults: tombstoneDefaults))
+    ///
+    /// `domainIdentifier` (H) selects which per-domain cross-instance NSLock this
+    /// store coordinates on. Fixtures default it to a random UUID so no two tests
+    /// (or two calls within a test) accidentally coordinate through the shared
+    /// static lock; tests that need two authorities to share coordination pass a
+    /// stable identifier explicitly.
+    static func makeAuthority(
+        tombstoneDefaults: UserDefaults,
+        domainIdentifier: String = "test-domain-\(UUID().uuidString)"
+    ) -> FarmSnapshotAuthority {
+        FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotTombstoneStore(
+                userDefaults: tombstoneDefaults,
+                domainIdentifier: domainIdentifier
+            )
+        )
     }
 
     /// Isolated tombstone store on a caller-provided, test-owned suite (used by
     /// restart-durability fixtures that recreate the store on the SAME suite).
-    static func makeTombstoneStore(_ defaults: UserDefaults) -> FarmSnapshotTombstoneStore {
-        FarmSnapshotTombstoneStore(userDefaults: defaults)
+    ///
+    /// `domainIdentifier` selects the cross-instance coordinator lock (H). Default
+    /// is a random UUID so a fixture call does not accidentally cross-serialize with
+    /// unrelated tests; recreation/cross-instance tests pass a stable identifier so
+    /// two stores share one coordinator.
+    static func makeTombstoneStore(
+        _ defaults: UserDefaults,
+        domainIdentifier: String = "test-domain-\(UUID().uuidString)"
+    ) -> FarmSnapshotTombstoneStore {
+        FarmSnapshotTombstoneStore(userDefaults: defaults, domainIdentifier: domainIdentifier)
     }
 
     static func makeOwnerStore(_ defaults: UserDefaults) -> FarmSnapshotOwnerStore {
