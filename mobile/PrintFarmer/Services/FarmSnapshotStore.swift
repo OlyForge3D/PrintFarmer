@@ -35,6 +35,16 @@ protocol FarmSnapshotFileIO: Sendable {
     /// current bytes at `from` still equal `expected`; returns `false` (no move)
     /// when the bytes have changed so a newer valid commit is never destroyed.
     func moveIfContentEquals(from: URL, to: URL, expected: Data) throws -> Bool
+
+    /// Lifecycle notification: a purge has installed its durable tombstone and
+    /// purging barrier for `serverID` and is about to drain in-flight leases. Real
+    /// filesystem implementations ignore it; test doubles use it as a causal ACK to
+    /// sequence deterministically (H4). Default: no-op.
+    func purgeWillDrain(_ serverID: UUID) async
+}
+
+extension FarmSnapshotFileIO {
+    func purgeWillDrain(_ serverID: UUID) async {}
 }
 
 /// Real filesystem implementation. A missing file reads as `nil` (absence) and a
@@ -129,9 +139,13 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !tombstones.contains(namespace.serverID) else { return nil }
-        tokenCounter += 1
-        highWater = tokenCounter
-        let session = FarmSnapshotSession(namespace: namespace, generation: generation, token: tokenCounter)
+        // Advance strictly above BOTH the local counter and the permanent high-water
+        // mark, so a mint that follows an externally-adopted higher token can never
+        // rewind the high-water (H3).
+        let next = max(tokenCounter, highWater) + 1
+        tokenCounter = next
+        highWater = next
+        let session = FarmSnapshotSession(namespace: namespace, generation: generation, token: next)
         current = session
         return session
     }
@@ -149,6 +163,9 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         if session == current { return true } // idempotent for the exact current
         guard session.token > highWater else { return false }
         highWater = session.token
+        // Keep the mint counter monotonically ahead of any adopted token so a later
+        // mint never issues a token at-or-below an already-adopted one (H3).
+        tokenCounter = max(tokenCounter, session.token)
         current = session
         return true
     }
@@ -267,7 +284,12 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     private var leaseCounts: [UUID: Int] = [:]
     private var purging: Set<UUID> = []
     private var drainWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
-    private var sweptTombstonesOnStartup = false
+    /// Startup residue-sweep state machine (H4). `startupComplete` is set ONLY after a
+    /// fully-successful sweep; a failed sweep leaves it false so the next public op
+    /// retries. `startupTask` memoizes an in-flight sweep so concurrent callers await
+    /// the same run rather than sweeping twice.
+    private var startupComplete = false
+    private var startupTask: Task<Bool, Never>?
 
     /// Acquire a lease for `serverID`. Refused (nil result → caller aborts) when the
     /// server is purging or tombstoned, so no new operation starts against a purged
@@ -333,15 +355,21 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
 
     // MARK: Lifecycle
 
-    func activate(session: FarmSnapshotSession) async {
+    @discardableResult
+    func activate(session: FarmSnapshotSession) async -> Bool {
         // H4: on first use, replay durable tombstones and sweep residual namespaces
         // a crash may have left before activating anything.
-        await sweepTombstonedResidueOnStartup()
-        authority.adopt(session)
+        await ensureStartupPreparation()
+        // H3: honor the compare-and-set result so callers can refuse to bind a
+        // session the authority rejected (older/consumed token).
+        return authority.adopt(session)
     }
 
-    func deactivate() async {
-        authority.revoke()
+    /// Conditionally deactivate ONLY the captured session (H3). A newer activation
+    /// that landed during an await survives — this never globally revokes.
+    @discardableResult
+    func deactivate(session: FarmSnapshotSession) async -> Bool {
+        authority.deactivate(session)
     }
 
     func currentSession() async -> FarmSnapshotSession? {
@@ -550,15 +578,22 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
 
     func purge(serverID: UUID) async -> FarmSnapshotPurgeResult {
         // H4 ordered drain-then-sweep:
+        // 0. Replay durable tombstones / residue before touching this server so a
+        //    prior crash's residue cannot be mistaken for live state.
+        await ensureStartupPreparation()
         // 1. Durable tombstone FIRST — blocks new mints/activation, survives restart.
         authority.tombstone(serverID)
         // 2. Refuse new filesystem leases for this server.
         purging.insert(serverID)
         // 3. Clear the persisted owner mapping so a stale owner cannot re-select it.
         ownerStore?.clearOwner(serverID: serverID)
-        // 4. Drain all in-flight commit/quarantine leases before touching the disk.
+        // 4. Causal ACK: the durable tombstone + purging barrier are now installed
+        //    (before the drain wait). A test can deterministically observe this and
+        //    release a blocked in-flight lease knowing the tombstone is in effect.
+        await fileIO.purgeWillDrain(serverID)
+        // 5. Drain all in-flight commit/quarantine leases before touching the disk.
         await drain(serverID)
-        // 5. Final recursive sweep of live/temp/quarantine; surface removal failures.
+        // 6. Final recursive sweep of live/temp/quarantine; surface removal failures.
         var failures = 0
         for dir in [serverDir(serverID), quarantineDir(serverID)] {
             do {
@@ -571,14 +606,38 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         return failures == 0 ? .purged : .failed(failureCount: failures)
     }
 
-    /// Replay durable tombstones on first use and sweep any residual namespaces a
-    /// crash may have left between purge and registry removal (H4). Idempotent.
-    private func sweepTombstonedResidueOnStartup() async {
-        guard !sweptTombstonesOnStartup else { return }
-        sweptTombstonesOnStartup = true
+    /// Replay durable tombstones and sweep any residual namespaces a crash may have
+    /// left between purge and registry removal (H4). Safe to call independently of
+    /// activation and before any use; memoized so it runs at most once successfully,
+    /// and retried on the next call if a removal failed. Surfaces success/failure.
+    @discardableResult
+    func prepareStartup() async -> Bool {
+        await ensureStartupPreparation()
+    }
+
+    @discardableResult
+    private func ensureStartupPreparation() async -> Bool {
+        if startupComplete { return true }
+        if let task = startupTask { return await task.value }
+        let task = Task { await self.runStartupSweep() }
+        startupTask = task
+        let ok = await task.value
+        startupTask = nil
+        if ok { startupComplete = true } // mark complete ONLY after a successful sweep
+        return ok
+    }
+
+    private func runStartupSweep() async -> Bool {
+        var allSucceeded = true
         for serverID in authority.tombstonedServerIDs() {
-            try? await fileIO.removeItem(at: serverDir(serverID))
-            try? await fileIO.removeItem(at: quarantineDir(serverID))
+            for dir in [serverDir(serverID), quarantineDir(serverID)] {
+                do {
+                    try await fileIO.removeItem(at: dir) // absent == success; genuine errors throw
+                } catch {
+                    allSucceeded = false // do NOT mark complete; retry on the next op
+                }
+            }
         }
+        return allSucceeded
     }
 }

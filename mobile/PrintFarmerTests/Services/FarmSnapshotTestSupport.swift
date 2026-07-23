@@ -138,6 +138,10 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
     /// `store.activate`). Lets a test park an activation mid-await and advance the
     /// auth epoch to prove the final snapshot-publication CAS (issue #816 H2, Bishop).
     var removeItemBarrier: AsyncBarrier?
+    /// Fires on `purgeWillDrain` — after purge has installed its durable tombstone +
+    /// purging barrier and BEFORE it drains in-flight leases. Causal ACK so a test can
+    /// deterministically release a blocked lease knowing the tombstone is in effect (H4).
+    var purgeWillDrainBarrier: AsyncBarrier?
 
     // Exact counts.
     private(set) var readCount = 0
@@ -224,6 +228,13 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
         moveBoundaryProbe?()
         if failMove { throw IOFailure() }
         return try backing.moveIfContentEquals(from: from, to: to, expected: expected)
+    }
+
+    func purgeWillDrain(_ serverID: UUID) async {
+        if let barrier = purgeWillDrainBarrier {
+            purgeWillDrainBarrier = nil
+            await barrier.arriveAndWait()
+        }
     }
 }
 

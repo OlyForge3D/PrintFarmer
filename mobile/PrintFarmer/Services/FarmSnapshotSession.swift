@@ -119,12 +119,22 @@ enum FarmSnapshotPurgeResult: Sendable, Equatable {
 /// child. #817 consumes this unchanged and must not alter persistence, namespace,
 /// generation, purge, envelope, or authority internals.
 protocol FarmSnapshotStoring: Sendable {
-    /// Binds the store to a new authoritative session. Any prior session is
-    /// deactivated first.
-    func activate(session: FarmSnapshotSession) async
+    /// Replays durable tombstones and sweeps residual namespaces left by a crash,
+    /// independently of activation. Memoized (runs once on success) and retried on
+    /// failure. Returns whether preparation fully succeeded (H4).
+    @discardableResult
+    func prepareStartup() async -> Bool
 
-    /// Clears the active session. Idempotent.
-    func deactivate() async
+    /// Binds the store to a new authoritative session, returning whether the
+    /// authority accepted it (a delayed/older token is rejected). Callers must honor
+    /// a `false` result and not treat the session as bound (H3).
+    @discardableResult
+    func activate(session: FarmSnapshotSession) async -> Bool
+
+    /// Conditionally clears ONLY the given session if it is still exactly current;
+    /// a newer activation survives. Returns whether it cleared (H3).
+    @discardableResult
+    func deactivate(session: FarmSnapshotSession) async -> Bool
 
     /// The currently authoritative session, if any.
     func currentSession() async -> FarmSnapshotSession?

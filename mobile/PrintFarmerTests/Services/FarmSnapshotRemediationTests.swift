@@ -142,6 +142,116 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path))
     }
 
+    // MARK: H4 — startup sweep state machine + purge causal ACK
+
+    func testStartupSweepCleansResidueWithoutActivation() async {
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let tombstoneStore = FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        // Durable tombstone + leftover residue on disk (models a crash between purge
+        // and registry removal).
+        tombstoneStore.insert(ns.serverID)
+        let residue = serverDir(root: root, ns.serverID)
+        try? FileManager.default.createDirectory(at: residue, withIntermediateDirectories: true)
+        try? Data("stale".utf8).write(to: residue.appendingPathComponent("x.json"))
+
+        let authority = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        // No activation — startup preparation alone must sweep the residue.
+        let ok = await store.prepareStartup()
+        XCTAssertTrue(ok)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: residue.path))
+    }
+
+    func testStartupSweepFailureThenRetrySucceeds() async {
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let tombstoneStore = FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        tombstoneStore.insert(ns.serverID)
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+
+        // First sweep fails → not marked complete, retry allowed.
+        io.failRemove = true
+        let firstAttempt = await store.prepareStartup()
+        XCTAssertFalse(firstAttempt, "failed sweep is surfaced, not swallowed")
+        // Retry succeeds.
+        io.failRemove = false
+        let retry = await store.prepareStartup()
+        XCTAssertTrue(retry, "retry after a transient failure completes")
+    }
+
+    func testPurgeDrainsWithCausalACKThenSweepsNoResurrection() async {
+        // Deterministic via the purge ACK: the commit lease is released only AFTER the
+        // durable tombstone + purging barrier are installed, so the commit provably
+        // sees the tombstone and purge provably drains its lease before sweeping.
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        let session = await activate(store, authority, ns)
+
+        let recorder = CompletionOrderRecorder()
+        let writeBarrier = AsyncBarrier()
+        let ackBarrier = AsyncBarrier()
+        io.writeCandidateBarrier = writeBarrier
+        io.purgeWillDrainBarrier = ackBarrier
+
+        let commitTask = Task { () -> FarmSnapshotCommitResult in
+            let r = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session)
+            await recorder.record("commit")
+            return r
+        }
+        await writeBarrier.waitUntilArrived() // commit holds a lease, parked pre-write
+
+        let purgeTask = Task { () -> FarmSnapshotPurgeResult in
+            let r = await store.purge(serverID: ns.serverID)
+            await recorder.record("purge")
+            return r
+        }
+        // Wait until purge has installed the tombstone + purging barrier (ACK), THEN
+        // release the commit — it now provably observes the tombstone.
+        await ackBarrier.waitUntilArrived()
+        ackBarrier.release()
+        writeBarrier.release()
+
+        XAssertEqual(await commitTask.value, .superseded)
+        XAssertEqual(await purgeTask.value, .purged)
+        let order = await recorder.order
+        XCTAssertEqual(order, ["commit", "purge"], "purge drains the lease before completing")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path))
+    }
+
+    func testPurgeFinalDeletionFailureYieldsFailure() async {
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        let session = await activate(store, authority, ns)
+        _ = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session)
+
+        io.failRemove = true // final sweep removal fails
+        if case .failed = await store.purge(serverID: ns.serverID) {} else {
+            XCTFail("final deletion failure must yield a failed purge result")
+        }
+        // Tombstone remains durable regardless.
+        XCTAssertTrue(authority.isTombstoned(ns.serverID))
+    }
+
+    func testRepeatedPurgeIsBounded() async {
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        _ = await activate(store, authority, ns)
+        XAssertEqual(await store.purge(serverID: ns.serverID), .purged)
+        // A repeated purge of an already-purged server still succeeds and does not hang.
+        XAssertEqual(await store.purge(serverID: ns.serverID), .purged)
+    }
+
     // MARK: H5 — quarantine linearization (both completion orders)
 
     func testPurgeDrainsInFlightLeaseBeforeCompleting() async {

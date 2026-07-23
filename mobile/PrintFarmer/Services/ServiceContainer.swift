@@ -157,6 +157,10 @@ final class ServiceContainer: @unchecked Sendable {
         }
 
         wireSnapshotPurgeHandler()
+        // H4: sweep any durable-tombstone residue a prior crash may have left,
+        // independently of (and before) any activation.
+        let startupStore = self.farmSnapshotStore
+        Task { await startupStore.prepareStartup() }
     }
 
     /// Route registry deletion through the store's awaited purge (Gate E). Wired
@@ -287,10 +291,14 @@ final class ServiceContainer: @unchecked Sendable {
         await bindSnapshotToActiveServer(authToken: authToken)
     }
 
-    /// Synchronously revoke authority, then await the store's deactivation.
+    /// Capture the current session, then conditionally deactivate ONLY that captured
+    /// session in both the synchronous authority and the async store. A newer
+    /// activation that lands during the store await survives — this never globally
+    /// revokes (H3).
     func revokeFarmSnapshot() async {
-        farmSnapshotAuthority.revoke()
-        await farmSnapshotStore.deactivate()
+        guard let session = farmSnapshotAuthority.currentSession() else { return }
+        farmSnapshotAuthority.deactivate(session)
+        _ = await farmSnapshotStore.deactivate(session: session)
     }
 
     /// Bind the snapshot session to the current active server using only that
@@ -327,7 +335,9 @@ final class ServiceContainer: @unchecked Sendable {
             // Tombstoned (purged) server — do not resurrect.
             return
         }
-        await farmSnapshotStore.activate(session: session)
+        // Bind only if the authority ACCEPTS the session (H3: a rejected/older token
+        // must not be treated as bound).
+        guard await farmSnapshotStore.activate(session: session) else { return }
         // Final exact-token CAS at publication: the active server did not change, the
         // session is still authority-current, AND the auth operation is still current
         // (no logout/newer login landed during the activate await).
@@ -442,7 +452,7 @@ final class ServiceContainer: @unchecked Sendable {
         guard transitionEpoch.isCurrent(epoch) else { return }
         let namespace = FarmSnapshotNamespace(serverID: server.id, userID: ownerID)
         guard let session = farmSnapshotAuthority.mint(namespace: namespace, generation: generation) else { return }
-        await farmSnapshotStore.activate(session: session)
+        guard await farmSnapshotStore.activate(session: session) else { return }
         guard transitionEpoch.isCurrent(epoch), farmSnapshotAuthority.isCurrent(session) else {
             farmSnapshotAuthority.deactivate(session) // conditional: only if still exactly this session
             return
