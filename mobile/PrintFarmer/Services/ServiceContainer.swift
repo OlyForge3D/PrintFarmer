@@ -329,6 +329,13 @@ final class ServiceContainer: @unchecked Sendable {
         await activeServerSwitchTask?.value
     }
 
+    /// Whether `generation` is the current active-server generation. Used to discard a
+    /// stale session-expiry event posted by an APIClient we already switched away from
+    /// (issue #816 H2).
+    func isActiveGeneration(_ generation: Int) -> Bool {
+        activeGeneration.isCurrent(generation)
+    }
+
     /// Capture the current session, then conditionally deactivate ONLY that captured
     /// session in both the synchronous authority and the async store. A newer
     /// activation that lands during the store await survives — this never globally

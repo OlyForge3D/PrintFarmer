@@ -90,19 +90,33 @@ actor AuthService: AuthServiceProtocol {
         let response: AuthResponse = try await loginClient.post("/api/auth/login", body: request)
 
         guard response.success, let token = response.token else {
-            credentialsStore.clear(serverId: server.id)
+            // H2: a superseded/stale failed login must not clear a newer login's stored
+            // credentials — gate the clear on exactly this operation.
+            if isCurrentOperation(operation) {
+                credentialsStore.clear(serverId: server.id)
+            }
             throw NetworkError.authFailed(response.error ?? "Login failed")
         }
 
         // H2: gate every durable mutation on exactly this operation token at the
-        // mutation point. A superseded login performs no durable work.
+        // mutation point. A superseded login performs no durable work. The credential
+        // write (synchronous) is atomic with the check on this actor; the shared
+        // APIClient session is applied via a destination compare-and-set so a login
+        // superseded DURING the await cannot clobber a newer session.
         guard isCurrentOperation(operation) else { return .superseded }
         credentialsStore.save(
             ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
             serverId: server.id
         )
-        await apiClient.updateBaseURL(server.baseURL)
-        await apiClient.setAccessToken(token)
+        if operation == .unspecified {
+            await apiClient.updateBaseURL(server.baseURL)
+            await apiClient.setAccessToken(token)
+        } else {
+            let applied = await apiClient.applySessionIfCurrent(
+                baseURL: server.baseURL, accessToken: token, epoch: authEpoch, token: operation.value
+            )
+            guard applied else { return .superseded }
+        }
         await registerTokenExpiryChecker(for: server)
 
         // The snapshot owner must be a VERIFIED current identity. A token-only
@@ -151,8 +165,18 @@ actor AuthService: AuthServiceProtocol {
         migrateLegacyCredentialsIfAllowed(to: server)
         guard let credentials = credentialsStore.load(serverId: server.id) else { return .noSession }
 
-        await apiClient.updateBaseURL(server.baseURL)
-        await apiClient.setAccessToken(credentials.accessToken)
+        // H2: apply the shared session via a destination CAS so a restore superseded by
+        // a newer login/logout cannot clobber the newer session. Legacy unspecified
+        // callers keep the unconditional behavior.
+        if operation == .unspecified {
+            await apiClient.updateBaseURL(server.baseURL)
+            await apiClient.setAccessToken(credentials.accessToken)
+        } else {
+            let applied = await apiClient.applySessionIfCurrent(
+                baseURL: server.baseURL, accessToken: credentials.accessToken, epoch: authEpoch, token: operation.value
+            )
+            guard applied else { return .superseded }
+        }
         await registerTokenExpiryChecker(for: server)
 
         do {
@@ -165,10 +189,19 @@ actor AuthService: AuthServiceProtocol {
             snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
             return .restored(user)
         } catch {
-            if isDefinitiveAuthRejection(error) {
+            // H2: a stale restore's late 401 must not clear a newer login's
+            // credentials/owner/session — gate the definitive-rejection clears on the
+            // token, and CAS the APIClient clear.
+            if isDefinitiveAuthRejection(error), isCurrentOperation(operation) {
                 credentialsStore.clear(serverId: server.id)
                 snapshotOwnerStore.clearOwner(serverID: server.id)
-                await apiClient.setAccessToken(nil)
+                if operation == .unspecified {
+                    await apiClient.setAccessToken(nil)
+                } else {
+                    _ = await apiClient.applySessionIfCurrent(
+                        baseURL: nil, accessToken: nil, epoch: authEpoch, token: operation.value
+                    )
+                }
             }
             return .noSession
         }

@@ -352,6 +352,7 @@ extension AuthViewModelTests {
     /// release — deterministically (no sleeps/polling).
     private final class ProgrammableAuthService: AuthServiceProtocol, @unchecked Sendable {
         var loginBarrier: AsyncBarrier?
+        var restoreBarrier: AsyncBarrier?
         var loginOutcome: () -> Result<AuthLoginOutcome, Error>
         let user: UserDTO
         private(set) var logoutCount = 0
@@ -372,11 +373,37 @@ extension AuthViewModelTests {
             }
         }
         func logout(operation: AuthOperationToken) async { logoutCount += 1 }
-        func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome { .restored(user) }
+        func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
+            if let restoreBarrier { await restoreBarrier.arriveAndWait() }
+            return .restored(user)
+        }
         func currentUser() async throws -> UserDTO { user }
         var isAuthenticated: Bool { get async { true } }
     }
 
+    func testRestoreSupersededByNewerLoginDoesNotClobber() async {
+        let prog = ProgrammableAuthService(user: makeUser(roles: ["operator"]))
+        services.authService = prog
+        let restoreBarrier = AsyncBarrier()
+        prog.restoreBarrier = restoreBarrier
+
+        // A restore is in flight, parked at the network barrier.
+        let restoreTask = Task { await self.viewModel.restoreSession() }
+        await restoreBarrier.waitUntilArrived()
+
+        // A newer login completes while the restore is parked.
+        await viewModel.login(serverURL: "https://a.example.com", username: "u", password: "p")
+        XCTAssertTrue(viewModel.isAuthenticated)
+        let loginUser = viewModel.currentUser
+
+        // Release the superseded restore: it must not clobber the newer login's state
+        // or its loading flag.
+        restoreBarrier.release()
+        await restoreTask.value
+        XCTAssertTrue(viewModel.isAuthenticated, "newer login survives a superseded restore")
+        XCTAssertEqual(viewModel.currentUser?.id, loginUser?.id)
+        XCTAssertFalse(viewModel.isLoading)
+    }
     func testLoginSupersededByLogoutDoesNotClobberVMState() async {
         let prog = ProgrammableAuthService(user: makeUser(roles: ["operator"]))
         services.authService = prog

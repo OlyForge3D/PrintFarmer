@@ -29,10 +29,13 @@ final class AuthViewModel {
             forName: .sessionExpired,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
             guard let self else { return }
+            // The event carries the originating APIClient's server generation (or nil
+            // for legacy). Discard a stale-generation 401 (H2) on the posting thread.
+            let generation = (note.object as? NSNumber)?.intValue
             Task { @MainActor in
-                await self.handleSessionExpiration()
+                await self.handleSessionExpiration(generation: generation)
             }
         }
     }
@@ -40,10 +43,17 @@ final class AuthViewModel {
     /// React to a server-reported session expiry. This is NOT a user logout: it
     /// must not advance the auth-operation token (else it would supersede a fresh
     /// concurrent login). It clears the current session state and revokes the
-    /// snapshot for the expired session only (issue #816, H2).
-    private func handleSessionExpiration() async {
+    /// snapshot for the expired session only (issue #816, H2). A 401 originating from
+    /// an APIClient we already switched away from (stale generation) is ignored.
+    private func handleSessionExpiration(generation: Int?) async {
+        if let generation, !services.isActiveGeneration(generation) { return }
+        // Gate the clears on the CURRENT auth epoch WITHOUT advancing it: a newer login
+        // that advances the epoch during these awaits is not clobbered, and a fresh
+        // concurrent login is not superseded.
+        let token = services.authOperationEpoch.current
         await services.revokeFarmSnapshot()
-        await services.authService.logout(operation: .unspecified)
+        await services.authService.logout(operation: AuthOperationToken(value: token))
+        guard services.authOperationEpoch.isCurrent(token) else { return }
         isAuthenticated = false
         currentUser = nil
     }

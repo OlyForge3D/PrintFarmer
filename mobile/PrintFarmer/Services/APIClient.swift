@@ -495,6 +495,22 @@ actor APIClient {
         self.accessToken = token
     }
 
+    /// Applies base URL + access token ATOMICALLY, but only if `epoch.isCurrent(token)`
+    /// at the moment of application — a destination compare-and-set for the shared
+    /// session (issue #816 H2). Because this runs inside the APIClient actor, the epoch
+    /// check and the mutation cannot be separated by an await, so a superseded login /
+    /// restore can never clobber a newer operation's session. Returns whether applied.
+    @discardableResult
+    func applySessionIfCurrent(baseURL: URL?, accessToken: String?, epoch: AuthOperationEpoch, token: Int) -> Bool {
+        guard epoch.isCurrent(token) else { return false }
+        if let baseURL {
+            self.baseURL = baseURL
+            UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+        }
+        self.accessToken = accessToken
+        return true
+    }
+
     /// Registers a closure that checks whether the current token is expired.
     /// Called before each API request to proactively reject expired tokens.
     func setTokenExpiryChecker(_ checker: @escaping @Sendable () async -> Bool) {
@@ -696,7 +712,7 @@ actor APIClient {
     private func checkTokenExpiry() async throws {
         try validateActiveServerGeneration()
         if let checker = tokenExpiryChecker, await checker() {
-            NotificationCenter.default.post(name: .sessionExpired, object: nil)
+            NotificationCenter.default.post(name: .sessionExpired, object: generationAtCreation.map(NSNumber.init(value:)))
             throw NetworkError.unauthorized
         }
     }
@@ -744,7 +760,7 @@ actor APIClient {
         case 200...299:
             return
         case 401:
-            NotificationCenter.default.post(name: .sessionExpired, object: nil)
+            NotificationCenter.default.post(name: .sessionExpired, object: generationAtCreation.map(NSNumber.init(value:)))
             throw NetworkError.unauthorized
         case 403:
             throw NetworkError.forbidden
