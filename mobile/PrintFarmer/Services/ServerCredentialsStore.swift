@@ -57,6 +57,27 @@ final class ServerCredentialsStore: @unchecked Sendable {
         keychain.delete(expiryKey(serverId: serverId))
     }
 
+    /// J (issue #816 reject, Hicks): compare-and-clear the stored credentials for
+    /// `serverId` IFF the currently-persisted access token equals
+    /// `expectedAccessToken`. Rollback primitive for a login/restore that
+    /// published its credentials and then failed a subsequent operation-fenced
+    /// destination (e.g. apiClient CAS, owner write, or activate). If a newer
+    /// T2 login has already re-saved credentials for the SAME server (a
+    /// different access token by construction), the compare fails and T2's
+    /// credentials are left untouched. Returns whether the clear happened.
+    @discardableResult
+    func clearIfAccessTokenMatches(serverId: UUID, expectedAccessToken: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let current = keychain.get(tokenKey(serverId: serverId)),
+              current == expectedAccessToken else {
+            return false
+        }
+        keychain.delete(tokenKey(serverId: serverId))
+        keychain.delete(expiryKey(serverId: serverId))
+        return true
+    }
+
     @discardableResult
     func migrateLegacyCredentialsIfNeeded(to serverId: UUID) -> Bool {
         lock.lock()

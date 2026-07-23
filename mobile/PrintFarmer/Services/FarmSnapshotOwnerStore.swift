@@ -60,6 +60,25 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
         defer { lock.unlock() }
         userDefaults.removeObject(forKey: ownerKey(serverID: serverID))
     }
+
+    /// J (issue #816 reject, Hicks): compare-and-clear the owner IFF the
+    /// currently-persisted owner UUID equals `expectedUserID` (nil-nil also
+    /// matches — a rollback of a token-only login that cleared prior owner).
+    /// Rollback primitive for a login/restore that persisted the owner and
+    /// then failed a subsequent operation-fenced destination. If a newer T2
+    /// login has already written its own owner, the compare fails and T2's
+    /// owner is preserved. Returns whether the clear happened (an equal
+    /// nil-nil match returns true with no side effects).
+    @discardableResult
+    func clearOwnerIfMatches(serverID: UUID, expectedUserID: UUID?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let currentRaw = userDefaults.string(forKey: ownerKey(serverID: serverID))
+        let current = currentRaw.flatMap(UUID.init(uuidString:))
+        guard current == expectedUserID else { return false }
+        userDefaults.removeObject(forKey: ownerKey(serverID: serverID))
+        return true
+    }
 }
 
 // MARK: - Durable tombstone store (F10-C1a, #816, H4)

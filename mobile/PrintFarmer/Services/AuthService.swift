@@ -98,6 +98,15 @@ actor AuthService: AuthServiceProtocol {
 
     /// Authenticate against a Printfarmer server.
     /// Stores the JWT and applies it to the shared API client for the active server on success.
+    ///
+    /// J (issue #816 reject, Hicks): shared destinations (credentials, apiClient
+    /// session, snapshot owner, registry active-server) are published ONLY
+    /// AFTER identity verification succeeds, and each publication step is fenced
+    /// on the operation epoch with an operation-owned rollback so a supersession
+    /// at ANY await boundary leaves credentials + apiClient bearer/session +
+    /// owner + registry active-server UNTOUCHED. The rollback uses
+    /// compare-and-clear helpers so a newer T2 login that has already
+    /// re-published its own values is never clobbered.
     func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
         guard let normalizedURL = APIClient.normalizedServerURLString(serverURL),
               let url = URL(string: normalizedURL) else {
@@ -120,52 +129,72 @@ actor AuthService: AuthServiceProtocol {
             throw NetworkError.authFailed(response.error ?? "Login failed")
         }
 
-        // H2/J: fence every durable mutation atomically on exactly this operation at the
-        // mutation point. A superseded login performs no durable work. The shared
-        // APIClient session is applied via a destination compare-and-set so a login
-        // superseded DURING the await cannot clobber a newer session.
-        guard fencedMutation(operation, {
+        // J (issue #816 reject, Hicks): verify identity BEFORE publishing any
+        // shared destination. The verification runs on an EPHEMERAL, bearer-loaded
+        // client — the shared apiClient is not repointed here, so a supersession
+        // during /me does not leave any shared destination holding this operation's
+        // state.
+        var verifiedUser = response.user
+        if verifiedUser == nil {
+            let verifyClient = await apiClient.unauthenticatedClient(baseURL: server.baseURL)
+            await verifyClient.setAccessToken(token)
+            verifiedUser = try? await verifyClient.get("/api/auth/me")
+        }
+        // After the verification await, if we've been superseded, publish nothing.
+        guard isCurrentOperation(operation) else { return .superseded }
+
+        // Publication phase — every step is fenced or CAS, and rolls back prior
+        // published steps in reverse order on failure so no destination is left
+        // holding this superseded operation's state at any await boundary.
+
+        // Step 1: credentials + owner (single synchronous fenced block).
+        let published = fencedMutation(operation) {
             credentialsStore.save(
                 ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
                 serverId: server.id
             )
-        }) else { return .superseded }
-        if operation == .unspecified {
-            await apiClient.updateBaseURL(server.baseURL)
-            await apiClient.setAccessToken(token)
-        } else {
-            let applied = await apiClient.applySessionIfCurrent(
-                baseURL: server.baseURL, accessToken: token, epoch: authEpoch, token: operation.value
-            )
-            guard applied else { return .superseded }
-        }
-        await registerTokenExpiryChecker(for: server)
-
-        // The snapshot owner must be a VERIFIED current identity. A token-only
-        // response (`user == nil`) must never reuse a persisted prior owner — verify
-        // via an authoritative `currentUser()` fetch, and fail closed (clear any
-        // stale owner) if no stable id can be established.
-        var verifiedUser = response.user
-        if verifiedUser == nil {
-            verifiedUser = try? await currentUser()
-        }
-        guard isCurrentOperation(operation) else { return .superseded }
-        // J (issue #816 reject): do NOT ignore the owner-mutation fenced result.
-        // If it fails, the operation has been superseded — return .superseded
-        // rather than proceeding to activate() and stamping the registry.
-        guard fencedMutation(operation, {
             if let user = verifiedUser {
                 snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
             } else {
                 snapshotOwnerStore.clearOwner(serverID: server.id)
             }
-        }) else { return .superseded }
-        // J (issue #816 reject): active-server registry mutation must also be
-        // fenced on this operation and must not silently swallow its outcome.
-        // A superseded login MUST NOT stamp the registry active server under a
-        // superseded operation's identity.
+        }
+        guard published else { return .superseded }
+
+        // Step 2: apiClient shared session (CAS on the epoch — carries stable
+        // serverID so a later logout snapshot cannot separate baseURL from
+        // server identity).
+        if operation == .unspecified {
+            await apiClient.updateBaseURL(server.baseURL)
+            await apiClient.setAccessToken(token)
+        } else {
+            let applied = await apiClient.applySessionIfCurrent(
+                baseURL: server.baseURL, accessToken: token, serverID: server.id,
+                epoch: authEpoch, token: operation.value
+            )
+            guard applied else {
+                // Rollback step 1: our exact credentials + owner.
+                credentialsStore.clearIfAccessTokenMatches(serverId: server.id, expectedAccessToken: token)
+                snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: verifiedUser?.id)
+                return .superseded
+            }
+        }
+        await registerTokenExpiryChecker(for: server)
+
+        // Step 3: registry activate (fenced on operation).
         let activated = await activate(server, operation: operation)
-        guard activated else { return .superseded }
+        guard activated else {
+            // Rollback steps 1-2: our exact credentials + owner + apiClient session.
+            credentialsStore.clearIfAccessTokenMatches(serverId: server.id, expectedAccessToken: token)
+            snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: verifiedUser?.id)
+            if operation != .unspecified {
+                await apiClient.clearSessionIfMatches(
+                    expectedAccessToken: token,
+                    expectedAuthSessionToken: operation.value
+                )
+            }
+            return .superseded
+        }
         // Carry the VERIFIED user back to the caller (not the original nil).
         let verifiedResponse = AuthResponse(
             success: response.success,
@@ -178,38 +207,37 @@ actor AuthService: AuthServiceProtocol {
     }
 
     func logout(operation: AuthOperationToken) async {
-        // J (issue #816 reject): capture the session snapshot ATOMICALLY under an
-        // operation currency check BEFORE any other await (activeServer() or the
-        // /logout network hop). Even a T2 apply that lands between here and the
-        // network can never cause /logout to be sent under T2's bearer, because
-        // this snapshot returns nil when the epoch has advanced past this
-        // operation's token.
-        let logoutClient: APIClient?
+        // J (issue #816 reject, Hicks): capture the FULL logout snapshot
+        // (client + baseURL + accessToken + stable serverID) in ONE APIClient
+        // actor hop, fenced on the operation. Local cleanup uses the SNAPSHOT's
+        // serverID, NEVER the mutable registry's activeServer — so a
+        // registry-driven server switch landing between here and the /logout
+        // network await (or between the network hop and local cleanup)
+        // cannot cause /logout to hit server A while cleanup wipes server B.
+        // A superseded logout returns a nil snapshot and does zero work.
+        let snapshot: APIClient.LogoutSnapshot?
         if operation == .unspecified {
-            logoutClient = await apiClient.sessionSnapshotClient()
+            snapshot = await apiClient.logoutOperationSnapshot()
         } else {
-            logoutClient = await apiClient.sessionSnapshotClientIfCurrent(
+            snapshot = await apiClient.logoutOperationSnapshotIfCurrent(
                 epoch: authEpoch, token: operation.value
             )
         }
-        // Only look up the current registered server AFTER the snapshot is fixed.
-        // A stale logout that fails the epoch-currency check does not need to
-        // resolve the active server — it will neither hit the network nor mutate
-        // any local state below (the fencedMutation guard also rejects it).
-        let currentServer = await activeServer()
         // Network uses the snapshot's captured bearer/baseURL. A superseded
-        // logout has a nil snapshot and skips the network entirely (better than
-        // sending /logout under T2's session).
-        if let logoutClient {
-            try? await logoutClient.postVoid("/api/auth/logout")
+        // logout has a nil snapshot and skips the network entirely (better
+        // than sending /logout under T2's session).
+        if let snapshot {
+            try? await snapshot.client.postVoid("/api/auth/logout")
         }
-        // After the network await, clear local + durable state only if THIS operation is
-        // still current, each mutation fenced atomically on the operation.
+        // After the network await, clear local + durable state only if THIS
+        // operation is still current, each mutation fenced atomically on the
+        // operation. Local cleanup targets the SNAPSHOT'S serverID — a
+        // registry switch cannot redirect it.
         fencedMutation(operation) {
-            if let server = currentServer {
-                credentialsStore.clear(serverId: server.id)
+            if let serverID = snapshot?.serverID {
+                credentialsStore.clear(serverId: serverID)
                 // Explicit logout clears the persisted owner identity for this server.
-                snapshotOwnerStore.clearOwner(serverID: server.id)
+                snapshotOwnerStore.clearOwner(serverID: serverID)
             }
         }
         // Clear the shared session only if still current (destination CAS), so a stale
@@ -218,63 +246,74 @@ actor AuthService: AuthServiceProtocol {
             await apiClient.setAccessToken(nil)
         } else {
             _ = await apiClient.applySessionIfCurrent(
-                baseURL: nil, accessToken: nil, epoch: authEpoch, token: operation.value
+                baseURL: nil, accessToken: nil, serverID: nil,
+                epoch: authEpoch, token: operation.value
             )
         }
     }
 
     /// Attempt to restore a previous session from Keychain.
+    ///
+    /// J (issue #816 reject, Hicks): identity is verified on an ephemeral,
+    /// bearer-loaded client BEFORE publishing the shared apiClient session or
+    /// the snapshot owner. On any operation-fenced destination failure, the
+    /// prior published destinations are rolled back via compare-and-clear so a
+    /// supersession leaves credentials/apiClient/owner UNCHANGED at every
+    /// await boundary.
     func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
         guard let server = await activeServer() else { return .noSession }
         migrateLegacyCredentialsIfAllowed(to: server)
         guard let credentials = credentialsStore.load(serverId: server.id) else { return .noSession }
 
-        // H2: apply the shared session via a destination CAS so a restore superseded by
-        // a newer login/logout cannot clobber the newer session. Legacy unspecified
-        // callers keep the unconditional behavior.
-        if operation == .unspecified {
-            await apiClient.updateBaseURL(server.baseURL)
-            await apiClient.setAccessToken(credentials.accessToken)
-        } else {
-            let applied = await apiClient.applySessionIfCurrent(
-                baseURL: server.baseURL, accessToken: credentials.accessToken, epoch: authEpoch, token: operation.value
-            )
-            guard applied else { return .superseded }
-        }
-        await registerTokenExpiryChecker(for: server)
-
+        // J: verify identity on an EPHEMERAL client first — the shared apiClient
+        // is not repointed until the verified user is in hand and every prior
+        // step is committed.
+        let verifyClient = await apiClient.unauthenticatedClient(baseURL: server.baseURL)
+        await verifyClient.setAccessToken(credentials.accessToken)
+        let verifiedUser: UserDTO
         do {
-            let user: UserDTO = try await apiClient.get("/api/auth/me")
-            // H2: if a logout / newer op superseded this restore mid-flight, do not
-            // persist the owner or report success (no resurrection).
-            guard isCurrentOperation(operation) else { return .superseded }
-            // Online-verified restore: persist the owner (transient offline never
-            // reaches here, so the last verified owner is preserved).
-            guard fencedMutation(operation, {
-                snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
-            }) else { return .superseded }
-            return .restored(user)
+            verifiedUser = try await verifyClient.get("/api/auth/me")
         } catch {
             // H2/J: a stale restore's late 401 must not clear a newer login's
             // credentials/owner/session — fence the definitive-rejection clears on the
-            // operation, and CAS the APIClient clear.
+            // operation. No shared destination was published for this restore.
             if isDefinitiveAuthRejection(error) {
                 fencedMutation(operation) {
                     credentialsStore.clear(serverId: server.id)
                     snapshotOwnerStore.clearOwner(serverID: server.id)
                 }
-                if isCurrentOperation(operation) {
-                    if operation == .unspecified {
-                        await apiClient.setAccessToken(nil)
-                    } else {
-                        _ = await apiClient.applySessionIfCurrent(
-                            baseURL: nil, accessToken: nil, epoch: authEpoch, token: operation.value
-                        )
-                    }
-                }
             }
             return .noSession
         }
+
+        guard isCurrentOperation(operation) else { return .superseded }
+
+        // Publication phase (symmetric with login).
+        // Step 1: owner (fenced, synchronous). Credentials were persisted at
+        // login time; restore does not re-save them.
+        let published = fencedMutation(operation) {
+            snapshotOwnerStore.setOwner(userID: verifiedUser.id, serverID: server.id)
+        }
+        guard published else { return .superseded }
+
+        // Step 2: apiClient session (CAS with stable serverID).
+        if operation == .unspecified {
+            await apiClient.updateBaseURL(server.baseURL)
+            await apiClient.setAccessToken(credentials.accessToken)
+        } else {
+            let applied = await apiClient.applySessionIfCurrent(
+                baseURL: server.baseURL, accessToken: credentials.accessToken, serverID: server.id,
+                epoch: authEpoch, token: operation.value
+            )
+            guard applied else {
+                // Rollback owner (compare-and-clear — a newer T2 login's owner
+                // is preserved because its user id differs from verifiedUser.id).
+                snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: verifiedUser.id)
+                return .superseded
+            }
+        }
+        await registerTokenExpiryChecker(for: server)
+        return .restored(verifiedUser)
     }
 
     func currentUser() async throws -> UserDTO {
