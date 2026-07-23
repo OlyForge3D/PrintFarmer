@@ -121,4 +121,18 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         let reloaded = FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: suite)!)
         XCTAssertEqual(reloaded.ownerUserID(serverID: server), user)
     }
+
+    /// Focused hygiene proof (issue #816, Vasquez): writing a key into a TRACKED suite
+    /// and invoking the shared cleanup primitive removes the exact persistent domain —
+    /// no untracked suite is created to test it.
+    func testTrackedSuiteCleanupPrimitiveRemovesDomain() {
+        let suite = trackedSuiteName("hygiene-proof")
+        UserDefaults(suiteName: suite)!.set("value", forKey: "key")
+        // The domain now exists and is non-empty.
+        XCTAssertEqual(UserDefaults().persistentDomain(forName: suite)?["key"] as? String, "value")
+        // The same primitive used by trackedSuiteName's teardown removes it exactly.
+        XCTAssertTrue(TrackedDefaults.removeDomain(suite))
+        let residual = UserDefaults().persistentDomain(forName: suite) ?? [:]
+        XCTAssertTrue(residual.isEmpty, "domain must be nil/empty after cleanup")
+    }
 }

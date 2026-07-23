@@ -229,20 +229,35 @@ final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendabl
 
 // MARK: - Factories
 
+/// Central, test-owned UserDefaults suite hygiene (issue #816). The exact-domain
+/// removal primitive is shared by `trackedSuiteName`'s teardown and is directly
+/// callable so a focused proof can exercise the same cleanup without spawning an
+/// untracked suite.
+enum TrackedDefaults {
+    /// Removes a suite's persistent domain and returns whether the domain is empty
+    /// afterwards (nil/empty). This is the single cleanup primitive used everywhere.
+    @discardableResult
+    static func removeDomain(_ suite: String) -> Bool {
+        UserDefaults().removePersistentDomain(forName: suite)
+        let residual = UserDefaults().persistentDomain(forName: suite) ?? [:]
+        return residual.isEmpty
+    }
+}
+
 extension XCTestCase {
     /// Returns a uniquely-named, TEST-OWNED suite name and registers a teardown block
-    /// that removes the persistent domain (on success or failure) and asserts it no
-    /// longer contains any keys. Prevents leaked persistent domains from accumulating
-    /// in `~/Library/Preferences` across runs (issue #816 test hygiene). Callers build
+    /// that removes the persistent domain (on success or failure) via the shared
+    /// `TrackedDefaults.removeDomain` primitive and asserts it no longer contains any
+    /// keys. Prevents leaked persistent domains from accumulating in
+    /// `~/Library/Preferences` across runs (issue #816 test hygiene). Callers build
     /// their own `UserDefaults(suiteName:)` from this name so fixtures never construct
     /// an untracked random suite. Returning only the `Sendable` String also keeps the
     /// non-Sendable `UserDefaults` within the caller's isolation domain.
     func trackedSuiteName(_ prefix: String, file: StaticString = #filePath, line: UInt = #line) -> String {
         let suite = "\(prefix)-\(UUID().uuidString)"
         addTeardownBlock {
-            UserDefaults().removePersistentDomain(forName: suite)
-            let residual = UserDefaults().persistentDomain(forName: suite) ?? [:]
-            XCTAssertTrue(residual.isEmpty, "leaked persistent domain \(suite): \(residual)", file: file, line: line)
+            XCTAssertTrue(TrackedDefaults.removeDomain(suite),
+                          "leaked persistent domain \(suite)", file: file, line: line)
         }
         return suite
     }
