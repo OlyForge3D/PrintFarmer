@@ -161,6 +161,11 @@ public class UserApiKeysController : ControllerBase
             return NotFound();
         }
 
+        if (oldKey.IsExpired)
+        {
+            return BadRequest(new { error = "Expired API keys cannot be rotated. Create a new API key instead." });
+        }
+
         string rawKey = GenerateKey();
         string storedValue = GetValueForStorage(rawKey, oldKey.Purpose);
 
@@ -228,7 +233,7 @@ public class UserApiKeysController : ControllerBase
             return true;
         }
 
-        return User.IsInRole("Admin") || User.IsInRole("Administrator");
+        return User.IsInRole("farm_admin");
     }
 
     /// <summary>

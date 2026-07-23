@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Cameras;
 
 namespace Farm.Infrastructure;
 
@@ -49,6 +50,21 @@ public class CameraDto
 
     public string? SnapshotUrl { get; set; }
 
+    /// <summary>
+    /// Client presentation mode. Stock Snapmaker U1 is SnapshotOnly because it exposes monitor.jpg, not MJPEG.
+    /// </summary>
+    public CameraAccessMode AccessMode => CameraContractClassifier.GetAccessMode(StreamUrl, SnapshotUrl);
+
+    /// <summary>
+    /// Live stream transport. WebRTC/RTSP are exposed so clients can avoid treating them as MJPEG.
+    /// </summary>
+    public CameraStreamFormat StreamFormat => CameraContractClassifier.GetStreamFormat(StreamUrl);
+
+    /// <summary>
+    /// Snapshot capture strategy. SnapmakerU1MonitorJpeg means the API wakes the monitor over Moonraker websocket.
+    /// </summary>
+    public CameraSnapshotStrategy SnapshotStrategy => CameraContractClassifier.GetSnapshotStrategy(SnapshotUrl);
+
     public bool IsEnabled { get; set; } = true;
 
     public int SortOrder { get; set; }
@@ -64,6 +80,12 @@ public class CameraDto
     /// Null for standalone cameras.
     /// </summary>
     public Guid? PrinterId { get; set; }
+
+    /// <summary>
+    /// If this camera is attached to a printer, this is the printer's name.
+    /// Null for standalone cameras.
+    /// </summary>
+    public string? PrinterName { get; set; }
 
     /// <summary>
     /// Source that discovered or created this camera
@@ -111,6 +133,12 @@ public class CreateCameraDto
     [OptionalUrl(ErrorMessage = "Snapshot URL must be a valid URL.")]
     [StringLength(2048, ErrorMessage = "Snapshot URL cannot exceed 2048 characters.")]
     public string? SnapshotUrl { get; set; }
+
+    public CameraAccessMode AccessMode => CameraContractClassifier.GetAccessMode(StreamUrl, SnapshotUrl);
+
+    public CameraStreamFormat StreamFormat => CameraContractClassifier.GetStreamFormat(StreamUrl);
+
+    public CameraSnapshotStrategy SnapshotStrategy => CameraContractClassifier.GetSnapshotStrategy(SnapshotUrl);
 
     public bool IsEnabled { get; set; } = true;
 
@@ -166,7 +194,7 @@ public class UpdateCameraDto
 
     /// <summary>
     /// Optional printer ID if this camera should be attached to or moved to a different printer.
-    /// Can be set to null to convert a printer-attached camera to standalone.
+    /// Omit or leave null to keep the current association unchanged.
     /// </summary>
     public Guid? PrinterId { get; set; }
 
@@ -189,6 +217,29 @@ public class ToggleCameraDto
 {
     [Required]
     public bool IsEnabled { get; set; }
+}
+
+/// <summary>
+/// Request DTO for detecting camera endpoints for a configured printer.
+/// </summary>
+public class DetectCameraEndpointsRequest
+{
+    [Required]
+    public Guid PrinterId { get; set; }
+}
+
+/// <summary>
+/// Response DTO for detected camera endpoints.
+/// </summary>
+public class CameraEndpointDetectionDto
+{
+    public string? StreamUrl { get; set; }
+
+    public string? SnapshotUrl { get; set; }
+
+    public bool Detected { get; set; }
+
+    public string Source { get; set; } = string.Empty;
 }
 
 /// <summary>

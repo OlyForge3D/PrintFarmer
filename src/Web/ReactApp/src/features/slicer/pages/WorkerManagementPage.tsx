@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { workerService, WorkerResponse, WorkerStatus, WorkerJobResponse } from '@/services/workerService';
 import { slicerHubService, SlicerRegisteredEvent, SlicerHeartbeatEvent, SlicerDeregisteredEvent } from '@/services/slicerHubService';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -10,12 +11,20 @@ import { Label } from '@/common/components/ui/Label';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
+import { Select } from '@/common/components/ui/Select';
 import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
-import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
+import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 
-export function WorkerManagementPage() {
-  const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>('workers');
+interface WorkerManagementPageProps {
+  tabQueryParamName?: string;
+  embedded?: boolean;
+}
+
+export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = false }: WorkerManagementPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get(tabQueryParamName);
+  const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>(tabParam === 'jobs' ? 'jobs' : 'workers');
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +39,23 @@ export function WorkerManagementPage() {
   const [workerJobs, setWorkerJobs] = useState<Map<string, WorkerJobResponse[]>>(new Map());
   const [loadingJobs, setLoadingJobs] = useState<Set<string>>(new Set());
   const [workerToDelete, setWorkerToDelete] = useState<WorkerResponse | null>(null);
+
+  const handleTabChange = (tab: 'workers' | 'jobs') => {
+    setActiveTab(tab);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'jobs') {
+        next.set(tabQueryParamName, 'jobs');
+      } else {
+        next.delete(tabQueryParamName);
+      }
+      return next;
+    }, { replace: true });
+  };
+
+  useEffect(() => {
+    setActiveTab(tabParam === 'jobs' ? 'jobs' : 'workers');
+  }, [tabParam]);
 
   useEffect(() => {
     let isMounted = true;
@@ -162,6 +188,18 @@ export function WorkerManagementPage() {
     }
   };
 
+  const handleResetWorker = async (worker: WorkerResponse) => {
+    try {
+      const result = await workerService.resetWorker(worker.id);
+      if (result.releasedJobs > 0) {
+        setError(null);
+      }
+      loadWorkers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset worker');
+    }
+  };
+
   const handleDeleteWorker = (worker: WorkerResponse) => {
     setWorkerToDelete(worker);
   };
@@ -247,46 +285,33 @@ export function WorkerManagementPage() {
   };
 
   if (loading) {
+    const loadingContent = (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+      </div>
+    );
+
+    if (embedded) {
+      return loadingContent;
+    }
+
     return (
       <PageTemplate
         title="Worker Management"
         subtitle="Monitor and manage your Slicer workers"
         icon={WrenchIcon}
       >
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
-        </div>
+        {loadingContent}
       </PageTemplate>
     );
   }
 
-  return (
-    <PageTemplate
-      title="Worker Management"
-      subtitle="Monitor and manage your Slicer workers"
-      icon={WrenchIcon}
-      actions={
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={loadWorkers}
-          iconCenter={<RefreshIcon className="h-4 w-4" />}
-        >
-        </Button>
-      }
-    >
+  const pageContent = (
+    <>
       {/* Tab buttons */}
       <div className="mb-4 flex items-center gap-2">
-        <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('workers')}>Workers</Button>
-        <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
-      </div>
-
-      {/* Connection status */}
-      <div className="mb-4 flex items-center gap-2">
-        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
-        <span className="text-sm text-pf-text-secondary">
-          {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
-        </span>
+        <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => handleTabChange('workers')}>Workers</Button>
+        <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => handleTabChange('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
       </div>
 
       {error && (
@@ -295,29 +320,44 @@ export function WorkerManagementPage() {
         </Alert>
       )}
 
-      {/* Filter tabs */}
-      <div className="mb-4 flex gap-2 flex-wrap">
-        <Button
-          variant={filter === 'all' ? 'primary' : 'secondary'}
-          size="sm"
-          onClick={() => setFilter('all')}
-        >
-          All ({workers.length})
-        </Button>
-        {Object.values(WorkerStatus).map(status => (
-          <Button
-            key={status}
-            variant={filter === status ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setFilter(status as WorkerStatus)}
-          >
-            {status} ({workers.filter(w => w.status === status).length})
-          </Button>
-        ))}
-      </div>
-
-      {/* Workers table (shown on Workers tab) */}
+      {/* Workers tab content */}
       {activeTab === 'workers' && (
+        <>
+        {/* Worker-specific controls */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <Select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
+            containerClassName="w-52"
+            aria-label="Filter by worker status"
+          >
+            <option value="all">All Workers ({workers.length})</option>
+            {Object.values(WorkerStatus).map(status => (
+              <option key={status} value={status}>
+                {status} ({workers.filter(w => w.status === status).length})
+              </option>
+            ))}
+          </Select>
+
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
+            <span className="text-sm text-pf-text-secondary">
+              {isConnected ? 'Real-time updates active' : 'Polling mode'}
+            </span>
+          </div>
+
+          <div className="ml-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={loadWorkers}
+              iconCenter={<RefreshIcon className="h-4 w-4" />}
+              aria-label="Refresh workers"
+            />
+          </div>
+        </div>
+
+        {/* Workers table */}
         <div className="bg-pf-bg-1 rounded-sm border border-pf-border overflow-hidden">
         <table className="w-full">
           <thead className="bg-pf-bg-2 border-b border-pf-border">
@@ -431,6 +471,16 @@ export function WorkerManagementPage() {
                         Disable
                       </Button>
                     )}
+                    {(worker.activeJobs > 0 || worker.status === 'Busy') && (
+                      <Button
+                        variant="warning"
+                        size="sm"
+                        onClick={() => handleResetWorker(worker)}
+                        title="Reset worker — clears ghost jobs and frees slots"
+                      >
+                        Reset
+                      </Button>
+                    )}
                     <Button
                       variant="danger"
                       size="sm"
@@ -507,11 +557,10 @@ export function WorkerManagementPage() {
           </div>
         )}
         </div>
+      </>
       )}
       {activeTab === 'jobs' && (
-        <div className="mt-4">
-          <SlicerJobStatus />
-        </div>
+        <SliceJobsPanel />
       )}
 
       {/* Disable Worker Dialog */}
@@ -625,6 +674,20 @@ export function WorkerManagementPage() {
         onConfirm={confirmDeleteWorker}
         onCancel={() => setWorkerToDelete(null)}
       />
+    </>
+  );
+
+  if (embedded) {
+    return pageContent;
+  }
+
+  return (
+    <PageTemplate
+      title="Worker Management"
+      subtitle="Monitor and manage your Slicer workers"
+      icon={WrenchIcon}
+    >
+      {pageContent}
     </PageTemplate>
   );
 }

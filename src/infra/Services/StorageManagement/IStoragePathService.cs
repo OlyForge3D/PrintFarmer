@@ -29,6 +29,11 @@ public interface IStoragePathService
     string GetSlicerProfilesDirectory();
 
     /// <summary>
+    /// Get the directory for camera snapshots captured on print events.
+    /// </summary>
+    string GetSnapshotStorageDirectory();
+
+    /// <summary>
     /// Ensure all storage directories exist.
     /// </summary>
     Task EnsureDirectoriesExistAsync();

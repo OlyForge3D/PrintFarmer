@@ -17,7 +17,7 @@ namespace Farm.Migrations.SqlServer.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.3")
+                .HasAnnotation("ProductVersion", "10.0.9")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -34,6 +34,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
 
                     b.Property<string>("SettingsJson")
                         .IsRequired()
@@ -154,6 +159,139 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("AuthAuditLogs");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BalanceTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("PerformedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("TransactionType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("UserBalanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("UserBalanceId");
+
+                    b.ToTable("BalanceTransactions");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BarcodeScanLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("Barcode")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int?>("CreatedSpoolId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("HttpStatus")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MatchedFilamentId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Action");
+
+                    b.HasIndex("Barcode");
+
+                    b.HasIndex("Outcome");
+
+                    b.HasIndex("Timestamp");
+
+                    b.ToTable("BarcodeScanLogs");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(9)
+                        .HasColumnType("nvarchar(9)");
+
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("BedTypes");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
                 {
                     b.Property<Guid>("Id")
@@ -237,6 +375,50 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Cameras", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CameraId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CapturedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CameraId");
+
+                    b.HasIndex("CapturedAt");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("PrinterId");
+
+                    b.ToTable("CameraSnapshots");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.CatalogVersion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -259,6 +441,90 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("CatalogVersions");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("DefaultValue")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("EntityType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FieldKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("FieldName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("FieldType")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Options")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("UpdatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EntityType", "FieldKey")
+                        .IsUnique();
+
+                    b.ToTable("CustomFieldDefinitions");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldValue", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("DefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Value")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefinitionId", "EntityId")
+                        .IsUnique();
+
+                    b.ToTable("CustomFieldValues");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
@@ -669,7 +935,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("ExtruderCount")
                         .HasColumnType("int");
 
+                    b.Property<string>("FilamentPerExtruderColorHex")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("FilamentPerExtruderLengthMm")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FilamentPerExtruderType")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("FilamentPerExtruderWeightG")
@@ -1432,6 +1704,46 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Locations");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.LoginAuditEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Success");
+
+                    b.HasIndex("Timestamp");
+
+                    b.HasIndex("Username");
+
+                    b.ToTable("LoginAuditEntries");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceAlert", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1848,6 +2160,53 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Manufacturers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialCluster", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("MaterialClusters");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialClusterMember", b =>
+                {
+                    b.Property<Guid>("ClusterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FilamentTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("ClusterId", "FilamentTypeId");
+
+                    b.HasIndex("FilamentTypeId");
+
+                    b.ToTable("MaterialClusterMembers");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Model3DTagMapping", b =>
                 {
                     b.Property<Guid>("Model3DId")
@@ -1959,6 +2318,52 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("NfcScanEvents");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("SpoolId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("SpoolLastSeenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SpoolName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("TagUid")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("TrayId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId");
+
+                    b.HasIndex("SpoolId");
+
+                    b.HasIndex("TagUid")
+                        .IsUnique();
+
+                    b.ToTable("NfcTagBindings");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.Property<string>("Id")
@@ -2025,6 +2430,26 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<bool>("EmailOnJobCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailOnJobFailed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailOnJobPaused")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailOnJobStarted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("EnableEmailNotifications")
                         .HasColumnType("bit");
 
@@ -2034,10 +2459,33 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("EnablePushNotifications")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("EnableTelegramNotifications")
+                        .HasColumnType("bit");
+
                     b.Property<int>("Frequency")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
+
+                    b.Property<bool>("InAppOnJobCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("InAppOnJobFailed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("InAppOnJobPaused")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("InAppOnJobStarted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("NotifyOnCompletion")
                         .HasColumnType("bit");
@@ -2051,10 +2499,42 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("NotifyOnStart")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("PushOnJobCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("PushOnJobFailed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("PushOnJobPaused")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("PushOnJobStarted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<int>("RetentionDays")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(30);
+
+                    b.Property<bool>("TelegramOnJobCompleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("TelegramOnJobFailed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("TelegramOnJobPaused")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("TelegramOnJobStarted")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -2068,6 +2548,43 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsUnique();
 
                     b.ToTable("NotificationPreferences");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.PushSubscription", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Endpoint")
+                        .IsUnique();
+
+                    b.ToTable("PushSubscriptions");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NozzleModelDefinition", b =>
@@ -2269,6 +2786,72 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("PlanTasks");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("DeviceAddress")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<decimal>("ElectricityRateUsdPerKwh")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProviderType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId");
+
+                    b.ToTable("PowerMonitors");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerReading", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal?>("KwhTotal")
+                        .HasPrecision(14, 4)
+                        .HasColumnType("decimal(14,4)");
+
+                    b.Property<int>("PowerMonitorId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("WattsNow")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("decimal(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PowerMonitorId");
+
+                    b.HasIndex("RecordedAt");
+
+                    b.ToTable("PowerReadings");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintApproval", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2338,6 +2921,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("DeadlineAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<int?>("DispatchMode")
                         .HasColumnType("int");
 
@@ -2387,6 +2973,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("IsExternalPrint")
                         .HasColumnType("bit");
 
+                    b.Property<decimal?>("KwhUsed")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal?>("LaborCostUsd")
                         .HasColumnType("decimal(18,2)");
 
@@ -2403,6 +2992,13 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("PlateIndex")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PlateName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("PreferredPrinterIds")
                         .HasColumnType("nvarchar(max)");
@@ -2468,6 +3064,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AssignedPrinterId");
+
+                    b.HasIndex("DeadlineAtUtc");
 
                     b.HasIndex("GcodeFileId");
 
@@ -2686,6 +3284,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<int?>("PlateIndex")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PlateName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
                     b.Property<int>("PrintCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -2732,9 +3337,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("PrintProjectId", "GcodeFileId")
+                    b.HasIndex("PrintProjectId", "GcodeFileId", "PlateIndex")
                         .IsUnique()
-                        .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId");
+                        .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId_PlateIndex")
+                        .HasFilter("[PlateIndex] IS NOT NULL");
 
                     b.ToTable("PrintProjectFiles");
                 });
@@ -2837,6 +3443,68 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("PrintProjectTemplateFiles", (string)null);
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintQuota", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("GroupName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<decimal>("LimitAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("PeriodType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("QuotaType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ResetAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("UsedAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupName");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("ResetAt")
+                        .HasDatabaseName("IX_PrintQuotas_ResetAt");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("PrintQuotas");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2857,6 +3525,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int>("BackendPort")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("BedTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BuddyCameraIp")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("nvarchar(max)");
 
@@ -2875,6 +3549,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("HasHeatedBed")
                         .HasColumnType("bit");
 
+                    b.Property<bool?>("HasMmu")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("InMaintenance")
                         .HasColumnType("bit");
 
@@ -2883,6 +3560,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastZOffsetCalibrationAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
@@ -2922,6 +3602,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("float");
+
                     b.Property<bool>("ObicoEnabled")
                         .HasColumnType("bit");
 
@@ -2951,13 +3634,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("TemplateMachineProfileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("UseModelDispatchDefaults")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Username")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal?>("Wattage")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal?>("ZOffsetMm")
+                        .HasColumnType("decimal(18,2)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("BedTypeId");
 
                     b.HasIndex("LocationId");
 
@@ -3023,6 +3714,36 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("PrinterGroups");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroupAccess", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccessLevel")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset>("CreatedDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("PrinterGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("PrinterGroupId", "RoleId", "AccessLevel")
+                        .IsUnique();
+
+                    b.ToTable("PrinterGroupAccesses");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3075,11 +3796,20 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("CoverImageUrl")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("DefaultAutoDispatchState")
+                        .HasColumnType("int");
+
                     b.Property<int?>("DefaultBackend")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("DefaultBedTypeId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal?>("DefaultHourlyRate")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("DefaultStartBehavior")
+                        .HasColumnType("int");
 
                     b.Property<decimal?>("DefaultWattage")
                         .HasColumnType("decimal(18,2)");
@@ -3192,6 +3922,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DefaultBedTypeId");
 
                     b.HasIndex("ManufacturerId", "NameLowered")
                         .IsUnique();
@@ -3731,6 +4463,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("manual");
+
                     b.Property<string>("Color")
                         .HasMaxLength(7)
                         .HasColumnType("nvarchar(7)");
@@ -3741,6 +4480,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
+
+                    b.Property<bool>("IsAutoGenerated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3754,10 +4498,14 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("CreatedAt");
 
-                    b.HasIndex("Name")
-                        .IsUnique();
+                    b.HasIndex("Category", "IsAutoGenerated")
+                        .HasDatabaseName("IX_Tags_Category_IsAutoGenerated");
 
-                    b.ToTable("Tag");
+                    b.HasIndex("Name", "Category")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Tags_Name_Category");
+
+                    b.ToTable("Tags");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Toolhead", b =>
@@ -3992,6 +4740,118 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("UserActions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("BalanceAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)")
+                        .HasDefaultValue("USD");
+
+                    b.Property<DateTime>("LastUpdated")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserBalances");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AaguidDescription")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("CredentialId")
+                        .IsRequired()
+                        .HasColumnType("varbinary(900)");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<long>("SignCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CredentialId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("UserPasskeyCredentials");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserQuotaGroupMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("GroupName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupName")
+                        .HasDatabaseName("IX_UserQuotaGroupMemberships_GroupName");
+
+                    b.HasIndex("UserId", "GroupName")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserQuotaGroupMemberships_UserId_GroupName");
+
+                    b.ToTable("UserQuotaGroupMemberships");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserRole", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4025,6 +4885,74 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsUnique();
 
                     b.ToTable("UserRoles");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DefaultSlicerPreset")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("ItemsPerPage")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Locale")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("PrintablesOAuthAccessToken")
+                        .HasMaxLength(4096)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("PrintablesOAuthLinkedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PrintablesOAuthRefreshToken")
+                        .HasMaxLength(4096)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PrintablesOAuthScope")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime?>("PrintablesOAuthTokenExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PrintablesOAuthTokenType")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("PrintablesUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("Theme")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserSettings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserTask", b =>
@@ -4230,6 +5158,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("GcodeFileTag");
                 });
 
+            modelBuilder.Entity("PrintJobTag", b =>
+                {
+                    b.Property<Guid>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TagsId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("PrintJobId", "TagsId");
+
+                    b.HasIndex("TagsId");
+
+                    b.ToTable("PrintJobTag");
+                });
+
             modelBuilder.Entity("PrinterTag", b =>
                 {
                     b.Property<Guid>("PrinterId")
@@ -4255,6 +5198,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BalanceTransaction", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.UserBalance", "UserBalance")
+                        .WithMany()
+                        .HasForeignKey("UserBalanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("UserBalance");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
@@ -4263,6 +5217,43 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraSnapshot", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Camera", "Camera")
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Camera");
+
+                    b.Navigation("PrintJob");
+
+                    b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldValue", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.CustomFieldDefinition", "Definition")
+                        .WithMany("Values")
+                        .HasForeignKey("DefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Definition");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
@@ -4563,6 +5554,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("MaintenanceTask");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialClusterMember", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.MaterialCluster", "Cluster")
+                        .WithMany("Members")
+                        .HasForeignKey("ClusterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.FilamentType", "FilamentType")
+                        .WithMany()
+                        .HasForeignKey("FilamentTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cluster");
+
+                    b.Navigation("FilamentType");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Model3DTagMapping", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Tag", "Tag")
@@ -4595,6 +5605,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("NfcDevice");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NfcTagBinding", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Printer");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.Notification", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "Job")
@@ -4618,6 +5638,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
                         .WithOne()
                         .HasForeignKey("Farm.Infrastructure.Domain.Notifications.NotificationPreferences", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Notifications.PushSubscription", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -4663,6 +5694,28 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("MaintenancePlan");
 
                     b.Navigation("MaintenanceTask");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerReading", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PowerMonitor", "PowerMonitor")
+                        .WithMany("Readings")
+                        .HasForeignKey("PowerMonitorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PowerMonitor");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintApproval", b =>
@@ -4757,8 +5810,23 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Template");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintQuota", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
+                    b.HasOne("Farm.Infrastructure.Domain.BedType", "BedType")
+                        .WithMany("Printers")
+                        .HasForeignKey("BedTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Farm.Infrastructure.Domain.Location", "Location")
                         .WithMany("Printers")
                         .HasForeignKey("LocationId")
@@ -4781,6 +5849,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasForeignKey("PrinterGroupId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.Navigation("BedType");
+
                     b.Navigation("Location");
 
                     b.Navigation("Manufacturer");
@@ -4799,6 +5869,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroupAccess", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
+                        .WithMany("AccessRules")
+                        .HasForeignKey("PrinterGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Role", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PrinterGroup");
+
+                    b.Navigation("Role");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", b =>
@@ -4822,11 +5911,18 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterModel", b =>
                 {
+                    b.HasOne("Farm.Infrastructure.Domain.BedType", "DefaultBedType")
+                        .WithMany()
+                        .HasForeignKey("DefaultBedTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Farm.Infrastructure.Domain.Manufacturer", "Manufacturer")
                         .WithMany("Models")
                         .HasForeignKey("ManufacturerId")
                         .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
+
+                    b.Navigation("DefaultBedType");
 
                     b.Navigation("Manufacturer");
                 });
@@ -5042,6 +6138,39 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Manufacturer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserBalance", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserPasskeyCredential", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserQuotaGroupMembership", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.UserRole", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Role", "Role")
@@ -5057,6 +6186,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Role");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.UserSettings", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });
@@ -5111,6 +6251,21 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("PrintJobTag", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", null)
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("PrinterTag", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Printer", null)
@@ -5124,6 +6279,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasForeignKey("TagsId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
+                {
+                    b.Navigation("Printers");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldDefinition", b =>
+                {
+                    b.Navigation("Values");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.FolderNode", b =>
@@ -5180,6 +6345,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Models");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MaterialCluster", b =>
+                {
+                    b.Navigation("Members");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
                 {
                     b.Navigation("ScanHistory");
@@ -5188,6 +6358,11 @@ namespace Farm.Migrations.SqlServer.Migrations
             modelBuilder.Entity("Farm.Infrastructure.Domain.ObicoServer", b =>
                 {
                     b.Navigation("PrinterServiceStates");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PowerMonitor", b =>
+                {
+                    b.Navigation("Readings");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJob", b =>
@@ -5232,6 +6407,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
                 {
+                    b.Navigation("AccessRules");
+
                     b.Navigation("Printers");
                 });
 

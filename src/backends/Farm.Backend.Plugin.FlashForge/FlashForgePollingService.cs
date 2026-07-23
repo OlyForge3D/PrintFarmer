@@ -243,7 +243,7 @@ public sealed class FlashForgePollingService(
                     // Resolve spool info from DB assignment
                     PrinterSpoolInfoDto? spoolInfo = await spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
 
-                    var update = new PrinterStatusDto(
+                    var cacheUpdate = new PrinterStatusDto(
                         Id: printerId,
                         IsOnline: status.IsOnline,
                         State: PrinterStateNormalizer.NormalizeState(status.State),
@@ -261,11 +261,30 @@ public sealed class FlashForgePollingService(
                         BedTarget: status.BedTarget,
                         SpoolInfo: spoolInfo,
                         ExtruderTemperatures: status.ExtruderTemperatures,
-                        DetectedExtruderCount: status.DetectedExtruderCount);
+                        DetectedExtruderCount: status.DetectedExtruderCount,
+                        PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate);
 
-                    _statusCacheWriter.UpdateStatus(update);
+                    var signalRUpdate = new PrinterStatusUpdate(
+                        Id: printerId,
+                        IsOnline: status.IsOnline,
+                        State: PrinterStateNormalizer.NormalizeState(status.State),
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        X: status.X,
+                        Y: status.Y,
+                        Z: status.Z,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        HomedAxes: null,
+                        SpoolInfo: spoolInfo,
+                        FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
+                    await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -279,7 +298,7 @@ public sealed class FlashForgePollingService(
                     {
                         _logger.LogWarning("FlashForge printer {PrinterId} marked offline after {Attempts} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
-                        var offlineUpdate = new PrinterStatusDto(
+                        var offlineCacheUpdate = new PrinterStatusDto(
                             Id: printerId,
                             IsOnline: false,
                             State: null,
@@ -295,11 +314,32 @@ public sealed class FlashForgePollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            SpoolInfo: null);
+                            SpoolInfo: null,
+                            ExtruderTemperatures: null,
+                            DetectedExtruderCount: null,
+                            PrintTimeLeftSeconds: null);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
 
-                        _statusCacheWriter.UpdateStatus(offlineUpdate);
+                        var offlineSignalRUpdate = new PrinterStatusUpdate(
+                            Id: printerId,
+                            IsOnline: false,
+                            State: null,
+                            Progress: null,
+                            JobName: null,
+                            ThumbnailUrl: null,
+                            CameraStreamUrl: null,
+                            X: null,
+                            Y: null,
+                            Z: null,
+                            HotendTemp: null,
+                            BedTemp: null,
+                            HotendTarget: null,
+                            BedTarget: null,
+                            HomedAxes: null,
+                            SpoolInfo: null,
+                            FileName: null);
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 

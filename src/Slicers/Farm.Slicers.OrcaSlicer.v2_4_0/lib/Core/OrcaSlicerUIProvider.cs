@@ -1,0 +1,34 @@
+﻿using Farm.Slicer.Module.Contracts.Libraries;
+
+namespace Farm.Slicers.OrcaSlicer.v2_4_0;
+
+/// <summary>
+/// OrcaSlicer v2.4.0 UI provider.
+/// Exposes UI capabilities and metadata for this slicer version.
+/// </summary>
+#pragma warning disable S101 // Class name required to match version numbering for plugin discovery
+public class OrcaSlicerUIProvider_v2_4_0 : ISlicerUIProvider
+#pragma warning restore S101
+{
+    public string SlicerName => "OrcaSlicer";
+
+    public string SlicerVersion => "2.4.0";
+
+    // OrcaSlicer has bundle import/export
+    public bool HasBundleSupport => true;
+
+    // OrcaSlicer has specific bed texture formats
+    public bool HasAssetCustomization => true;
+
+    // OrcaSlicer has jitter and other settings
+    public bool HasEngineSpecificSettings => true;
+
+    // TODO: Update these to actual OrcaSlicer-specific types when available
+    public Type ProfileConfigType => typeof(object);
+
+    public Type SettingsType => typeof(object);
+
+#pragma warning disable CA1024 // Use property instead of method
+    public string GetDescription() => "OrcaSlicer v2.4.0 - Supports bundle import/export, custom assets, and engine-specific settings.";
+#pragma warning restore CA1024
+}

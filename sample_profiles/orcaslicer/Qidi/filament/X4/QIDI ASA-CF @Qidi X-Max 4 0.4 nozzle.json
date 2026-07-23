@@ -1,0 +1,11 @@
+{
+	"type": "filament",
+	"setting_id": "5xQW6rGlxlsZ4WhW",
+	"name": "QIDI ASA-CF @Qidi X-Max 4 0.4 nozzle",
+	"from": "system",
+	"instantiation": "true",
+	"inherits": "QIDI ASA-CF@X-Max 4-Series",
+	"compatible_printers": [
+		"Qidi X-Max 4 0.4 nozzle"
+	]
+}

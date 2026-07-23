@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 
@@ -79,4 +80,16 @@ public interface IPrusaLinkApiClient
     /// <summary>Deletes a file from the printer's storage via PrusaLink API v1.</summary>
     Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null,
         bool force = false, CancellationToken ct = default);
+
+    /// <summary>Gets a list of print history jobs from OctoPrint-compatible history endpoint.</summary>
+    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credentials = null, CancellationToken ct = default);
+
+    /// <summary>Gets details for a specific history job from OctoPrint-compatible history endpoint.</summary>
+    Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default);
+
+    /// <summary>Gets aggregated totals computed from available history jobs.</summary>
+    Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
+
+    /// <summary>Deletes a history job if endpoint supports deletion.</summary>
+    Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default);
 }

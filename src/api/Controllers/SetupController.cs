@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Setup;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -10,6 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/setup")]
+[AllowAnonymous] // First-run setup must be reachable before any user or admin account exists.
 public class SetupController(ISetupService setupService) : ControllerBase
 {
     private readonly ISetupService _setupService = setupService;

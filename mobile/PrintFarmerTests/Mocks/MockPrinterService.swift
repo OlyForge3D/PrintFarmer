@@ -5,6 +5,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var printersToReturn: [Printer] = []
     var printerToReturn: Printer?
     var statusToReturn: PrinterStatusDetail?
+    var cameraUrlsToReturn: [PrinterCameraUrls] = []
+    var cameraUrlToReturn: PrinterCameraUrl?
     var currentJobToReturn: PrintJobStatusInfo?
     var commandResultToReturn = CommandResult(success: true, message: nil)
     var snapshotDataToReturn = Data()
@@ -17,7 +19,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var listIncludeDisabledArg: Bool?
     var getPrinterCalledWith: UUID?
     var getStatusCalledWith: UUID?
+    var listCameraUrlsCalled = false
+    var getCameraUrlCalledWith: UUID?
     var getSnapshotCalledWith: UUID?
+    var getSnapshotCallCount = 0
     var getCurrentJobCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
@@ -31,6 +36,11 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var loadFilamentCalledWith: UUID?
     var unloadFilamentCalledWith: UUID?
     var changeFilamentCalledWith: UUID?
+    var setTemperaturesCalledWith: (printerId: UUID, hotend: Double?, bed: Double?)?
+    var homeCalledWith: (printerId: UUID, axes: [String])?
+    var homeXYCalledWith: UUID?
+    var homeZCalledWith: UUID?
+    var moveCalledWith: (printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int)?
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
@@ -53,8 +63,22 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return status
     }
 
+    func listCameraUrls() async throws -> [PrinterCameraUrls] {
+        listCameraUrlsCalled = true
+        if let error = errorToThrow { throw error }
+        return cameraUrlsToReturn
+    }
+
+    func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl {
+        getCameraUrlCalledWith = id
+        if let error = errorToThrow { throw error }
+        guard let cameraUrl = cameraUrlToReturn else { throw NetworkError.notFound }
+        return cameraUrl
+    }
+
     func getSnapshot(id: UUID) async throws -> Data {
         getSnapshotCalledWith = id
+        getSnapshotCallCount += 1
         if let error = errorToThrow { throw error }
         return snapshotDataToReturn
     }
@@ -138,10 +162,49 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
+    var capabilitiesToReturn: PrinterBackendCapabilities?
+    var getBackendCapabilitiesCalledWith: UUID?
+
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
+        getBackendCapabilitiesCalledWith = printerId
+        if let error = errorToThrow { throw error }
+        return capabilitiesToReturn ?? PrinterBackendCapabilities.fallback(for: .moonraker)
+    }
+
+    var beforeSetTemperatures: (@Sendable () async -> Void)?
+
+    func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
+        if let hook = beforeSetTemperatures { await hook() }
+        setTemperaturesCalledWith = (printerId, hotend, bed)
+        if let error = errorToThrow { throw error }
+    }
+
+    func home(printerId: UUID, axes: [String]) async throws {
+        homeCalledWith = (printerId, axes)
+        if let error = errorToThrow { throw error }
+    }
+
+    func homeXY(printerId: UUID) async throws {
+        homeXYCalledWith = printerId
+        if let error = errorToThrow { throw error }
+    }
+
+    func homeZ(printerId: UUID) async throws {
+        homeZCalledWith = printerId
+        if let error = errorToThrow { throw error }
+    }
+
+    func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
+        moveCalledWith = (printerId, axis, distanceMm, feedrateMmMin)
+        if let error = errorToThrow { throw error }
+    }
+
     func reset() {
         printersToReturn = []
         printerToReturn = nil
         statusToReturn = nil
+        cameraUrlsToReturn = []
+        cameraUrlToReturn = nil
         currentJobToReturn = nil
         commandResultToReturn = CommandResult(success: true, message: nil)
         errorToThrow = nil
@@ -149,7 +212,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         listIncludeDisabledArg = nil
         getPrinterCalledWith = nil
         getStatusCalledWith = nil
+        listCameraUrlsCalled = false
+        getCameraUrlCalledWith = nil
         getSnapshotCalledWith = nil
+        getSnapshotCallCount = 0
         getCurrentJobCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil
@@ -163,6 +229,11 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         loadFilamentCalledWith = nil
         unloadFilamentCalledWith = nil
         changeFilamentCalledWith = nil
+        setTemperaturesCalledWith = nil
+        homeCalledWith = nil
+        homeXYCalledWith = nil
+        homeZCalledWith = nil
+        moveCalledWith = nil
         spoolsToReturn = []
     }
 }

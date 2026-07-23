@@ -1,4 +1,6 @@
 ﻿using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Contracts.Printers.OctoPrint;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -68,6 +70,8 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
+        services.AddScoped<IPrinterCameraProbe, OctoPrintPrinterCameraProbe>();
+
         // Register the HTTP client for OctoPrint with proper timeout.
         // Using AddScoped to allow proper dependency resolution.
         services.AddScoped<IOctoPrintClient>(provider =>

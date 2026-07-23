@@ -486,14 +486,26 @@ public class BatchDispatchService(
     }
 
     public async Task<(List<DispatchHistoryDto> Items, int TotalCount)> GetDispatchHistoryAsync(
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default)
     {
         int clampedPage = Math.Max(1, page);
         int clampedSize = Math.Clamp(pageSize, 1, 100);
 
-        int totalCount = await db.DispatchLogs.CountAsync(ct);
+        IQueryable<DispatchLog> baseQuery = db.DispatchLogs;
 
-        List<DispatchHistoryDto> items = await db.DispatchLogs
+        if (dateFrom.HasValue)
+        {
+            baseQuery = baseQuery.Where(l => l.CreatedAtUtc >= dateFrom.Value);
+        }
+
+        if (dateTo.HasValue)
+        {
+            baseQuery = baseQuery.Where(l => l.CreatedAtUtc <= dateTo.Value);
+        }
+
+        int totalCount = await baseQuery.CountAsync(ct);
+
+        List<DispatchHistoryDto> items = await baseQuery
             .AsNoTracking()
             .Include(l => l.PrintJob)
             .Include(l => l.Printer)

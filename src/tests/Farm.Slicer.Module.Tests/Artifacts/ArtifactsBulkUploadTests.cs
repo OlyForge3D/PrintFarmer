@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers;
 using Farm.Slicer.Module.Services.Configuration;
-using Farm.Slicer.Module.Tests.Slicing;
+using Farm.Slicer.Module.Tests.Helpers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -29,7 +29,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<SlicerArtifactStorageSettings> settings = Options.Create(new SlicerArtifactStorageSettings());
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
+        StubSliceJobRepository jobRepo = new StubSliceJobRepository();
 
         Guid jobId = Guid.NewGuid();
         jobRepo.Jobs.Add(new SliceJob { Id = jobId, Status = SliceJobStatus.Processing });
@@ -52,7 +52,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<SlicerArtifactStorageSettings> settings = Options.Create(new SlicerArtifactStorageSettings());
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
+        StubSliceJobRepository jobRepo = new StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
         IFormFile emptyFile = CreateFormFile(Array.Empty<byte>(), "empty.gcode", "application/x-gcode");
@@ -71,7 +71,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<SlicerArtifactStorageSettings> settings = Options.Create(new SlicerArtifactStorageSettings());
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
+        StubSliceJobRepository jobRepo = new StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
         IFormFile file = CreateFormFile(Encoding.UTF8.GetBytes("gcode"), "model.gcode", "application/octet-stream");

@@ -66,6 +66,43 @@ public interface IModel3DFileService
     /// <param name="ct">Cancellation token.</param>
     Task<Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct);
 
+    /// <summary>Uploads and processes a 3D model file with an optional client-generated PNG thumbnail.</summary>
+    /// <param name="modelFile">The model file to upload.</param>
+    /// <param name="thumbnailFile">Optional client-generated PNG thumbnail.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3DUploadResultDto> UploadModelAsync(
+        IFormFile modelFile,
+        IFormFile? thumbnailFile,
+        CancellationToken ct);
+
+    /// <summary>Uploads a model for a user with an optional client thumbnail and idempotency identifier.</summary>
+    /// <param name="modelFile">The model file to upload.</param>
+    /// <param name="thumbnailFile">Optional client-generated PNG thumbnail.</param>
+    /// <param name="userId">The authenticated upload owner.</param>
+    /// <param name="clientUploadId">Optional caller-provided idempotency identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3DUploadResultDto> UploadModelAsync(
+        IFormFile modelFile,
+        IFormFile? thumbnailFile,
+        Guid userId,
+        Guid? clientUploadId,
+        CancellationToken ct);
+
+    /// <summary>Replaces a model thumbnail after validating ownership and an optional HTTP precondition.</summary>
+    /// <param name="modelId">The model identifier.</param>
+    /// <param name="thumbnailFile">The client-generated PNG thumbnail.</param>
+    /// <param name="userId">The authenticated user identifier, if present.</param>
+    /// <param name="isAdmin">Whether the caller has farm administrator privileges.</param>
+    /// <param name="ifMatch">Optional If-Match header value.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3DThumbnailUpdateResultDto> ReplaceThumbnailAsync(
+        Guid modelId,
+        IFormFile thumbnailFile,
+        Guid? userId,
+        bool isAdmin,
+        string? ifMatch,
+        CancellationToken ct);
+
     /// <summary>Gets or creates a folder for the given directory path and type.</summary>
     /// <param name="directoryPath">The virtual directory path.</param>
     /// <param name="folderType">The folder type: "models" or "gcode".</param>
@@ -84,4 +121,24 @@ public interface IModel3DFileService
     /// <param name="path">Relative path to the file within model storage.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<(byte[] Bytes, string FileName)?> DownloadFileAsync(string path, CancellationToken ct);
+
+    /// <summary>
+    /// Uploads raw geometry (e.g., STL from the Cut Model tool) with minimal processing.
+    /// Skips thumbnail generation, model analysis, and deduplication.
+    /// </summary>
+    /// <param name="geometryFile">The STL geometry file to store.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<GeometryUploadResultDto> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct);
+
+    /// <summary>
+    /// Sets attribution metadata on an existing model record.
+    /// Intended for post-import wiring when attribution is resolved separately from the initial upload.
+    /// </summary>
+    /// <param name="modelId">The model to update.</param>
+    /// <param name="sourceUrl">Original source URL (e.g., Printables model page URL).</param>
+    /// <param name="sourceCreator">Creator/author handle.</param>
+    /// <param name="sourceLicense">License name (e.g., "CC BY 4.0").</param>
+    /// <param name="importedAt">Timestamp when the model was imported.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task SetAttributionAsync(Guid modelId, string? sourceUrl, string? sourceCreator, string? sourceLicense, DateTime? importedAt, CancellationToken ct);
 }

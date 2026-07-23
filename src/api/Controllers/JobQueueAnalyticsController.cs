@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos.PrintQueue;
+﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Webhooks;
@@ -31,6 +32,11 @@ public class JobQueueAnalyticsController(
     /// <param name="filterStatus">Filter by job status (Queued, Printing, Paused, etc.)</param>
     /// <param name="filterModel">Filter by printer model name</param>
     /// <param name="filterMaterial">Filter by material type</param>
+    /// <param name="deadlineStart">Filter jobs with deadline at or after this UTC timestamp</param>
+    /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
+    /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
+    /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
+    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
@@ -43,6 +49,11 @@ public class JobQueueAnalyticsController(
         [FromQuery] string? filterStatus,
         [FromQuery] string? filterModel,
         [FromQuery] string? filterMaterial,
+        [FromQuery] DateTime? deadlineStart = null,
+        [FromQuery] DateTime? deadlineEnd = null,
+        [FromQuery] DateTime? queuedFrom = null,
+        [FromQuery] DateTime? queuedTo = null,
+        [FromQuery] string sortBy = "priority",
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0,
         CancellationToken cancellationToken = default)
@@ -60,7 +71,7 @@ public class JobQueueAnalyticsController(
             }
 
             List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
-                filterStatus, filterModel, filterMaterial, limit, offset, cancellationToken);
+                filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
 
             return Ok(jobs);
         }
@@ -152,10 +163,12 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="limit">Maximum number of results (default 50, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
-    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status)</param>
+    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status, deadline, deadline_desc)</param>
     /// <param name="statuses">Comma-separated list of statuses to filter by (completed, failed, cancelled)</param>
     /// <param name="dateStart">Start date filter (ISO 8601 format, inclusive)</param>
     /// <param name="dateEnd">End date filter (ISO 8601 format, inclusive)</param>
+    /// <param name="deadlineStart">Deadline start filter (ISO 8601 format, inclusive)</param>
+    /// <param name="deadlineEnd">Deadline end filter (ISO 8601 format, inclusive)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("history")]
     [ProducesResponseType(typeof(QueueHistoryPageDto), StatusCodes.Status200OK)]
@@ -168,6 +181,8 @@ public class JobQueueAnalyticsController(
         [FromQuery] string? statuses = null,
         [FromQuery] DateTime? dateStart = null,
         [FromQuery] DateTime? dateEnd = null,
+        [FromQuery] DateTime? deadlineStart = null,
+        [FromQuery] DateTime? deadlineEnd = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -185,7 +200,7 @@ public class JobQueueAnalyticsController(
             }
 
             QueueHistoryPageDto history = await _printJobManagementService.GetQueueHistoryAsync(
-                limit, offset, sortBy, statusList, dateStart, dateEnd, cancellationToken);
+                limit, offset, sortBy, statusList, dateStart, dateEnd, deadlineStart, deadlineEnd, cancellationToken);
             return Ok(history);
         }
         catch (Exception ex)
@@ -231,6 +246,10 @@ public class JobQueueAnalyticsController(
             return CreatedAtAction("GetAllQueue", new { id = job.Id }, job);
         }
         catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (ValidationException ex)
         {
             return BadRequest(new { error = ex.Message });
         }
@@ -581,6 +600,11 @@ public class JobQueueAnalyticsController(
             _logger.LogWarning(ex, "Invalid update request for job {JobId}", jobId);
             return BadRequest(new { error = ex.Message });
         }
+        catch (ValidationException ex)
+        {
+            _logger.LogWarning(ex, "Deadline policy validation failed for job {JobId}", jobId);
+            return BadRequest(new { error = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating job details for {JobId}", jobId);
@@ -667,6 +691,44 @@ public class JobQueueAnalyticsController(
         {
             _logger.LogError(ex, "Error seeding queue history");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to seed history" });
+        }
+    }
+
+    /// <summary>
+    /// Remove existing duplicate history jobs created before the harvest-time dedup guard.
+    /// Duplicates are seeded history jobs that share the same printer and the same whole-second
+    /// actual start time. Native (non-seeded) jobs are always retained. Defaults to a dry run
+    /// that only reports what would be removed; pass <c>dryRun=false</c> to actually delete.
+    /// </summary>
+    /// <param name="dryRun">When true (default), reports duplicates without deleting them.</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
+    [HttpPost("history/deduplicate")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(DeduplicateHistoryResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> DeduplicateHistoryAsync(
+        [FromQuery] bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            DeduplicateHistoryResultDto result =
+                await _printJobManagementService.DeduplicateSeededHistoryAsync(dryRun, cancellationToken);
+
+            _logger.LogInformation(
+                "History deduplication {Mode} completed: {Groups} group(s), {Jobs} job(s)",
+                dryRun ? "dry-run" : "cleanup",
+                result.DuplicateGroups,
+                result.JobsRemoved);
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deduplicating queue history");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to deduplicate history" });
         }
     }
 

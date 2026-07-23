@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, development]
     paths:
       - 'src/**'
       - 'tests/**'
@@ -32,12 +33,12 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
           cache: "npm"
@@ -47,9 +48,50 @@ jobs:
         working-directory: src
         run: dotnet restore ./farm-web.sln
 
+      - name: Dotnet format (verify — fail-fast)
+        working-directory: src
+        run: dotnet format --verify-no-changes --no-restore ./farm-web.sln
+
       - name: Install frontend deps
         working-directory: src/Web/ReactApp
         run: npm ci
+
+      - name: Lint frontend (fail-fast)
+        working-directory: src/Web/ReactApp
+        run: npm run lint
+
+      - name: Install dotnet-ef
+        run: |
+          dotnet tool install -g dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Check EF Core migration drift
+        working-directory: src
+        run: |
+          status=0
+
+          check_migration_drift() {
+            local label="$1"
+            local provider="$2"
+            local project="$3"
+            local context="$4"
+
+            echo "Checking ${label} for pending EF Core model changes..."
+            if ! DB_PROVIDER="$provider" dotnet ef migrations has-pending-model-changes \
+              --project "$project" \
+              --startup-project "$project" \
+              --context "$context"; then
+              echo "::error title=EF Core migration drift detected::${label} has pending model changes. Add a migration for ${context} using DB_PROVIDER=${provider}."
+              status=1
+            fi
+          }
+
+          check_migration_drift "AppDbContext PostgreSQL (Farm.Migrations.PostgreSQL)" "postgres" "./migrations/Farm.Migrations.PostgreSQL" "AppDbContext"
+          check_migration_drift "AppDbContext SQL Server (Farm.Migrations.SqlServer)" "sqlserver" "./migrations/Farm.Migrations.SqlServer" "AppDbContext"
+          check_migration_drift "SlicerDbContext PostgreSQL (Farm.Slicer.Migrations.PostgreSQL)" "postgres" "./migrations/Farm.Slicer.Migrations.PostgreSQL" "SlicerDbContext"
+          check_migration_drift "SlicerDbContext SQL Server (Farm.Slicer.Migrations.SqlServer)" "sqlserver" "./migrations/Farm.Slicer.Migrations.SqlServer" "SlicerDbContext"
+
+          exit "$status"
 
       - name: Build .NET
         working-directory: src
@@ -84,14 +126,6 @@ jobs:
         with:
           name: dotnet-test-results
           path: src/TestResults
-
-      - name: Lint frontend
-        working-directory: src/Web/ReactApp
-        run: npm run lint
-
-      - name: Dotnet format (check)
-        working-directory: src
-        run: dotnet format --verify-no-changes ./farm-web.sln || echo "Dotnet format issues detected" && exit 0
 
       - name: Upload test results summary
         if: always()

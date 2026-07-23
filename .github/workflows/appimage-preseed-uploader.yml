@@ -8,7 +8,7 @@ on:
         required: true
         default: 'orca'
       version:
-        description: 'Version string (for Prusa: 2.8.0 or for Orca: 2.3.1). If empty, script will attempt to use latest release.'
+        description: 'Version string (for Prusa: 2.8.0 or for Orca: 2.4.0). If empty, script will attempt to use latest release.'
         required: false
         default: ''
 
@@ -47,7 +47,7 @@ jobs:
             ASSET_PATTERNS=("PrusaSlicer-" ".AppImage")
             DEFAULT_EXT="PrusaSlicer-${VERSION_IN}+linux-x64-GTK3.AppImage"
           else
-            REPO="SoftFever/OrcaSlicer"
+            REPO="OrcaSlicer/OrcaSlicer"
             ASSET_PATTERNS=("OrcaSlicer" "AppImage")
           fi
 
@@ -72,10 +72,10 @@ jobs:
           fi
 
           # Attempt to find a matching asset URL
-          asset_url=$(echo "$release_entry" | jq -r '.assets[]? | select(.name | test("AppImage" ; "i")) | .browser_download_url' | head -n1 || true)
+          asset_url=$(echo "$release_entry" | jq -r '.assets[]? | select((.name | test("AppImage"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1 || true)
           if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then
             echo "No AppImage asset found in release; trying fallback listing" >&2
-            asset_url=$(curl -sS $AUTH_HEADER "$API_URL" | jq -r --arg tag "${VERSION_IN}" '.[] | select(.tag_name==($tag)) | .assets[]?.browser_download_url' | head -n1 || true)
+            asset_url=$(curl -sS $AUTH_HEADER "$API_URL" | jq -r --arg tag "${VERSION_IN}" '.[] | select(.tag_name==($tag)) | .assets[]? | select((.name | test("AppImage"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1 || true)
           fi
 
           if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then

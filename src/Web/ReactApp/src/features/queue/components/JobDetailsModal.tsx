@@ -197,11 +197,14 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         closeOnBackdrop={false}
         closeOnEscape={!hasChanges}
       >
-        {/* Status Badge */}
+        {/* Header: filename (shown once) + status */}
         {displayDetails && (
-          <div className="mb-4">
-            <span 
-              className={`inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <h2 className="min-w-0 text-lg font-semibold text-pf-text-primary break-all" title={displayDetails.name}>
+              {displayDetails.name || <span className="italic text-pf-text-muted">Unknown</span>}
+            </h2>
+            <span
+              className={`shrink-0 inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
                 displayDetails.status.toLowerCase() === 'completed' ? 'bg-pf-success/20 text-pf-success' :
                 displayDetails.status.toLowerCase() === 'printing' ? 'bg-pf-accent/20 text-pf-accent' :
                 displayDetails.status.toLowerCase() === 'queued' ? 'bg-pf-warning/20 text-pf-warning' :
@@ -257,23 +260,39 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
               onFieldChange={handleFieldChange}
             />
 
-            {/* Cost */}
+            {/* Cost Breakdown */}
             <div className="bg-pf-bg-1 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3">Cost</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="text-center p-2 bg-pf-bg-0 rounded-md">
-                  <p className="text-xs text-pf-text-muted mb-1">Estimated</p>
-                  <p className="text-lg font-bold text-pf-text-primary">
-                    {displayDetails.estimatedCost != null ? `$${displayDetails.estimatedCost.toFixed(2)}` : '—'}
-                  </p>
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide">Total Cost</h3>
+                <span className="text-2xl font-bold text-pf-text-primary">
+                  {displayDetails.totalCostUsd != null ? `$${displayDetails.totalCostUsd.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              <div className="space-y-1.5 border-t border-pf-border pt-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-pf-text-muted">Energy</span>
+                  <span className="text-sm font-medium text-pf-text-primary">
+                    {displayDetails.energyCostUsd != null ? `$${displayDetails.energyCostUsd.toFixed(2)}` : '—'}
+                  </span>
                 </div>
-                <div className="text-center p-2 bg-pf-bg-0 rounded-md">
-                  <p className="text-xs text-pf-text-muted mb-1">Actual</p>
-                  <p className="text-lg font-bold text-pf-text-primary">
-                    {displayDetails.actualCost != null ? `$${displayDetails.actualCost.toFixed(2)}` : '—'}
-                  </p>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-pf-text-muted">Material</span>
+                  <span className="text-sm font-medium text-pf-text-primary">
+                    {displayDetails.materialCostUsd != null ? `$${displayDetails.materialCostUsd.toFixed(2)}` : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-pf-text-muted">Machine Time</span>
+                  <span className="text-sm font-medium text-pf-text-primary">
+                    {displayDetails.machineTimeCostUsd != null ? `$${displayDetails.machineTimeCostUsd.toFixed(2)}` : '—'}
+                  </span>
                 </div>
               </div>
+              {displayDetails.costCalculatedAt && (
+                <p className="text-xs text-pf-text-muted mt-2">
+                  as of {new Date(displayDetails.costCalculatedAt).toLocaleString()}
+                </p>
+              )}
             </div>
           </div>
 
@@ -289,34 +308,27 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
 
               return (
                 <>
-                  {/* Printer & File Info */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-pf-bg-1 rounded-lg p-4">
-                      <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3">Printer</h3>
-                      <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
-                        <div>
-                          <dt className="text-xs text-pf-text-muted">Name</dt>
-                          <dd className="text-sm font-medium text-pf-text-primary">{displayDetails.printerName || <span className="italic text-pf-text-muted">Not assigned</span>}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-pf-text-muted">Model</dt>
-                          <dd className="text-sm font-medium text-pf-text-primary">{displayDetails.printerModel || <span className="italic text-pf-text-muted">—</span>}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-pf-text-muted">Material</dt>
-                          <dd className="text-sm font-medium text-pf-text-primary">{materialType || <span className="italic text-pf-text-muted">—</span>}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs text-pf-text-muted">Nozzle</dt>
-                          <dd className="text-sm font-medium text-pf-text-primary">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="italic text-pf-text-muted">—</span>}</dd>
-                        </div>
-                      </dl>
-                    </div>
-
-                    <div className="bg-pf-bg-1 rounded-lg p-4">
-                      <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3">File</h3>
-                      <p className="text-sm font-mono text-pf-text-primary break-all">{displayDetails.name || <span className="italic text-pf-text-muted">Unknown</span>}</p>
-                    </div>
+                  {/* Printer Info */}
+                  <div className="bg-pf-bg-1 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3">Printer</h3>
+                    <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2">
+                      <div>
+                        <dt className="text-xs text-pf-text-muted">Name</dt>
+                        <dd className="text-sm font-medium text-pf-text-primary">{displayDetails.printerName || <span className="italic text-pf-text-muted">Not assigned</span>}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-pf-text-muted">Model</dt>
+                        <dd className="text-sm font-medium text-pf-text-primary">{displayDetails.printerModel || <span className="italic text-pf-text-muted">—</span>}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-pf-text-muted">Material</dt>
+                        <dd className="text-sm font-medium text-pf-text-primary">{materialType || <span className="italic text-pf-text-muted">—</span>}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-pf-text-muted">Nozzle</dt>
+                        <dd className="text-sm font-medium text-pf-text-primary">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="italic text-pf-text-muted">—</span>}</dd>
+                      </div>
+                    </dl>
                   </div>
 
                   {/* Duration & Filament */}

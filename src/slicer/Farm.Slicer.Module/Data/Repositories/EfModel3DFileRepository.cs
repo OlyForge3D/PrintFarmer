@@ -28,9 +28,23 @@ public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepositor
     }
 
     /// <inheritdoc/>
+    public async Task<Model3D?> GetByClientUploadIdAsync(Guid userId, Guid clientUploadId, CancellationToken ct)
+    {
+        return await _db.Models3D.FirstOrDefaultAsync(
+            m => m.UploadedByUserId == userId && m.ClientUploadId == clientUploadId,
+            ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<Model3D?> GetByIdAsync(Guid id, CancellationToken ct)
     {
         return await _db.Models3D.FirstOrDefaultAsync(m => m.Id == id && m.IsValid, ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<Model3D?> GetByIdUnfilteredAsync(Guid id, CancellationToken ct)
+    {
+        return await _db.Models3D.FirstOrDefaultAsync(m => m.Id == id, ct);
     }
 
     /// <inheritdoc/>
