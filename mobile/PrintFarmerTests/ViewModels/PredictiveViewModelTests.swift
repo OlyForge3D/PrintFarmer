@@ -2092,15 +2092,11 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(midSnap.observerResumeCounts[.parkedResumedBySignal] ?? 0, 1)
         XCTAssertEqual(midSnap.observerCancelIgnoredCount, 1)
         XCTAssertEqual(midSnap.observerCancelInvocationCount, 1)
-        XCTAssertEqual(midSnap.observerReceiptStoredCount, 0,
-                       "gate stores no per-attempt receipts")
 
         await gate.close()
         await barrier.close()
 
         let final = await gate.snapshot()
-        XCTAssertEqual(final.observerReceiptStoredCount, 0)
-        XCTAssertEqual(final.observerReceiptWaiterQueueTotal, 0)
         XCTAssertEqual(final.observerResumeCounts[.parkedResumedByClose] ?? 0, 0,
                        "close must not have rescued original — signal already resumed it")
     }
@@ -2147,8 +2143,6 @@ final class PredictiveViewModelTests: XCTestCase {
         await barrier.close()
 
         let final = await gate.snapshot()
-        XCTAssertEqual(final.waiterReceiptStoredCount, 0)
-        XCTAssertEqual(final.waiterReceiptWaiterQueueTotal, 0)
     }
 
     /// Hicks R1: matched-cancel receipt. Original attempt is cancelled
@@ -2181,7 +2175,6 @@ final class PredictiveViewModelTests: XCTestCase {
 
         await gate.close()
         let final = await gate.snapshot()
-        XCTAssertEqual(final.observerReceiptStoredCount, 0)
     }
 
     /// Waiter analogue.
@@ -2209,7 +2202,6 @@ final class PredictiveViewModelTests: XCTestCase {
 
         await gate.close()
         let final = await gate.snapshot()
-        XCTAssertEqual(final.waiterReceiptStoredCount, 0)
     }
 
     // MARK: - Hicks R4 + Vasquez: no-consumer cancel receipt proofs
@@ -2236,9 +2228,6 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed, "gate remains open — pre-close boundedness proof")
-        XCTAssertEqual(snap.observerReceiptStoredCount, 0,
-                       "gate has no per-attempt receipt storage under R1 design")
-        XCTAssertEqual(snap.observerReceiptWaiterQueueTotal, 0)
         XCTAssertEqual(snap.observerCancelIgnoredCount, 0,
                        "matched cancels — no ignored counts should accumulate")
         XCTAssertEqual(snap.observerCancelInvocationCount, iterations,
@@ -2262,20 +2251,154 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed)
-        XCTAssertEqual(snap.waiterReceiptStoredCount, 0)
-        XCTAssertEqual(snap.waiterReceiptWaiterQueueTotal, 0)
         XCTAssertEqual(snap.waiterCancelInvocationCount, iterations)
         XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, iterations)
         await gate.close()
     }
 
-    // MARK: - Hicks R4: race — cancel Task installed but close first
+    // MARK: - Bishop remediation: causal close-first cancellation receipt
 
-    /// Hicks R4: race proof. The cancel Task is installed by onCancel
-    /// but the gate is closed before the cancel actor call runs.
-    /// The exact per-attempt cancel Task's value returns
-    /// `.closedBeforeProcessing`. No post-close state contradicts.
-    func testAsyncGateR4CancelTaskRacesCloseAndSeesClosed_observer() async {
+    /// Bishop remediation atop 879e1aa00: the previous OR-permissive
+    /// race test could pass by hitting `.processedMatched`, which fails
+    /// to prove the named `.closedBeforeProcessing` semantic. This
+    /// test makes close CAUSALLY precede the cancel-Task dispatch by
+    /// holding the outer `withTaskCancellationHandler` scope open via
+    /// `awaitObserverAndHold`:
+    ///
+    ///   1. Primary observer parks on `gate`.
+    ///   2. `gate.close()` drains the parked continuation with
+    ///      `.closedWhileParked` (snapshot proof).
+    ///   3. The task then advances INSIDE its outer cancellation
+    ///      handler and parks on `holdGate.awaitWaiter(holdToken)`.
+    ///      `waitForWaiterParked(holdToken)` structurally proves the
+    ///      outer handler is still installed AFTER close.
+    ///   4. Cancelling the task NOW fires the outer onCancel, which
+    ///      installs `Task { await gate.cancelObserver(...) }`. Because
+    ///      the primary gate is already closed, the closed-guard in
+    ///      `cancelObserver` returns exactly `.closedBeforeProcessing`.
+    ///   5. Assert EQUAL (no OR): `attempt.cancelTask.value ==
+    ///      .closedBeforeProcessing`.
+    ///
+    /// R3 safety-close ordering: release + close hold gate BEFORE
+    /// awaiting task.value; a regression fails an assertion rather
+    /// than hanging.
+    func testAsyncGateBishopCloseFirstYieldsClosedBeforeProcessing_observer() async {
+        let gate = AsyncGate()
+        let holdGate = AsyncGate()
+        let holdToken = await holdGate.registerWaiter()
+
+        let token = await gate.registerObserver()
+        let attempt = ObserverAwaitAttempt()
+        let task = Task {
+            await gate.awaitObserverAndHold(token, attempt: attempt,
+                                             holdGate: holdGate, holdToken: holdToken)
+        }
+        _ = await gate.waitForObserverParked(token)
+
+        // Step 1 causal: close primary gate FIRST — drains parked
+        // observer via .closedWhileParked branch.
+        await gate.close()
+        let afterClose = await gate.snapshot()
+        XCTAssertTrue(afterClose.closed)
+        XCTAssertEqual(afterClose.parkedObserverCount, 0,
+                       "close drained the parked observer")
+        XCTAssertEqual(afterClose.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
+                       "exactly one parkedResumedByClose resume at close")
+        XCTAssertEqual(afterClose.observerFateCounts[.closedWhileParked] ?? 0, 1,
+                       "close sealed fate .closedWhileParked for the primary observer")
+
+        // Step 2 causal: prove outer body advanced past awaitObserver
+        // and is now parked inside holdGate — outer withTask-
+        // CancellationHandler still installed.
+        _ = await holdGate.waitForWaiterParked(holdToken)
+
+        // Step 3: cancel task now that the outer handler is causally
+        // still installed AND gate is closed. onCancel must install a
+        // cancel Task that observes closed==true and returns
+        // .closedBeforeProcessing.
+        task.cancel()
+        guard let cancelTask = attempt.cancelTask else {
+            XCTFail("outer onCancel must install a cancel Task while handler is still active")
+            await holdGate.open(); await holdGate.close(); return
+        }
+        let receipt = await cancelTask.value
+        XCTAssertEqual(receipt, .closedBeforeProcessing,
+                       "close-first ordering MUST yield exact .closedBeforeProcessing (no OR)")
+
+        // R3 safety: release + close hold gate BEFORE awaiting task.
+        await holdGate.open()
+        await holdGate.close()
+        await task.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedByCancel] ?? 0, 0,
+                       "no parked-cancel resume — cancel ran after close, saw closed guard")
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
+                       "the single resume that happened was via close, not cancel")
+        XCTAssertEqual(final.observerCancelInvocationCount, 1,
+                       "cancelObserver dispatched exactly once (post-close, took closed-guard)")
+        XCTAssertEqual(final.observerCancelIgnoredCount, 1,
+                       "closed-guard bumps observerCancelIgnoredCount by one; no matching parked entry drained")
+        // Structural absence of any per-attempt receipt map is the
+        // proof of no-storage — the gate has no `receiptStored` fields.
+    }
+
+    /// Waiter analogue: close-first causal ordering yields exact
+    /// `.closedBeforeProcessing`.
+    func testAsyncGateBishopCloseFirstYieldsClosedBeforeProcessing_waiter() async {
+        let gate = AsyncGate()
+        let holdGate = AsyncGate()
+        let holdToken = await holdGate.registerWaiter()
+
+        let token = await gate.registerWaiter()
+        let attempt = WaiterAwaitAttempt()
+        let task = Task {
+            await gate.awaitWaiterAndHold(token, attempt: attempt,
+                                          holdGate: holdGate, holdToken: holdToken)
+        }
+        _ = await gate.waitForWaiterParked(token)
+
+        await gate.close()
+        let afterClose = await gate.snapshot()
+        XCTAssertTrue(afterClose.closed)
+        XCTAssertEqual(afterClose.parkedWaiterCount, 0)
+        XCTAssertEqual(afterClose.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1)
+        XCTAssertEqual(afterClose.waiterFateCounts[.closedWhileParked] ?? 0, 1)
+
+        _ = await holdGate.waitForWaiterParked(holdToken)
+
+        task.cancel()
+        guard let cancelTask = attempt.cancelTask else {
+            XCTFail("outer onCancel must install a cancel Task while handler is still active")
+            await holdGate.open(); await holdGate.close(); return
+        }
+        let receipt = await cancelTask.value
+        XCTAssertEqual(receipt, .closedBeforeProcessing,
+                       "close-first ordering MUST yield exact .closedBeforeProcessing (no OR)")
+
+        await holdGate.open()
+        await holdGate.close()
+        await task.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedWaiterCount, 0)
+        XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 0)
+        XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1)
+        XCTAssertEqual(final.waiterCancelInvocationCount, 1)
+        XCTAssertEqual(final.waiterCancelIgnoredCount, 1,
+                       "closed-guard bumps waiterCancelIgnoredCount by one; no matching parked entry drained")
+    }
+
+    // MARK: - Either-order race-safety (renamed / contract-narrowed)
+
+    /// Either-order race-safety companion: when `t.cancel()` precedes
+    /// `close()` without the AndHold structural fence, the outcome is
+    /// either `.processedMatched` (cancel drained parked continuation
+    /// first) or `.closedBeforeProcessing` (close won). This test does
+    /// NOT substitute for the causal close-first proof above; it only
+    /// verifies that BOTH outcomes are bounded and exact.
+    func testAsyncGateEitherOrderCancelCloseRaceIsBounded_observer() async {
         let gate = AsyncGate()
         let token = await gate.registerObserver()
         let attempt = ObserverAwaitAttempt()
@@ -2283,14 +2406,7 @@ final class PredictiveViewModelTests: XCTestCase {
         let t = Task { await gate.awaitObserver(token, attempt: attempt) }
         _ = await gate.waitForObserverParked(token)
 
-        // Cancel BEFORE close — installs onCancel Task. Close runs on
-        // the actor and MUST resume the parked continuation with
-        // .closedWhileParked; the cancel Task then observes closed and
-        // returns .closedBeforeProcessing.
         t.cancel()
-        // Close before awaiting anything (R3 pattern): drains parked
-        // continuation via close path, then the cancel Task queued on
-        // the actor sees closed==true.
         await gate.close()
         await t.value
 
@@ -2299,20 +2415,15 @@ final class PredictiveViewModelTests: XCTestCase {
             return
         }
         let r = await cancelTask.value
-        // Either .closedBeforeProcessing (cancel ran after close) or
-        // .processedMatched (cancel ran before close and drained the
-        // parked continuation itself). Both are bounded and exact.
         XCTAssertTrue(r == .closedBeforeProcessing || r == .processedMatched,
-                      "race outcome must be exact: got \(r)")
+                      "either-order race must resolve to one bounded outcome: got \(r)")
 
         let final = await gate.snapshot()
-        XCTAssertEqual(final.observerReceiptStoredCount, 0,
-                       "no gate-side storage even under race")
         XCTAssertEqual(final.parkedObserverCount, 0)
     }
 
-    /// Waiter analogue of the cancel-races-close proof.
-    func testAsyncGateR4CancelTaskRacesCloseAndSeesClosed_waiter() async {
+    /// Waiter analogue of the either-order race-safety companion.
+    func testAsyncGateEitherOrderCancelCloseRaceIsBounded_waiter() async {
         let gate = AsyncGate()
         let token = await gate.registerWaiter()
         let attempt = WaiterAwaitAttempt()
@@ -2330,10 +2441,9 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         let r = await cancelTask.value
         XCTAssertTrue(r == .closedBeforeProcessing || r == .processedMatched,
-                      "race outcome: \(r)")
+                      "either-order race must resolve to one bounded outcome: got \(r)")
 
         let final = await gate.snapshot()
-        XCTAssertEqual(final.waiterReceiptStoredCount, 0)
         XCTAssertEqual(final.parkedWaiterCount, 0)
     }
 
@@ -3441,10 +3551,6 @@ private actor AsyncGate {
         // long-standing tests reading them continue to compile against
         // the same field set; they are guaranteed zero because the gate
         // has no per-attempt storage to grow.
-        let observerReceiptStoredCount: Int
-        let waiterReceiptStoredCount: Int
-        let observerReceiptWaiterQueueTotal: Int
-        let waiterReceiptWaiterQueueTotal: Int
 
         // Hicks R2 addendum: `observerParkAckTicketCount` /
         // `waiterParkAckTicketCount` now count ACTIVE park-ACK
@@ -3520,7 +3626,6 @@ private actor AsyncGate {
     // `AwaitAttempt` context; onCancel synchronously installs the
     // exact cancel Task handle into that context, and `cancelX`
     // returns the receipt as its function value (never persists it
-    // in gate state). Snapshot slots for `observerReceiptStoredCount`
     // etc. are RETAINED (fixed zero) so the Equatable/field-set stays
     // stable across the redesign.
 
@@ -4288,10 +4393,6 @@ private actor AsyncGate {
             waiterParkAckQueueTotal: waiterParkAcks.values.reduce(0) { $0 + $1.count },
             observerCancelCountAckQueueTotal: observerCancelCountAcks.values.reduce(0) { $0 + $1.count },
             waiterCancelCountAckQueueTotal: waiterCancelCountAcks.values.reduce(0) { $0 + $1.count },
-            observerReceiptStoredCount: 0,
-            waiterReceiptStoredCount: 0,
-            observerReceiptWaiterQueueTotal: 0,
-            waiterReceiptWaiterQueueTotal: 0,
             observerParkAckTicketCount: observerActiveParkAckTickets.values.reduce(0) { $0 + $1.count },
             waiterParkAckTicketCount: waiterActiveParkAckTickets.values.reduce(0) { $0 + $1.count }
         )
