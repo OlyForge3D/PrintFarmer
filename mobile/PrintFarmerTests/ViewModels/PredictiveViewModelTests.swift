@@ -2184,88 +2184,189 @@ final class PredictiveViewModelTests: XCTestCase {
 
     // MARK: Hicks H1 — attempt publication race (atomic outcome latch)
 
-    /// Hicks H1: parked observer resumed by signal completes naturally
-    /// FIRST, then a late `task.cancel()` arrives. The attempt's
-    /// `outcome()` must remain `.finishedBeforeProcessing`; onCancel
-    /// must skip because `beginCancellationIfActive()` returns false.
-    /// This proves the atomic monotonic state gate prevents the late
-    /// cancel path from reversing published outcome.
+    /// Reviewer finding #1 (HIGH): the prior version used
+    /// `awaitObserver` (no hold) and awaited `attempt.outcome()`
+    /// AFTER signal to prove natural publication. That await could
+    /// hang indefinitely if publication regressed, and the late
+    /// `task.cancel()` fired AFTER the outer withTaskCancellationHandler
+    /// scope had already torn down — so cancellation was NOT proven
+    /// to arrive while the handler was live.
+    ///
+    /// This revision uses the new `awaitObserverAndHoldAfterPublish`
+    /// helper which:
+    ///   1. Parks the primary continuation
+    ///   2. On resume, IMMEDIATELY publishes natural completion via
+    ///      `attempt.markCompletedNaturallyIfActive()` +
+    ///      `resolveOutcome(.finishedBeforeProcessing)` (synchronous)
+    ///   3. Then parks inside `holdGate.awaitWaiter(holdToken)`
+    /// The outer cancellation handler stays installed throughout.
+    ///
+    /// Test flow (deterministic, failure-safe):
+    ///   1. Pre-register `holdAck` ticket on holdGate BEFORE task spawn
+    ///   2. Spawn task using the new helper
+    ///   3. Prove primary parked via `waitForObserverParked`
+    ///   4. `signal()` → primary continuation resumes → body publishes
+    ///      natural THEN parks in hold
+    ///   5. Snapshot: primary `signaledWhileParked` == 1, parked == 0
+    ///   6. Watchdog Task: awaits `task.value` and (only if that returns)
+    ///      closes holdGate — a REGRESSION where body never reaches hold
+    ///      causes task to return early, watchdog fires, holdAck resolves
+    ///      `.closedOrConsumed`, and the arrival assertion fails LOUDLY
+    ///      instead of hanging.
+    ///   7. `await holdAck.value()` — bounded: either `.parked` (body
+    ///      entered hold; publication committed) or `.closedOrConsumed`
+    ///      (regression detected).
+    ///   8. Read `attempt.stateForTest`/`bufferedOutcomeForTest`
+    ///      SYNCHRONOUSLY under lock — publication is proven to have
+    ///      committed BEFORE the hold-park by construction.
+    ///   9. `task.cancel()` — outer onCancel fires while handler is
+    ///      live in hold. Primary state gate rejects
+    ///      (`beginCancellationIfActive()` returns false because state
+    ///      is `.completedNaturally`); NO primary cancel Task is launched.
+    ///  10. Open + close holdGate to release the body; `await task.value`
+    ///      is bounded by that drain.
+    ///  11. Assertions: primary `observerCancelInvocationCount == 0`
+    ///      (definitive proof the state gate blocked the late cancel);
+    ///      outcome remains exactly `.finishedBeforeProcessing`.
     func testAsyncGateH1AttemptNaturalWinsOverLateCancel_observer() async {
         let gate = AsyncGate()
+        let holdGate = AsyncGate()
+        let holdToken = await holdGate.registerWaiter()
+        // Failure-safe hold-arrival ticket (pre-registered BEFORE spawn):
+        // resolves `.parked` when body enters hold-await, or
+        // `.closedOrConsumed` if the watchdog closes holdGate on
+        // early task return.
+        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
+
         let token = await gate.registerObserver()
         let attempt = ObserverAwaitAttempt()
 
-        let task = Task { await gate.awaitObserver(token, attempt: attempt) }
+        let task = Task {
+            await gate.awaitObserverAndHoldAfterPublish(
+                token, attempt: attempt,
+                holdGate: holdGate, holdToken: holdToken)
+        }
         _ = await gate.waitForObserverParked(token)
+
         // Signal resumes the parked continuation naturally.
         await gate.signal()
-        // Gate-side resume proof (synchronous seal): fails fast on a lost
-        // wakeup instead of stranding the natural-publish barrier below.
+
+        // Gate-side resume proof (synchronous seal).
         let mid = await gate.snapshot()
         XCTAssertEqual(mid.observerFateCounts[.signaledWhileParked] ?? 0, 1,
                        "signal resumed the parked observer (gate-side proof)")
         XCTAssertEqual(mid.parkedObserverCount, 0)
-        // Required natural-publication ordering barrier: awaiting the attempt's
-        // OWN buffered outcome (bounded by the proven gate resume above) orders
-        // the live-handler late cancel strictly AFTER natural publication. This
-        // is contract-bounded synchronization, not a stranding teardown wait.
-        let outcome = await attempt.outcome()
-        XCTAssertEqual(outcome, .finishedBeforeProcessing,
-                       "natural completion must publish before any cancel")
-        // Late cancel arrives AFTER natural publish while the handler is still
-        // live; beginCancellationIfActive() returns false, so no cancel Task
-        // is launched — bounded no-op.
+
+        // Watchdog: bounds holdAck against a regression where body
+        // returns without ever reaching hold. If task ends early,
+        // watchdog closes holdGate which drains holdAck as
+        // `.closedOrConsumed`. Registered BEFORE we await holdAck so
+        // there is no strand risk.
+        let watchdog = Task { [holdGate] in
+            _ = await task.value
+            await holdGate.close()
+        }
+
+        // Bounded hold-arrival: resolves `.parked` when body enters
+        // hold, or `.closedOrConsumed` via watchdog on regression.
+        let arrival = await holdAck.value()
+        XCTAssertEqual(arrival, .parked,
+                       "body must reach holdGate.awaitWaiter after publishing natural completion; got \(arrival)")
+
+        // Synchronous publication proof (no additional actor hops):
+        // the state gate committed `.completedNaturally` and the
+        // buffered outcome is `.finishedBeforeProcessing` BEFORE the
+        // task parked in hold, so both are readable now.
+        XCTAssertEqual(attempt.stateForTest, .completedNaturally,
+                       "state machine must have committed natural path before hold-park")
+        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
+                       "outcome must be published to buffered latch before hold-park")
+
+        // Late cancel WHILE outer withTaskCancellationHandler is live
+        // (body is parked in hold). Task.cancel() synchronously invokes
+        // active onCancel handlers, so the primary onCancel runs before
+        // this call returns; its `beginCancellationIfActive()` returns
+        // false because state is `.completedNaturally`, so NO primary
+        // cancel Task is launched.
         task.cancel()
-        // Unconditional teardown BEFORE awaiting task.value.
+
+        // Unconditional teardown: release hold to let body return,
+        // then drain primary. All awaits below are bounded.
+        await holdGate.open()
+        await holdGate.close()
         await gate.close()
         await task.value
+        _ = await watchdog.value
 
-        // Outcome remains stable — buffered latch is one-shot (re-read is
-        // synchronous; awaited after close for teardown-final assertion).
+        // Definitive proof the state gate blocked the late cancel:
+        // no primary cancel Task was ever dispatched, so
+        // observerCancelInvocationCount stays exactly zero. A regression
+        // that lets natural + cancel double-publish (or that removes
+        // the state gate) would increment this counter.
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerCancelInvocationCount, 0,
+                       "state gate must reject late cancel: no primary cancel Task launched")
+
+        // Outcome remains stable — buffered latch is one-shot.
         let after = await attempt.outcome()
         XCTAssertEqual(after, .finishedBeforeProcessing,
                        "late cancel must not reverse published outcome")
-        // Coordinator remediation: legacy cancelTask accessor removed.
-        // State proof: onCancel's beginCancellationIfActive() returned
-        // false (natural won), so no cancel Task was ever launched.
-        XCTAssertEqual(attempt.stateForTest, .completedNaturally,
-                       "state machine committed natural path — no cancel Task launched")
-        let snap = await gate.snapshot()
-        // Cancel invocation count did not increment (Task never launched).
-        XCTAssertEqual(snap.observerCancelInvocationCount, 0)
     }
 
     /// Waiter analogue of the natural-wins-over-late-cancel proof.
+    /// Uses `awaitWaiterAndHoldAfterPublish` + open() to resume the
+    /// parked waiter, same watchdog + holdAck handshake structure.
     func testAsyncGateH1AttemptNaturalWinsOverLateCancel_waiter() async {
         let gate = AsyncGate()
+        let holdGate = AsyncGate()
+        let holdToken = await holdGate.registerWaiter()
+        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
+
         let token = await gate.registerWaiter()
         let attempt = WaiterAwaitAttempt()
 
-        let task = Task { await gate.awaitWaiter(token, attempt: attempt) }
+        let task = Task {
+            await gate.awaitWaiterAndHoldAfterPublish(
+                token, attempt: attempt,
+                holdGate: holdGate, holdToken: holdToken)
+        }
         _ = await gate.waitForWaiterParked(token)
         await gate.open()
-        // Gate-side resume proof (synchronous seal): fails fast on a lost
-        // wakeup instead of stranding the natural-publish barrier below.
+
         let mid = await gate.snapshot()
         XCTAssertEqual(mid.waiterFateCounts[.openedWhileParked] ?? 0, 1,
                        "open resumed the parked waiter (gate-side proof)")
         XCTAssertEqual(mid.parkedWaiterCount, 0)
-        // Required natural-publication ordering barrier (bounded by the proven
-        // gate resume above): orders the live-handler late cancel strictly
-        // AFTER natural publication. Contract-bounded synchronization.
-        let outcome = await attempt.outcome()
-        XCTAssertEqual(outcome, .finishedBeforeProcessing)
+
+        let watchdog = Task { [holdGate] in
+            _ = await task.value
+            await holdGate.close()
+        }
+
+        let arrival = await holdAck.value()
+        XCTAssertEqual(arrival, .parked,
+                       "waiter body must reach holdGate.awaitWaiter after publishing natural completion; got \(arrival)")
+
+        XCTAssertEqual(attempt.stateForTest, .completedNaturally,
+                       "waiter state machine must have committed natural path before hold-park")
+        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
+                       "waiter outcome must be published to buffered latch before hold-park")
+
         task.cancel()
-        // Unconditional teardown BEFORE awaiting task.value.
+
+        await holdGate.open()
+        await holdGate.close()
         await gate.close()
         await task.value
+        _ = await watchdog.value
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.waiterCancelInvocationCount, 0,
+                       "state gate must reject late cancel: no waiter cancel Task launched")
 
         let after = await attempt.outcome()
-        XCTAssertEqual(after, .finishedBeforeProcessing)
-        XCTAssertEqual(attempt.stateForTest, .completedNaturally,
-                       "waiter: state machine committed natural path — no cancel Task launched")
-        let snap = await gate.snapshot()
-        XCTAssertEqual(snap.waiterCancelInvocationCount, 0)
+        XCTAssertEqual(after, .finishedBeforeProcessing,
+                       "waiter: late cancel must not reverse published outcome")
     }
 
     /// Hicks H1: opposite race — parked observer is cancelled FIRST.
