@@ -45,6 +45,13 @@ fi
 chmod +x "$HOOKS_DIR/pre-commit"
 info "pre-commit hook is executable"
 
+if [[ -f "$HOOKS_DIR/pre-push" ]]; then
+  chmod +x "$HOOKS_DIR/pre-push"
+  info "pre-push hook is executable"
+else
+  warn "pre-push hook missing from $HOOKS_DIR"
+fi
+
 # ---------------------------------------------------------------------------
 # 3. Check for optional tools
 # ---------------------------------------------------------------------------

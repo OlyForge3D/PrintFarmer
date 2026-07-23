@@ -14,3 +14,8 @@ install.sh text eol=lf
 # Embedded slicer assets must not be modified by line-ending conversion
 *.png binary
 *.stl binary
+
+# Git hooks must always use LF line endings
+.githooks/pre-commit text eol=lf
+.githooks/pre-push text eol=lf
+
