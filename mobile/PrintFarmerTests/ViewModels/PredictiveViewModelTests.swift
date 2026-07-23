@@ -2060,12 +2060,24 @@ final class PredictiveViewModelTests: XCTestCase {
         let r2 = await ticket2.value()
         await park.value
 
-        // Exact result set: `.parked` when park won, or
-        // `.terminal(.closedBeforePark)` when close won. Both tickets
-        // share timeline. No `.closedOrConsumed`/`.unknown` reachable.
-        let expected: Set<AsyncGate.ParkAckResult> = [.parked, .terminal(.closedBeforePark)]
+        // Exact result set (observer signal path): the intended resume
+        // trigger here is `registerWaiter()` which invokes signalEntry
+        // on the actor. Either:
+        //   - park won: parked before signal → ticket resolves `.parked`
+        //     when park calls `flushObserverParkAcks(.parked)`; signal
+        //     later drains parked via `.signaledWhileParked` but the
+        //     one-shot ticket is unaffected.
+        //   - signal won: latch fires with `.signaledBeforePark`, which
+        //     `flushObserverParkAcks(.terminal(.signaledBeforePark))`
+        //     resolves the ticket to. The subsequent awaitObserver
+        //     consumes the latch.
+        // `close()` runs strictly AFTER `registerWaiter()` (test awaits
+        // both sequentially), so `.terminal(.closedBeforePark)` is
+        // unreachable — the token's fate is already sealed by
+        // registerWaiter's signal.
+        let expected: Set<AsyncGate.ParkAckResult> = [.parked, .terminal(.signaledBeforePark)]
         XCTAssertTrue(expected.contains(r1),
-                      "ticket 1 exact receipt must be .parked or .terminal(.closedBeforePark); got \(r1)")
+                      "ticket 1 exact receipt must be .parked or .terminal(.signaledBeforePark); got \(r1)")
         XCTAssertEqual(r1, r2, "tickets share timeline")
 
         let final = await gate.snapshot()
