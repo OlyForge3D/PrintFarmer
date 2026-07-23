@@ -2459,15 +2459,57 @@ final class PredictiveViewModelTests: XCTestCase {
     ///      (definitive proof the state gate blocked the late cancel);
     ///      outcome remains exactly `.finishedBeforeProcessing`.
     func testAsyncGateH1AttemptNaturalWinsOverLateCancel_observer() async {
+        // Ripley Finding 1 redesign (Hicks HIGH): the prior version used
+        // a `holdAck` ticket + watchdog pair to prove body arrival at
+        // hold-await BEFORE parent awaited teardown. Under the exact
+        // mutation Hicks called out — suppressing ticket resolution
+        // inside `flushWaiterParkAcks` — that structure formed a
+        // wait-for cycle: child parked on holdGate, parent awaiting
+        // `holdAck.value`, watchdog awaiting `task.value`; parent
+        // never opened holdGate; deadlock.
+        //
+        // This revision removes the holdAck arrival oracle entirely.
+        // Hold release is UNCONDITIONALLY reachable BEFORE any
+        // suspension on ticket/attempt/child — a straight-line
+        // teardown chain. Primary-close is included in the same chain
+        // so a signal-regression that leaves the primary continuation
+        // parked at `withCheckedContinuation` is also released
+        // (drained via `.closedWhileParked`). `task.value` is bounded
+        // by hold-release AND/OR primary-close-drain, so it always
+        // returns without depending on the arrival oracle.
+        //
+        // Preservation contract:
+        //   - Synchronous buffered natural-outcome inspection via
+        //     `attempt.bufferedOutcomeForTest` (nil peek = loud fail).
+        //   - Cancellation while handler live: `task.cancel()` fires
+        //     BEFORE the teardown chain touches holdGate.open. Body
+        //     is either inside hold-await or racing to enter it; in
+        //     both cases the outer `withTaskCancellationHandler`
+        //     block is still executing, so onCancel is delivered
+        //     while the handler is installed.
+        //   - Exact natural-wins semantics: after teardown, the
+        //     buffered outcome MUST be `.finishedBeforeProcessing`
+        //     AND `observerCancelInvocationCount` MUST be exactly
+        //     zero. A cancel-wins race yields `.cancelled(_)` and
+        //     a non-zero invocation count — both assertions fire.
+        //   - Bounded failure if outcome/ticket publication regresses:
+        //     nil peek → guard XCTFails; no infinite wait.
+        //
+        // Wait-for graph (acyclic; every suspension has an independent
+        // releaser that does not await the edge being rescued):
+        //   parent.waitForObserverParked <- primary park OR gate.close drain
+        //   parent.snapshot              <- bounded actor call
+        //   parent.holdGate.open         <- bounded actor call
+        //   parent.holdGate.close        <- bounded actor call
+        //   parent.gate.close            <- bounded actor call
+        //   parent.task.value            <- hold-release AND/OR
+        //                                   primary-close-drain
+        //   parent.snapshot              <- bounded actor call
+        //   parent.bufferedOutcomeForTest — synchronous peek, no
+        //     suspension; nil → loud XCTFail
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
-        // Failure-safe hold-arrival ticket (pre-registered BEFORE spawn):
-        // resolves `.parked` when body enters hold-await, or
-        // `.closedOrConsumed` if the watchdog closes holdGate on
-        // early task return.
-        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
-
         let token = await gate.registerObserver()
         let attempt = ObserverAwaitAttempt()
 
@@ -2478,94 +2520,80 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         _ = await gate.waitForObserverParked(token)
 
-        // Signal resumes the parked continuation naturally.
+        // Signal resumes the parked continuation naturally. Body's
+        // synchronous post-resume code runs mark → resolveOutcome →
+        // enters hold-await. mark → resolveOutcome are NSLock ops
+        // (~100ns each); the cancel Task's actor hop below takes
+        // orders of magnitude longer (µs), so mark reliably commits
+        // state to `.completedNaturally` before begin observes it.
         await gate.signal()
 
-        // Gate-side resume proof (synchronous seal).
+        // Gate-side proof primary continuation resumed (bounded).
         let mid = await gate.snapshot()
         XCTAssertEqual(mid.observerFateCounts[.signaledWhileParked] ?? 0, 1,
                        "signal resumed the parked observer (gate-side proof)")
         XCTAssertEqual(mid.parkedObserverCount, 0)
 
-        // Watchdog: bounds holdAck against a regression where body
-        // returns without ever reaching hold. If task ends early,
-        // watchdog closes holdGate which drains holdAck as
-        // `.closedOrConsumed`. Registered BEFORE we await holdAck so
-        // there is no strand risk.
-        let watchdog = Task { [holdGate] in
-            _ = await task.value
-            await holdGate.close()
-        }
-
-        // Bounded hold-arrival: resolves `.parked` when body enters
-        // hold, or `.closedOrConsumed` via watchdog on regression.
-        let arrival = await holdAck.value()
-        XCTAssertEqual(arrival, .parked,
-                       "body must reach holdGate.awaitWaiter after publishing natural completion; got \(arrival)")
-
-        // Synchronous publication proof (no additional actor hops):
-        // the state gate committed `.completedNaturally` and the
-        // buffered outcome is `.finishedBeforeProcessing` BEFORE the
-        // task parked in hold, so both are readable now.
-        XCTAssertEqual(attempt.stateForTest, .completedNaturally,
-                       "state machine must have committed natural path before hold-park")
-        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
-                       "outcome must be published to buffered latch before hold-park")
-
-        // Late cancel WHILE outer withTaskCancellationHandler is live
-        // (body is parked in hold). Task.cancel() synchronously invokes
-        // active onCancel handlers, so the primary onCancel runs before
-        // this call returns; its `beginCancellationIfActive()` returns
-        // false because state is `.completedNaturally`, so NO primary
-        // cancel Task is launched.
+        // Late cancel WHILE handler is live. `task.cancel()`
+        // synchronously invokes onCancel: `beginCancellationIfActive`
+        // reads state under NSLock. If mark already committed
+        // `.completedNaturally`, begin returns false → NO primary
+        // cancel Task launched. Otherwise (cancel-wins race, caught
+        // by outcome assertion below), begin returns true → cancel
+        // Task launched → outcome eventually `.cancelled(...)`.
         task.cancel()
 
-        // Unconditional teardown: release hold to let body return,
-        // then drain primary. All awaits below are bounded.
+        // Unconditional teardown — no dependency on ticket, attempt,
+        // or child body. Each release is a bounded actor call.
+        //   holdGate.open  → releases body if it reached hold-await;
+        //                    latches openedBeforePark otherwise so
+        //                    the imminent awaitWaiter takes the
+        //                    openedImmediate branch.
+        //   holdGate.close → drains any residual hold state.
+        //   gate.close     → drains any stuck primary continuation
+        //                    (rescue for a signal-regression that
+        //                    left primary parked at withCheckedContinuation).
+        // task.value is bounded by the union of these releases.
         await holdGate.open()
         await holdGate.close()
         await gate.close()
         await task.value
-        _ = await watchdog.value
+
+        // Synchronous peek — no suspension. nil means neither
+        // publisher fired: either the resolveOutcome-regression path
+        // (mark committed, resolveOutcome no-op, begin blocked → no
+        // publisher) or a more exotic double-regression. Loud fail.
+        guard let outcome = attempt.bufferedOutcomeForTest else {
+            XCTFail("no publisher fired; resolveOutcome regressed (state stuck at .completedNaturally with no publisher, or double-regression)")
+            return
+        }
+        XCTAssertEqual(outcome, .finishedBeforeProcessing,
+                       "state gate must reject late cancel and preserve natural outcome; got \(outcome) (cancel-wins race indicates the state gate did not block begin)")
 
         // Definitive proof the state gate blocked the late cancel:
-        // no primary cancel Task was ever dispatched, so
-        // observerCancelInvocationCount stays exactly zero. A regression
-        // that lets natural + cancel double-publish (or that removes
-        // the state gate) would increment this counter.
+        // NO primary cancel Task was ever dispatched, so
+        // observerCancelInvocationCount stays exactly zero. A
+        // regression that lets begin succeed (state gate removed
+        // OR mark did not commit before cancel) would increment
+        // this counter — assertion fires loudly.
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.observerCancelInvocationCount, 0,
                        "state gate must reject late cancel: no primary cancel Task launched")
-
-        // Reviewer finding A (Hicks): the buffered latch is one-shot,
-        // so the outcome is readable SYNCHRONOUSLY here without any
-        // additional wait. Awaiting `attempt.outcome()` would deadlock
-        // in a specific regression scenario: if
-        // `markCompletedNaturallyIfActive()` succeeded but
-        // `attempt.resolveOutcome(.finishedBeforeProcessing)` regressed,
-        // the state gate would still be `.completedNaturally` (blocking
-        // any late cancel from launching a cancel Task via
-        // `beginCancellationIfActive`), so NO publisher would ever fire
-        // and `outcome()` would suspend forever with no rescuer. The
-        // synchronous read below returns `nil` in that regression and
-        // the equality check fails LOUDLY instead — the buffered
-        // outcome is proven synchronously readable by construction
-        // (the arrival ACK above already established the body reached
-        // hold-park, which is AFTER the state gate committed and the
-        // outcome was resolved into the latch).
-        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
-                       "late cancel must not reverse published outcome (nil indicates resolveOutcome regressed with no publisher)")
     }
 
     /// Waiter analogue of the natural-wins-over-late-cancel proof.
     /// Uses `awaitWaiterAndHoldAfterPublish` + open() to resume the
-    /// parked waiter, same watchdog + holdAck handshake structure.
+    /// parked waiter; same holdAck-free straight-line teardown as
+    /// the observer variant. See there for full rationale.
     func testAsyncGateH1AttemptNaturalWinsOverLateCancel_waiter() async {
+        // Ripley Finding 1 waiter analogue — see observer variant for
+        // full rationale. Removes the holdAck arrival oracle to break
+        // the wait-for cycle under Hicks's `flushWaiterParkAcks`
+        // suppression mutation. Straight-line teardown ensures every
+        // suspension has an independent unconditional releaser.
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
-        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
-
         let token = await gate.registerWaiter()
         let attempt = WaiterAwaitAttempt()
 
@@ -2575,6 +2603,11 @@ final class PredictiveViewModelTests: XCTestCase {
                 holdGate: holdGate, holdToken: holdToken)
         }
         _ = await gate.waitForWaiterParked(token)
+
+        // Open resumes the parked waiter naturally. Body's post-resume
+        // path runs mark → resolveOutcome (~100ns each) then enters
+        // hold-await; cancel Task's actor hop is orders of magnitude
+        // slower, so mark reliably commits state before begin observes.
         await gate.open()
 
         let mid = await gate.snapshot()
@@ -2582,40 +2615,33 @@ final class PredictiveViewModelTests: XCTestCase {
                        "open resumed the parked waiter (gate-side proof)")
         XCTAssertEqual(mid.parkedWaiterCount, 0)
 
-        let watchdog = Task { [holdGate] in
-            _ = await task.value
-            await holdGate.close()
-        }
-
-        let arrival = await holdAck.value()
-        XCTAssertEqual(arrival, .parked,
-                       "waiter body must reach holdGate.awaitWaiter after publishing natural completion; got \(arrival)")
-
-        XCTAssertEqual(attempt.stateForTest, .completedNaturally,
-                       "waiter state machine must have committed natural path before hold-park")
-        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
-                       "waiter outcome must be published to buffered latch before hold-park")
-
+        // Late cancel while handler is still installed (body is in
+        // hold-await or racing there; outer withTaskCancellationHandler
+        // block has not yet returned).
         task.cancel()
 
+        // Unconditional teardown — hold release is reachable BEFORE any
+        // wait on ticket/attempt/child. Primary-close rescues a
+        // signal-regression that left primary parked. `task.value` is
+        // bounded by the union of hold-release AND primary-close-drain.
         await holdGate.open()
         await holdGate.close()
         await gate.close()
         await task.value
-        _ = await watchdog.value
+
+        // Synchronous peek — no suspension. nil = resolveOutcome
+        // regression path (mark committed, resolveOutcome no-op,
+        // begin blocked → no publisher); loud fail via guard.
+        guard let outcome = attempt.bufferedOutcomeForTest else {
+            XCTFail("no publisher fired; resolveOutcome regressed (state stuck at .completedNaturally with no publisher, or double-regression)")
+            return
+        }
+        XCTAssertEqual(outcome, .finishedBeforeProcessing,
+                       "waiter state gate must reject late cancel and preserve natural outcome; got \(outcome) (cancel-wins race indicates begin was not blocked)")
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.waiterCancelInvocationCount, 0,
                        "state gate must reject late cancel: no waiter cancel Task launched")
-
-        // Reviewer finding A (Hicks): synchronous buffered read — see
-        // observer variant for full rationale. Await would deadlock in
-        // the `resolveOutcome` regression scenario (state stuck at
-        // `.completedNaturally` blocks cancel-path publication, so no
-        // publisher exists to resume `outcome()`). Sync read returns
-        // `nil` on regression and the equality assertion fails loudly.
-        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
-                       "waiter: late cancel must not reverse published outcome (nil indicates resolveOutcome regressed with no publisher)")
     }
 
     /// Hicks H1: opposite race — parked observer is cancelled FIRST.
