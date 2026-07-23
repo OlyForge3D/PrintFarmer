@@ -1,7 +1,9 @@
 ﻿using System;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
+using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Startup;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;

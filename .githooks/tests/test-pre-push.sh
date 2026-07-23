@@ -71,6 +71,7 @@ build_hermetic_no_dotnet_bin() {
 #   * `dotnet --version`         → prints $FAKE_DOTNET_VERSION (default 10.0.0)
 #   * `dotnet format ... --verify-no-changes` → exits $FAKE_FORMAT_RC (default 0)
 #   * `dotnet format --version`  → prints $FAKE_FORMAT_VERSION (default "10.0.0-format")
+#   * `dotnet restore ...`       → exits $FAKE_RESTORE_RC (default 0)
 #   * `dotnet <anything else>`   → exits 0
 #
 # The invocation trace is written to $FAKE_LOG so tests can assert exact
@@ -87,7 +88,13 @@ install_fake_dotnet() {
 : "${FAKE_DOTNET_VERSION=10.0.0}"
 : "${FAKE_FORMAT_VERSION=10.0.0-format}"
 : "${FAKE_FORMAT_RC=0}"
+: "${FAKE_RESTORE_RC=0}"
+: "${FAKE_REJECT_IDENTITY_CWD=}"
 printf '%s\n' "$*" >> "$FAKE_LOG"
+if [[ -n "$FAKE_REJECT_IDENTITY_CWD" && "$PWD" == "$FAKE_REJECT_IDENTITY_CWD" ]] &&
+   { [[ "$1" == "--version" ]] || [[ "$1" == "format" && "$2" == "--version" ]]; }; then
+  exit 91
+fi
 if [[ "$1" == "--version" ]]; then
   printf '%s\n' "$FAKE_DOTNET_VERSION"
   exit 0
@@ -97,8 +104,11 @@ if [[ "$1" == "format" && "$2" == "--version" ]]; then
   exit 0
 fi
 if [[ "$1" == "format" ]]; then
-  # `dotnet format <sln> --verify-no-changes`
+  # `dotnet format <sln> --verify-no-changes --no-restore`
   exit "$FAKE_FORMAT_RC"
+fi
+if [[ "$1" == "restore" ]]; then
+  exit "$FAKE_RESTORE_RC"
 fi
 exit 0
 EOF
@@ -169,6 +179,11 @@ run_hook() {
             FAKE_DOTNET_VERSION="${FAKE_DOTNET_VERSION-10.0.0}" \
             FAKE_FORMAT_VERSION="${FAKE_FORMAT_VERSION-10.0.0-format}" \
             FAKE_FORMAT_RC="${FAKE_FORMAT_RC-0}" \
+            FAKE_RESTORE_RC="${FAKE_RESTORE_RC-0}" \
+            FAKE_REJECT_IDENTITY_CWD="${FAKE_REJECT_IDENTITY_CWD:-}" \
+            REAL_GIT="${REAL_GIT:-}" \
+            FAKE_DRIVE_COMMON="${FAKE_DRIVE_COMMON:-}" \
+            FAKE_COMMON_UNIX="${FAKE_COMMON_UNIX:-}" \
             PRE_PUSH_DEBUG="${PRE_PUSH_DEBUG:-}" \
             bash .githooks/pre-push
     )
@@ -265,7 +280,15 @@ case_pass_when_formatted() {
   sha1="$(make_commit src/api/Program.cs 'class P { }' "reformat api")"
   local rc=0
   FAKE_FORMAT_RC=0 run_hook yes "$(push_line "$sha1" "$sha0")" >/dev/null 2>&1 || rc=$?
-  assert_rc "pass_when_formatted" "$rc" "0"
+  assert_rc "pass_when_formatted" "$rc" "0" || return 1
+  grep -Fxq 'restore ./farm-web.sln --nologo' "$FAKE_LOG" || {
+    echo "  explicit restore invocation missing" >&2
+    return 1
+  }
+  grep -Fxq 'format ./farm-web.sln --verify-no-changes --no-restore' "$FAKE_LOG" || {
+    echo "  exact no-restore format invocation missing" >&2
+    return 1
+  }
 }
 
 case_fail_when_unformatted() {
@@ -333,6 +356,12 @@ case_cache_hit_skips_format() {
   if [[ "$verify_count" != "1" ]]; then
     printf '  expected 1 verify invocation, got %s (log below):\n' "$verify_count" >&2
     cat "$FAKE_LOG" >&2
+    return 1
+  fi
+  local restore_count
+  restore_count="$(grep -c '^restore ' "$FAKE_LOG" || true)"
+  if [[ "$restore_count" != "1" ]]; then
+    printf '  expected 1 restore invocation across cache hit, got %s\n' "$restore_count" >&2
     return 1
   fi
   return 0
@@ -544,6 +573,101 @@ case_editorconfig_change_verified() {
   assert_rc "editorconfig_verified" "$rc" "0"
 }
 
+case_all_global_inputs_verified() {
+  local base tip path content
+  base="$(cd "$REPO" && git rev-parse HEAD)"
+  local -a inputs=(
+    "Directory.Build.props"
+    "global.json"
+    "VERSION"
+    "src/Directory.Packages.props"
+    "src/custom/Feature.targets"
+    "NuGet.Config"
+  )
+  for path in "${inputs[@]}"; do
+    content="change-$path"
+    tip="$(make_commit "$path" "$content" "change $path")"
+    local rc=0
+    FAKE_FORMAT_RC=0 run_hook yes "$(push_line "$tip" "$base")" >/dev/null 2>&1 || rc=$?
+    assert_rc "$path relevance" "$rc" "0" || return 1
+    base="$tip"
+  done
+
+  local verify_count
+  verify_count="$(grep -Ec '^format .*--verify-no-changes' "$FAKE_LOG" || true)"
+  if [[ "$verify_count" != "${#inputs[@]}" ]]; then
+    printf '  expected %d global-input verifications, got %s\n' "${#inputs[@]}" "$verify_count" >&2
+    return 1
+  fi
+}
+
+case_identity_probed_only_in_outgoing_tree() {
+  local sha0 sha1
+  sha0="$(cd "$REPO" && git rev-parse HEAD)"
+  sha1="$(make_commit global.json '{"sdk":{"version":"10.0.100"}}' "pin outgoing SDK")"
+  local rc=0
+  FAKE_REJECT_IDENTITY_CWD="$REPO" FAKE_FORMAT_RC=0 \
+    run_hook yes "$(push_line "$sha1" "$sha0")" >/dev/null 2>&1 || rc=$?
+  assert_rc "outgoing-tree identity" "$rc" "0"
+}
+
+case_linked_worktree_drive_common_dir() {
+  local main_repo="$REPO"
+  local linked
+  linked="$(mktemp -d)"
+  rmdir "$linked"
+  git -C "$main_repo" worktree add -q -b linked-drive-test "$linked" HEAD
+
+  local sha0 sha1
+  sha0="$(git -C "$linked" rev-parse HEAD)"
+  printf '10.0.1\n' > "$linked/VERSION"
+  git -C "$linked" add VERSION
+  git -C "$linked" commit -q -m "version in linked worktree"
+  sha1="$(git -C "$linked" rev-parse HEAD)"
+
+  local common_unix real_git drive_common
+  common_unix="$(git -C "$linked" rev-parse --path-format=absolute --git-common-dir)"
+  real_git="$(command -v git)"
+  drive_common="D:/synthetic/PrintFarmer.git"
+
+  cat > "$PATH_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  printf '%s\n' "$FAKE_DRIVE_COMMON"
+  exit 0
+fi
+exec "$REAL_GIT" "$@"
+EOF
+  cat > "$PATH_BIN/cygpath" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "-u" && "$2" == "$FAKE_DRIVE_COMMON" ]]; then
+  printf '%s\n' "$FAKE_COMMON_UNIX"
+  exit 0
+fi
+exit 2
+EOF
+  chmod +x "$PATH_BIN/git" "$PATH_BIN/cygpath"
+
+  REPO="$linked"
+  local rc=0
+  REAL_GIT="$real_git" FAKE_DRIVE_COMMON="$drive_common" \
+    FAKE_COMMON_UNIX="$common_unix" FAKE_FORMAT_RC=0 \
+    run_hook yes "$(push_line "$sha1" "$sha0")" >/dev/null 2>&1 || rc=$?
+  REPO="$main_repo"
+
+  local marker_count=0
+  if [[ -d "$common_unix/pre-push-fmt-cache" ]]; then
+    marker_count="$(find "$common_unix/pre-push-fmt-cache" -type f | wc -l | tr -d ' ')"
+  fi
+  git -C "$main_repo" worktree remove -f "$linked"
+
+  assert_rc "drive-qualified common dir" "$rc" "0" || return 1
+  if [[ "$marker_count" == "0" ]]; then
+    echo "  expected cache marker in linked worktree common dir" >&2
+    return 1
+  fi
+}
+
 case_force_push_range() {
   # Force push: remote_sha is not an ancestor of local_sha. `git diff`
   # against remote_sha still yields a symmetric diff which we treat as
@@ -605,6 +729,9 @@ TESTS=(
   case_format_version_invalidates_cache
   case_csproj_change_verified
   case_editorconfig_change_verified
+  case_all_global_inputs_verified
+  case_identity_probed_only_in_outgoing_tree
+  case_linked_worktree_drive_common_dir
   case_force_push_range
   case_empty_push_list_skipped
   case_multi_ref_mixed_relevance

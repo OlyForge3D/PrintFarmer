@@ -1,7 +1,7 @@
-# CI: Affected .NET Test Selection & Pre-Push Format Gate
+# CI: Affected .NET Test Selection and Formatting Gates
 
-This document describes PrintFarmer's CI strategy and the local pre-push
-formatting hook that replaced the `dotnet format` step in CI.
+This document describes PrintFarmer's CI strategy, its authoritative
+server-side formatting gate, and the supplemental local pre-push check.
 
 Related:
 
@@ -21,6 +21,7 @@ flowchart LR
   A[PR opened] --> B[select job]
   B -->|paths-only frontend| C[frontend job]
   B -->|any dotnet input| D[dotnet-build full sln]
+  B -->|any dotnet input| I[dotnet-format required]
   D --> E[dotnet-test matrix]
   D --> F[migration-drift]
   B --> G[ci-tools]
@@ -28,6 +29,7 @@ flowchart LR
   E --> H
   F --> H
   G --> H
+  I --> H
 ```
 
 Every PR triggers the `select` job, which classifies changed paths and emits
@@ -40,8 +42,9 @@ name even when no downstream work runs (e.g. docs-only or React-only PRs).
 | ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `select`         | always                                                       | Classifies changed paths; emits `want_*`, `matrix`, `mig_matrix`.     |
 | `ci-tools`       | always                                                       | Runs `bash -n` + selector + hook tests; gates changes to selector.    |
-| `frontend`       | React inputs changed OR full-safe                            | `npm ci`, lint, test:run, build in `src/Web/ReactApp/`.               |
+| `frontend`       | React inputs changed OR full-safe                            | `npm ci`, lint, build, test with coverage in `src/Web/ReactApp/`.     |
 | `dotnet-build`   | any .NET input changed OR full-safe                          | `dotnet restore && dotnet build` on the whole solution.               |
+| `dotnet-format`  | any .NET input changed OR full-safe                          | Authoritative server-side `dotnet format --verify-no-changes` gate.   |
 | `migration-drift`| App or Slicer schema-relevant inputs changed OR full-safe    | `has-pending-model-changes` per provider (App×Pg/SqlServer, Slicer×Pg/SqlServer). |
 | `dotnet-test`    | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per affected test project.                       |
 | `summary`        | always (`if: always()`)                                      | Aggregates gates; hard-fails on required check regression.            |
@@ -63,24 +66,28 @@ classify.
 | Bucket                                        | want_frontend | want_dotnet_build | want_dotnet_test | want_mig_drift | full_matrix | Notes                              |
 | --------------------------------------------- | :-----------: | :---------------: | :--------------: | :------------: | :---------: | ---------------------------------- |
 | `frontend` (`src/Web/ReactApp/**`)            | ✓             |                   |                  |                |             | React-only PRs run zero .NET.      |
-| `api` (`src/api/**`)                          |               | ✓                 | Api.Tests, Slicer.Tests (both ref api) | App drift ✓  |             |                                    |
-| `infra` (`src/infra/**`, `src/config/**`)     |               | ✓                 | Api.Tests, Slicer.Tests               |                |             | Both test projects ref infra.      |
+| `api` (`src/api/**`)                          |               | ✓                 | Api, Slicer, Integration | App drift ✓  |             |                                    |
+| `infra` (`src/infra/**`)                      |               | ✓                 | Api, Slicer, Integration | App drift ✓  |             | AppDbContext lives under `src/infra/Data`; both App providers are checked. |
 | `backends` (`src/backends/**`)                |               | ✓                 | Api.Tests only                        |                |             | Slicer.Tests does not ref backends.|
-| `slicer` (`src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**`) |    | ✓ | Api.Tests, Slicer.Tests | Slicer drift ✓ |             |                                    |
-| `migrations_app` (`src/migrations/Farm.Migrations.*/**`)             |    | ✓ | Api.Tests, Slicer.Tests | App drift ✓  |             |                                    |
+| `slicer` (`src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**`) |    | ✓ | Api, Slicer, Integration | Slicer drift ✓ |             |                                    |
+| `orca_worker` (`src/orcaslicer-worker/**`) | | ✓ | Orca worker | | | The worker test project is built and tested directly outside the solution. |
+| `migrations_app` (`src/migrations/Farm.Migrations.*/**`)             |    | ✓ | Api.Tests               | App drift ✓  |             |                                    |
 | `migrations_slcr` (`src/migrations/Farm.Slicer.Migrations.*/**`)     |    | ✓ | Slicer.Tests            | Slicer drift ✓ |             |                                    |
 | `tests_api` (`src/tests/Farm.Web.Api.Tests/**`)      |               | ✓                 | Api.Tests             |                |             |                                    |
 | `tests_slicer` (`src/tests/Farm.Slicer.Module.Tests/**`) |            | ✓                 | Slicer.Tests          |                |             |                                    |
-| `tests_other` (`src/tests/Farm.Web.IntegrationTests/**`, `src/tests/Farm.OrcaSlicer.Worker.Tests/**`) |    | ✓ | full matrix ✓        | full ✓          | ✓          | These test projects are not in the current sln; treat as full-safe rather than silently drop. |
-| `orca_worker` (`src/orcaslicer-worker/**`), `discovery` (`src/discovery/**`), `settings` (`src/settings/**`) |    | ✓ | full ✓                | full ✓          | ✓          | Foundational or non-sln; full-safe. |
-| `shared_config` (Directory.Build.*, .editorconfig, farm-web.sln, global.json, NuGet.Config, Directory.Packages.props) |   | ✓ | full ✓                | full ✓          | ✓          | Config/graph inputs affect everything. |
+| `tests_orca` (`src/tests/Farm.OrcaSlicer.Worker.Tests/**`) | | ✓ | Orca worker | | | Direct project coverage outside the solution. |
+| `tests_integration` (`src/tests/Farm.Web.IntegrationTests/**`) | | ✓ | Integration | | | Passes `RunIntegrationTests=true` through restore, build, and test; Docker categories remain excluded. |
+| `tests_other` (any future unmapped `src/tests/**`) | | ✓ | full matrix ✓ | full ✓ | ✓ | Unknown test projects fail safe. |
+| `discovery` (`src/discovery/**`), `settings` (`src/settings/**`) |    | ✓ | full ✓                | full ✓          | ✓          | Foundational; full-safe. |
+| `shared_config` (`VERSION`, SDK/tool manifests, solutions, package files, `.editorconfig`, and any `.props`/`.targets`) |   | ✓ | Api, Slicer, Orca, Integration | full ✓ | ✓ | Config/graph inputs affect everything. |
 | `ci_selector` (workflows/.githooks/scripts/ci changes)               |    | ✓                 | full ✓                | full ✓          | ✓          | CI/selector edits verify themselves against everything. |
 | `unknown_src` (`src/**` didn't match any bucket)                     |    | ✓                 | full ✓                | full ✓          | ✓          | Fail-safe.                          |
 | `docs_only`, `mobile`, `tools_only`                                  |    |                   |                       |                 |             | Nothing changes downstream.         |
 
 ### Full-safe (`full_matrix=1`) triggers
 
-- Any of: `shared_config`, `ci_selector`, `unknown_src`, `discovery`, `settings`, `orca_worker`, `tests_other`, `devcontainer`.
+- Any of: `shared_config`, `ci_selector`, `unknown_src`, `discovery`,
+  `settings`, an unmapped `tests_other`, or `devcontainer`.
 - `workflow_dispatch` event.
 - `push` to `main` or `development`.
 - Caller sets `FORCE_FULL_SAFE=1`.
@@ -89,27 +96,29 @@ classify.
 
 ### Exclusions
 
-- Docker- and external-service-tagged test categories are excluded from ordinary
-  PR CI. Reintroduce them by setting `FORCE_FULL_SAFE=1` on the run or opening a
-  dedicated on-demand workflow.
+- Docker- and external-service-tagged test categories are excluded from both
+  scoped and full-safe runs. Run those categories out-of-band in an environment
+  that provides their required services.
 
 ## Pre-push format gate
 
-`.githooks/pre-push` replaces the CI `dotnet format` step. It runs
-`dotnet format ./farm-web.sln --verify-no-changes` against the **exact
-outgoing Git tree** — not your working directory — so local dirty state cannot
-poison the check.
+`.githooks/pre-push` supplements the required CI formatting job. It verifies
+the **exact outgoing Git tree** rather than the working directory, so local
+dirty state cannot poison the check.
 
 ### Contract
 
 - Reads Git's push list from stdin (`<local_ref> <local_sha> <remote_ref>
   <remote_sha>\n`).
 - For each non-delete ref, computes `.NET`-relevant paths in the outgoing diff:
-  - `src/**/*.cs`, `src/**/*.csproj`
-  - `src/farm-web.sln`, `src/.editorconfig`, `src/Directory.Build.props|targets`
+  source/project/solution files, `VERSION`, `global.json`, `dotnet-tools.json`,
+  NuGet/package lock files, `.editorconfig`, and any `.props`/`.targets`.
 - If none affected → skip the format run and pass immediately.
 - Otherwise, extracts the tip's tree via `git archive | tar -x` into a
-  detached temporary directory and runs `dotnet format --verify-no-changes`.
+  detached temporary directory. SDK and formatter identity are probed only
+  there. On a cache miss it explicitly restores the solution using the normal
+  machine-wide NuGet package cache, then runs
+  `dotnet format --verify-no-changes --no-restore`.
 - Successful verifications are cached; subsequent pushes of the same tree
   under the same SDK & formatter version skip the run.
 
@@ -125,7 +134,7 @@ where `<key>` is:
 
 ```
 sha256(
-  "pre-push-format-v1" ||
+  "pre-push-format-v2" ||
   sha256(hook_script) ||
   <tree_sha> ||
   <dotnet --version> ||
@@ -158,9 +167,8 @@ This skips all local pre-push hooks (including this one) exactly once, per
 Git's design. Use it in genuine emergencies only.
 
 **Local hooks are not server-enforceable.** Anyone can bypass or delete their
-copy. The authoritative gate is the required CI check on the pull request.
-Branch protection on `main`/`development` — not the hook — is what actually
-enforces formatting for merges.
+copy. The authoritative gate is CI's `.NET format` job, whose result is a
+required dependency of the always-created `CI summary` check.
 
 ## Install the hooks
 
@@ -182,14 +190,14 @@ Baselines are approximate and depend on runner load, warm caches, and PR size.
 | ---------------------------------------------------- | ---------------------------- | ------------------------------ |
 | React-only PR                                        | ~20-30 min (built everything) | ~2-3 min (frontend only)       |
 | Docs-only PR                                         | ~20-30 min                    | ~30 s (select + summary only)  |
-| Single-project .NET change (api or slicer only)      | ~20-30 min                    | ~8-12 min (build + 1 test leg) |
-| Two-project .NET change (both test projects)         | ~20-30 min                    | ~10-14 min (build + 2 test legs parallel) |
+| API or slicer .NET change                            | ~20-30 min                    | ~10-14 min (build + 3 test legs parallel) |
+| Orca worker or direct test-project change            | ~20-30 min                    | ~8-12 min (build + affected test leg) |
 | Shared config / selector / unknown-path change       | ~20-30 min                    | ~20-30 min (full-safe)         |
 | Push to `main` / `development`                       | ~20-30 min                    | ~20-30 min (full-safe)         |
 
-The pre-push hook shifts ~15-90 s of `dotnet format` out of CI onto the
-committer's machine — cached after the first successful verification of any
-given tree.
+The pre-push hook adds early local feedback without weakening CI. Its restore
+and format work is skipped after the first successful verification of a given
+tree/SDK/formatter identity, while CI still verifies formatting independently.
 
 ## Failure diagnosis
 
@@ -209,9 +217,10 @@ given tree.
 
 ## Extending
 
-- **New test project**: add it to `farm-web.sln`, add a row to `ALL_TEST_PROJECTS`
-  and (as needed) the classification map in `select-dotnet-tests.sh`, then add
-  a matching test case in the selector suite.
+- **New test project**: add a row to `ALL_TEST_PROJECTS` and the classification
+  map in `select-dotnet-tests.sh`, then add a matching selector test. Add it to
+  `farm-web.sln` when appropriate, but CI also supports required projects that
+  intentionally live outside the solution.
 - **New bucket**: extend `classify_path()` and add a case in the selector suite.
 - **New full-safe trigger**: extend the trigger switch in `main()` of the
   selector and add a case.

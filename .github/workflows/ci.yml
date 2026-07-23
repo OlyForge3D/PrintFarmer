@@ -7,11 +7,22 @@ on:
     paths:
       - 'src/**'
       - 'tests/**'
-      - '*.sln'
-      - 'global.json'
+      - '**/*.sln'
+      - '**/*.slnx'
+      - '**/*.csproj'
+      - '**/*.props'
+      - '**/*.targets'
+      - '**/packages.lock.json'
+      - '.editorconfig'
       - 'Directory.Build.props'
-      - 'Directory.Build.targets'
+      - 'global.json'
+      - 'dotnet-tools.json'
+      - 'VERSION'
+      - 'NuGet.Config'
       - 'NuGet.config'
+      - 'nuget.config'
+      - 'src/Directory.Build.props'
+      - 'src/Directory.Packages.props'
       - 'src/Web/ReactApp/package.json'
       - 'src/Web/ReactApp/package-lock.json'
       - '.github/workflows/ci.yml'
@@ -245,6 +256,32 @@ jobs:
         run: dotnet build ./farm-web.sln -c Debug --no-restore
 
   # ---------------------------------------------------------------------------
+  # dotnet-format — authoritative server-side formatting gate. The pre-push
+  # hook is a supplemental fast-feedback check and cannot replace this job.
+  # ---------------------------------------------------------------------------
+  dotnet-format:
+    name: .NET format
+    needs: [select, ci-tools]
+    if: ${{ needs.select.outputs.want_dotnet_build == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore .NET
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Verify .NET formatting
+        working-directory: src
+        run: dotnet format ./farm-web.sln --verify-no-changes --no-restore
+
+  # ---------------------------------------------------------------------------
   # migration-drift — affected App/Slicer context+provider pairs.
   # ---------------------------------------------------------------------------
   migration-drift:
@@ -311,28 +348,48 @@ jobs:
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-        run: dotnet restore "./$MATRIX_PROJECT"
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
+        run: |
+          set -euo pipefail
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
+          dotnet restore "./$MATRIX_PROJECT" "${integration_args[@]}"
 
       - name: Build test project
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-        run: dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
+        run: |
+          set -euo pipefail
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
+          dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore "${integration_args[@]}"
 
       - name: Test
         working-directory: src
         env:
           MATRIX_NAME: ${{ matrix.name }}
           MATRIX_PROJECT: ${{ matrix.project }}
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
         # Category filter matches the legacy CI behavior: skip Docker /
         # DbHeavy categories that need external services. Callers who want
         # those categories run them out-of-band (workflow_dispatch will
         # force the full safe matrix, which still excludes Docker per
         # policy).
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p TestResults
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
           dotnet test "./$MATRIX_PROJECT" -c Debug --no-build \
+            "${integration_args[@]}" \
             --logger "trx;LogFileName=$MATRIX_NAME.trx" \
             --results-directory TestResults \
             --filter "Category!=DbHeavy&Category!=Docker"
@@ -388,7 +445,7 @@ jobs:
   # ---------------------------------------------------------------------------
   summary:
     name: CI summary
-    needs: [select, ci-tools, frontend, dotnet-build, migration-drift, dotnet-test]
+    needs: [select, ci-tools, frontend, dotnet-build, dotnet-format, migration-drift, dotnet-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -398,6 +455,7 @@ jobs:
           CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
+          DOTNET_FORMAT_RESULT: ${{ needs.dotnet-format.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
@@ -413,6 +471,7 @@ jobs:
             printf '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
             printf '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
             printf '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
+            printf '- dotnet-format: `%s` (wanted=`%s`)\n' "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
             printf '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
             printf '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -423,6 +482,7 @@ jobs:
           CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
+          DOTNET_FORMAT_RESULT: ${{ needs.dotnet-format.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
@@ -458,6 +518,7 @@ jobs:
           }
           check_conditional frontend "$FRONTEND_RESULT" "$WANT_FRONTEND"
           check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
+          check_conditional dotnet-format "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional migration-drift "$MIG_RESULT" "$WANT_MIG_DRIFT"
           check_conditional dotnet-test "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
 

@@ -339,9 +339,12 @@ We welcome contributions! See **[Contributing Guide](./CONTRIBUTING.md)** for:
 This installs two hooks:
 
 - **`pre-commit`** — runs local linting (ShellCheck, yamllint, path casing, ESLint) on staged files.
-- **`pre-push`** — runs `dotnet format --verify-no-changes` against the exact outgoing Git tree whenever any `.cs`, `.csproj`, `farm-web.sln`, `.editorconfig`, or `Directory.Build.*` file is changed. Successful verifications are cached by tree + SDK + formatter version, so repeat pushes of the same tree are effectively free.
+- **`pre-push`** — explicitly restores and runs `dotnet format --verify-no-changes --no-restore` against the exact outgoing Git tree whenever .NET source, project, solution, SDK, version, package, editor, props, or targets inputs change. Successful verifications are cached by tree + SDK + formatter version, so repeat pushes of the same tree are effectively free.
 
-**`dotnet format` no longer runs in CI.** The pre-push hook is the primary format gate for local pushes; branch protection on `main`/`development` is the authoritative server-side gate. See [docs/CI.md](./docs/CI.md) for the full CI architecture.
+The local hook is supplemental. CI restores the solution and runs
+`dotnet format --verify-no-changes --no-restore`; the required `CI summary`
+fails if that authoritative server-side formatting job fails. See
+[docs/CI.md](./docs/CI.md) for the full CI architecture.
 
 **Emergency bypass:** `git push --no-verify` skips the pre-push hook (Git's standard emergency escape hatch). Local hooks are not server-enforceable — required CI checks are.
 

@@ -88,6 +88,18 @@ assert_not_contains() {
   return 0
 }
 
+assert_required_matrix() {
+  local matrix="$1"
+  local name
+  for name in \
+      Farm.Web.Api.Tests \
+      Farm.Slicer.Module.Tests \
+      Farm.OrcaSlicer.Worker.Tests \
+      Farm.Web.IntegrationTests; do
+    assert_contains "required matrix project" "$matrix" "\"name\":\"$name\"" || return 1
+  done
+}
+
 # run_case <name> <function>
 run_case() {
   local name="$1" fn="$2"
@@ -156,6 +168,7 @@ case_api_change() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
 }
 
 case_infra_change() {
@@ -168,6 +181,10 @@ case_infra_change() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  local mig ; mig="$(get_output "$out" mig_matrix)"
+  assert_contains "infra app pg" "$mig" "AppPg" || return 1
+  assert_contains "infra app sql" "$mig" "AppSqlServer" || return 1
 }
 
 case_backend_plugin_change() {
@@ -194,6 +211,7 @@ case_slicer_change() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "mig slicer pg" "$mig" "SlicerPg" || return 1
   assert_contains "mig slicer sql" "$mig" "SlicerSqlServer" || return 1
@@ -201,14 +219,16 @@ case_slicer_change() {
 
 case_orca_worker_change() {
   local out="$1"
-  # orcaslicer-worker is outside farm-web.sln → full-safe.
   CHANGED_FILES="src/orcaslicer-worker/Program.cs"
   EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
-  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
-  local reason ; reason="$(get_output "$out" reason)"
-  assert_contains "reason orca" "$reason" "orcaslicer-worker" || return 1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
 }
 
 case_migration_app_change() {
@@ -263,16 +283,39 @@ case_test_only_slicer() {
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
 }
 
-case_tests_other_full_safe() {
+case_test_only_orca() {
   local out="$1"
-  # Farm.Web.IntegrationTests / Farm.OrcaSlicer.Worker.Tests are not in the
-  # sln. Any change under those paths is treated as full-safe rather than
-  # silently dropped.
-  CHANGED_FILES="src/tests/Farm.Web.IntegrationTests/Foo.cs"
+  CHANGED_FILES="src/tests/Farm.OrcaSlicer.Worker.Tests/ProfilesTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  assert_not_contains "no integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+}
+
+case_test_only_integration() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Web.IntegrationTests/AuthenticationTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+}
+
+case_unknown_test_project_full_safe() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Future.Tests/Foo.cs"
   EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_unknown_src_path() {
@@ -295,6 +338,27 @@ case_shared_config_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
   local reason ; reason="$(get_output "$out" reason)"
   assert_contains "reason shared" "$reason" "shared" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
+}
+
+case_version_change_full_safe() {
+  local out="$1"
+  CHANGED_FILES="VERSION"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
+}
+
+case_package_and_build_inputs_full_safe() {
+  local out="$1"
+  CHANGED_FILES=$'src/Directory.Packages.props\nsrc/custom/Feature.targets\ndotnet-tools.json\nsrc/api/packages.lock.json\nNuGet.Config'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_ci_workflow_change() {
@@ -546,9 +610,13 @@ TESTS=(
   case_migration_slicer_change
   case_test_only_api
   case_test_only_slicer
-  case_tests_other_full_safe
+  case_test_only_orca
+  case_test_only_integration
+  case_unknown_test_project_full_safe
   case_unknown_src_path
   case_shared_config_change
+  case_version_change_full_safe
+  case_package_and_build_inputs_full_safe
   case_ci_workflow_change
   case_hook_file_change
   case_ci_script_change
