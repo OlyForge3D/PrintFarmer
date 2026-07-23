@@ -88,6 +88,16 @@ public class GcodeMetadataExtracted
     public double[]? FilamentPerExtruderLengthMm { get; set; }
 
     /// <summary>
+    /// Filament color hex values per extruder (index = extruder number). Null when unavailable.
+    /// </summary>
+    public string[]? FilamentPerExtruderColorHex { get; set; }
+
+    /// <summary>
+    /// Filament material/type values per extruder (index = extruder number). Null when unavailable.
+    /// </summary>
+    public string[]? FilamentPerExtruderType { get; set; }
+
+    /// <summary>
     /// Detected number of extruders in the gcode file. Null when not parsed.
     /// </summary>
     public int? ExtruderCount { get; set; }

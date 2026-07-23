@@ -4,7 +4,7 @@ using Farm.Slicer.Module.Contracts.Libraries;
 namespace Farm.Slicer.Module.Tests.Slicers;
 
 /// <summary>
-/// Test double for loading OrcaSlicer v2.3.1 profiles from the file system.
+/// Test double for loading OrcaSlicer v2.4.0 profiles from the file system.
 /// 
 /// This is used ONLY for testing profile loading logic with sample data.
 /// Production code uses NullProfilesProvider and loads profiles from the OrcaSlicer worker service.
@@ -56,7 +56,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         return _universalFilamentsJson;
     }
 
-    public string GetProfilesVersion() => "2.3.1";
+    public string GetProfilesVersion() => "2.4.0";
 
     private async Task EnsureInitializedAsync(CancellationToken ct)
     {
@@ -149,20 +149,38 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
                 return; // No universal filaments available
             }
 
-            // Collect all filament profiles from the OrcaFilamentLibrary directory
-            string filamentsDir = Path.Combine(universalFilamentsDir, "filament");
-            if (!Directory.Exists(filamentsDir))
+            string bundlePath = Path.Combine(_profilesPath, "OrcaFilamentLibrary.json");
+            if (!File.Exists(bundlePath))
             {
                 return;
             }
 
-            string[] filamentFiles = Directory.GetFiles(filamentsDir, "*.json");
+            string bundleJson = await File.ReadAllTextAsync(bundlePath, ct);
+            using var bundleDoc = JsonDocument.Parse(bundleJson);
+            if (!bundleDoc.RootElement.TryGetProperty("filament_list", out JsonElement filamentList) ||
+                filamentList.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
             var filaments = new List<object>();
 
-            foreach (string filamentsFile in filamentFiles)
+            foreach (JsonElement filamentEntry in filamentList.EnumerateArray())
             {
                 try
                 {
+                    string? subPath = filamentEntry.GetProperty("sub_path").GetString();
+                    if (string.IsNullOrWhiteSpace(subPath))
+                    {
+                        continue;
+                    }
+
+                    string filamentsFile = Path.Combine(universalFilamentsDir, subPath);
+                    if (!File.Exists(filamentsFile))
+                    {
+                        continue;
+                    }
+
                     string filamentsJson = await File.ReadAllTextAsync(filamentsFile, ct);
                     using var filamentsDoc = JsonDocument.Parse(filamentsJson);
                     filaments.Add(filamentsDoc.RootElement.Clone());

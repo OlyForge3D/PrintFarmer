@@ -16,9 +16,9 @@ public class CatalogUpdateControllerTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _factory = new CustomWebApplicationFactory();
-        _client = _factory.CreateClient();
+        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
         await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -27,6 +27,31 @@ public class CatalogUpdateControllerTests : IAsyncLifetime
         {
             await _factory.DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task GetVersion_Unauthenticated_Returns401()
+    {
+        using HttpClient anon = _factory!.CreateClient();
+        HttpResponseMessage response = await anon.GetAsync("/api/admin/catalog/version");
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetVersion_NonAdminRole_Returns403()
+    {
+        using HttpClient nonAdmin = await _factory!.CreateAuthenticatedClientAsync(
+            username: "catalog-nonadmin",
+            email: "catalog-nonadmin@example.com");
+        HttpResponseMessage response = await nonAdmin.GetAsync("/api/admin/catalog/version");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task GetVersion_Admin_ReturnsOk()
+    {
+        HttpResponseMessage response = await _client!.GetAsync("/api/admin/catalog/version");
+        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.NoContent);
     }
 
     [Fact]

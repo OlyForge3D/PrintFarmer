@@ -81,7 +81,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             config.AddInMemoryCollection(testConfig);
         });
 
-        builder.ConfigureServices(services =>
+        builder.ConfigureServices((context, services) =>
         {
             // Remove only the DbContext configuration, not the whole service
             ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
@@ -128,10 +128,38 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Re-configure SlicerDbContext to use the same test SQLite database.
             // AddSlicerModule registered it with production defaults; override here.
             // Skip when slicer is disabled (no SlicerDbContext will be registered).
-            bool slicerRegistered = services.Any(d =>
-                d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
+            //
+            // Determinism guard: AddSlicerIntegration discovers the slicer module via a runtime
+            // assembly scan (SlicerIntegrationExtensions). Under parallel host builds that scan can
+            // transiently fail — concurrent Assembly.GetTypes() throws ReflectionTypeLoadException,
+            // which the discovery code swallows — leaving the slicer module (and SlicerDbContext)
+            // unregistered for that host. This produced intermittent
+            // "No service for type 'SlicerDbContext' has been registered" failures. Re-run the
+            // idempotent AddSlicerModule so registration is deterministic unless the slicer is
+            // explicitly disabled for this factory.
+            bool slicerDisabled = string.Equals(
+                context.Configuration["Slicer:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
+            if (!slicerDisabled && !services.Any(d =>
+                d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>)))
+            {
+                Farm.Slicer.Module.SlicerModuleExtensions.AddSlicerModule(services, context.Configuration);
+            }
 
-            if (slicerRegistered)
+            // Deterministically (re)register SlicerDbContext against the test SQLite database.
+            // This intentionally does NOT depend on whether discovery / AddSlicerModule already
+            // registered it. Two independent races could otherwise leave it unregistered:
+            //   1. The runtime assembly scan in AddSlicerIntegration can transiently miss the slicer
+            //      module under parallel host builds (ReflectionTypeLoadException), so nothing is
+            //      registered.
+            //   2. AddSlicerModule is idempotent on a SlicerModuleMarker and skips the DbContext in
+            //      microservices DEPLOYMENT_MODE — so the safety-net AddSlicerModule call above can be
+            //      a no-op that leaves SlicerDbContext unregistered while the marker is present.
+            // Either case previously fell through the old `if (slicerRegistered)` gate, causing
+            // ResetDatabaseAsync to throw "No service for type 'SlicerDbContext' has been registered".
+            // Registering unconditionally (unless slicer is explicitly disabled for this factory)
+            // makes the test host deterministic. The Remove calls below are null-safe when nothing
+            // was registered, so a fresh registration is added in that case.
+            if (!slicerDisabled)
             {
                 ServiceDescriptor? slicerDbDescriptor = services.FirstOrDefault(d =>
                     d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
@@ -184,6 +212,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
+        _ = useInMemorySqlite;
+
         // Tests expect a factory instance configured for an isolated DB.
         return new CustomWebApplicationFactory();
     }

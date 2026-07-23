@@ -5,6 +5,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AddModelsToCollectionModal } from '../AddModelsToCollectionModal';
 import type { ModelCollection } from '@/types/models';
 
+// Mock auth so ownership/admin checks are deterministic across tests (mirrors CollectionsNav.test.tsx).
+const mockUseAuth = vi.fn();
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => mockUseAuth(),
+}));
+
 vi.mock('@/services/api', () => ({
   apiClient: {
     getModelCollections: vi.fn(),
@@ -57,6 +63,9 @@ function renderModal(props: Partial<React.ComponentProps<typeof AddModelsToColle
 describe('AddModelsToCollectionModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: current user owns collectionA/collectionB (both use ownerUserId: 'user-1')
+    // and is not an admin, matching every pre-existing test below.
+    mockUseAuth.mockReturnValue({ user: { id: 'user-1' }, hasRole: () => false });
   });
 
   it('shows the number of selected models in the title', async () => {
@@ -142,5 +151,31 @@ describe('AddModelsToCollectionModal', () => {
     );
 
     expect(await screen.findByRole('checkbox', { name: /miniatures/i })).not.toBeChecked();
+  });
+
+  it('excludes a shared collection owned by another user, since the backend rejects non-owner writes', async () => {
+    // collectionB is shared (isShared: true) but still owned by 'user-1'; a non-owner,
+    // non-admin viewer must not be able to select it for a write (ModelCollectionService.
+    // EnsureCanWrite only allows the owner or an admin).
+    mockUseAuth.mockReturnValue({ user: { id: 'user-2' }, hasRole: () => false });
+    vi.mocked(apiClient.getModelCollections).mockResolvedValue([collectionA, collectionB]);
+    renderModal();
+
+    // Falls through to the empty state: user-2 owns neither collection, and both are
+    // filtered out of the writable list even though collectionB is shared/readable.
+    expect(await screen.findByText(/no collections yet/i)).toBeInTheDocument();
+    expect(screen.queryByText('Miniatures')).not.toBeInTheDocument();
+    expect(screen.queryByText('Client Work')).not.toBeInTheDocument();
+  });
+
+  it('lets a farm_admin select every collection, including ones they do not own', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 'user-2' }, hasRole: (role: string) => role === 'farm_admin' });
+    vi.mocked(apiClient.getModelCollections).mockResolvedValue([collectionA, collectionB]);
+    renderModal();
+
+    await screen.findByText('Miniatures');
+    expect(screen.getByText('Client Work')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /miniatures/i })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: /client work/i })).toBeEnabled();
   });
 });

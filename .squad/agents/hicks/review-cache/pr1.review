@@ -1,0 +1,1 @@
+Verified Bishop's three blockers are fixed in docs/design/printer-controls-section.md: capability-gated subgroup hiding is specified, Jog default is 1 mm, and Home All / Home XY / Home Z now target /home, /homexy, and /homez respectively.

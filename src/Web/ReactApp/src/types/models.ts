@@ -13,7 +13,7 @@ export interface Model {
   name: string;
   fileName: string;
   fileSize: number;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
+  fileType: 'stl' | '3mf' | 'obj' | 'ply' | 'step' | 'stp';
   uploadedAt: string;
   url?: string;
   thumbnailUrl?: string;
@@ -22,6 +22,24 @@ export interface Model {
     name: string;
     color?: string;
   }>;
+  extractedMetadata?: ThreeMfMetadata | null;
+  autoTags?: string[];
+  sourceUrl?: string;
+  sourceCreator?: string;
+}
+
+/**
+ * Metadata extracted from a 3MF file
+ */
+export interface ThreeMfMetadata {
+  title: string | null;
+  designer: string | null;
+  description: string | null;
+  application: string | null;
+  creationDate: string | null;
+  modificationDate: string | null;
+  materials: string[];
+  autoTags: string[];
 }
 
 /**
@@ -97,4 +115,55 @@ export interface CreateModelCollectionRequest {
 export interface UpdateModelCollectionRequest {
   name: string;
   description?: string;
+}
+
+/**
+ * Response from POST /api/3d-models/upload-geometry
+ * Used when uploading STL geometry blobs (e.g. cut model pieces).
+ */
+export interface GeometryUploadResultDto {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileUrl: string;
+}
+
+export interface PrintablesModelSummary {
+  id: string;
+  title: string;
+  slug?: string | null;
+  author: string;
+  thumbnailUrl?: string | null;
+  likesCount?: number;
+  downloadsCount?: number;
+  fileCount?: number;
+  sourceUrl?: string;
+}
+
+export interface PrintablesCollectionSummary {
+  id: string;
+  name: string;
+  modelCount: number;
+  thumbnailUrls?: string[];
+  models?: PrintablesModelSummary[];
+}
+
+export interface PrintablesPagedResponse<T> {
+  items: T[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+  offset?: number;
+  limit?: number;
+}
+
+export interface PrintablesOAuthStatus {
+  isLinked: boolean;
+  accessTokenExpiresAtUtc?: string | null;
+  linkedAtUtc?: string | null;
+  hasRefreshToken: boolean;
+  scope?: string | null;
+}
+
+export interface PrintablesDownloadHistoryItem extends PrintablesModelSummary {
+  downloadedAt?: string | null;
 }

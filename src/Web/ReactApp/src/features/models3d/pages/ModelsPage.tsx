@@ -11,11 +11,13 @@ import { Button } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ModelsFileBrowser } from '@/features/models3d/components/ModelsFileBrowser';
 import { CollectionsNav } from '@/features/models3d/components/collections/CollectionsNav';
 import { AddModelsToCollectionModal } from '@/features/models3d/components/collections/AddModelsToCollectionModal';
 import { CollectionFormModal } from '@/features/models3d/components/collections/CollectionFormModal';
 import { useModelCollectionMembers, useCreateModelCollection } from '@/features/models3d/hooks/useCollections';
+import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
 import type { GCodeViewerProps } from '@/features/models3d/components/3d/GCodeViewer3D';
 const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
@@ -40,6 +42,7 @@ export const ModelsPage: React.FC = () => {
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
   const [showAddToCollectionModal, setShowAddToCollectionModal] = useState(false);
   const [showNewCollectionModal, setShowNewCollectionModal] = useState(false);
+  const [quickSliceModel, setQuickSliceModel] = useState<Model | null>(null);
 
   const createCollection = useCreateModelCollection();
   const { data: collectionMembers } = useModelCollectionMembers(selectedCollectionId);
@@ -150,7 +153,7 @@ export const ModelsPage: React.FC = () => {
               onSelectionChange={setSelectedModelIds}
               onOpenModel={setViewerModel}
               onSliceModel={(model) => {
-                window.location.assign(`/jobs/new?modelId=${model.id}`);
+                setQuickSliceModel(model);
               }}
               onShowTagModal={() => setShowBulkTagModal(true)}
               onShowSingleTagModal={(model) => {
@@ -186,11 +189,11 @@ export const ModelsPage: React.FC = () => {
                     />
                   }
                 >
-                  {viewerModel.url && viewerModel.fileType && (
+                  {(viewerModel.url || viewerModel.id) && viewerModel.fileType && (
                     <ModelViewer
-                      modelUrl={viewerModel.url}
+                      modelUrl={viewerModel.url || `${getApiBaseUrl()}/3d-models/file/${viewerModel.id}`}
                       fileType={viewerModel.fileType}
-                      showGrid={false}
+                      showGrid={true}
                       className="h-128 w-full"
                     />
                   )}
@@ -275,6 +278,13 @@ export const ModelsPage: React.FC = () => {
             initialTags={selectedModelForTagging.tags || []}
           />
         )}
+
+        {/* Quick Slice Modal */}
+        <QuickSliceModal
+          isOpen={quickSliceModel !== null}
+          onClose={() => setQuickSliceModel(null)}
+          model={quickSliceModel}
+        />
 
         {/* Floating Action Button for Upload */}
         <FloatingActionButton

@@ -79,6 +79,7 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         // Indexes for common queries
         builder.HasIndex(pj => pj.Status);
         builder.HasIndex(pj => pj.QueuedAt);
+        builder.HasIndex(pj => pj.DeadlineAtUtc);
         builder.HasIndex(pj => pj.Priority);
         builder.HasIndex(pj => pj.AssignedPrinterId);
 
@@ -96,5 +97,8 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         // Index for efficient lookup by external job ID and source printer (for history seeding)
         builder.HasIndex(pj => pj.SourcePrinterId)
             .HasDatabaseName("IX_PrintJobs_SourcePrinterId");
+
+        // Tags - many-to-many via skip-navigation (auto-creates join table)
+        builder.HasMany(pj => pj.Tags).WithMany();
     }
 }

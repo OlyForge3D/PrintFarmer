@@ -18,6 +18,8 @@ import {
   mdiChevronRight,
   mdiDelete,
   mdiPencil,
+  mdiMatrix,
+  mdiFire,
   mdiCheck,
   mdiClose,
   mdiDownload,
@@ -43,6 +45,8 @@ import {
   mdiLoading,
   mdiContentCopy,
   mdiViewGrid,
+  mdiLockOpenVariantOutline,
+  mdiCompassOutline,
   mdiViewList,
   mdiFile,
   mdiFolder,
@@ -109,8 +113,10 @@ import {
   mdiCloudDownload,
   mdiShareVariant,
   mdiEarth,
-  mdiAccountMultiple,
   mdiFolderPlusOutline,
+  mdiBarcodeScan,
+  mdiRuler,
+  mdiFormatText,
 } from '@mdi/js';
 
 interface IconProps {
@@ -2829,6 +2835,40 @@ export function GridIcon({ className = 'w-4 h-4', ariaLabel = 'Grid' }: Omit<Ico
 }
 
 /**
+ * LockOpenIcon - Unlocked padlock (from @mdi/js mdiLockOpenVariantOutline)
+ */
+export function LockOpenIcon({ className = 'w-4 h-4', ariaLabel = 'Unlock' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiLockOpenVariantOutline} />
+    </svg>
+  );
+}
+
+/**
+ * CompassIcon - Compass / orientation (from @mdi/js mdiCompassOutline)
+ */
+export function CompassIcon({ className = 'w-4 h-4', ariaLabel = 'Orient' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiCompassOutline} />
+    </svg>
+  );
+}
+
+/**
  * Perspective view icon - 3D perspective view
  */
 export function PerspectiveIcon({ className = 'w-4 h-4', ariaLabel = 'Perspective View' }: Omit<IconProps, 'isOn'>) {
@@ -3082,6 +3122,31 @@ export function ShareIcon({ className = 'w-4 h-4', ariaLabel = 'Share' }: Omit<I
 }
 
 /**
+ * Barcode scan icon
+ *
+ * Material Design icon component for barcode/QR scanning actions.
+ *
+ * @preview ![barcode-scan](https://unpkg.com/@mdi/svg@7.4.47/svg/barcode-scan.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/barcode-scan.svg
+ * @example
+ * ```tsx
+ * <BarcodeScanIcon className="w-5 h-5" ariaLabel="Scan barcode" />
+ * ```
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function BarcodeScanIcon({ className = 'w-4 h-4', ariaLabel = 'Scan barcode' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiBarcodeScan} />
+    </svg>
+  );
+}
+
+/**
  * Earth/globe icon indicating a collection is shared with all users
  *
  * Material Design icon component that renders an SVG element.
@@ -3098,6 +3163,25 @@ export function EarthIcon({ className = 'w-4 h-4', ariaLabel = 'Shared' }: Omit<
       role="img"
     >
       <path fill="currentColor" d={mdiEarth} />
+    </svg>
+  );
+}
+
+/**
+ * Ruler icon — measurement tool in 3D viewer
+ *
+ * @preview ![ruler](https://unpkg.com/@mdi/svg@7.4.47/svg/ruler.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/ruler.svg
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function RulerIcon({ className = 'w-4 h-4', ariaLabel = 'Measure' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiRuler} />
     </svg>
   );
 }
@@ -3124,6 +3208,29 @@ export function AccountMultipleIcon({ className = 'w-4 h-4', ariaLabel = 'Shared
 }
 
 /**
+ * Simplify / Decimate mesh icon (hexagonal wireframe)
+ *
+ * @component
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ */
+export function SimplifyIcon({ className = 'w-4 h-4', ariaLabel = 'Simplify Mesh' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path
+        fill="currentColor"
+        d="M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L5,8.09V15.91L12,19.85L19,15.91V8.09L12,4.15Z"
+      />
+    </svg>
+  );
+}
+
+/**
  * Folder-plus icon for creating a new collection
  *
  * Material Design icon component that renders an SVG element.
@@ -3140,6 +3247,84 @@ export function FolderPlusIcon({ className = 'w-4 h-4', ariaLabel = 'New collect
       role="img"
     >
       <path fill="currentColor" d={mdiFolderPlusOutline} />
+    </svg>
+  );
+}
+
+/**
+ * 3D Text tool icon
+ *
+ * Material Design icon component for adding 3D text annotations.
+ *
+ * @component
+ * @preview ![format-text](https://unpkg.com/@mdi/svg@7.4.47/svg/format-text.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/format-text.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <TextToolIcon className="w-5 h-5" ariaLabel="3D Text" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function TextToolIcon({ className = 'w-4 h-4', ariaLabel = '3D Text' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFormatText} />
+    </svg>
+  );
+}
+
+/**
+ * Matrix icon — digital rain/matrix theme
+ *
+ * Material Design icon component for the Matrix theme option.
+ *
+ * @component
+ * @preview ![matrix](https://unpkg.com/@mdi/svg@7.4.47/svg/matrix.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/matrix.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <MatrixIcon className="w-5 h-5" ariaLabel="Matrix theme" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function MatrixIcon({ className = 'w-4 h-4', ariaLabel = 'Matrix theme' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiMatrix} />
+    </svg>
+  );
+}
+
+/**
+ * Fire icon — forge/industrial warmth theme
+ *
+ * Material Design icon component for the Forge theme option.
+ *
+ * @component
+ * @preview ![fire](https://unpkg.com/@mdi/svg@7.4.47/svg/fire.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/fire.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <FireIcon className="w-5 h-5" ariaLabel="Forge theme" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FireIcon({ className = 'w-4 h-4', ariaLabel = 'Forge theme' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFire} />
     </svg>
   );
 }

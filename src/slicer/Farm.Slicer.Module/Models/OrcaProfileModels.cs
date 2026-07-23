@@ -134,6 +134,12 @@ public class ImportOrcaBundleDto
     public bool ImportFilaments { get; set; } = true;
 
     public bool ImportProcesses { get; set; } = true;
+
+    public List<string>? SelectedPrinters { get; set; } // Names of printer presets to import
+
+    public List<string>? SelectedFilaments { get; set; } // Names of filament presets to import
+
+    public List<string>? SelectedProcesses { get; set; } // Names of process presets to import
 }
 
 /// <summary>

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Checkbox, EmptyState } from '@/common/components/ui';
 import { FolderPlusIcon, EarthIcon } from '@/common/components/icons/MdiIcons';
 import { useModelCollections, useAddModelsToCollection } from '@/features/models3d/hooks/useCollections';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 
 export interface AddModelsToCollectionModalProps {
   isOpen: boolean;
@@ -24,9 +25,21 @@ export interface AddModelsToCollectionModalProps {
  * checkbox selection starts empty, avoiding a reset-on-open effect.
  */
 export function AddModelsToCollectionModal({ isOpen, modelIds, onClose, onCreateNew }: AddModelsToCollectionModalProps) {
-  const { data: collections = [], isLoading } = useModelCollections();
+  const { data: allCollections = [], isLoading } = useModelCollections();
+  const { user, hasRole } = useAuth();
   const addModels = useAddModelsToCollection();
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
+
+  const isAdmin = hasRole('farm_admin');
+
+  // Only offer collections the backend will actually let this user write to
+  // (ModelCollectionService.EnsureCanWrite: admin, or the collection's owner). A shared
+  // collection is visible/readable by everyone, but sharing does not grant write access -
+  // listing it here would let a non-owner check it and then hit a 403 on submit.
+  const collections = useMemo(
+    () => allCollections.filter((collection) => isAdmin || collection.ownerUserId === user?.id),
+    [allCollections, isAdmin, user?.id]
+  );
 
   const toggle = (id: string, checked: boolean) => {
     setCheckedIds((prev) => (checked ? [...prev, id] : prev.filter((existing) => existing !== id)));

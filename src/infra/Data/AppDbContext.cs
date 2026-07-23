@@ -19,6 +19,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PrinterGroup> PrinterGroups => Set<PrinterGroup>();
 
+    public DbSet<PrinterGroupAccess> PrinterGroupAccesses => Set<PrinterGroupAccess>();
+
+    public DbSet<BedType> BedTypes => Set<BedType>();
+
     public DbSet<Location> Locations => Set<Location>();
 
     public DbSet<Spool> Spools => Set<Spool>();
@@ -34,6 +38,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
 
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
+
+    public DbSet<BarcodeScanLog> BarcodeScanLogs => Set<BarcodeScanLog>();
+
+    // Tags
+    public DbSet<Tag> Tags => Set<Tag>();
 
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
@@ -96,6 +105,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
 
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
+
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
 
@@ -119,7 +130,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
 
+    // Login attempt audit log (focused admin-facing security view)
+    public DbSet<LoginAuditEntry> LoginAuditEntries => Set<LoginAuditEntry>();
+
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
+
+    // WebAuthn/FIDO2 passkey credentials
+    public DbSet<UserPasskeyCredential> UserPasskeyCredentials => Set<UserPasskeyCredential>();
 
     // API Keys for OctoPrint API
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
@@ -156,10 +173,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Cameras (standalone webcams not attached to printers)
     public DbSet<Camera> Cameras => Set<Camera>();
 
+    // Camera snapshots (captured on print events)
+    public DbSet<CameraSnapshot> CameraSnapshots => Set<CameraSnapshot>();
+
     // NFC Devices (ESP32 + PN532 filament spool readers)
     public DbSet<NfcDevice> NfcDevices => Set<NfcDevice>();
 
     public DbSet<NfcScanEvent> NfcScanEvents => Set<NfcScanEvent>();
+
+    public DbSet<NfcTagBinding> NfcTagBindings => Set<NfcTagBinding>();
 
     // Webhooks
     public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
@@ -183,6 +205,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Library sync change journal with tombstones (sync epic #835, issue #844)
     public DbSet<Farm.Infrastructure.Domain.Sync.LibrarySyncChange> LibrarySyncChanges => Set<Farm.Infrastructure.Domain.Sync.LibrarySyncChange>();
 
+    // Material equivalence clusters for auto-matching
+    public DbSet<MaterialCluster> MaterialClusters => Set<MaterialCluster>();
+
+    public DbSet<MaterialClusterMember> MaterialClusterMembers => Set<MaterialClusterMember>();
+
+    // Print quotas and user balances
+    public DbSet<PrintQuota> PrintQuotas => Set<PrintQuota>();
+
+    public DbSet<UserBalance> UserBalances => Set<UserBalance>();
+
+    public DbSet<BalanceTransaction> BalanceTransactions => Set<BalanceTransaction>();
+
+    // Quota group memberships (user ↔ named group associations)
+    public DbSet<UserQuotaGroupMembership> UserQuotaGroupMemberships => Set<UserQuotaGroupMembership>();
+
+    // Custom fields (extensible metadata for Printers and Users)
+    public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
+
+    public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
+
+    // Electricity Monitoring (power monitors + time-series readings)
+    public DbSet<PowerMonitor> PowerMonitors => Set<PowerMonitor>();
+
+    public DbSet<PowerReading> PowerReadings => Set<PowerReading>();
+
+    // Per-user settings (theme, locale, slicer defaults, etc.)
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -191,6 +241,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // This enables separation of entity configurations into individual files
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        // SQLite does not support DateTimeOffset natively in ORDER BY / WHERE clauses.
+        // Apply a transparent UTC DateTime conversion so all DateTimeOffset properties
+        // on LoginAuditEntry round-trip correctly through the SQLite text store.
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            // SQLite has no native DateTimeOffset type. We normalize to UTC for storage
+            // since LoginAuditService always writes DateTimeOffset.UtcNow. This conversion
+            // is LOSSY for non-UTC offsets — that scenario is forbidden by service contract.
+            _ = modelBuilder.Entity<LoginAuditEntry>()
+                .Property(e => e.Timestamp)
+                .HasConversion(
+                    v => v.UtcDateTime,
+                    v => new DateTimeOffset(v, TimeSpan.Zero));
+        }
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
@@ -212,12 +277,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         PopulateCaseInsensitiveShadowColumns();
+        StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         PopulateCaseInsensitiveShadowColumns();
+        StampRowVersions();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -244,6 +311,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 {
                     entry.Entity.UpdatedAt = DateTime.UtcNow;
                 }
+            }
+        }
+    }
+
+    private void StampRowVersions()
+    {
+        byte[] newVersion = Guid.NewGuid().ToByteArray();
+
+        foreach (EntityEntry<UserSettings> entry in ChangeTracker.Entries<UserSettings>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.RowVersion = newVersion;
+            }
+        }
+
+        foreach (EntityEntry<AppSettingsEntity> entry in ChangeTracker.Entries<AppSettingsEntity>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.RowVersion = newVersion;
             }
         }
     }

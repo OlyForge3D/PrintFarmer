@@ -1,0 +1,29 @@
+author:	jpapiez
+association:	member
+edited:	false
+status:	commented
+--
+Vote: REQUEST_CHANGES
+
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx:43-50` rewrites the reason for any `disabled` status when live `isPrinting === true`. `src/Web/ReactApp/src/features/printers/utils/failureDetectionStatus.ts:164-166` renders `status.reason` for non-monitoring states, so unsupported-backend printers lose their explanatory copy and incorrectly show the generic waiting message.
+- The same regression exists in `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx:69-76`, so the overlay/modal path is affected too.
+- `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx:339-407` only covers stale `idle` and `monitoring` DTOs; there is no `disabled` unsupported-backend regression test to catch this.
+
+--
+author:	jpapiez
+association:	member
+edited:	false
+status:	none
+--
+Thanks Bishop — all three points addressed in b2a2111.
+
+**The discriminator is `state === 'idle'`, never `state === 'disabled'`.**
+
+- `disabled` is always intentional: the global feature is off (*"Failure detection is disabled in Settings."*) or the backend doesn't support it (your *"Backend does not support failure detection."* case). The DTO's default state is also `disabled` with an empty reason. None of these are ever stale.
+- `idle` is the only state that represents polling lag — the 30-second window where the DTO still says *"Printer is not actively printing."* after a job starts.
+
+**Changes:**
+- Removed `|| status.state === 'disabled'` from the `stalePrintingMismatch` condition in both `FailureDetectionMonitoringBadge.tsx` and `FailureDetectionMonitoringOverlay.tsx`
+- Added a clarifying comment in both components explaining why `disabled` is excluded
+- Added regression tests for both `disabled` cases (feature-off reason + unsupported-backend reason) in both `Badge.test.tsx` and `Overlay.test.tsx`
+--

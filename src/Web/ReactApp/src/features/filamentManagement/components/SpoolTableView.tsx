@@ -1,6 +1,6 @@
 import { Button } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
-import { ArrowUpIcon, ArrowDownIcon, EditIcon, CopyIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { ArrowUpIcon, ArrowDownIcon, EditIcon, CopyIcon, DeleteIcon, TagIcon } from '@/common/components/icons/MdiIcons';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { SpoolmanSpoolDto, SpoolTableColumn } from '@/features/filamentManagement/types';
 
@@ -17,6 +17,7 @@ interface SpoolTableViewProps {
   onEdit: (s: SpoolmanSpoolDto) => void;
   onClone: (s: SpoolmanSpoolDto) => void;
   onDelete: (s: SpoolmanSpoolDto) => void;
+  onPrintLabel: (s: SpoolmanSpoolDto) => void;
 }
 
 /** Table view for Spoolman physical spools with dynamic column configuration. */
@@ -33,6 +34,7 @@ export function SpoolTableView({
   onEdit,
   onClone,
   onDelete,
+  onPrintLabel,
 }: SpoolTableViewProps) {
   const visibleColumns = tableColumns.filter(c => c.visible);
 
@@ -91,6 +93,9 @@ export function SpoolTableView({
                 <div className="flex gap-1">
                   <Button variant="subtle" size="sm" onClick={() => onEdit(spool)} aria-label={`Edit spool #${spool.id}`} title="Edit spool">
                     <EditIcon className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="subtle" size="sm" onClick={() => onPrintLabel(spool)} aria-label={`Print label for spool #${spool.id}`} title="Print label">
+                    <TagIcon className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="subtle" size="sm" onClick={() => onClone(spool)} aria-label={`Clone spool #${spool.id}`} title="Clone spool">
                     <CopyIcon className="h-3.5 w-3.5" />

@@ -103,6 +103,17 @@ export class WorkerService {
   }
 
   /**
+   * Reset a worker — clears ghost jobs and frees slots (admin only)
+   */
+  async resetWorker(id: string): Promise<{ releasedJobs: number; status: string }> {
+    const response = await apiClient.request<{ releasedJobs: number; status: string }>({
+      url: `/workers/${id}/reset`,
+      method: 'POST',
+    });
+    return response;
+  }
+
+  /**
    * Delete a worker (admin only)
    */
   async deleteWorker(id: string): Promise<void> {

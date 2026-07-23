@@ -26,6 +26,7 @@ import { RecentPrintsWidget } from './RecentPrintsWidget';
 import { CriticalAlertsBanner } from './CriticalAlertsBanner';
 import { BackgroundServicesWidget } from '@/features/admin/components/BackgroundServicesWidget';
 import { MaintenanceAlertsWidget } from '@/features/maintenance/components/MaintenanceAlertsWidget';
+import { FarmCostSummaryWidget } from './FarmCostSummaryWidget';
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { dashboardTour } from '@/features/printers/tours/dashboard.tour';
 import { HelpButton } from '@/common/components/HelpButton';
@@ -34,17 +35,28 @@ interface StatsCardProps {
   title: string;
   value: number;
   icon: React.ComponentType<{ className?: string }>;
-  color: 'blue' | 'green' | 'yellow' | 'gray';
+  color: 'total' | 'online' | 'printing' | 'paused' | 'gray';
   /** Optional link — wraps the card in a clickable link */
   linkTo?: string;
 }
 
 function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) {
-  const colorClasses: Record<string, string> = {
-    blue: 'bg-pf-loading text-pf-text-primary',
-    green: 'bg-pf-status-online-bg text-pf-status-online-text',
-    yellow: 'bg-pf-warning text-pf-text-primary',
-    gray: 'bg-pf-border-medium text-pf-text-secondary',
+  const isActive = value > 0;
+  const inactiveClasses = 'bg-pf-status-idle-bg text-pf-status-idle-text border border-pf-status-idle-border';
+  const colorClasses: Record<StatsCardProps['color'], string> = {
+    total: isActive
+      ? 'bg-pf-success-bg text-pf-success border border-pf-success'
+      : inactiveClasses,
+    online: isActive
+      ? 'bg-pf-status-online-bg text-pf-status-online-text border border-pf-status-online-border'
+      : inactiveClasses,
+    printing: isActive
+      ? 'bg-pf-status-printing-bg text-pf-status-printing-text border border-pf-status-printing-border'
+      : inactiveClasses,
+    paused: isActive
+      ? 'bg-pf-status-paused-bg text-pf-status-paused-text border border-pf-status-paused-border'
+      : inactiveClasses,
+    gray: 'bg-pf-bg-2 text-pf-text-secondary border border-pf-border',
   };
 
   const card = (
@@ -52,13 +64,13 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
       <div className="p-5">
         <div className="flex items-center">
           <div className="shrink-0">
-            <div className={`p-3 rounded-md ${colorClasses[color]}`}>
+            <div className={`dashboard-stat-icon dashboard-stat-icon-${color} p-3 rounded-md ${colorClasses[color]}`}>
               <Icon className="h-6 w-6" />
             </div>
           </div>
-          <div className="ml-5 w-0 flex-1">
+          <div className="ml-5 min-w-0 flex-1">
             <dl>
-              <dt className="text-sm font-medium text-pf-text-tertiary truncate uppercase tracking-wide">{title}</dt>
+              <dt className="text-sm font-medium text-pf-text-tertiary uppercase tracking-wide">{title}</dt>
               <dd className="text-lg font-bold text-pf-text-primary">{value}</dd>
             </dl>
           </div>
@@ -99,10 +111,10 @@ export const PrinterDashboard: React.FC = () => {
     >
       {/* Stats Cards */}
       <div data-tour="stats-cards" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
-        <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircleIcon} />
-        <StatsCard title="Printing" value={stats.printing} color="yellow" icon={PlayIcon} />
-        <StatsCard title="Paused" value={stats.paused} color="yellow" icon={PauseIcon} />
+        <StatsCard title="Total Printers" value={stats.total} color="total" icon={PrinterIcon} />
+        <StatsCard title="Online" value={stats.online} color="online" icon={CheckCircleIcon} />
+        <StatsCard title="Printing" value={stats.printing} color="printing" icon={PlayIcon} />
+        <StatsCard title="Paused" value={stats.paused} color="paused" icon={PauseIcon} />
         <StatsCard title="Offline" value={stats.offline} color="gray" icon={SettingsIcon} />
         <StatsCard
           title="In Maintenance"
@@ -150,14 +162,15 @@ export const PrinterDashboard: React.FC = () => {
             <TasksWidget />
           </div>
 
-          {/* Row 2: Active Jobs + Recent Prints */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Row 2: Active Jobs + Recent Prints + Farm Cost */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div data-tour="active-jobs">
               <ActiveJobsWidget />
             </div>
             <div data-tour="recent-prints">
               <RecentPrintsWidget />
             </div>
+            <FarmCostSummaryWidget />
           </div>
 
           {/* Row 3: Maintenance Alerts + Background Services */}

@@ -43,6 +43,8 @@ export interface SettingsPageletProps {
   fieldErrors?: Record<string, string> | null;
   isSaving?: boolean;
   error?: string | null;
+  /** When true, renders only fields without the outer card wrapper and title */
+  compact?: boolean;
 }
 
 // Helper
@@ -62,17 +64,15 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
   </span>
 );
 
-export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error }) => {
-  return (
-    <div className="settings-pagelet bg-pf-bg-1 border border-pf-border rounded-xl p-4 mb-6 shadow-xs">
-      <h3 className="text-lg font-semibold text-pf-text-primary mb-3">{metadata.displayName || metadata.className}</h3>
-      <div className="space-y-2">
-            {metadata.properties.map((prop0: SettingPropertyMetadata) => {
-              // Narrow prop to allow legacy fields without using `any`
-              const prop = prop0 as SettingPropertyMetadata & { displayName?: string; required?: boolean };
-              // Support legacy shapes: prop.display?.name OR prop.displayName
-              const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;
-              const isRequired = (prop.attributes && prop.attributes.includes('RequiredAttribute')) || Boolean(prop.required);
+export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error, compact }) => {
+  const content = (
+    <div className="space-y-2">
+          {metadata.properties.map((prop0: SettingPropertyMetadata) => {
+            // Narrow prop to allow legacy fields without using `any`
+            const prop = prop0 as SettingPropertyMetadata & { displayName?: string; required?: boolean };
+            // Support legacy shapes: prop.display?.name OR prop.displayName
+            const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;
+            const isRequired = (prop.attributes && prop.attributes.includes('RequiredAttribute')) || Boolean(prop.required);
               const err = fieldErrors?.[prop.name];
               const hasDescription = Boolean(prop.display?.description);
 
@@ -336,6 +336,18 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           </div>
         )}
       </div>
+  );
+
+  // Compact mode: return just the content without wrapper
+  if (compact) {
+    return content;
+  }
+
+  // Full mode: wrap in card-style container with title
+  return (
+    <div className="settings-pagelet bg-pf-bg-1 border border-pf-border rounded-xl p-4 mb-6 shadow-xs">
+      <h3 className="text-lg font-semibold text-pf-text-primary mb-3">{metadata.displayName || metadata.className}</h3>
+      {content}
     </div>
   );
 };

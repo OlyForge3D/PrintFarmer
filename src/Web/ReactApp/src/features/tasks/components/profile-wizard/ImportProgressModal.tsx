@@ -83,9 +83,9 @@ export const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
 
         {/* Progress indicator dots */}
         <div className="flex justify-center gap-1.5 mt-6">
-          <div className="w-2 h-2 rounded-full bg-pf-accent animate-bounce" style={{ animationDelay: '0ms' }} />
-          <div className="w-2 h-2 rounded-full bg-pf-accent animate-bounce" style={{ animationDelay: '150ms' }} />
-          <div className="w-2 h-2 rounded-full bg-pf-accent animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div className="w-2 h-2 rounded-full bg-pf-accent animate-bounce" />
+          <div className="w-2 h-2 rounded-full bg-pf-accent animate-bounce [animation-delay:150ms]" />
+          <div className="w-2 h-2 rounded-full bg-pf-accent animate-bounce [animation-delay:300ms]" />
         </div>
       </div>
     </Modal>

@@ -23,6 +23,10 @@ vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: false }),
 }));
 
+vi.mock('@/features/cameras/hooks/usePrinterCameras', () => ({
+  usePrinterCameras: () => ({ data: [] }),
+}));
+
 vi.mock('@/common/components/modals/Modal', () => ({
   Modal: ({ isOpen, title, footer, children }: { isOpen: boolean; title: string; footer?: React.ReactNode; children: React.ReactNode }) => (
     isOpen ? (

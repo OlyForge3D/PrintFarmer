@@ -38,5 +38,9 @@ public record PrinterModelDto(
     // Default machine hourly rate
     decimal? DefaultHourlyRate = null,
 
+    // Auto-dispatch defaults for new printers of this model
+    AutoDispatchState? DefaultAutoDispatchState = null,
+    StartBehavior? DefaultStartBehavior = null,
+
     // Toolhead templates for multi-toolhead printers
     PrinterModelToolheadDto[]? Toolheads = null);

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -659,6 +660,11 @@ public class GcodeFilesService(
                 EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
                 SlicerName = metadata?.SlicerName,
                 SlicerVersion = metadata?.SlicerVersion,
+                FilamentPerExtruderWeightG = SerializeArrayOrNull(metadata?.FilamentPerExtruderWeightG),
+                FilamentPerExtruderLengthMm = SerializeArrayOrNull(metadata?.FilamentPerExtruderLengthMm),
+                FilamentPerExtruderColorHex = SerializeArrayOrNull(metadata?.FilamentPerExtruderColorHex),
+                FilamentPerExtruderType = SerializeArrayOrNull(metadata?.FilamentPerExtruderType),
+                ExtruderCount = metadata?.ExtruderCount,
                 ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -1396,11 +1402,19 @@ public class GcodeFilesService(
             BottomSolidLayers = metadata?.BottomSolidLayers,
             MaxVolumetricSpeed = metadata?.MaxVolumetricSpeed,
             IroningEnabled = metadata?.IroningEnabled,
+            FilamentPerExtruderWeightG = SerializeArrayOrNull(metadata?.FilamentPerExtruderWeightG),
+            FilamentPerExtruderLengthMm = SerializeArrayOrNull(metadata?.FilamentPerExtruderLengthMm),
+            FilamentPerExtruderColorHex = SerializeArrayOrNull(metadata?.FilamentPerExtruderColorHex),
+            FilamentPerExtruderType = SerializeArrayOrNull(metadata?.FilamentPerExtruderType),
+            ExtruderCount = metadata?.ExtruderCount,
             ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
     }
+
+    private static string? SerializeArrayOrNull<T>(T[]? values)
+        => values is { Length: > 0 } ? JsonSerializer.Serialize(values) : null;
 
     #endregion
 
@@ -1763,6 +1777,8 @@ public class GcodeFilesService(
             IroningEnabled: file.IroningEnabled,
             FilamentPerExtruderWeightG: file.FilamentPerExtruderWeightG,
             FilamentPerExtruderLengthMm: file.FilamentPerExtruderLengthMm,
+            FilamentPerExtruderColorHex: file.FilamentPerExtruderColorHex,
+            FilamentPerExtruderType: file.FilamentPerExtruderType,
             ExtruderCount: file.ExtruderCount);
     }
 

@@ -176,24 +176,39 @@ public static class SlicerIntegrationExtensions
         Type slicerModule = typeof(ISlicerModule);
         Type hubRegistrar = typeof(ISlicerHubRegistrar);
 
-        return assembly.GetTypes().Where(t =>
+        return SafeGetTypes(assembly).Where(t =>
             !t.IsAbstract &&
             !t.IsInterface &&
             t.IsPublic &&
             (slicerModule.IsAssignableFrom(t) || hubRegistrar.IsAssignableFrom(t)));
     }
 
-    /// <summary>Returns <c>true</c> if <paramref name="assembly"/> contains at least one concrete
-    /// <see cref="ISlicerModule"/> or <see cref="ISlicerHubRegistrar"/> implementation.</summary>
-    private static bool HasPluginTypes(Assembly assembly)
+    /// <summary>
+    /// Enumerates the public types of <paramref name="assembly"/>, tolerating a transient
+    /// <see cref="ReflectionTypeLoadException"/>.
+    /// </summary>
+    /// <remarks>
+    /// When several hosts build concurrently (e.g. parallel integration tests),
+    /// <see cref="Assembly.GetTypes"/> can transiently throw while another thread is still loading
+    /// part of the assembly's dependency closure. The successfully-loaded types are still exposed on
+    /// <see cref="ReflectionTypeLoadException.Types"/> and are sufficient to discover the plugin
+    /// contract implementations. Returning those (instead of dropping the whole assembly) makes
+    /// slicer-module discovery deterministic regardless of load timing, preventing intermittent
+    /// "No service for type 'SlicerDbContext' has been registered" failures.
+    /// </remarks>
+    private static Type[] SafeGetTypes(Assembly assembly)
     {
         try
         {
-            return GetPluginTypes(assembly).Any();
+            return assembly.GetTypes();
         }
-        catch (ReflectionTypeLoadException)
+        catch (ReflectionTypeLoadException ex)
         {
-            return false;
+            return ex.Types.Where(t => t is not null).ToArray()!;
         }
     }
+
+    /// <summary>Returns <c>true</c> if <paramref name="assembly"/> contains at least one concrete
+    /// <see cref="ISlicerModule"/> or <see cref="ISlicerHubRegistrar"/> implementation.</summary>
+    private static bool HasPluginTypes(Assembly assembly) => GetPluginTypes(assembly).Any();
 }

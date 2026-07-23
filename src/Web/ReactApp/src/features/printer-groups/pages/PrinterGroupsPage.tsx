@@ -11,7 +11,11 @@ import { PrinterGroupDetail } from '../components/PrinterGroupDetail';
 import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfirmationModal';
 import type { PrinterGroup } from '@/types/api';
 
-export function PrinterGroupsPage() {
+interface PrinterGroupsPageProps {
+  embedded?: boolean;
+}
+
+export function PrinterGroupsPage({ embedded = false }: PrinterGroupsPageProps) {
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editGroup, setEditGroup] = useState<PrinterGroup | null>(null);
@@ -77,8 +81,8 @@ export function PrinterGroupsPage() {
 
   // If a group is selected, show detail view
   if (selectedGroupId) {
-    return (
-      <PageTemplate title="Printer Groups" icon={PrinterIcon}>
+    const detailContent = (
+      <>
         <PrinterGroupDetail
           groupId={selectedGroupId}
           onBack={handleBack}
@@ -95,22 +99,22 @@ export function PrinterGroupsPage() {
           confirmText="Delete"
           isDeleting={deleteMutation.isPending}
         />
-      </PageTemplate>
+      </>
     );
+
+    return embedded ? detailContent : <PageTemplate title="Printer Groups" icon={PrinterIcon}>{detailContent}</PageTemplate>;
   }
 
   // List view
-  return (
-    <PageTemplate
-      title="Printer Groups"
-      subtitle="Organize printers into groups for easier management"
-      icon={PrinterIcon}
-      actions={
-        <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
-          Create Group
-        </Button>
-      }
-    >
+  const listContent = (
+    <>
+      {embedded ? (
+        <div className="mb-4 flex justify-end">
+          <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
+            Create Group
+          </Button>
+        </div>
+      ) : null}
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
           <Spinner size="lg" />
@@ -152,6 +156,21 @@ export function PrinterGroupsPage() {
         confirmText="Delete"
         isDeleting={deleteMutation.isPending}
       />
+    </>
+  );
+
+  return embedded ? listContent : (
+    <PageTemplate
+      title="Printer Groups"
+      subtitle="Organize printers into groups for easier management"
+      icon={PrinterIcon}
+      actions={
+        <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
+          Create Group
+        </Button>
+      }
+    >
+      {listContent}
     </PageTemplate>
   );
 }

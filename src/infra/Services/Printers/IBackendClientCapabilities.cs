@@ -224,6 +224,21 @@ public interface ISupportsConfiguredCameraDetection
 }
 
 /// <summary>
+/// Capability marker for cameras that require a backend wake/start action before snapshot fetch.
+/// </summary>
+public interface ISupportsTriggeredCameraSnapshot
+{
+    /// <summary>
+    /// Captures a snapshot after performing the backend-specific wake/start operation.
+    /// </summary>
+    /// <param name="baseUrl">The backend base URL.</param>
+    /// <param name="credential">Optional backend credential.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>JPEG bytes, or null if wake or fetch failed gracefully.</returns>
+    Task<byte[]?> GetTriggeredCameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backend clients that support file metadata extraction.
 /// Extracts detailed information from G-code files including print time estimates, layer information, thumbnails, and slicer settings.
 /// </summary>
@@ -610,6 +625,30 @@ public interface ISupportsFilamentControl
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if the change command was sent successfully, false if it failed</returns>
     Task<bool> ChangeFilamentAsync(string baseUrl, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Capability marker interface for backends that support runtime object exclusion during active prints.
+/// </summary>
+public interface ISupportsObjectExclusion
+{
+    /// <summary>
+    /// Gets object-exclusion metadata for the active print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server.</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>The active job objects, or null when no active job/object metadata is available.</returns>
+    Task<PrintJobObjectListDto?> GetCurrentJobObjectsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Excludes a named object from the active print.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server.</param>
+    /// <param name="objectName">The object name from printer metadata.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    /// <returns>True if the exclusion command was accepted; otherwise false.</returns>
+    Task<bool> ExcludeObjectAsync(string baseUrl, string objectName, CancellationToken ct = default);
 }
 
 /// <summary>

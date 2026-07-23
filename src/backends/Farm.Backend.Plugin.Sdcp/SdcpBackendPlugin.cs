@@ -1,4 +1,6 @@
 ﻿using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Contracts.Printers.Sdcp;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -69,6 +71,8 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
+        services.AddScoped<IPrinterCameraProbe, SdcpPrinterCameraProbe>();
+
         // Register the SDCP client interface with its implementation
         // Using AddScoped because HTTP clients need fresh instances per request scope
         services.AddScoped<ISdcpClient>(provider =>

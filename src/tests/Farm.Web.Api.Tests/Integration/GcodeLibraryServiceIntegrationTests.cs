@@ -144,6 +144,36 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task QueryLibraryAsync_WithDescriptionSearch_ReturnsMatching()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
+
+        string uniqueId = Guid.NewGuid().ToString()[..8];
+        var file = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Description Search Test",
+            FileName = $"description-search-{uniqueId}.gcode",
+            Description = $"Calibration tower {uniqueId}",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/description-search-{uniqueId}.gcode",
+            FileSizeBytes = 1024,
+            FileHash = $"description-search-hash-{uniqueId}",
+            UploadedAt = DateTime.UtcNow
+        };
+        context.GcodeFiles.Add(file);
+        await context.SaveChangesAsync();
+
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync($"CALIBRATION TOWER {uniqueId}", null, null, null, CancellationToken.None);
+
+        result.Should().ContainSingle(g => g.Id == file.Id);
+    }
+
+    [Fact]
     public async Task QueryLibraryAsync_WithMaterialFilter_ReturnsMatching()
     {
         // Arrange
@@ -207,6 +237,172 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Assert
         result.Should().NotBeEmpty();
         result.Should().Contain(g => Math.Abs((g.RequiredNozzleDiameter ?? 0) - 0.4) < 0.01);
+    }
+
+    [Fact]
+    public async Task QueryLibraryAsync_WithNozzleFilter_ExcludesBoundaryValues()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
+        string uniqueId = Guid.NewGuid().ToString()[..8];
+        double requestedNozzleDiameter = 0.4;
+        double lowerBoundaryValue = requestedNozzleDiameter - 0.001;
+        double upperBoundaryValue = requestedNozzleDiameter + 0.001;
+        var lowerBoundary = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Lower Boundary {uniqueId}",
+            FileName = $"lower-boundary-{uniqueId}.gcode",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/lower-boundary-{uniqueId}.gcode",
+            FileSizeBytes = 1024,
+            FileHash = $"lower-boundary-hash-{uniqueId}",
+            RequiredMaterial = uniqueId,
+            RequiredNozzleDiameter = lowerBoundaryValue,
+            UploadedAt = DateTime.UtcNow
+        };
+        var upperBoundary = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Upper Boundary {uniqueId}",
+            FileName = $"upper-boundary-{uniqueId}.gcode",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/upper-boundary-{uniqueId}.gcode",
+            FileSizeBytes = 1024,
+            FileHash = $"upper-boundary-hash-{uniqueId}",
+            RequiredMaterial = uniqueId,
+            RequiredNozzleDiameter = upperBoundaryValue,
+            UploadedAt = DateTime.UtcNow
+        };
+        var withinBoundary = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Within Boundary {uniqueId}",
+            FileName = $"within-boundary-{uniqueId}.gcode",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/within-boundary-{uniqueId}.gcode",
+            FileSizeBytes = 1024,
+            FileHash = $"within-boundary-hash-{uniqueId}",
+            RequiredMaterial = uniqueId,
+            RequiredNozzleDiameter = requestedNozzleDiameter + 0.0005,
+            UploadedAt = DateTime.UtcNow
+        };
+        var nullNozzle = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Null Nozzle {uniqueId}",
+            FileName = $"null-nozzle-{uniqueId}.gcode",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/null-nozzle-{uniqueId}.gcode",
+            FileSizeBytes = 1024,
+            FileHash = $"null-nozzle-hash-{uniqueId}",
+            RequiredMaterial = uniqueId,
+            RequiredNozzleDiameter = null,
+            UploadedAt = DateTime.UtcNow
+        };
+        context.GcodeFiles.AddRange(lowerBoundary, upperBoundary, withinBoundary, nullNozzle);
+        await context.SaveChangesAsync();
+
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync(null, uniqueId, requestedNozzleDiameter, null, CancellationToken.None);
+
+        result.Should().ContainSingle();
+        result.Single().Id.Should().Be(withinBoundary.Id);
+    }
+
+    [Fact]
+    public async Task QueryLibraryAsync_WithSameUploadedAt_OrdersById()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
+        string uniqueId = Guid.NewGuid().ToString()[..8];
+        DateTime uploadedAt = DateTime.UtcNow;
+        var secondFile = new GcodeFile
+        {
+            Id = Guid.Parse("00000000-0000-0000-0000-000000000002"),
+            Name = $"Tie Second {uniqueId}",
+            FileName = $"tie-second-{uniqueId}.gcode",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/tie-second-{uniqueId}.gcode",
+            FileSizeBytes = 2048,
+            FileHash = $"tie-second-hash-{uniqueId}",
+            UploadedAt = uploadedAt
+        };
+        var firstFile = new GcodeFile
+        {
+            Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
+            Name = $"Tie First {uniqueId}",
+            FileName = $"tie-first-{uniqueId}.gcode",
+            FolderId = folder.Id,
+            FilePath = $"/gcodes/tie-first-{uniqueId}.gcode",
+            FileSizeBytes = 1024,
+            FileHash = $"tie-first-hash-{uniqueId}",
+            UploadedAt = uploadedAt
+        };
+        context.GcodeFiles.AddRange(secondFile, firstFile);
+        await context.SaveChangesAsync();
+
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync(uniqueId, null, null, null, CancellationToken.None);
+
+        result.Select(g => g.Id).Should().Equal(firstFile.Id, secondFile.Id);
+    }
+
+    [Fact]
+    public async Task QueryAsync_WithSameUploadedAtAcrossPages_OrdersByIdWithoutDuplication()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
+        string uniqueId = Guid.NewGuid().ToString()[..8];
+        DateTime uploadedAt = DateTime.UtcNow;
+        Guid[] expectedIds =
+        [
+            Guid.Parse("00000000-0000-0000-0000-000000000011"),
+            Guid.Parse("00000000-0000-0000-0000-000000000012"),
+            Guid.Parse("00000000-0000-0000-0000-000000000013"),
+            Guid.Parse("00000000-0000-0000-0000-000000000014"),
+            Guid.Parse("00000000-0000-0000-0000-000000000015")
+        ];
+
+        var files = expectedIds
+            .Reverse()
+            .Select((id, index) => new GcodeFile
+            {
+                Id = id,
+                Name = $"Paged Tie {uniqueId} {index}",
+                FileName = $"paged-tie-{uniqueId}-{index}.gcode",
+                FolderId = folder.Id,
+                FilePath = $"/gcodes/paged-tie-{uniqueId}-{index}.gcode",
+                FileSizeBytes = 1024 + index,
+                FileHash = $"paged-tie-hash-{uniqueId}-{index}",
+                UploadedAt = uploadedAt
+            })
+            .ToList();
+        context.GcodeFiles.AddRange(files);
+        await context.SaveChangesAsync();
+
+        var firstPage = await service.QueryAsync(null, "date", "asc", uniqueId, 1, 2, null, null, null, CancellationToken.None);
+        var secondPage = await service.QueryAsync(null, "date", "asc", uniqueId, 2, 2, null, null, null, CancellationToken.None);
+        var thirdPage = await service.QueryAsync(null, "date", "asc", uniqueId, 3, 2, null, null, null, CancellationToken.None);
+
+        Guid[] actualIds = firstPage.Files
+            .Concat(secondPage.Files)
+            .Concat(thirdPage.Files)
+            .Select(file => Guid.Parse(file.Id!))
+            .ToArray();
+
+        firstPage.TotalFiles.Should().Be(expectedIds.Length);
+        secondPage.TotalFiles.Should().Be(expectedIds.Length);
+        thirdPage.TotalFiles.Should().Be(expectedIds.Length);
+        actualIds.Should().Equal(expectedIds);
+        actualIds.Should().OnlyHaveUniqueItems();
     }
 
     [Fact]
@@ -390,4 +586,3 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
 
     #endregion
 }
-
