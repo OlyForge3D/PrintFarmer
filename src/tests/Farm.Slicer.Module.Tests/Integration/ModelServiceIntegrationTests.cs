@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -11,6 +12,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Integration;
@@ -477,6 +480,110 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         result.Should().NotBeNull();
         result.Id.Should().NotBe(Guid.Empty);
         result.Id.Should().NotBe(Guid.Empty);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithClientThumbnail_PersistsThumbnailAndLinksModel()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        IModel3DFileRepository repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
+        IStoragePathService storagePathService = scope.ServiceProvider.GetRequiredService<IStoragePathService>();
+        using Image<Rgba32> image = new(16, 16);
+        using MemoryStream thumbnailStream = new();
+        image.SaveAsPng(thumbnailStream);
+        thumbnailStream.Position = 0;
+        FormFile thumbnailFile = new(thumbnailStream, 0, thumbnailStream.Length, "thumbnailFile", "client.png");
+
+        Model3DUploadResultDto result = await service.UploadModelAsync(
+            CreateMockFormFile("client-thumbnail.stl"),
+            thumbnailFile,
+            CancellationToken.None);
+
+        Model3D? model = await repository.GetByIdAsync(result.Id, CancellationToken.None);
+        model.Should().NotBeNull();
+        model!.ThumbnailFileName.Should().Be($"{result.Id}_thumb.png");
+        File.Exists(Path.Combine(storagePathService.GetModelUploadDirectory(), model.ThumbnailFileName!)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithClientUploadId_PersistsSingleModelAndReturnsExistingRetry()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Guid userId = Guid.NewGuid();
+        Guid clientUploadId = Guid.NewGuid();
+
+        Model3DUploadResultDto initial = await service.UploadModelAsync(
+            CreateMockFormFile("idempotent.stl", "idempotent-content"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+        Model3DUploadResultDto retry = await service.UploadModelAsync(
+            CreateMockFormFile("idempotent.stl", "idempotent-content"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+
+        initial.WasExisting.Should().BeFalse();
+        retry.WasExisting.Should().BeTrue();
+        retry.Id.Should().Be(initial.Id);
+        retry.ClientUploadId.Should().Be(clientUploadId);
+        (await context.Models3D.CountAsync(
+            model => model.UploadedByUserId == userId && model.ClientUploadId == clientUploadId))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReplaceThumbnailAsync_AfterOwnedUpload_PersistsReplacementAndChangesETag()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        IModel3DFileRepository repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
+        IStoragePathService storagePathService = scope.ServiceProvider.GetRequiredService<IStoragePathService>();
+        Guid userId = Guid.NewGuid();
+        using Image<Rgba32> initialImage = new(8, 8);
+        using MemoryStream initialStream = new();
+        initialImage.SaveAsPng(initialStream);
+        initialStream.Position = 0;
+        FormFile initialThumbnail = new(initialStream, 0, initialStream.Length, "thumbnailFile", "initial.png");
+        Model3DUploadResultDto uploaded = await service.UploadModelAsync(
+            CreateMockFormFile("replace-thumbnail.stl", "replacement-model"),
+            initialThumbnail,
+            userId,
+            clientUploadId: null,
+            CancellationToken.None);
+
+        using Image<Rgba32> replacementImage = new(16, 12);
+        using MemoryStream replacementStream = new();
+        replacementImage.SaveAsPng(replacementStream);
+        byte[] replacementBytes = replacementStream.ToArray();
+        replacementStream.Position = 0;
+        FormFile replacementThumbnail = new(
+            replacementStream,
+            0,
+            replacementStream.Length,
+            "thumbnailFile",
+            "replacement.png");
+
+        Model3DThumbnailUpdateResultDto replaced = await service.ReplaceThumbnailAsync(
+            uploaded.Id,
+            replacementThumbnail,
+            userId,
+            isAdmin: false,
+            uploaded.ETag,
+            CancellationToken.None);
+
+        Model3D model = (await repository.GetByIdAsync(uploaded.Id, CancellationToken.None))!;
+        replaced.ThumbnailUrl.Should().Be($"/api/3d-models/thumbnail/{uploaded.Id}");
+        replaced.ETag.Should().NotBe(uploaded.ETag);
+        File.ReadAllBytes(Path.Combine(
+                storagePathService.GetModelUploadDirectory(),
+                model.ThumbnailFileName!))
+            .Should().Equal(replacementBytes);
     }
 
     [Fact]
