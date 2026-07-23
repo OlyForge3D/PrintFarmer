@@ -2042,6 +2042,87 @@ final class PredictiveViewModelTests: XCTestCase {
         await gate.close()
     }
 
+    // MARK: - Hicks Point 5: kind-correct issuance metadata
+
+    /// Hicks addendum Point 5: ObserverToken/WaiterToken share a
+    /// memberwise `id: UInt64` initializer, so a caller can fabricate
+    /// either kind. When observer and waiter share a single high-water
+    /// counter, `token.id >= nextID` misclassifies a fabricated
+    /// ObserverToken whose numeric id was only ever issued as a waiter
+    /// (or vice-versa). Per-kind counters (`nextObserverID` /
+    /// `nextWaiterID`) make the classification EXACT without any
+    /// per-token set.
+    ///
+    /// Structure: register only a waiter. Then fabricate an
+    /// ObserverToken whose id equals the waiter's id. That id is
+    /// unknown-as-observer; classification MUST resolve `.unknown`.
+    /// Also fabricate an ObserverToken with an id above the observer
+    /// high-water mark → `.unknown`. Symmetric proofs for waiter.
+    func testAsyncGateKindCorrectIssuanceClassification() async {
+        let gate = AsyncGate()
+
+        // Register only a waiter — waiter id=1, nextObserverID still 1.
+        let waiter = await gate.registerWaiter()
+        XCTAssertEqual(waiter.id, 1, "waiter takes first waiter-kind id")
+
+        // Fabricate an ObserverToken with the SAME numeric id as the
+        // waiter. Under the pre-remediation shared counter this would
+        // be classified as `.closedOrConsumed` (previously-issued
+        // observer) — cross-kind misclassification. Under kind-correct
+        // per-kind counters it must resolve `.unknown`.
+        let crossKindObs = AsyncGate.ObserverToken(id: waiter.id)
+        let ack1 = await gate.waitForObserverParked(crossKindObs)
+        XCTAssertEqual(ack1, .unknown,
+                       "cross-kind fabricated ObserverToken must be classified .unknown, not .closedOrConsumed")
+
+        // Fabricate an ObserverToken above every counter → `.unknown`.
+        let fabObs = AsyncGate.ObserverToken(id: 999_999)
+        let ack2 = await gate.waitForObserverParked(fabObs)
+        XCTAssertEqual(ack2, .unknown)
+
+        // Symmetric: register an observer, fabricate a WaiterToken with
+        // the same numeric id → `.unknown`.
+        let obs = await gate.registerObserver()
+        XCTAssertEqual(obs.id, 1, "observer takes first observer-kind id (independent of waiter counter)")
+        let crossKindWat = AsyncGate.WaiterToken(id: obs.id)
+        // waiter id=1 IS active (registered above); so use a fresh
+        // observer-only id that was never a waiter. registerObserver
+        // again to advance observer counter to 3.
+        _ = await gate.registerObserver()   // observer id=2, nextObserverID=3
+        let onlyObserverID: UInt64 = 2      // was issued as observer, never as waiter
+        let crossKindWat2 = AsyncGate.WaiterToken(id: onlyObserverID)
+        let ack3 = await gate.waitForWaiterParked(crossKindWat2)
+        XCTAssertEqual(ack3, .unknown,
+                       "cross-kind fabricated WaiterToken (id issued only as observer) must resolve .unknown")
+
+        // Sanity: `crossKindWat` (id=1) IS active as a waiter, so it
+        // should classify as `.parked` after park OR `.closedOrConsumed`
+        // after drain — never `.unknown`. Just confirm not-unknown here
+        // by inspecting order.
+        let mid = await gate.snapshot()
+        XCTAssertTrue(mid.waiterOrder.contains(1),
+                      "id=1 waiter must still be registered/active (rules out .unknown for its own kind)")
+        _ = crossKindWat  // silence unused; represented in the assertion above.
+
+        // Enter-park-ACK envelope path uses the same predicate.
+        let env = await gate.enterObserverParkAck(fabObs)
+        if case .immediate(let r) = env {
+            XCTAssertEqual(r, .unknown,
+                           "enterObserverParkAck fabricated-id → .immediate(.unknown)")
+        } else {
+            XCTFail("fabricated observer id must not allocate a ticket")
+        }
+
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerParkAckTicketCount, 0)
+        XCTAssertEqual(snap.waiterParkAckTicketCount, 0)
+        XCTAssertEqual(snap.observerUnknownAwaitCount, 0,
+                       "waitForXParked classification path must NOT increment awaitUnknown counters")
+        XCTAssertEqual(snap.waiterUnknownAwaitCount, 0)
+
+        await gate.close()
+    }
+
     // MARK: - Hicks B: bounded post-close state
 
     /// Bishop F1: high-count repeated post-close register/await/ACK proves
@@ -2904,7 +2985,16 @@ private actor AsyncGate {
     }
 
     // MARK: State
-    private var nextID: UInt64 = 1
+    // Hicks addendum Point 5: kind-correct issuance high-water counters.
+    // Prior single `nextID` allowed cross-kind fabricated-token
+    // misclassification (an ObserverToken(id:) with an id only ever
+    // issued to a waiter would satisfy `id < nextID` and be classified
+    // as `.closedOrConsumed` / previously-issued observer). Separate
+    // per-kind gap-free counters make `token.id >= nextObserverID` /
+    // `token.id >= nextWaiterID` an EXACT non-issuance predicate for
+    // that kind without any per-token set.
+    private var nextObserverID: UInt64 = 1
+    private var nextWaiterID: UInt64 = 1
     // Hicks H5 / addendum: non-reusing per-await identity. UUID guarantees
     // owner/receipt maps cannot alias a prior/wrapped attempt.
     private var parkedObservers: [UInt64: (awaitID: UUID, c: CheckedContinuation<Void, Never>)] = [:]
@@ -2990,7 +3080,7 @@ private actor AsyncGate {
     /// `awaitObserver(postCloseToken)` hits the branch-3 unknown path
     /// (also bounded), which increments `observerUnknownAwaitCount`.
     func registerObserver() -> ObserverToken {
-        let id = nextID; nextID &+= 1
+        let id = nextObserverID; nextObserverID &+= 1
         if closed {
             observerPostCloseRegistrationCount += 1
         } else if pendingEntrySignals > 0 {
@@ -3065,7 +3155,7 @@ private actor AsyncGate {
                     return
                 }
                 // (4) Not active.
-                if token.id >= nextID {
+                if token.id >= nextObserverID {
                     observerUnknownAwaitCount += 1
                     observerResumeCounts[.unknownToken, default: 0] += 1
                 } else {
@@ -3148,7 +3238,7 @@ private actor AsyncGate {
             }
         }
         // Not active: fabricated (never issued) vs previously-issued.
-        if token.id >= nextID { return .unknown }
+        if token.id >= nextObserverID { return .unknown }
         return .closedOrConsumed
     }
 
@@ -3169,7 +3259,7 @@ private actor AsyncGate {
     /// per-token fate/completed insertion.
     func registerWaiter() -> WaiterToken {
         if !closed { signalEntryLocked() }
-        let id = nextID; nextID &+= 1
+        let id = nextWaiterID; nextWaiterID &+= 1
         if closed {
             waiterPostCloseRegistrationCount += 1
         } else if opened {
@@ -3225,7 +3315,7 @@ private actor AsyncGate {
                     flushWaiterParkAcks(id: token.id, result: .parked)
                     return
                 }
-                if token.id >= nextID {
+                if token.id >= nextWaiterID {
                     waiterUnknownAwaitCount += 1
                     waiterResumeCounts[.unknownToken, default: 0] += 1
                 } else {
@@ -3278,7 +3368,7 @@ private actor AsyncGate {
                 waiterParkAcks[token.id, default: []].append(c)
             }
         }
-        if token.id >= nextID { return .unknown }
+        if token.id >= nextWaiterID { return .unknown }
         return .closedOrConsumed
     }
 
@@ -3407,7 +3497,7 @@ private actor AsyncGate {
             observerParkAckTicketToToken[ticket] = token.id
             return .queued(ticket)
         }
-        if token.id >= nextID { return .immediate(.unknown) }
+        if token.id >= nextObserverID { return .immediate(.unknown) }
         return .immediate(.closedOrConsumed)
     }
 
@@ -3455,7 +3545,7 @@ private actor AsyncGate {
             waiterParkAckTicketToToken[ticket] = token.id
             return .queued(ticket)
         }
-        if token.id >= nextID { return .immediate(.unknown) }
+        if token.id >= nextWaiterID { return .immediate(.unknown) }
         return .immediate(.closedOrConsumed)
     }
 
@@ -3537,7 +3627,7 @@ private actor AsyncGate {
                     flushObserverParkAcks(id: token.id, result: .parked)
                     return
                 }
-                if token.id >= nextID {
+                if token.id >= nextObserverID {
                     observerUnknownAwaitCount += 1
                     observerResumeCounts[.unknownToken, default: 0] += 1
                 } else {
@@ -3606,7 +3696,7 @@ private actor AsyncGate {
                     flushWaiterParkAcks(id: token.id, result: .parked)
                     return
                 }
-                if token.id >= nextID {
+                if token.id >= nextWaiterID {
                     waiterUnknownAwaitCount += 1
                     waiterResumeCounts[.unknownToken, default: 0] += 1
                 } else {
