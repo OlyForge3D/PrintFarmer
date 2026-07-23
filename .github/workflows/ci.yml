@@ -104,12 +104,12 @@ jobs:
         run: |
           {
             echo "## CI selection"
-            printf '- reason: `%s`\n' "$SELECTOR_REASON"
-            printf '- want_frontend: `%s`\n' "$WANT_FRONTEND"
-            printf '- want_dotnet_build: `%s`\n' "$WANT_DOTNET_BUILD"
-            printf '- want_dotnet_test: `%s`\n' "$WANT_DOTNET_TEST"
-            printf '- want_mig_drift: `%s`\n' "$WANT_MIG_DRIFT"
-            printf '- full_matrix: `%s`\n' "$FULL_MATRIX"
+            printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
+            printf -- '- want_frontend: `%s`\n' "$WANT_FRONTEND"
+            printf -- '- want_dotnet_build: `%s`\n' "$WANT_DOTNET_BUILD"
+            printf -- '- want_dotnet_test: `%s`\n' "$WANT_DOTNET_TEST"
+            printf -- '- want_mig_drift: `%s`\n' "$WANT_MIG_DRIFT"
+            printf -- '- full_matrix: `%s`\n' "$FULL_MATRIX"
             echo ""
             echo "### test matrix"
             printf '```json\n%s\n```\n' "$SELECTOR_MATRIX"
@@ -414,13 +414,13 @@ jobs:
         run: |
           {
             echo "## CI summary"
-            printf '- reason: `%s`\n' "$SELECTOR_REASON"
-            printf '- select: `%s`\n' "$SELECT_RESULT"
-            printf '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
-            printf '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
-            printf '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
-            printf '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
-            printf '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
+            printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
+            printf -- '- select: `%s`\n' "$SELECT_RESULT"
+            printf -- '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
+            printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
+            printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
+            printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
+            printf -- '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if any required dependency failed or was cancelled

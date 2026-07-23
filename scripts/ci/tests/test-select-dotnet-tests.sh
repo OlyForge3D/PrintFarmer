@@ -480,6 +480,15 @@ case_workflow_has_no_dotnet_format() {
   assert_not_contains "no format command" "$workflow" "dotnet format" || return 1
 }
 
+case_workflow_printf_formats_are_option_safe() {
+  local unsafe_lines
+  unsafe_lines="$(awk '
+    { sub(/\r$/, "") }
+    /printf[[:space:]]+['\''"]-/ { print NR ":" $0 }
+  ' "$WORKFLOW")"
+  assert_eq "leading-dash printf formats use --" "$unsafe_lines" "" || return 1
+}
+
 case_workflow_dispatch_full_safe() {
   local out="$1"
   CHANGED_FILES=""
@@ -679,6 +688,7 @@ TESTS=(
   case_push_to_main_full_safe
   case_workflow_trusted_push_contract
   case_workflow_has_no_dotnet_format
+  case_workflow_printf_formats_are_option_safe
   case_workflow_dispatch_full_safe
   case_force_full_safe_from_caller
   case_empty_changes
