@@ -1,7 +1,7 @@
-# CI: Affected .NET Test Selection and Formatting Gates
+# CI: Affected .NET Test Selection and Local Formatting
 
-This document describes PrintFarmer's CI strategy, its authoritative
-server-side formatting gate, and the supplemental local pre-push check.
+This document describes PrintFarmer's CI strategy and its local pre-push
+formatting gate.
 
 Related:
 
@@ -21,7 +21,6 @@ flowchart LR
   A[PR opened] --> B[select job]
   B -->|paths-only frontend| C[frontend job]
   B -->|any dotnet input| D[dotnet-build full sln]
-  B -->|any dotnet input| I[dotnet-format required]
   D --> E[dotnet-test matrix]
   D --> F[migration-drift]
   B --> G[ci-tools]
@@ -29,12 +28,14 @@ flowchart LR
   E --> H
   F --> H
   G --> H
-  I --> H
 ```
 
 Every PR triggers the `select` job, which classifies changed paths and emits
 outputs consumed by downstream jobs. This produces a required, stable check
 name even when no downstream work runs (e.g. docs-only or React-only PRs).
+Every push to `main` or `development` also starts this workflow. The push
+trigger has no path filter, and the selector unconditionally chooses the full
+safe matrix for both trusted branches, including docs-only pushes.
 
 ## Jobs
 
@@ -44,7 +45,6 @@ name even when no downstream work runs (e.g. docs-only or React-only PRs).
 | `ci-tools`       | always                                                       | Runs `bash -n` + selector + hook tests; gates changes to selector.    |
 | `frontend`       | React inputs changed OR full-safe                            | `npm ci`, lint, build, test with coverage in `src/Web/ReactApp/`.     |
 | `dotnet-build`   | any .NET input changed OR full-safe                          | `dotnet restore && dotnet build` on the whole solution.               |
-| `dotnet-format`  | any .NET input changed OR full-safe                          | Authoritative server-side `dotnet format --verify-no-changes` gate.   |
 | `migration-drift`| App or Slicer schema-relevant inputs changed OR full-safe    | `has-pending-model-changes` per provider (App×Pg/SqlServer, Slicer×Pg/SqlServer). |
 | `dotnet-test`    | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per affected test project.                       |
 | `summary`        | always (`if: always()`)                                      | Aggregates gates; hard-fails on required check regression.            |
@@ -67,9 +67,10 @@ classify.
 | --------------------------------------------- | :-----------: | :---------------: | :--------------: | :------------: | :---------: | ---------------------------------- |
 | `frontend` (`src/Web/ReactApp/**`)            | ✓             |                   |                  |                |             | React-only PRs run zero .NET.      |
 | `api` (`src/api/**`)                          |               | ✓                 | Api, Slicer, Integration | App drift ✓  |             |                                    |
-| `infra` (`src/infra/**`)                      |               | ✓                 | Api, Slicer, Integration | App drift ✓  |             | AppDbContext lives under `src/infra/Data`; both App providers are checked. |
-| `backends` (`src/backends/**`)                |               | ✓                 | Api.Tests only                        |                |             | Slicer.Tests does not ref backends.|
-| `slicer` (`src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**`) |    | ✓ | Api, Slicer, Integration | Slicer drift ✓ |             |                                    |
+| `infra` (`src/infra/**`)                      |               | ✓                 | Api, Slicer, Orca, Integration | App drift ✓  |             | AppDbContext lives under `src/infra/Data`; the Orca worker directly references infra. |
+| `backend_core` (`src/backends/Farm.Backend.Plugin.Core/**`) | | ✓ | Api, Slicer, Orca, Integration | | | Core is transitive through infra and slicer. |
+| `backends` (other `src/backends/**`)          |               | ✓                 | Api.Tests only                        |                |             | Concrete printer plugins stay narrowly scoped. |
+| `slicer` (`src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**`) |    | ✓ | Api, Slicer, Orca, Integration | Slicer drift ✓ |             | The Orca worker directly references slicer and worker-shared. |
 | `orca_worker` (`src/orcaslicer-worker/**`) | | ✓ | Orca worker | | | The worker test project is built and tested directly outside the solution. |
 | `migrations_app` (`src/migrations/Farm.Migrations.*/**`)             |    | ✓ | Api.Tests               | App drift ✓  |             |                                    |
 | `migrations_slcr` (`src/migrations/Farm.Slicer.Migrations.*/**`)     |    | ✓ | Slicer.Tests            | Slicer drift ✓ |             |                                    |
@@ -102,9 +103,9 @@ classify.
 
 ## Pre-push format gate
 
-`.githooks/pre-push` supplements the required CI formatting job. It verifies
-the **exact outgoing Git tree** rather than the working directory, so local
-dirty state cannot poison the check.
+`.githooks/pre-push` is the repository's formatting authority. It verifies the
+**exact outgoing Git tree** rather than the working directory, so local dirty
+state cannot poison the check.
 
 ### Contract
 
@@ -159,16 +160,15 @@ The hook is enforced by `git push`. The documented Git bypass is:
 
 ```bash
 git push --no-verify
-# or
-git push -n
 ```
 
-This skips all local pre-push hooks (including this one) exactly once, per
-Git's design. Use it in genuine emergencies only.
+`--no-verify` is Git's standard emergency bypass. It skips all local pre-push
+hooks, including this one, for that push. Use it in genuine emergencies only.
 
-**Local hooks are not server-enforceable.** Anyone can bypass or delete their
-copy. The authoritative gate is CI's `.NET format` job, whose result is a
-required dependency of the always-created `CI summary` check.
+**The local hook is not server-enforceable.** Anyone can bypass or delete their
+copy. GitHub Actions does not run `dotnet format`, and branch protection does
+**not** enforce formatting. The `CI summary` check gates the remaining CI jobs
+but has no formatting dependency.
 
 ## Install the hooks
 
@@ -195,9 +195,8 @@ Baselines are approximate and depend on runner load, warm caches, and PR size.
 | Shared config / selector / unknown-path change       | ~20-30 min                    | ~20-30 min (full-safe)         |
 | Push to `main` / `development`                       | ~20-30 min                    | ~20-30 min (full-safe)         |
 
-The pre-push hook adds early local feedback without weakening CI. Its restore
-and format work is skipped after the first successful verification of a given
-tree/SDK/formatter identity, while CI still verifies formatting independently.
+The pre-push hook's restore and format work is skipped after the first
+successful verification of a given tree/SDK/formatter identity.
 
 ## Failure diagnosis
 

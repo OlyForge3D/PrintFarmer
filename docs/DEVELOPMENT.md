@@ -59,7 +59,7 @@ src/Web/ReactApp/
   - UPPER_CASE for constants
 
 - **Formatting**:
-  - Run `dotnet format` before pushing. The optional `pre-push` hook verifies the exact outgoing tree for fast local feedback, and the required CI summary independently enforces the server-side `.NET format` job. Install the hook once with `./.githooks/setup.sh`; see [docs/CI.md](./CI.md) for details.
+  - Install `./.githooks/pre-push` with `./.githooks/setup.sh`. It is the local formatting authority and verifies the exact outgoing tree. The hook is not server-enforceable, `git push --no-verify` is Git's standard emergency bypass, and branch protection does not enforce formatting. See [docs/CI.md](./CI.md) for details.
   - Max line length: 120 characters
   - Use var for obvious types
 

@@ -48,7 +48,7 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.2.0"
 
 # ---------------------------------------------------------------------------
 # Required CI test projects. The final field opts the integration project into
@@ -211,7 +211,8 @@ load_changed_files() {
 #   frontend        — src/Web/**
 #   api             — src/api/**
 #   infra           — src/infra/**
-#   backend_plugin  — src/backends/**
+#   backend_core    — src/backends/Farm.Backend.Plugin.Core/**
+#   backend_plugin  — other src/backends/**
 #   slicer          — src/slicer/**, src/Slicers/**, src/worker-shared/**
 #   orca_worker     — src/orcaslicer-worker/**
 #   discovery       — src/discovery/**, src/printer-discovery/**
@@ -269,6 +270,7 @@ classify_path() {
   case "$p" in
     src/api/*)               printf 'api' ; return ;;
     src/infra/*)             printf 'infra' ; return ;;
+    src/backends/Farm.Backend.Plugin.Core/*) printf 'backend_core' ; return ;;
     src/backends/*)          printf 'backend_plugin' ; return ;;
     src/slicer/*)            printf 'slicer' ; return ;;
     src/Slicers/*)           printf 'slicer' ; return ;;
@@ -454,7 +456,7 @@ main() {
 
   # Bucket flags.
   local has_shared_config=0 has_ci_selector=0 has_frontend=0
-  local has_api=0 has_infra=0 has_backend=0 has_slicer=0
+  local has_api=0 has_infra=0 has_backend_core=0 has_backend=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
@@ -470,6 +472,7 @@ main() {
       frontend)        has_frontend=1 ;;
       api)             has_api=1 ;;
       infra)           has_infra=1 ;;
+      backend_core)    has_backend_core=1 ;;
       backend_plugin)  has_backend=1 ;;
       slicer)          has_slicer=1 ;;
       orca_worker)     has_orca=1 ;;
@@ -526,7 +529,7 @@ main() {
 
   # Any .NET-relevant bucket forces a full solution build to preserve compile
   # coverage across the whole graph.
-  if (( has_api || has_infra || has_backend || has_slicer ||
+  if (( has_api || has_infra || has_backend_core || has_backend || has_slicer ||
         has_orca ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
@@ -536,12 +539,32 @@ main() {
 
   # tools alone → build only, no tests.
   local net_test_bucket_hit=0
-  if (( has_api || has_infra )); then
-    # API and infra changes flow into both solution suites and the API-level
-    # integration suite.
+  if (( has_api )); then
     test_names+=(
       "Farm.Web.Api.Tests"
       "Farm.Slicer.Module.Tests"
+      "Farm.Web.IntegrationTests"
+    )
+    net_test_bucket_hit=1
+  fi
+  if (( has_infra )); then
+    # Orca worker directly references infra, while the other suites consume it
+    # through their API and slicer dependencies.
+    test_names+=(
+      "Farm.Web.Api.Tests"
+      "Farm.Slicer.Module.Tests"
+      "Farm.OrcaSlicer.Worker.Tests"
+      "Farm.Web.IntegrationTests"
+    )
+    net_test_bucket_hit=1
+  fi
+  if (( has_backend_core )); then
+    # Backend Core is transitively consumed by infra, slicer, and the Orca
+    # worker. Keep concrete backend plugins in their narrower bucket below.
+    test_names+=(
+      "Farm.Web.Api.Tests"
+      "Farm.Slicer.Module.Tests"
+      "Farm.OrcaSlicer.Worker.Tests"
       "Farm.Web.IntegrationTests"
     )
     net_test_bucket_hit=1
@@ -555,6 +578,7 @@ main() {
     test_names+=(
       "Farm.Web.Api.Tests"
       "Farm.Slicer.Module.Tests"
+      "Farm.OrcaSlicer.Worker.Tests"
       "Farm.Web.IntegrationTests"
     )
     net_test_bucket_hit=1
@@ -615,6 +639,7 @@ main() {
   if (( has_frontend )); then reason+="frontend "; fi
   if (( has_api )); then reason+="api "; fi
   if (( has_infra )); then reason+="infra "; fi
+  if (( has_backend_core )); then reason+="backend-core "; fi
   if (( has_backend )); then reason+="backend "; fi
   if (( has_slicer )); then reason+="slicer "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi

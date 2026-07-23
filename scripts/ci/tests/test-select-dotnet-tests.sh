@@ -16,6 +16,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 SELECTOR="$REPO_ROOT/scripts/ci/select-dotnet-tests.sh"
+WORKFLOW="$REPO_ROOT/.github/workflows/ci.yml"
 
 if [[ ! -x "$SELECTOR" && ! -r "$SELECTOR" ]]; then
   echo "FATAL: selector not found at $SELECTOR" >&2
@@ -169,6 +170,7 @@ case_api_change() {
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
 }
 
 case_infra_change() {
@@ -181,6 +183,7 @@ case_infra_change() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "infra app pg" "$mig" "AppPg" || return 1
@@ -198,6 +201,17 @@ case_backend_plugin_change() {
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   # Backends do not appear as a direct ProjectReference of Slicer.Module.Tests.
   assert_not_contains "matrix slicer absent" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_not_contains "matrix orca absent" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+}
+
+case_backend_core_change() {
+  local out="$1"
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.Core/IPrinterBackend.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_slicer_change() {
@@ -211,6 +225,7 @@ case_slicer_change() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "mig slicer pg" "$mig" "SlicerPg" || return 1
@@ -229,6 +244,17 @@ case_orca_worker_change() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_worker_shared_change() {
+  local out="$1"
+  CHANGED_FILES="src/worker-shared/WorkerHost.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
 }
 
 case_migration_app_change() {
@@ -379,6 +405,7 @@ case_hook_file_change() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_ci_script_change() {
@@ -388,6 +415,7 @@ case_ci_script_change() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_tools_only_build_no_tests() {
@@ -420,6 +448,7 @@ case_push_to_development_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_push_to_main_full_safe() {
@@ -429,6 +458,26 @@ case_push_to_main_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
+}
+
+case_workflow_trusted_push_contract() {
+  local push_block
+  push_block="$(awk '
+    { sub(/\r$/, "") }
+    /^  push:$/ { capture = 1 }
+    capture { print }
+    /^  pull_request:$/ { exit }
+  ' "$WORKFLOW")"
+  assert_contains "trusted branches" "$push_block" "branches: [main, development]" || return 1
+  assert_not_contains "no push paths filter" "$push_block" "paths:" || return 1
+}
+
+case_workflow_has_no_dotnet_format() {
+  local workflow
+  workflow="$(cat "$WORKFLOW")"
+  assert_not_contains "no format job" "$workflow" "dotnet-format" || return 1
+  assert_not_contains "no format command" "$workflow" "dotnet format" || return 1
 }
 
 case_workflow_dispatch_full_safe() {
@@ -438,6 +487,7 @@ case_workflow_dispatch_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_force_full_safe_from_caller() {
@@ -582,6 +632,7 @@ case_settings_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_required_matrix "$(get_output "$out" matrix)" || return 1
 }
 
 case_mixed_react_and_dotnet() {
@@ -604,8 +655,10 @@ TESTS=(
   case_api_change
   case_infra_change
   case_backend_plugin_change
+  case_backend_core_change
   case_slicer_change
   case_orca_worker_change
+  case_worker_shared_change
   case_migration_app_change
   case_migration_slicer_change
   case_test_only_api
@@ -624,6 +677,8 @@ TESTS=(
   case_mobile_change_no_dotnet
   case_push_to_development_full_safe
   case_push_to_main_full_safe
+  case_workflow_trusted_push_contract
+  case_workflow_has_no_dotnet_format
   case_workflow_dispatch_full_safe
   case_force_full_safe_from_caller
   case_empty_changes
