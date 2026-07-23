@@ -363,6 +363,14 @@ actor APIClient {
     private let encoder: JSONEncoder
     private var baseURL: URL
     private var accessToken: String?
+    /// J (issue #816 reject, Hicks): the STABLE server-identity id the current
+    /// authenticated session was applied for. Carried atomically in the same
+    /// mutation as `baseURL`/`accessToken`/`authSessionToken` so
+    /// `sessionSnapshotClient*` / `logoutOperationSnapshot*` can produce an
+    /// immutable snapshot whose network destination AND local-cleanup target
+    /// stay consistent even across a server switch that does NOT advance the
+    /// auth-operation epoch (registry-driven server switch).
+    private var currentServerID: UUID?
     /// The exact auth-session/operation token this client's authenticated session was
     /// applied under (A). Carried on a 401 so the expiry handler can reject a stale
     /// event; nil for unauthenticated / login clients.
@@ -508,13 +516,26 @@ actor APIClient {
         self.accessToken = token
     }
 
-    /// Applies base URL + access token ATOMICALLY, but only if `epoch.isCurrent(token)`
-    /// at the moment of application — a destination compare-and-set for the shared
-    /// session (issue #816 H2). Because this runs inside the APIClient actor, the epoch
-    /// check and the mutation cannot be separated by an await, so a superseded login /
-    /// restore can never clobber a newer operation's session. Returns whether applied.
+    /// Applies base URL + access token + server id ATOMICALLY, but only if
+    /// `epoch.isCurrent(token)` at the moment of application — a destination
+    /// compare-and-set for the shared session (issue #816 H2). Because this runs
+    /// inside the APIClient actor, the epoch check and the mutation cannot be
+    /// separated by an await, so a superseded login / restore can never clobber a
+    /// newer operation's session. Returns whether applied.
+    ///
+    /// J (issue #816 reject, Hicks): `serverID` is applied atomically with
+    /// baseURL/accessToken so a `sessionSnapshotClient*` produced later carries
+    /// the SAME stable server identity as its baseURL/bearer; logout can then use
+    /// that snapshot's `serverID` for local cleanup and cannot land on a different
+    /// server than the /logout network request ended up hitting.
     @discardableResult
-    func applySessionIfCurrent(baseURL: URL?, accessToken: String?, epoch: AuthOperationEpoch, token: Int) -> Bool {
+    func applySessionIfCurrent(
+        baseURL: URL?,
+        accessToken: String?,
+        serverID: UUID? = nil,
+        epoch: AuthOperationEpoch,
+        token: Int
+    ) -> Bool {
         // B: perform the currency check AND the session mutation as ONE atomic
         // operation under the epoch lock, so the epoch cannot advance between them.
         let applied: Bool? = epoch.withCurrent(token) {
@@ -523,6 +544,11 @@ actor APIClient {
                 UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
             }
             self.accessToken = accessToken
+            // J: the passed `serverID` is applied atomically with the session so
+            // a later snapshot cannot separate "which server was this session for"
+            // from "which host will the network go to". When clearing the session
+            // (accessToken == nil), the serverID is cleared too.
+            self.currentServerID = accessToken == nil ? nil : serverID
             // A: capture the exact auth-session/operation identity this authenticated
             // session was applied under, so a later 401 carries it and the handler can
             // reject a stale event without borrowing the current token.
@@ -530,6 +556,32 @@ actor APIClient {
             return true
         }
         return applied ?? false
+    }
+
+    /// J (issue #816 reject, Hicks): compare-and-clear the authenticated session
+    /// IFF the client still holds exactly `(expectedAccessToken,
+    /// expectedAuthSessionToken)`. Rollback primitive for a login/restore that
+    /// installed the shared session and then failed a subsequent operation-fenced
+    /// destination — clears our own T1 session, but if a newer T2 login has
+    /// already applied its own session (different accessToken/authSessionToken)
+    /// the compare fails and T2's session is left untouched. Does NOT change
+    /// baseURL (a rollback cannot restore an unknown prior baseURL; leaving the
+    /// last-applied baseURL is safe because any subsequent authenticated request
+    /// captures baseURL synchronously with the bearer via `RequestSession`, and
+    /// no request can be issued without a bearer). Returns whether cleared.
+    @discardableResult
+    func clearSessionIfMatches(
+        expectedAccessToken: String,
+        expectedAuthSessionToken: Int
+    ) -> Bool {
+        guard self.accessToken == expectedAccessToken,
+              self.authSessionToken == expectedAuthSessionToken else {
+            return false
+        }
+        self.accessToken = nil
+        self.authSessionToken = nil
+        self.currentServerID = nil
+        return true
     }
 
     /// Post a session-expiry event carrying the originating auth-session identity
@@ -566,6 +618,13 @@ actor APIClient {
         accessToken
     }
 
+    /// J (issue #816 reject, Hicks): the stable server-identity id the current
+    /// authenticated session was applied for. Used by tests / callers that need
+    /// to prove the atomic (baseURL, accessToken, serverID) coupling.
+    func currentServerIdentity() -> UUID? {
+        currentServerID
+    }
+
     func unauthenticatedClient(baseURL: URL) -> APIClient {
         APIClient(baseURL: baseURL, session: session)
     }
@@ -590,6 +649,47 @@ actor APIClient {
             APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken)
         }
         return snapshot
+    }
+
+    /// J (issue #816 reject, Hicks): the immutable full-fidelity logout snapshot.
+    /// Captured atomically in ONE APIClient actor hop, so `client.currentBaseURL`,
+    /// `accessToken`, and `serverID` all describe the SAME session and cannot be
+    /// separated by a concurrent registry-driven server switch. Callers use
+    /// `client` for the /logout network request AND `serverID` (when non-nil)
+    /// for local per-server cleanup, so a switch landing without an epoch
+    /// advance cannot cause /logout to hit server A while cleanup wipes server B.
+    struct LogoutSnapshot: Sendable {
+        let client: APIClient
+        let baseURL: URL
+        let accessToken: String?
+        let serverID: UUID?
+    }
+
+    /// J: unconditional atomic logout snapshot (used by legacy `.unspecified`
+    /// callers). Captures baseURL / accessToken / serverID in ONE actor hop.
+    func logoutOperationSnapshot() -> LogoutSnapshot {
+        LogoutSnapshot(
+            client: APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken),
+            baseURL: baseURL,
+            accessToken: accessToken,
+            serverID: currentServerID
+        )
+    }
+
+    /// J: operation-fenced atomic logout snapshot. Returns nil when the epoch has
+    /// advanced past `token` (a stale logout skips the network AND local cleanup
+    /// entirely); otherwise returns the immutable snapshot in ONE hop so a switch
+    /// landing between epoch check and capture cannot separate baseURL from
+    /// serverID.
+    func logoutOperationSnapshotIfCurrent(epoch: AuthOperationEpoch, token: Int) -> LogoutSnapshot? {
+        epoch.withCurrent(token) {
+            LogoutSnapshot(
+                client: APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken),
+                baseURL: baseURL,
+                accessToken: accessToken,
+                serverID: currentServerID
+            )
+        }
     }
 
     /// Restores a previously-saved server URL from UserDefaults.
@@ -728,7 +828,13 @@ actor APIClient {
         // session mutation cannot change our decision after we already committed to
         // building under this snapshot's identity.
         try validateRequestGeneration(session: requestSession)
-        guard let url = URL(string: path, relativeTo: baseURL) else {
+        // A1 (issue #816 reject, Hicks): resolve the URL against the SNAPSHOT's
+        // baseURL, NEVER `self.baseURL` — a concurrent applySessionIfCurrent /
+        // updateBaseURL during a preceding await (e.g. `getData`'s expiry checker
+        // await) could have repointed the shared client to server B, and building
+        // this request against `self.baseURL` would send a T1-labeled request
+        // under T1's bearer to server B's host.
+        guard let url = URL(string: path, relativeTo: requestSession.baseURL) else {
             throw NetworkError.invalidURL(path)
         }
         var request = URLRequest(url: url)
@@ -750,11 +856,19 @@ actor APIClient {
     /// Immutable snapshot of the authenticated request session, captured at API-call
     /// ENTRY — before request construction, the token-expiry checker, or ANY await (A1).
     /// Every downstream step — request building, expiry preflight, and the 401 post —
-    /// uses THIS snapshot's identity (bearer + generation + authSessionToken) so a
-    /// concurrent same-server re-login applied during an await can never make this
-    /// request build with T2's bearer while it is still labeled with T1's identity,
-    /// or vice versa. The snapshot is never re-read from `self` after a suspension.
+    /// uses THIS snapshot's identity (URL host / bearer / generation / authSessionToken)
+    /// so a concurrent same-client re-apply (login or server switch) executed during an
+    /// await can never make this request build with T2's URL host OR T2's bearer while
+    /// it is still labeled with T1's identity, or vice versa. The snapshot is never
+    /// re-read from `self` after a suspension.
+    ///
+    /// A1 (issue #816 reject, Hicks): `baseURL` is included in the SAME pre-await
+    /// capture as the bearer/generation/authSessionToken so a request that suspends on
+    /// the token-expiry checker cannot resume and read a newer `self.baseURL` (which
+    /// `applySessionIfCurrent`/`updateBaseURL` could have advanced during the await),
+    /// causing the outbound request to hit server B under T1's bearer / T1's identity.
     private struct RequestSession {
+        let baseURL: URL
         let accessToken: String?
         let generationAtCreation: Int?
         let authSessionToken: Int?
@@ -762,9 +876,11 @@ actor APIClient {
 
     /// Capture the immutable request-session identity synchronously (no await). Must be
     /// the FIRST thing every public request method does, before building the request or
-    /// awaiting the checker.
+    /// awaiting the checker. Captures `baseURL` in the same atomic read as the bearer
+    /// so host and bearer cannot diverge across any downstream suspension (A1).
     private func captureRequestSession() -> RequestSession {
         RequestSession(
+            baseURL: baseURL,
             accessToken: accessToken,
             generationAtCreation: generationAtCreation,
             authSessionToken: authSessionToken
