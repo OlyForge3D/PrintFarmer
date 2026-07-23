@@ -123,7 +123,7 @@ setup_repo() {
 
   install_fake_dotnet "$PATH_BIN"
 
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     git init -q -b main
     git config user.email "test@example.com"
     git config user.name  "Test"
@@ -163,7 +163,7 @@ run_hook_in_repo() {
   local path
   if [[ "$with_dotnet" == "yes" ]]; then
     path="$PATH_BIN:$PATH"
-    ( cd "$repo"
+    ( cd "$repo" || exit
       printf '%s' "$stdin_list" \
         | PATH="$path" \
             FAKE_LOG="$FAKE_LOG" \
@@ -189,7 +189,7 @@ run_hook_in_repo() {
     echo "FATAL per-run: git=$ck1 dotnet=$ck2" >&2
     return 99
   fi
-  ( cd "$repo"
+  ( cd "$repo" || exit
     printf '%s' "$stdin_list" \
       | env -i \
           PATH="$path" \
@@ -231,7 +231,7 @@ resolve_common_dir_for_test() {
 # make_commit <path> <content>
 make_commit() {
   local path="$1" content="$2" msg="$3"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     mkdir -p "$(dirname "$path")"
     printf '%s' "$content" > "$path"
     git add -A
@@ -332,9 +332,16 @@ case_cache_hit_skips_format() {
   local rc=0
   FAKE_FORMAT_RC=0 run_hook yes "$(push_line "$sha1" "$sha0")" >/dev/null 2>&1 || rc=$?
   assert_rc "first push" "$rc" "0" || return 1
-  # Count format invocations after first push.
+  # Count format invocations after first push. The fake `dotnet` logs every
+  # invocation, so `first_count` covers version probes AND the actual
+  # `--verify-no-changes` run.
   local first_count
   first_count="$(grep -c '^format ' "$FAKE_LOG" || true)"
+  if (( first_count < 1 )); then
+    printf '  expected at least one format invocation on first push, got %s\n' "$first_count" >&2
+    cat "$FAKE_LOG" >&2
+    return 1
+  fi
   # Second push of the same tree — should hit cache. Simulate by re-running.
   # We flip FAKE_FORMAT_RC to 1 so a re-verify would fail; cache hit must
   # bypass it.
@@ -343,11 +350,15 @@ case_cache_hit_skips_format() {
   assert_rc "second push cache hit" "$rc2" "0" || return 1
   local second_count
   second_count="$(grep -c '^format ' "$FAKE_LOG" || true)"
-  # Second push should NOT have added a new `format ...` line — only version
-  # probes.
-  # The first_count includes exactly one --verify-no-changes invocation.
-  # After the second push, the count of `format ./farm-web.sln --verify-no-changes`
-  # should remain unchanged.
+  # Cache hit still runs `dotnet format --version` probes inside the extracted
+  # worktree (so `global.json` can pin the SDK), so `second_count` must have
+  # grown. What must NOT change is the count of `--verify-no-changes` runs.
+  if (( second_count < first_count )); then
+    printf '  fake dotnet log shrank between pushes: first=%s second=%s\n' \
+      "$first_count" "$second_count" >&2
+    cat "$FAKE_LOG" >&2
+    return 1
+  fi
   local verify_count
   verify_count="$(grep -Ec '^format .*--verify-no-changes' "$FAKE_LOG" || true)"
   if [[ "$verify_count" != "1" ]]; then
@@ -487,6 +498,39 @@ case_hook_uses_bash32_compatible_dedup() {
   fi
 }
 
+# Static regression: the pre-push hook must never expand an array with
+# `"${arr[@]}"` inside its dedup / summary paths without the
+# `${arr[@]+"${arr[@]}"}` guard, because Bash 3.2 (macOS default) + `set -u`
+# crashes on empty-array expansion. This is a Vasquez-blocker regression check.
+case_hook_dedup_safe_for_empty_arrays() {
+  # Extract just the main() body so we don't false-positive on helper functions
+  # that operate on caller-provided arrays known to be non-empty.
+  local body
+  body="$(awk '/^main\(\)[[:space:]]*\{/{f=1} f{print} f && /^\}[[:space:]]*$/{exit}' "$HOOK")"
+  if [[ -z "$body" ]]; then
+    printf '  could not locate main() body in %s\n' "$HOOK" >&2
+    return 1
+  fi
+  # Only flag `"${uniq[@]}"` / `"${tips[@]}"` that are NOT preceded by the
+  # safe `+` guard. `${uniq[@]+"${uniq[@]}"}` contains the substring but is
+  # safe; we exclude it explicitly.
+  local unsafe
+  unsafe="$(printf '%s\n' "$body" \
+    | grep -nE '"\$\{(uniq|tips)\[@\]\}"' \
+    | grep -vE '\$\{(uniq|tips)\[@\]\+' \
+    || true)"
+  if [[ -n "$unsafe" ]]; then
+    printf '  hook has unguarded empty-array expansion in main():\n%s\n' "$unsafe" >&2
+    return 1
+  fi
+  # Positive assertion: the guard pattern must actually be present, otherwise
+  # a future refactor that drops the arrays entirely would silently pass.
+  if ! grep -qE '\$\{(uniq|tips)\[@\]\+"\$\{(uniq|tips)\[@\]\}"\}' "$HOOK"; then
+    printf '  hook is missing the Bash 3.2 empty-array guard idiom\n' >&2
+    return 1
+  fi
+}
+
 case_non_dotnet_change_skipped() {
   # Only README changed → hook should skip format entirely.
   local sha0 sha1
@@ -508,7 +552,7 @@ case_missing_sln_fails_closed() {
   # Delete the sln → .cs still changed → hook must reject.
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     rm -f src/farm-web.sln
     printf 'class P { }\n' > src/api/Program.cs
     git add -A
@@ -543,7 +587,7 @@ case_rename_dotnet_to_nondotnet_verified() {
   # a .NET-relevant path change because --no-renames decomposes to add+delete.
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     git mv src/api/Program.cs docs/Program.cs.old
     git commit -q -m "move api to docs"
   )
@@ -556,13 +600,13 @@ case_rename_dotnet_to_nondotnet_verified() {
 case_rename_nondotnet_to_dotnet_verified() {
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     printf 'hello\n' > notes.txt
     git add notes.txt
     git commit -q -m "add notes"
   )
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     mkdir -p src/api
     git mv notes.txt src/api/Notes.cs
     git commit -q -m "promote notes to cs"
@@ -611,7 +655,7 @@ case_format_version_invalidates_cache() {
 case_csproj_change_verified() {
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     mkdir -p src/api
     printf '<Project />\n' > src/api/Farm.Web.Api.csproj
     git add -A
@@ -626,7 +670,7 @@ case_csproj_change_verified() {
 case_editorconfig_change_verified() {
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     printf 'root = true\n' > src/.editorconfig
     git add -A
     git commit -q -m "add editorconfig"
@@ -645,7 +689,7 @@ case_force_push_range() {
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
   sha1="$(make_commit src/api/Program.cs 'class P { /* branch1 */ }' "branch1")"
   # Reset and create an alternate history.
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     git reset -q --hard "$sha0"
   )
   sha2="$(make_commit src/api/Program.cs 'class Q { /* branch2 */ }' "branch2")"
@@ -692,6 +736,7 @@ TESTS=(
   case_windows_absolute_common_dir_preserved
   case_linked_worktree_uses_real_common_cache
   case_hook_uses_bash32_compatible_dedup
+  case_hook_dedup_safe_for_empty_arrays
   case_non_dotnet_change_skipped
   case_missing_sln_fails_closed
   case_empty_dotnet_version_rejected

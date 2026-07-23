@@ -258,8 +258,10 @@ classify_path() {
     mobile/*)
       printf 'mobile' ; return ;;
 
-    # Documentation and markdown outside src/.
-    docs/*|*.md|LICENSE|LICENSE.md|.gitignore|.gitattributes|.editorconfig)
+    # Documentation and markdown outside src/. `LICENSE.md` is intentionally
+    # not listed separately because `*.md` already covers it (ShellCheck
+    # SC2221 flagged the redundancy in an earlier iteration).
+    docs/*|*.md|LICENSE|.gitignore|.gitattributes|.editorconfig)
       printf 'docs' ; return ;;
 
     # Frontend.
@@ -300,6 +302,9 @@ finish() {
   local want_mig_drift="$4" full_matrix="$5" reason_raw="$6"
   shift 6
   # Remaining args: test project names, then a "---" separator, then mig entry names.
+  # `"$@"` is safe with 0 args; we defensively guard subsequent array
+  # expansions with `${arr[@]+"${arr[@]}"}` for Bash 3.2 + `set -u`
+  # (macOS default), which errors on `"${empty_arr[@]}"`.
   local test_selected=() mig_selected=() sawsep=0
   local a
   for a in "$@"; do
@@ -338,12 +343,11 @@ finish() {
   # Build mig matrix JSON.
   local mig_json='{"include":[]}'
   if (( ${#mig_selected[@]} > 0 )); then
-    local items="" first=1 entry name label project context provider
+    local items="" first=1 entry name
     for name in "${mig_selected[@]}"; do
       for entry in "${ALL_MIG_ENTRIES[@]}"; do
         IFS='|' read -r ename elabel eproject econtext eprovider <<< "$entry"
         if [[ "$ename" == "$name" ]]; then
-          label="$elabel" ; project="$eproject" ; context="$econtext" ; provider="$eprovider"
           if (( first == 0 )); then items+=","; fi
           first=0
           items+='{"name":"'"$ename"'","label":"'"$elabel"'","project":"'"$eproject"'","context":"'"$econtext"'","provider":"'"$eprovider"'"}'
@@ -398,6 +402,9 @@ finish() {
 
 # ---------------------------------------------------------------------------
 # Produce every test project + every mig entry (used by full-safe fallback).
+# `ALL_TEST_PROJECTS`/`ALL_MIG_ENTRIES` are non-empty constants but we still
+# guard the `finish` invocation with `${arr[@]+…}` so a future refactor that
+# empties them cannot regress into the Bash 3.2 empty-array crash path.
 # ---------------------------------------------------------------------------
 emit_full_safe() {
   local reason="$1"
@@ -405,7 +412,7 @@ emit_full_safe() {
   for entry in "${ALL_TEST_PROJECTS[@]}"; do all_tests+=("${entry%%|*}"); done
   for entry in "${ALL_MIG_ENTRIES[@]}"; do all_migs+=("${entry%%|*}"); done
   finish "true" "true" "true" "true" "true" "$reason" \
-    "${all_tests[@]}" "---" "${all_migs[@]}"
+    ${all_tests[@]+"${all_tests[@]}"} "---" ${all_migs[@]+"${all_migs[@]}"}
 }
 
 # ---------------------------------------------------------------------------
@@ -620,12 +627,14 @@ main() {
   fi
 
   # Dedup test/mig names with indexed arrays so the selector remains runnable
-  # under macOS's Bash 3.2 as well as CI's newer Bash.
+  # under macOS's Bash 3.2 as well as CI's newer Bash. Bash 3.2 + `set -u`
+  # errors on `"${empty_arr[@]}"`; the `${arr[@]+"${arr[@]}"}` form is safe
+  # on the first-item iteration when `out`/`out2` are still empty.
   local -a out=()
   local nm existing duplicate
-  for nm in "${test_names[@]}"; do
+  for nm in ${test_names[@]+"${test_names[@]}"}; do
     duplicate=0
-    for existing in "${out[@]}"; do
+    for existing in ${out[@]+"${out[@]}"}; do
       if [[ "$existing" == "$nm" ]]; then
         duplicate=1
         break
@@ -635,13 +644,13 @@ main() {
       out+=("$nm")
     fi
   done
-  test_names=("${out[@]}")
+  test_names=(${out[@]+"${out[@]}"})
 
   local -a out2=()
   local nm2 existing2
-  for nm2 in "${mig_names[@]}"; do
+  for nm2 in ${mig_names[@]+"${mig_names[@]}"}; do
     duplicate=0
-    for existing2 in "${out2[@]}"; do
+    for existing2 in ${out2[@]+"${out2[@]}"}; do
       if [[ "$existing2" == "$nm2" ]]; then
         duplicate=1
         break
@@ -651,12 +660,14 @@ main() {
       out2+=("$nm2")
     fi
   done
-  mig_names=("${out2[@]}")
+  mig_names=(${out2[@]+"${out2[@]}"})
 
   # When nothing at all is wanted, still return a well-formed set of outputs.
+  # `test_names`/`mig_names` may be empty here (e.g. pure-frontend scoped run);
+  # guard both expansions so the final `finish` call is safe on Bash 3.2.
   finish "$want_frontend" "$want_dotnet_build" "$want_dotnet_test" \
          "$want_mig_drift" "false" "$reason" \
-         "${test_names[@]}" "---" "${mig_names[@]}"
+         ${test_names[@]+"${test_names[@]}"} "---" ${mig_names[@]+"${mig_names[@]}"}
 }
 
 main "$@"

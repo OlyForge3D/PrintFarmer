@@ -599,6 +599,56 @@ case_selector_uses_bash32_compatible_dedup() {
   fi
 }
 
+# Static regression (Vasquez blocker): the selector must never expand its
+# dedup output arrays (`out`, `out2`) or its `finish`-args arrays (`test_names`,
+# `mig_names`, `all_tests`, `all_migs`) with a bare `"${arr[@]}"` — Bash 3.2
+# (macOS default) + `set -u` crashes on empty-array expansion. Every such
+# expansion must use the `${arr[@]+"${arr[@]}"}` guard.
+case_selector_dedup_safe_for_empty_arrays() {
+  local names='out|out2|test_names|mig_names|all_tests|all_migs'
+  # Find any "${name[@]}" occurrence and filter out the safe `+` form.
+  local unsafe
+  unsafe="$(grep -nE "\"\\\$\\{($names)\\[@\\]\\}\"" "$SELECTOR" \
+    | grep -vE "\\\$\\{($names)\\[@\\]\\+" \
+    || true)"
+  if [[ -n "$unsafe" ]]; then
+    printf '  selector has unguarded empty-array expansions:\n%s\n' "$unsafe" >&2
+    return 1
+  fi
+  # Positive assertion — the guard idiom must actually appear, otherwise a
+  # future refactor that removes the arrays entirely would silently pass.
+  if ! grep -qE "\\\$\\{($names)\\[@\\]\\+\"\\\$\\{($names)\\[@\\]\\}\"\\}" "$SELECTOR"; then
+    printf '  selector is missing the Bash 3.2 empty-array guard idiom\n' >&2
+    return 1
+  fi
+}
+
+# Static regression: the `finish` function itself must tolerate being called
+# with zero trailing test/mig arguments. `"$@"` is safe with 0 args, but the
+# derived `test_selected` / `mig_selected` arrays must be built without a
+# bare `"${empty_arr[@]}"` anywhere in the function body.
+case_selector_finish_tolerates_empty_args() {
+  local body
+  body="$(awk '/^finish\(\)[[:space:]]*\{/{f=1} f{print} f && /^\}[[:space:]]*$/{exit}' "$SELECTOR")"
+  if [[ -z "$body" ]]; then
+    printf '  could not locate finish() body\n' >&2
+    return 1
+  fi
+  # test_selected / mig_selected must only be expanded through length checks
+  # (`${#arr[@]}`) or through the `for x in "${arr[@]}"` loop, which Bash 3.2
+  # tolerates when the array was declared with `arr=()`. The dangerous pattern
+  # is a bare expansion in argument position — flag any such use.
+  local unsafe
+  unsafe="$(printf '%s\n' "$body" \
+    | grep -nE '"\$\{(test_selected|mig_selected)\[@\]\}"' \
+    | grep -vE 'for [a-z0-9_]+ in "\$\{(test_selected|mig_selected)\[@\]\}"' \
+    || true)"
+  if [[ -n "$unsafe" ]]; then
+    printf '  finish() has unsafe empty-array expansion:\n%s\n' "$unsafe" >&2
+    return 1
+  fi
+}
+
 # =============================================================================
 # Runner
 # =============================================================================
@@ -643,6 +693,8 @@ TESTS=(
   case_settings_full_safe
   case_mixed_react_and_dotnet
   case_selector_uses_bash32_compatible_dedup
+  case_selector_dedup_safe_for_empty_arrays
+  case_selector_finish_tolerates_empty_args
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'

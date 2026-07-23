@@ -126,16 +126,37 @@ array_contains() {
 # Renames are decomposed into old-name delete + new-name add so both sides
 # are classified.
 #
-# Sets DOTNET_RELEVANT=0|1 and CHANGED_N (int) on success. Returns nonzero
-# on any I/O failure — the caller MUST treat that as fail-closed.
+# Sets DOTNET_RELEVANT=0|1 on success. Returns nonzero on any I/O failure —
+# the caller MUST treat that as fail-closed.
 # ---------------------------------------------------------------------------
 DOTNET_RELEVANT=0
-CHANGED_N=0
+
+# _entry_is_dotnet_relevant <path>
+# Returns 0 (true) when the path is one dotnet format cares about. Uses
+# bash regex for arbitrary depth under src/ so we avoid the ShellCheck
+# SC2221/SC2222 false positives triggered by an enumeration of
+# `src/*.cs|src/*/*.cs|…` glob unions (bash case globs don't cross `/`,
+# but ShellCheck flags the union as overlapping).
+_entry_is_dotnet_relevant() {
+  local p="$1"
+  case "$p" in
+    src/farm-web.sln|src/.editorconfig|src/Directory.Build.props|src/Directory.Build.targets)
+      return 0 ;;
+  esac
+  # Any-depth src/**/*.cs or src/**/*.csproj.
+  if [[ "$p" =~ ^src/([^/]+/)*[^/]+\.(cs|csproj)$ ]]; then
+    return 0
+  fi
+  # Any-depth src/**/Directory.Build.{props,targets}.
+  if [[ "$p" =~ ^src/([^/]+/)+Directory\.Build\.(props|targets)$ ]]; then
+    return 0
+  fi
+  return 1
+}
 
 diff_dotnet_paths_z() {
   local from="$1" to="$2"
   DOTNET_RELEVANT=0
-  CHANGED_N=0
 
   # Two-pipeline strategy: git diff → filter loop. Check PIPESTATUS after.
   local tmp
@@ -149,24 +170,15 @@ diff_dotnet_paths_z() {
   fi
 
   # Read NUL-terminated entries. bash `read -d ''` uses NUL as delimiter.
-  local entry n=0 relevant=0
+  local entry relevant=0
   while IFS= read -r -d '' entry; do
     [[ -z "$entry" ]] && continue
-    n=$((n + 1))
-    case "$entry" in
-      src/*.cs|src/*/*.cs|src/*/*/*.cs|src/*/*/*/*.cs|src/*/*/*/*/*.cs|src/*/*/*/*/*/*.cs|src/*/*/*/*/*/*/*.cs)
-        relevant=1 ;;
-      src/*.csproj|src/*/*.csproj|src/*/*/*.csproj|src/*/*/*/*.csproj|src/*/*/*/*/*.csproj|src/*/*/*/*/*/*.csproj)
-        relevant=1 ;;
-      src/farm-web.sln|src/.editorconfig|src/Directory.Build.props|src/Directory.Build.targets)
-        relevant=1 ;;
-      src/*/Directory.Build.props|src/*/Directory.Build.targets)
-        relevant=1 ;;
-    esac
+    if _entry_is_dotnet_relevant "$entry"; then
+      relevant=1
+    fi
   done < "$tmp"
 
   DOTNET_RELEVANT=$relevant
-  CHANGED_N=$n
   return 0
 }
 
@@ -359,14 +371,14 @@ main() {
   local any_relevant=0
   local -a tips=()
 
-  local local_ref local_sha remote_ref remote_sha
+  local local_ref local_sha _remote_ref remote_sha
   # `read` returns nonzero on EOF-without-newline; accept partial final line so
   # callers that omit the trailing \n (common in tests and some shell shims)
   # still get processed. Reset per iteration so a partial final line at EOF
   # doesn't cause the loop body to re-run on stale values.
   while :; do
-    local_ref="" local_sha="" remote_ref="" remote_sha=""
-    IFS=' ' read -r local_ref local_sha remote_ref remote_sha
+    local_ref="" local_sha="" _remote_ref="" remote_sha=""
+    IFS=' ' read -r local_ref local_sha _remote_ref remote_sha
     local _read_rc=$?
     if [[ -z "$local_ref" ]]; then
       break
@@ -428,16 +440,23 @@ main() {
 
   # Dedup tips (multiple refs may push the same commit). Use a linear indexed
   # array scan because macOS ships Bash 3.2 without associative arrays.
+  #
+  # Bash 3.2 with `set -u` errors when expanding `"${empty_array[@]}"` (fixed
+  # in 4.4). We guard every possibly-empty expansion with
+  # `${arr[@]+"${arr[@]}"}`, which expands to nothing when the array is
+  # empty or unset and to the quoted elements otherwise. Applies to the
+  # `array_contains` call on the first iteration (uniq empty) and to the
+  # subsequent for-loops if `tips`/`uniq` are empty.
   local -a uniq=()
   local t
-  for t in "${tips[@]}"; do
-    if ! array_contains "$t" "${uniq[@]}"; then
+  for t in ${tips[@]+"${tips[@]}"}; do
+    if ! array_contains "$t" ${uniq[@]+"${uniq[@]}"}; then
       uniq+=("$t")
     fi
   done
 
   local rc=0
-  for t in "${uniq[@]}"; do
+  for t in ${uniq[@]+"${uniq[@]}"}; do
     if ! verify_tip_sha "$t" "$hook_hash"; then
       rc=1
     fi

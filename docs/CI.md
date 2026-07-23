@@ -212,9 +212,9 @@ given tree.
   `bash scripts/ci/tests/test-select-dotnet-tests.sh` and
   `bash .githooks/tests/test-pre-push.sh` locally.
 - `dotnet-test` matrix leg failed → per-project `TestResults/*.trx` is uploaded
-  as `trx-<project>` artifact. Download and inspect. The workflow also asserts
-  that the TRX reports non-zero executed tests, so an empty test run is a hard
-  failure rather than a silent pass.
+  as `dotnet-test-results-<project>` artifact. Download and inspect. The
+  workflow also asserts that the TRX reports non-zero executed tests, so an
+  empty test run is a hard failure rather than a silent pass.
 - `migration-drift` failed → the model on your branch drifted from the last
   migration. Regenerate migrations per [Migrations](../src/migrations/README.md)
   and commit them.
