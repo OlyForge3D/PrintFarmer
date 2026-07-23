@@ -1714,14 +1714,27 @@ final class PredictiveViewModelTests: XCTestCase {
         async let a1: AsyncGate.ParkAckResult = gate.waitForObserverParked(token)
         async let a2: AsyncGate.ParkAckResult = gate.waitForObserverParked(token)
         let t = Task { await gate.awaitObserver(token) }
+
+        // Intended state proof BEFORE any cleanup: both ACKs resolve
+        // `.parked` and the actor holds one parked continuation.
         let (r1, r2) = await (a1, a2)
         XCTAssertEqual(r1, .parked)
         XCTAssertEqual(r2, .parked)
-        _ = await gate.registerWaiter()
-        await t.value
-        let snap = await gate.snapshot()
-        XCTAssertEqual(snap.observerParkAckQueueTotal, 0)
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.parkedObserverCount, 1)
+        XCTAssertEqual(mid.observerParkAckQueueTotal, 0,
+                       "both queued ACKs drained at park")
+
+        // Vasquez R3: close UNCONDITIONALLY before awaiting task value.
+        // This test's intended terminal path IS close draining the park;
+        // no natural resume was expected, so `parkedResumedByClose`
+        // going to 1 is the intended cleanup, not a rescue.
         await gate.close()
+        await t.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        XCTAssertEqual(final.observerFateCounts[.closedWhileParked] ?? 0, 1)
     }
 
     /// Hicks A: ACK call AFTER park returns immediately `.parked`.
@@ -1729,12 +1742,24 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let token = await gate.registerObserver()
         let t = Task { await gate.awaitObserver(token) }
-        _ = await gate.waitForObserverParked(token)   // first waits for park
+
+        // Intended state proof: first ACK observes park, second ACK
+        // (after park) returns immediately `.parked`.
+        _ = await gate.waitForObserverParked(token)
         let second = await gate.waitForObserverParked(token)
         XCTAssertEqual(second, .parked)
-        _ = await gate.registerWaiter()
-        await t.value
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.parkedObserverCount, 1)
+        XCTAssertEqual(mid.observerParkAckQueueTotal, 0)
+
+        // Vasquez R3: close unconditionally BEFORE awaiting task.value.
+        // No natural resume was intended here; close drains the park.
         await gate.close()
+        await t.value
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.parkedObserverCount, 0)
+        XCTAssertEqual(final.observerFateCounts[.closedWhileParked] ?? 0, 1)
     }
 
     /// Hicks A: pre-park ACK on an active token is drained by close()
@@ -2156,18 +2181,31 @@ final class PredictiveViewModelTests: XCTestCase {
         let token = await gate.registerObserver()
         let ticket = await gate.enterObserverParkAck(token)
 
-        // Park + signal completes before we call value().
         let park = Task { await gate.awaitObserver(token) }
         _ = await gate.waitForObserverParked(token)
-        // Ticket resolves to .parked here (buffered inside ticket).
+        // Actor resolved the ticket at park time — BEFORE any
+        // consumer awaits it.
         XCTAssertTrue(ticket.isResolved,
                       "actor must have resolved ticket at park time")
+
+        // Trigger intended resume (registerWaiter signals observers).
         _ = await gate.registerWaiter()
+        // Assert intended resume via actor snapshot BEFORE any
+        // stranding wait.
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.observerResumeCounts[.parkedResumedBySignal] ?? 0, 1,
+                       "intended natural resume happened before close")
+
+        // Vasquez R3: close UNCONDITIONALLY before awaiting park.value.
+        // If the intended resume regresses, close drains the park and
+        // the following `parkedResumedByClose == 0` assertion fails
+        // instead of hanging.
+        await gate.close()
         await park.value
 
-        // R3: close before final value() call — the ticket's buffered
-        // .parked result is caller-owned and independent of gate state.
-        await gate.close()
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedByClose] ?? 0, 0,
+                       "close must not manufacture the intended resume")
 
         // Late consumer still gets the buffered .parked.
         let r = await ticket.value()
@@ -2184,10 +2222,21 @@ final class PredictiveViewModelTests: XCTestCase {
         let park = Task { await gate.awaitWaiter(token) }
         _ = await gate.waitForWaiterParked(token)
         XCTAssertTrue(ticket.isResolved)
+
+        // Intended resume: open() drains the parked waiter.
         await gate.open()
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1,
+                       "intended natural resume happened before close")
+
+        // Vasquez R3: close before task.value; assert no rescue.
+        await gate.close()
         await park.value
 
-        await gate.close()
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0,
+                       "close must not manufacture the intended resume")
+
         let r = await ticket.value()
         XCTAssertEqual(r, .parked)
     }
