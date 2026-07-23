@@ -833,12 +833,19 @@ case_workflow_publish_printf_option_safe() {
 # reads `.github/workflows/ci.yml`, extracts the `migration-drift:` job, and
 # asserts:
 #   * a "Restore migration project" step exists and references MATRIX_PROJECT
+#   * a "Build migration project" step exists
 #   * that restore step appears BEFORE "Check EF Core migration drift"
 #   * the EF invocation uses `--no-build` (matching restore+build+no-build
 #     ordering, so we do not re-trigger restore inside the EF tool)
-#   * the drift step distinguishes exit code 1 (real drift) from other
-#     non-zero exits (tool/restore/build errors) so infrastructure failures
-#     are not misreported as "pending model changes"
+#   * the drift step emits a truthful GENERIC annotation for any non-zero
+#     exit code (`EF Core migration drift check failed`) — because
+#     `dotnet ef` cannot be relied on to return a unique code for real
+#     drift vs. tool / design-time context / provider failures, the check
+#     must not classify rc=1 uniquely as drift.
+#   * the drift step does NOT emit the old rc=1-only annotation
+#     (`EF Core migration drift detected`) or a `1)` case arm, both of
+#     which would falsely tell authors "you have pending model changes"
+#     when the tool actually failed to run.
 case_workflow_migration_drift_restores_before_ef() {
   local workflow="$REPO_ROOT/.github/workflows/ci.yml"
   extract_job_block() {
@@ -871,10 +878,26 @@ case_workflow_migration_drift_restores_before_ef() {
     'name: Build migration project' || return 1
   assert_contains "ef step uses --no-build" "$block" \
     '--no-build' || return 1
-  assert_contains "drift step distinguishes tool errors" "$block" \
+
+  # Positive: single truthful generic annotation for any non-zero rc.
+  assert_contains "drift step emits generic non-zero annotation" "$block" \
     'EF Core migration drift check failed' || return 1
-  assert_contains "drift step keeps drift annotation" "$block" \
+
+  # Negative: the rejected R6 shape classified rc=1 uniquely as real drift
+  # via a case arm `1) ... EF Core migration drift detected`. `dotnet ef`
+  # returns non-zero (including 1) for design-time / tool / context /
+  # provider failures too, so that annotation would send authors chasing
+  # a migration they don't need. Guard against regression:
+  assert_not_contains "no rc=1-only drift annotation" "$block" \
     'EF Core migration drift detected' || return 1
+  # Belt-and-braces: no bare `1)` case arm anywhere in the drift job that
+  # would branch behavior purely on rc=1. We check via grep because
+  # assert_not_contains matches literal substrings, and we need a regex
+  # anchored to leading whitespace + `1)` to avoid false positives.
+  if printf '%s\n' "$block" | grep -Eq '^[[:space:]]+1\)[[:space:]]*$'; then
+    printf '  drift step must not contain a `1)` case arm (rc=1 is not uniquely drift)\n' >&2
+    return 1
+  fi
 
   # Order check: "Restore migration project" must precede "Check EF Core
   # migration drift". Line numbers within the extracted block are enough

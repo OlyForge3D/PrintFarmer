@@ -285,14 +285,18 @@ jobs:
           MATRIX_PROJECT: ${{ matrix.project }}
           MATRIX_CONTEXT: ${{ matrix.context }}
           DB_PROVIDER: ${{ matrix.provider }}
-        # `has-pending-model-changes` exit-code convention (EF Core 8+):
-        #   0 = no pending model changes
-        #   1 = drift (a migration is needed)
-        #   other non-zero = tool/restore/build error
-        # We branch on the exit code so infrastructure failures do NOT
-        # get reported as "pending model changes" (a misleading annotation
-        # that would send authors chasing a migration they don't need).
-        # Both drift and tooling errors still fail the job (fail-closed).
+        # `dotnet ef migrations has-pending-model-changes` returns 0 when the
+        # snapshot matches the current model. Any non-zero exit code means the
+        # check did not confirm "no drift", but the tool does NOT distinguish
+        # real drift (rc=1 on success paths) from design-time failures
+        # (missing/failed context factory, provider load errors, tool/version
+        # mismatches, restore/build errors surfaced through the tool) — those
+        # also exit non-zero, including 1, across supported EF Core versions.
+        # Because we cannot classify the cause purely from the exit code, we
+        # emit a single truthful annotation for any non-zero rc and direct the
+        # reader to the tool output already streamed to the Actions log. The
+        # job stays fail-closed either way: both drift and tool failures block
+        # the workflow.
         run: |
           set -u
           echo "Checking $MATRIX_LABEL for pending EF Core model changes..."
@@ -304,19 +308,12 @@ jobs:
             --no-build
           rc=$?
           set -e
-          case "$rc" in
-            0)
-              echo "$MATRIX_LABEL: no pending model changes."
-              ;;
-            1)
-              echo "::error title=EF Core migration drift detected::$MATRIX_LABEL has pending model changes. Add a migration for $MATRIX_CONTEXT using DB_PROVIDER=$DB_PROVIDER."
-              exit 1
-              ;;
-            *)
-              echo "::error title=EF Core migration drift check failed::$MATRIX_LABEL: 'dotnet ef migrations has-pending-model-changes' exited with $rc (tool/restore/build error, NOT a drift signal). Review the log above."
-              exit "$rc"
-              ;;
-          esac
+          if [ "$rc" -eq 0 ]; then
+            echo "$MATRIX_LABEL: no pending model changes."
+          else
+            echo "::error title=EF Core migration drift check failed::$MATRIX_LABEL: 'dotnet ef migrations has-pending-model-changes' exited with $rc. This may indicate pending model changes (add a migration for $MATRIX_CONTEXT using DB_PROVIDER=$DB_PROVIDER) OR an EF Core tool / design-time context / provider failure. Inspect the tool output above to determine which."
+            exit "$rc"
+          fi
 
   # ---------------------------------------------------------------------------
   # dotnet-test — one matrix leg per affected test project.
