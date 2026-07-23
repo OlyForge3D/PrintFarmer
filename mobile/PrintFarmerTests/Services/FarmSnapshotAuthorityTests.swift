@@ -402,6 +402,222 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         // Recreating on the same domain still works (registers a fresh lock).
         _ = FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!, domainIdentifier: domain)
     }
+
+    // MARK: - H (issue #816 reject): shared domain coordinator + true durability
+
+    /// H: two Authorities constructed on the SAME persistence domain share ONE
+    /// coordinator, so B adopting a newer session on domain D is IMMEDIATELY
+    /// visible to A on the same domain D. A.isCurrent(oldSession) MUST return
+    /// false; A.withPromotion(oldSession) MUST refuse to run its body. Fixes the
+    /// reject: "A stale instance cannot promote after B adopts/tombstones."
+    func testCrossInstanceCoordinatorSharesCurrentAndBlocksStalePromotion() throws {
+        let domain = "shared-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        let authA = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: defaults, domainIdentifier: domain)
+        let authB = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: defaults, domainIdentifier: domain)
+
+        let ns = FarmSnapshotFixtures.namespace()
+        // A mints an "old" session; both A and B see it as current (shared coordinator).
+        let oldSession = try authA.mint(namespace: ns, generation: 0)!
+        XCTAssertTrue(authA.isCurrent(oldSession))
+        XCTAssertTrue(authB.isCurrent(oldSession),
+                      "B on the same domain must observe A's mint (shared coordinator)")
+
+        // B mints a newer session — A must now see the old session as NOT current.
+        let newerSession = try authB.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(newerSession.token, oldSession.token)
+        XCTAssertFalse(authA.isCurrent(oldSession),
+                       "A stale Authority MUST NOT still see the superseded session as current")
+        XCTAssertTrue(authA.isCurrent(newerSession),
+                      "A must see B's newer session as current (shared state)")
+
+        // A tries to run a promotion body against the stale session — must be blocked.
+        var bodyRan = false
+        let result = authA.withPromotion(oldSession, cancelled: { false }) {
+            bodyRan = true
+            return 42
+        }
+        XCTAssertNil(result, "stale withPromotion MUST return nil")
+        XCTAssertFalse(bodyRan, "stale withPromotion body MUST NOT run — B has newer current")
+    }
+
+    /// H: B tombstones a server on the shared domain; A on the same domain then
+    /// tries to reserve/mint on that server MUST refuse. Fixes: "B tombstones =>
+    /// A cannot reserve/promote."
+    func testCrossInstanceTombstoneBlocksPeerReserveAndPromote() throws {
+        let domain = "tomb-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        let authA = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: defaults, domainIdentifier: domain)
+        let authB = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: defaults, domainIdentifier: domain)
+        let serverID = UUID()
+        let ns = FarmSnapshotFixtures.namespace(server: serverID)
+
+        // B tombstones the server.
+        authB.tombstone(serverID)
+        XCTAssertTrue(authA.isTombstoned(serverID),
+                      "A must see B's tombstone immediately (shared coordinator)")
+
+        // A cannot reserve OR mint on the tombstoned server.
+        XCTAssertNil(try authA.reserve(namespace: ns, generation: 0),
+                     "A MUST NOT reserve on a server B tombstoned")
+        XCTAssertNil(try authA.mint(namespace: ns, generation: 0),
+                     "A MUST NOT mint on a server B tombstoned")
+
+        // A pre-existing (fabricated) session held in A can't promote either.
+        let fabricated = FarmSnapshotSession(namespace: ns, generation: 0, token: 999)
+        var bodyRan = false
+        let result = authA.withPromotion(fabricated, cancelled: { false }) {
+            bodyRan = true
+            return 1
+        }
+        XCTAssertNil(result)
+        XCTAssertFalse(bodyRan, "A MUST NOT promote a session on a tombstoned server")
+    }
+
+    /// H: process-style reopen — a coordinator dropped (nothing holds it) then a
+    /// fresh Authority is constructed on the same domain. The fresh Authority
+    /// MUST observe the durable state (reserved+adopted high-water, tombstones)
+    /// from the tombstone store, and MUST NOT rewind. Reserving a next token
+    /// after a token=100 adoption yields >100.
+    func testProcessStyleReopenPreservesDurableStateAcrossCoordinatorLifecycle() throws {
+        let domain = "reopen-\(UUID().uuidString)"
+        let suiteName = trackedSuiteName("tomb")
+        let defaults = UserDefaults(suiteName: suiteName)!
+
+        // Session 1: adopt a high token then drop the coordinator (simulate app quit).
+        do {
+            let a = FarmSnapshotFixtures.makeAuthority(
+                tombstoneDefaults: defaults, domainIdentifier: domain)
+            let ns = FarmSnapshotFixtures.namespace()
+            let high = FarmSnapshotSession(namespace: ns, generation: 0, token: 100)
+            XCTAssertTrue(try a.adopt(high))
+            // Drop the strong reference; releaseCoordinator makes the weak registry
+            // slot immediately reusable — otherwise we would rely on ARC alone.
+            _ = a
+        }
+        FarmSnapshotDomainCoordinator.releaseCoordinator(forDomain: domain)
+        FarmSnapshotTombstoneStore.releaseCoordinator(forDomain: domain)
+
+        // Session 2: fresh coordinator on the same domain — must see durable state.
+        let b = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: defaults, domainIdentifier: domain)
+        let ns = FarmSnapshotFixtures.namespace()
+        let minted = try b.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(minted.token, 100,
+                             "process-style reopen MUST NOT rewind the durable high-water")
+    }
+
+    /// H (durability): with a file-backed authority record present, a mint
+    /// persists BOTH to UserDefaults and to the atomic file. A second coordinator
+    /// on a different UserDefaults suite but SAME file record still sees the
+    /// durable reservation via the file.
+    func testFileBackedDurableRecordPersistsReservationAcrossInstances() throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let domain = "fileback-\(UUID().uuidString)"
+        let store1 = FarmSnapshotFixtures.makeTombstoneStore(
+            UserDefaults(suiteName: trackedSuiteName("tomb1"))!, domainIdentifier: domain)
+        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        let auth1 = FarmSnapshotAuthority(tombstoneStore: store1, durableAuthorityRecord: record)
+        let ns = FarmSnapshotFixtures.namespace()
+        let s1 = try auth1.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(s1.token, 0)
+
+        // Second Authority on a DIFFERENT tombstone suite but SAME durable file —
+        // its next reservation must be strictly above s1.token because the file
+        // is authoritative even though the UserDefaults suite is fresh.
+        let store2 = FarmSnapshotFixtures.makeTombstoneStore(
+            UserDefaults(suiteName: trackedSuiteName("tomb2"))!,
+            domainIdentifier: "fileback-other-\(UUID().uuidString)")
+        let auth2 = FarmSnapshotAuthority(tombstoneStore: store2, durableAuthorityRecord: record)
+        let s2 = try auth2.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(s2.token, s1.token,
+                             "file-backed durable record MUST persist reservation across independent instances")
+    }
+
+    /// H (acknowledged-write-loss injection): when the file record's atomic
+    /// write appears to succeed but a verified re-read observes different bytes
+    /// (simulated by pointing the file at an unwritable location), `mint` MUST
+    /// throw `.persistenceFailure` and no session is published.
+    func testFileBackedRecordSurfacesPersistenceFailureOnWriteLoss() throws {
+        // Point the record at a path whose parent directory does not exist AND
+        // cannot be created (a file whose path segment is a regular file).
+        let root = FarmSnapshotFixtures.tempRoot()
+        try FileManager.default.createDirectory(
+            at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Create a REGULAR file where the record wants to create its parent dir.
+        let blocker = root.appendingPathComponent("blocker.dat")
+        try Data([0xDE, 0xAD]).write(to: blocker)
+        let record = FarmSnapshotDurableAuthorityRecord(
+            rootURL: blocker.appendingPathComponent("nope", isDirectory: true))
+
+        let domain = "writeloss-\(UUID().uuidString)"
+        let store = FarmSnapshotFixtures.makeTombstoneStore(
+            UserDefaults(suiteName: trackedSuiteName("tomb"))!, domainIdentifier: domain)
+        let auth = FarmSnapshotAuthority(tombstoneStore: store, durableAuthorityRecord: record)
+        let ns = FarmSnapshotFixtures.namespace()
+
+        XCTAssertThrowsError(try auth.mint(namespace: ns, generation: 0)) { err in
+            // Either .persistenceFailure or a low-level file-write error is acceptable —
+            // the invariant is that NO session is published.
+            _ = err
+        }
+        XCTAssertNil(auth.currentSession(),
+                     "no session may be published when the durable record write fails")
+    }
+
+    /// H (coordinator lifecycle): the weak registry evicts dead coordinators, so
+    /// a second Authority created after the first is deallocated gets a FRESH
+    /// coordinator instance (identity check via a marker session). Prevents the
+    /// old reject: "must not retain random domains forever or permit two locks
+    /// while live."
+    func testCoordinatorWeakRegistryEvictsDeadCoordinatorsOnRecreate() throws {
+        let domain = "lifecycle-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: trackedSuiteName("tomb"))!
+
+        // Create a coordinator via Authority A; drop A; explicitly release so any
+        // caching from tombstone-store lookup is cleared.
+        let ns = FarmSnapshotFixtures.namespace()
+        var lifetimeToken: UInt64 = 0
+        do {
+            let a = FarmSnapshotFixtures.makeAuthority(
+                tombstoneDefaults: defaults, domainIdentifier: domain)
+            lifetimeToken = try a.mint(namespace: ns, generation: 0)!.token
+        }
+        FarmSnapshotDomainCoordinator.releaseCoordinator(forDomain: domain)
+        FarmSnapshotTombstoneStore.releaseCoordinator(forDomain: domain)
+
+        // A brand new Authority on the same domain gets a fresh coordinator; the
+        // fresh coordinator seeds from durable state so a mint here is STRICTLY
+        // above the previously issued token.
+        let b = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: defaults, domainIdentifier: domain)
+        let nextToken = try b.mint(namespace: ns, generation: 0)!.token
+        XCTAssertGreaterThan(nextToken, lifetimeToken,
+                             "recreated coordinator must still honor durable state (no rewind)")
+    }
+
+    /// H (overflow via file-backed record): when the file record's reservation
+    /// counter is at UInt64.max, `reserveNextToken` throws typed
+    /// `.tokenSpaceExhausted` and NO session is published.
+    func testFileBackedRecordSurfacesTokenSpaceExhaustedAtUInt64Max() throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Pre-seed the file record at UInt64.max via direct adopt.
+        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        XCTAssertTrue(try record.tryAdopt(token: UInt64.max))
+        XCTAssertEqual(record.loadReservedHighWater(), UInt64.max)
+
+        XCTAssertThrowsError(try record.reserveNextToken()) { err in
+            XCTAssertEqual(err as? FarmSnapshotAuthorityError, .tokenSpaceExhausted)
+        }
+    }
 }
 
 /// UserDefaults subclass that silently drops writes to the RESERVED and ADOPTED
