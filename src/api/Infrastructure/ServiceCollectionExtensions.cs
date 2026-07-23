@@ -624,6 +624,9 @@ public static class ServiceCollectionExtensions
         // Model collection services
         _ = services.AddScoped<Farm.Infrastructure.Services.Collections.IModelCollectionService, Farm.Infrastructure.Services.Collections.ModelCollectionService>();
 
+        // Library sync service (cursor-based pull + transactional apply, issue #845)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Sync.ILibrarySyncService, Farm.Infrastructure.Services.Sync.LibrarySyncService>();
+
         // Task services (user task management)
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();

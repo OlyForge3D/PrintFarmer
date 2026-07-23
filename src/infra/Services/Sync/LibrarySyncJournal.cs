@@ -56,6 +56,40 @@ public class LibrarySyncJournal(AppDbContext dbContext) : ILibrarySyncJournal
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<LibrarySyncChange>> GetVisibleChangesSinceAsync(
+        long afterRevision,
+        Guid callerUserId,
+        bool callerIsAdmin,
+        int maxCount,
+        CancellationToken ct)
+    {
+        if (maxCount <= 0)
+        {
+            return [];
+        }
+
+        IQueryable<LibrarySyncChange> query = Changes
+            .AsNoTracking()
+            .Where(c => c.Revision > afterRevision);
+
+        if (!callerIsAdmin)
+        {
+            // Regular callers see only what they may observe: their own changes, shared
+            // changes, and owner-less changes. Applied in-store so no out-of-scope row is
+            // ever materialized, keeping the cursor leak-proof across users.
+            query = query.Where(c =>
+                c.OwnerUserId == callerUserId
+                || c.Visibility == SyncVisibility.Shared
+                || c.OwnerUserId == null);
+        }
+
+        return await query
+            .OrderBy(c => c.Revision)
+            .Take(maxCount)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<LibrarySyncChange>> GetChangesForEntityAsync(SyncEntityType entityType, Guid entityId, CancellationToken ct)
     {
         return await Changes
