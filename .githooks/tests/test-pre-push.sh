@@ -505,8 +505,13 @@ case_hook_uses_bash32_compatible_dedup() {
 case_hook_dedup_safe_for_empty_arrays() {
   # Extract just the main() body so we don't false-positive on helper functions
   # that operate on caller-provided arrays known to be non-empty.
+  #
+  # `sub(/\r$/, "")` strips any trailing CR defensively. `.githooks/pre-push`
+  # is gitattribute-pinned to LF today, but a future contributor could edit
+  # the hook on Windows without honoring the attribute; the awk should still
+  # match the exact `main() {` / `}` block delimiters.
   local body
-  body="$(awk '/^main\(\)[[:space:]]*\{/{f=1} f{print} f && /^\}[[:space:]]*$/{exit}' "$HOOK")"
+  body="$(awk '{ sub(/\r$/, "") } /^main\(\)[[:space:]]*\{/{f=1} f{print} f && /^\}[[:space:]]*$/{exit}' "$HOOK")"
   if [[ -z "$body" ]]; then
     printf '  could not locate main() body in %s\n' "$HOOK" >&2
     return 1
@@ -514,10 +519,15 @@ case_hook_dedup_safe_for_empty_arrays() {
   # Only flag `"${uniq[@]}"` / `"${tips[@]}"` that are NOT preceded by the
   # safe `+` guard. `${uniq[@]+"${uniq[@]}"}` contains the substring but is
   # safe; we exclude it explicitly.
+  #
+  # Use `[+]` (literal `+` inside a bracket expression) rather than `\+`
+  # because POSIX ERE leaves `\+` undefined behavior — GNU grep happens to
+  # treat `\+` as a literal plus, but BSD grep on macOS may treat it as
+  # "one-or-more" repetition (matching zero literal plus signs) or reject it.
   local unsafe
   unsafe="$(printf '%s\n' "$body" \
     | grep -nE '"\$\{(uniq|tips)\[@\]\}"' \
-    | grep -vE '\$\{(uniq|tips)\[@\]\+' \
+    | grep -vE '\$\{(uniq|tips)\[@\][+]' \
     || true)"
   if [[ -n "$unsafe" ]]; then
     printf '  hook has unguarded empty-array expansion in main():\n%s\n' "$unsafe" >&2
@@ -525,7 +535,7 @@ case_hook_dedup_safe_for_empty_arrays() {
   fi
   # Positive assertion: the guard pattern must actually be present, otherwise
   # a future refactor that drops the arrays entirely would silently pass.
-  if ! grep -qE '\$\{(uniq|tips)\[@\]\+"\$\{(uniq|tips)\[@\]\}"\}' "$HOOK"; then
+  if ! grep -qE '\$\{(uniq|tips)\[@\][+]"\$\{(uniq|tips)\[@\]\}"\}' "$HOOK"; then
     printf '  hook is missing the Bash 3.2 empty-array guard idiom\n' >&2
     return 1
   fi

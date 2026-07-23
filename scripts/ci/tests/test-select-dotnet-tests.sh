@@ -411,7 +411,13 @@ case_workflow_trusted_pushes_unfiltered() {
   local workflow="$REPO_ROOT/.github/workflows/ci.yml"
   extract_event_block() {
     local event="$1"
+    # NOTE: Strip any trailing CR before pattern matching so a Windows-checkout
+    # (`core.autocrlf=true`) worktree, where `ci.yml` may have CRLF line
+    # endings, is compared byte-for-byte the same as a Linux-style checkout.
+    # Without this a BSD/POSIX awk on macOS or an awk that does not silently
+    # trim `\r` in text mode would fail the exact-match on `$0 == marker`.
     awk -v marker="  ${event}:" '
+      { sub(/\r$/, "") }
       $0 == marker { inside = 1; next }
       inside && (/^[^ ]/ || /^  [A-Za-z_][A-Za-z0-9_-]*:/) { exit }
       inside { print }
@@ -607,9 +613,12 @@ case_selector_uses_bash32_compatible_dedup() {
 case_selector_dedup_safe_for_empty_arrays() {
   local names='out|out2|test_names|mig_names|all_tests|all_migs'
   # Find any "${name[@]}" occurrence and filter out the safe `+` form.
+  # Use `[+]` (literal `+` inside a bracket expression) rather than `\+`
+  # because POSIX ERE leaves `\+` undefined and BSD grep on macOS may treat
+  # it as "one-or-more" or as an error rather than a literal plus.
   local unsafe
   unsafe="$(grep -nE "\"\\\$\\{($names)\\[@\\]\\}\"" "$SELECTOR" \
-    | grep -vE "\\\$\\{($names)\\[@\\]\\+" \
+    | grep -vE "\\\$\\{($names)\\[@\\][+]" \
     || true)"
   if [[ -n "$unsafe" ]]; then
     printf '  selector has unguarded empty-array expansions:\n%s\n' "$unsafe" >&2
@@ -617,7 +626,7 @@ case_selector_dedup_safe_for_empty_arrays() {
   fi
   # Positive assertion — the guard idiom must actually appear, otherwise a
   # future refactor that removes the arrays entirely would silently pass.
-  if ! grep -qE "\\\$\\{($names)\\[@\\]\\+\"\\\$\\{($names)\\[@\\]\\}\"\\}" "$SELECTOR"; then
+  if ! grep -qE "\\\$\\{($names)\\[@\\][+]\"\\\$\\{($names)\\[@\\]\\}\"\\}" "$SELECTOR"; then
     printf '  selector is missing the Bash 3.2 empty-array guard idiom\n' >&2
     return 1
   fi
@@ -629,7 +638,10 @@ case_selector_dedup_safe_for_empty_arrays() {
 # bare `"${empty_arr[@]}"` anywhere in the function body.
 case_selector_finish_tolerates_empty_args() {
   local body
-  body="$(awk '/^finish\(\)[[:space:]]*\{/{f=1} f{print} f && /^\}[[:space:]]*$/{exit}' "$SELECTOR")"
+  # Strip any trailing CR from selector source lines defensively (the file is
+  # gitattribute-pinned to LF today, but future changes must not break this
+  # extractor if the working tree ever picks up CRLF).
+  body="$(awk '{ sub(/\r$/, "") } /^finish\(\)[[:space:]]*\{/{f=1} f{print} f && /^\}[[:space:]]*$/{exit}' "$SELECTOR")"
   if [[ -z "$body" ]]; then
     printf '  could not locate finish() body\n' >&2
     return 1
@@ -645,6 +657,66 @@ case_selector_finish_tolerates_empty_args() {
     || true)"
   if [[ -n "$unsafe" ]]; then
     printf '  finish() has unsafe empty-array expansion:\n%s\n' "$unsafe" >&2
+    return 1
+  fi
+}
+
+# =============================================================================
+# Portability regressions specific to this Windows-worktree revision (#772).
+# =============================================================================
+
+# extract_event_block, when applied to a workflow file that carries CRLF line
+# endings (a Windows worktree with `core.autocrlf=true` will produce this),
+# must still exact-match the event marker line. This regression case builds a
+# synthetic CRLF YAML fixture in a temp file, runs the same awk pattern used
+# by case_workflow_trusted_pushes_unfiltered, and asserts the returned block
+# contains the expected content and none of the sibling events.
+case_extract_event_block_crlf_tolerant() {
+  local fixture
+  fixture="$(mktemp)"
+  # NOTE: emit CRLF explicitly with `\r\n` inside printf. Do not rely on the
+  # host runtime translating line endings for us.
+  printf 'name: CI\r\non:\r\n  workflow_dispatch:\r\n  push:\r\n    branches: [main, development]\r\n  pull_request:\r\n    types: [opened, synchronize, reopened]\r\njobs:\r\n  select:\r\n    runs-on: ubuntu-latest\r\n' > "$fixture"
+
+  local event="push"
+  local block
+  block="$(awk -v marker="  ${event}:" '
+    { sub(/\r$/, "") }
+    $0 == marker { inside = 1; next }
+    inside && (/^[^ ]/ || /^  [A-Za-z_][A-Za-z0-9_-]*:/) { exit }
+    inside { print }
+  ' "$fixture")"
+  rm -f -- "$fixture"
+
+  assert_contains "crlf push branches" "$block" "branches: [main, development]" || return 1
+  # The pull_request marker line and the top-level jobs: line must NOT appear
+  # inside the extracted push: block. This proves the awk actually terminates
+  # at the next sibling event under CRLF input.
+  assert_not_contains "crlf push isolated" "$block" "pull_request:" || return 1
+  assert_not_contains "crlf push isolated" "$block" "jobs:" || return 1
+}
+
+# Every `printf` in .github/workflows/ci.yml whose format string begins with a
+# literal `-` (a Markdown list bullet) must be preceded by the POSIX `--`
+# end-of-options marker. Otherwise Bash's `printf` builtin can, under `set -e`
+# and certain builds, treat the format string as an option. This test looks at
+# each `printf` line and asserts the leading-dash format is guarded.
+case_workflow_publish_printf_option_safe() {
+  local workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  # Collect any offending line: format string that starts with `-` (a bullet)
+  # but is NOT the `-- ` option-terminator form. `printf -- '- ...` is safe;
+  # `printf '- ...` is not.
+  local offenders
+  offenders="$(grep -nE "printf +'-[^-]" "$workflow" || true)"
+  if [[ -n "$offenders" ]]; then
+    printf '  workflow has unsafe leading-dash printf format strings:\n%s\n' "$offenders" >&2
+    return 1
+  fi
+  # Positive assertion — the `printf -- '- ...` idiom must actually appear so
+  # a future refactor that removes the bullet lines entirely does not silently
+  # pass this test (belt-and-braces).
+  if ! grep -qE "printf -- '- reason: " "$workflow"; then
+    printf '  workflow is missing the printf -- option-terminator idiom\n' >&2
     return 1
   fi
 }
@@ -695,6 +767,8 @@ TESTS=(
   case_selector_uses_bash32_compatible_dedup
   case_selector_dedup_safe_for_empty_arrays
   case_selector_finish_tolerates_empty_args
+  case_extract_event_block_crlf_tolerant
+  case_workflow_publish_printf_option_safe
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'
