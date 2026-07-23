@@ -4,6 +4,7 @@ import XCTest
 
 @MainActor
 final class ShiftTaskSignalRTests: XCTestCase {
+    #if DEBUG
     func testP3QueuedOldCallbackRechecksAuthorityInsideMainActorHop() async {
         let queue = ShiftTaskCallbackQueue()
         let viewModel = ShiftTasksViewModel(callbackEnqueuer: queue.enqueuer)
@@ -52,6 +53,7 @@ final class ShiftTaskSignalRTests: XCTestCase {
         currentSignalR.simulateTaskInvalidation(target: "taskupdated")
         XCTAssertEqual(queue.count, 0)
     }
+    #endif
 
     func testRepeatedSameServiceConfigurationDoesNotStackTaskListener() {
         let viewModel = ShiftTasksViewModel()
@@ -74,6 +76,7 @@ final class ShiftTaskSignalRTests: XCTestCase {
         XCTAssertEqual(signalR.taskInvalidationSubscriberCount, 0)
     }
 
+    #if DEBUG
     func testP4RawSignalRTransportMatrixAndFIFO() async throws {
         let service = SignalRService(
             serverURL: try XCTUnwrap(URL(string: "http://signalr.test")),
@@ -116,6 +119,7 @@ final class ShiftTaskSignalRTests: XCTestCase {
             ["taskcreated", "taskupdated", "pendingtaskcount"]
         )
     }
+    #endif
 
     func testP4FrameParserResetDropsSplitRecordOnCancellation() throws {
         var parser = SignalRFrameParser()
