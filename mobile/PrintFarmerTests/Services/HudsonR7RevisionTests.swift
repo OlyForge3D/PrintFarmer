@@ -151,18 +151,16 @@ final class HudsonR7RevisionTests: XCTestCase {
 
     // MARK: - J4 authenticated APIClient construction requires serverID
 
-    /// J4: constructing an authenticated APIClient (accessToken != nil)
-    /// without a serverID is a hard precondition failure — the client
-    /// cannot exist without a stable identity.
+    /// E (issue #816 reject): constructing an authenticated APIClient without a
+    /// serverID is now a COMPILE-TIME-impossible state (bundled
+    /// `AuthenticatedIdentity`) rather than a runtime precondition trap. We prove
+    /// the authenticated identity is bound atomically at construction.
     func testAPIClientAuthenticatedConstructionWithoutServerIDIsProhibited() {
-        // The precondition is enforced synchronously. We prove it by
-        // constructing WITH serverID (succeeds) and observing currentServerID
-        // is bound atomically at init.
+        // Identity is bundled, so a bearer and serverID are inseparable.
         let serverID = UUID()
         let client = APIClient(
             baseURL: URL(string: "https://a.example.com")!,
-            accessToken: "bearer",
-            serverID: serverID
+            authenticated: AuthenticatedIdentity(accessToken: "bearer", serverID: serverID)
         )
         // Read via the actor-isolated accessor.
         let expectation = expectation(description: "currentServerIdentity")
@@ -174,20 +172,18 @@ final class HudsonR7RevisionTests: XCTestCase {
         wait(for: [expectation], timeout: 5.0)
     }
 
-    /// J4: setAccessToken(nil) clears everything — accessToken, serverID,
+    /// E: clearSession() clears everything — accessToken, serverID,
     /// and authSessionToken — atomically.
     func testAPIClientSetAccessTokenNilClearsServerIDAndAuthSessionToken() async {
         let serverID = UUID()
         let client = APIClient(
             baseURL: URL(string: "https://a.example.com")!,
-            accessToken: "bearer",
-            authSessionToken: 42,
-            serverID: serverID
+            authenticated: AuthenticatedIdentity(accessToken: "bearer", serverID: serverID, authSessionToken: 42)
         )
         var observedServer = await client.currentServerIdentity()
         XCTAssertEqual(observedServer, serverID)
 
-        await client.setAccessToken(nil)
+        await client.clearSession()
         observedServer = await client.currentServerIdentity()
         let observedToken = await client.currentAccessToken()
         XCTAssertNil(observedServer, "J4: clearing accessToken clears serverID")

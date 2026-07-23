@@ -185,7 +185,7 @@ final class AuthServiceTests: XCTestCase {
         let sharedClient = APIClient(
             baseURL: firstServer.baseURL,
             session: mockAPIClient.urlSession,
-            accessToken: "first-token"
+            authenticated: AuthenticatedIdentity(accessToken: "first-token", serverID: firstServer.id)
         )
         authService = AuthService(
             apiClient: sharedClient,

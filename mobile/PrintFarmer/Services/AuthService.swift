@@ -164,7 +164,8 @@ actor AuthService: AuthServiceProtocol {
         var verifiedUser = response.user
         if verifiedUser == nil {
             let verifyClient = await apiClient.unauthenticatedClient(baseURL: server.baseURL)
-            await verifyClient.setAccessToken(token, serverID: server.id)
+            await verifyClient.setAuthenticatedSession(
+                AuthenticatedIdentity(accessToken: token, serverID: server.id))
             do {
                 verifiedUser = try await verifyClient.get("/api/auth/me")
             } catch {
@@ -245,10 +246,12 @@ actor AuthService: AuthServiceProtocol {
             // alongside the bearer so a later logout snapshot's serverID
             // matches the captured bearer/baseURL. There is no reachable
             // authenticated APIClient mutation that leaves serverID nil.
-            await apiClient.setAccessToken(token, serverID: server.id)
+            await apiClient.setAuthenticatedSession(
+                AuthenticatedIdentity(accessToken: token, serverID: server.id))
         } else {
-            let applied = await apiClient.applySessionIfCurrent(
-                baseURL: server.baseURL, accessToken: token, serverID: server.id,
+            let applied = await apiClient.applyAuthenticatedSessionIfCurrent(
+                baseURL: server.baseURL,
+                identity: AuthenticatedIdentity(accessToken: token, serverID: server.id),
                 epoch: authEpoch, token: operation.value
             )
             guard applied else {
@@ -333,7 +336,7 @@ actor AuthService: AuthServiceProtocol {
         // reread the mutable registry's activeServer, which is exactly the
         // A-request / B-cleanup bug the reviewer called out. Any
         // authenticated APIClient construction/mutation now carries serverID
-        // (see APIClient.init + setAccessToken(_:serverID:)), so a fenced
+        // (see APIClient.init(authenticated:) + setAuthenticatedSession), so a fenced
         // operation with a captured snapshot ALWAYS has serverID; a
         // `.unspecified` snapshot without serverID means the shared client
         // was never authenticated for any known server — safe to skip local
@@ -359,11 +362,10 @@ actor AuthService: AuthServiceProtocol {
         // Clear the shared session only if still current (destination CAS), so a stale
         // logout can never clear a newer session's APIClient bearer.
         if operation == .unspecified {
-            await apiClient.setAccessToken(nil)
+            await apiClient.clearSession()
         } else {
-            _ = await apiClient.applySessionIfCurrent(
-                baseURL: nil, accessToken: nil, serverID: nil,
-                epoch: authEpoch, token: operation.value
+            _ = await apiClient.clearSessionIfCurrent(
+                baseURL: nil, epoch: authEpoch, token: operation.value
             )
         }
     }
@@ -388,10 +390,12 @@ actor AuthService: AuthServiceProtocol {
         // still bind the stable serverID with the bearer (J4).
         if operation == .unspecified {
             await apiClient.updateBaseURL(server.baseURL)
-            await apiClient.setAccessToken(credentials.accessToken, serverID: server.id)
+            await apiClient.setAuthenticatedSession(
+                AuthenticatedIdentity(accessToken: credentials.accessToken, serverID: server.id))
         } else {
-            let applied = await apiClient.applySessionIfCurrent(
-                baseURL: server.baseURL, accessToken: credentials.accessToken, serverID: server.id,
+            let applied = await apiClient.applyAuthenticatedSessionIfCurrent(
+                baseURL: server.baseURL,
+                identity: AuthenticatedIdentity(accessToken: credentials.accessToken, serverID: server.id),
                 epoch: authEpoch, token: operation.value
             )
             guard applied else { return .superseded }
@@ -463,11 +467,10 @@ actor AuthService: AuthServiceProtocol {
                 }
                 if isCurrentOperation(operation) {
                     if operation == .unspecified {
-                        await apiClient.setAccessToken(nil)
+                        await apiClient.clearSession()
                     } else {
-                        _ = await apiClient.applySessionIfCurrent(
-                            baseURL: nil, accessToken: nil, serverID: nil,
-                            epoch: authEpoch, token: operation.value
+                        _ = await apiClient.clearSessionIfCurrent(
+                            baseURL: nil, epoch: authEpoch, token: operation.value
                         )
                     }
                 }

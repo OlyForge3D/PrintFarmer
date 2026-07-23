@@ -411,13 +411,14 @@ final class ServerRegistryTests: XCTestCase {
             credentialsStore: credentialsStore,
             userDefaultsBox: AuthServiceUserDefaultsBox(userDefaults),
             apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
-                APIClient(
+                let identity = accessToken.flatMap { token in
+                    serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
+                }
+                return APIClient(
                     baseURL: baseURL,
                     session: self.mockAPIClient.urlSession,
                     serverGeneration: generation,
-                    accessToken: accessToken,
-                    authSessionToken: authSessionToken,
-                    serverID: serverID
+                    authenticated: identity
                 )
             },
             signalRServiceFactory: { baseURL, client in

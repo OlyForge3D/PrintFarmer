@@ -7,6 +7,7 @@ import XCTest
 /// checker's await, and every 401 / session-expiry publication must carry that
 /// snapshot's identity — never a concurrent same-server re-login's newer token.
 final class APIClientAuthSessionTests: XCTestCase {
+    private static let testServerID = UUID()
 
     // MARK: - Fixtures
 
@@ -53,8 +54,7 @@ final class APIClientAuthSessionTests: XCTestCase {
         APIClient(
             baseURL: URL(string: "https://a.example.com")!,
             session: transport.urlSession,
-            serverGeneration: gen,
-            accessToken: nil
+            serverGeneration: gen
         )
     }
 
@@ -74,8 +74,8 @@ final class APIClientAuthSessionTests: XCTestCase {
 
         // Apply T1 as the initial authenticated session.
         let t1 = epoch.advance()
-        let appliedT1 = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-T1", epoch: epoch, token: t1)
+        let appliedT1 = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T1", serverID: Self.testServerID), epoch: epoch, token: t1)
         XCTAssertTrue(appliedT1)
 
         // Park the expiry checker at a barrier so we can interleave a T2 apply.
@@ -107,8 +107,8 @@ final class APIClientAuthSessionTests: XCTestCase {
 
         // Interleave: apply T2 as the new authenticated session on the SAME client.
         let t2 = epoch.advance()
-        let appliedT2 = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-T2", epoch: epoch, token: t2)
+        let appliedT2 = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T2", serverID: Self.testServerID), epoch: epoch, token: t2)
         XCTAssertTrue(appliedT2)
 
         // Release T1's checker; it returns true → posts .sessionExpired.
@@ -138,8 +138,8 @@ final class APIClientAuthSessionTests: XCTestCase {
         // Establish the reconstructed session identity (same primitive
         // ServiceContainer.establishReconstructedAuthSession uses under the hood).
         let established = epoch.advance()
-        let ok = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-established", epoch: epoch, token: established)
+        let ok = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-established", serverID: Self.testServerID), epoch: epoch, token: established)
         XCTAssertTrue(ok)
 
         transport.requestHandler = { req in
@@ -170,8 +170,7 @@ final class APIClientAuthSessionTests: XCTestCase {
         let client = APIClient(
             baseURL: URL(string: "https://login.example.com")!,
             session: transport.urlSession,
-            serverGeneration: nil,
-            accessToken: nil)
+            serverGeneration: nil)
 
         transport.requestHandler = { req in
             (TestData.httpResponse(url: req.url, statusCode: 401), Data())
@@ -202,15 +201,15 @@ final class APIClientAuthSessionTests: XCTestCase {
 
         // Apply T1 to live client; snapshot AT THIS POINT captures baseURL + T1 bearer.
         let t1 = epoch.advance()
-        _ = await liveClient.applySessionIfCurrent(
-            baseURL: URL(string: "https://a.example.com")!, accessToken: "bearer-T1",
+        _ = await liveClient.applyAuthenticatedSessionIfCurrent(
+            baseURL: URL(string: "https://a.example.com")!, identity: AuthenticatedIdentity(accessToken: "bearer-T1", serverID: Self.testServerID),
             epoch: epoch, token: t1)
         let snapshot = await liveClient.sessionSnapshotClient()
 
         // Live client re-applied to T2 (a concurrent newer login).
         let t2 = epoch.advance()
-        _ = await liveClient.applySessionIfCurrent(
-            baseURL: URL(string: "https://b.example.com")!, accessToken: "bearer-T2",
+        _ = await liveClient.applyAuthenticatedSessionIfCurrent(
+            baseURL: URL(string: "https://b.example.com")!, identity: AuthenticatedIdentity(accessToken: "bearer-T2", serverID: Self.testServerID),
             epoch: epoch, token: t2)
 
         // Snapshot still points at the ORIGINAL baseURL (a.example.com).
@@ -247,8 +246,8 @@ final class APIClientAuthSessionTests: XCTestCase {
 
         // Apply T1 as the initial authenticated session (bearer-T1).
         let t1 = epoch.advance()
-        let appliedT1 = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-T1", epoch: epoch, token: t1)
+        let appliedT1 = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T1", serverID: Self.testServerID), epoch: epoch, token: t1)
         XCTAssertTrue(appliedT1)
 
         // Park the expiry checker so T2 can apply during its await window.
@@ -277,8 +276,8 @@ final class APIClientAuthSessionTests: XCTestCase {
         // the await (the A1 bug), the outbound request would carry bearer-T2 while
         // still labeled with T1's identity.
         let t2 = epoch.advance()
-        let appliedT2 = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-T2", epoch: epoch, token: t2)
+        let appliedT2 = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T2", serverID: Self.testServerID), epoch: epoch, token: t2)
         XCTAssertTrue(appliedT2)
 
         // Release the checker; getData now builds the request AFTER the await.
@@ -338,8 +337,8 @@ final class APIClientAuthSessionTests: XCTestCase {
             // Apply T1 (bearer-T1) as initial session; then park a checker so we
             // can interleave a T2 apply during the same-request in-flight window.
             let t1 = epoch.advance()
-            _ = await client.applySessionIfCurrent(
-                baseURL: nil, accessToken: "bearer-T1-\(kase.name)", epoch: epoch, token: t1)
+            _ = await client.applyAuthenticatedSessionIfCurrent(
+                baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T1-\(kase.name)", serverID: Self.testServerID), epoch: epoch, token: t1)
 
             let checkerBarrier = AsyncBarrier()
             addTeardownBlock { checkerBarrier.close() }
@@ -357,8 +356,8 @@ final class APIClientAuthSessionTests: XCTestCase {
 
             // T2 apply during the checker's parked await.
             let t2 = epoch.advance()
-            _ = await client.applySessionIfCurrent(
-                baseURL: nil, accessToken: "bearer-T2-\(kase.name)", epoch: epoch, token: t2)
+            _ = await client.applyAuthenticatedSessionIfCurrent(
+                baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T2-\(kase.name)", serverID: Self.testServerID), epoch: epoch, token: t2)
 
             checkerBarrier.release()
             try await task.value
@@ -392,9 +391,7 @@ final class APIClientAuthSessionTests: XCTestCase {
             baseURL: URL(string: "https://a.example.com")!,
             session: transport.urlSession,
             serverGeneration: gen,
-            accessToken: "bearer-T2",
-            authSessionToken: 42,
-            serverID: UUID()
+            authenticated: AuthenticatedIdentity(accessToken: "bearer-T2", serverID: UUID(), authSessionToken: 42)
         )
 
         transport.requestHandler = { req in
@@ -429,20 +426,20 @@ final class APIClientAuthSessionTests: XCTestCase {
 
         // T1 apply (as if from an earlier login/rebuild).
         let t1 = epoch.advance()
-        _ = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-T1", epoch: epoch, token: t1)
+        _ = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T1", serverID: Self.testServerID), epoch: epoch, token: t1)
 
         // T2 apply advances the epoch and takes over the shared client.
         let t2 = epoch.advance()
-        _ = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-T2", epoch: epoch, token: t2)
+        _ = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T2", serverID: Self.testServerID), epoch: epoch, token: t2)
 
         // Now a STALE reconstruction runs (as the old fire-and-forget Task would
         // have): it holds T1's bearer and reads the CURRENT epoch (t2) — the very
         // race the A2 refactor eliminated. Even so, applySessionIfCurrent CAS with
         // the ACTUAL stale token (t1) must fail: the epoch has advanced beyond t1.
-        let staleApplied = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: "bearer-T1", epoch: epoch, token: t1)
+        let staleApplied = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-T1", serverID: Self.testServerID), epoch: epoch, token: t1)
         XCTAssertFalse(staleApplied,
                        "a stale token's applySessionIfCurrent MUST NOT overwrite the fresher session")
 
@@ -471,9 +468,11 @@ final class APIClientAuthSessionTests: XCTestCase {
                       "shared client must still hold T2's bearer, got header=\(auth)")
     }
 
-    /// A2: an unauthenticated construction (nil accessToken) must have NIL
-    /// authSessionToken regardless of any token passed to init — a login-time
-    /// client (no bearer yet) MUST NOT be able to publish session-expired.
+    /// A2/E: an unauthenticated construction (no bundled identity) has NIL
+    /// authSessionToken — with the bundled `AuthenticatedIdentity` this is now
+    /// structurally guaranteed (authSessionToken cannot be supplied without an
+    /// identity), so a login-time client (no bearer yet) can never publish
+    /// session-expired.
     func testInitWithNilAccessTokenForcesNilIdentity() async throws {
         let observer = ExpiryObserver()
         let gen = ActiveServerGeneration()
@@ -482,9 +481,7 @@ final class APIClientAuthSessionTests: XCTestCase {
         let client = APIClient(
             baseURL: URL(string: "https://a.example.com")!,
             session: transport.urlSession,
-            serverGeneration: gen,
-            accessToken: nil,           // no bearer
-            authSessionToken: 99        // must be forced to nil by init
+            serverGeneration: gen           // no bearer, no identity
         )
 
         transport.requestHandler = { req in
@@ -517,15 +514,14 @@ final class APIClientAuthSessionTests: XCTestCase {
         let client = APIClient(
             baseURL: URL(string: "https://a.example.com")!,
             session: transport.urlSession,
-            serverGeneration: gen,
-            accessToken: nil
+            serverGeneration: gen
         )
 
         // Apply T1 as bearer=T1 at server A.
         let t1 = epoch.advance()
-        _ = await client.applySessionIfCurrent(
+        _ = await client.applyAuthenticatedSessionIfCurrent(
             baseURL: URL(string: "https://a.example.com")!,
-            accessToken: "bearer-T1",
+            identity: AuthenticatedIdentity(accessToken: "bearer-T1", serverID: Self.testServerID),
             epoch: epoch, token: t1)
 
         let checkerBarrier = AsyncBarrier()
@@ -548,9 +544,9 @@ final class APIClientAuthSessionTests: XCTestCase {
         // await (the A1 bug), the outbound request goes to server B under T1's
         // bearer, labeled with T1's identity.
         let t2 = epoch.advance()
-        _ = await client.applySessionIfCurrent(
+        _ = await client.applyAuthenticatedSessionIfCurrent(
             baseURL: URL(string: "https://b.example.com")!,
-            accessToken: "bearer-T2",
+            identity: AuthenticatedIdentity(accessToken: "bearer-T2", serverID: Self.testServerID),
             epoch: epoch, token: t2)
 
         checkerBarrier.release()
@@ -612,13 +608,12 @@ final class APIClientAuthSessionTests: XCTestCase {
             let client = APIClient(
                 baseURL: URL(string: "https://a.example.com")!,
                 session: transport.urlSession,
-                serverGeneration: gen,
-                accessToken: nil
+                serverGeneration: gen
             )
             let t1 = epoch.advance()
-            _ = await client.applySessionIfCurrent(
+            _ = await client.applyAuthenticatedSessionIfCurrent(
                 baseURL: URL(string: "https://a.example.com")!,
-                accessToken: "bearer-T1-\(kase.name)",
+                identity: AuthenticatedIdentity(accessToken: "bearer-T1-\(kase.name)", serverID: Self.testServerID),
                 epoch: epoch, token: t1)
 
             let checkerBarrier = AsyncBarrier()
@@ -638,9 +633,9 @@ final class APIClientAuthSessionTests: XCTestCase {
             // Repoint to server B with a different bearer during the parked
             // in-flight window.
             let t2 = epoch.advance()
-            _ = await client.applySessionIfCurrent(
+            _ = await client.applyAuthenticatedSessionIfCurrent(
                 baseURL: URL(string: "https://b.example.com")!,
-                accessToken: "bearer-T2-\(kase.name)",
+                identity: AuthenticatedIdentity(accessToken: "bearer-T2-\(kase.name)", serverID: Self.testServerID),
                 epoch: epoch, token: t2)
 
             checkerBarrier.release()

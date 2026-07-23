@@ -357,6 +357,28 @@ final class ActiveServerGeneration: @unchecked Sendable {
 
 // MARK: - API Client
 
+/// E (issue #816 reject, Hicks + replacement Vasquez): an authenticated APIClient
+/// session is represented by this bundled value so that "an authenticated session
+/// without a stable serverID" is a COMPILE-TIME-IMPOSSIBLE state — the access
+/// token and the serverID are inseparable. Every authenticated
+/// constructor/mutator/apply/reconstruction boundary takes this instead of loose
+/// optionals, which is what lets us delete the production `precondition` traps
+/// (invalid states can no longer be expressed) without a runtime crash.
+struct AuthenticatedIdentity: Sendable, Equatable {
+    let accessToken: String
+    let serverID: UUID
+    /// The auth-session/operation token the session was applied under, if any.
+    /// Nil for a freshly-constructed or snapshot client (which suppress
+    /// session-expiry anyway via a nil server generation).
+    var authSessionToken: Int?
+
+    init(accessToken: String, serverID: UUID, authSessionToken: Int? = nil) {
+        self.accessToken = accessToken
+        self.serverID = serverID
+        self.authSessionToken = authSessionToken
+    }
+}
+
 actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -477,37 +499,21 @@ actor APIClient {
         baseURL: URL,
         session: URLSession? = nil,
         serverGeneration: ActiveServerGeneration? = nil,
-        accessToken: String? = nil,
-        authSessionToken: Int? = nil,
-        serverID: UUID? = nil
+        authenticated: AuthenticatedIdentity? = nil
     ) {
         self.baseURL = baseURL
         self.session = session ?? Self.makePrivateNetworkSession()
-        self.accessToken = accessToken
+        self.accessToken = authenticated?.accessToken
         self.serverGeneration = serverGeneration
         self.generationAtCreation = serverGeneration?.current
-        // A2: bind the authenticated session's identity ATOMICALLY at construction.
-        // Callers capture `authOperationEpoch.current` synchronously BEFORE handing
-        // to the factory; the Task that used to publish identity later is gone, so
-        // no orphaned reconstructed-client can read a newer epoch and clobber this
-        // client's identity with a superseded operation's token. Unauthenticated
-        // clients (nil accessToken) MUST have nil authSessionToken so they cannot
-        // publish session-expiry.
-        self.authSessionToken = accessToken == nil ? nil : authSessionToken
-        // J4 (issue #816 reject, Hicks): the stable serverID is bound
-        // ATOMICALLY at construction alongside the access token. Any
-        // authenticated APIClient (accessToken != nil) MUST carry a
-        // non-nil serverID so a later `logoutOperationSnapshot`
-        // reconstruction can guarantee `serverID` matches the bearer/baseURL
-        // captured on the same actor hop. Unauthenticated clients (nil
-        // accessToken) carry nil serverID by construction.
-        if accessToken != nil {
-            precondition(
-                serverID != nil,
-                "J4: authenticated APIClient construction requires a stable serverID"
-            )
-        }
-        self.currentServerID = accessToken == nil ? nil : serverID
+        // E (issue #816 reject): identity is bundled, so an authenticated client
+        // (non-nil `authenticated`) ALWAYS carries a serverID and an access token
+        // together — the previous `precondition(serverID != nil)` trap is gone
+        // because "token without serverID" can no longer be constructed. An
+        // unauthenticated client (nil `authenticated`) carries nil token /
+        // serverID / authSessionToken.
+        self.authSessionToken = authenticated?.authSessionToken
+        self.currentServerID = authenticated?.serverID
 
         self.decoder = JSONDecoder()
         // ASP.NET Core can emit fractional seconds; the built-in .iso8601 strategy
@@ -527,23 +533,26 @@ actor APIClient {
         encoder.dateEncodingStrategy = .iso8601
     }
 
-    /// J4 (issue #816 reject, Hicks): apply/clear the shared session outside of
-    /// an operation-fenced flow. A non-nil token REQUIRES a non-nil serverID so
-    /// a later logout snapshot's `serverID` is guaranteed to match the
-    /// captured bearer/baseURL. A nil token clears the session (including
-    /// serverID and authSessionToken).
-    func setAccessToken(_ token: String?, serverID: UUID? = nil) {
-        if token != nil {
-            precondition(
-                serverID != nil,
-                "J4: authenticated session mutation requires a stable serverID"
-            )
+    /// E (issue #816 reject): set the authenticated shared session. Takes a
+    /// bundled `AuthenticatedIdentity`, so a serverID is structurally required —
+    /// there is no default-nil authenticated setter and no precondition trap.
+    /// Leaves `authSessionToken` unchanged unless the identity supplies one
+    /// (mirrors the prior setter, which did not touch it on a plain set).
+    func setAuthenticatedSession(_ identity: AuthenticatedIdentity) {
+        self.accessToken = identity.accessToken
+        self.currentServerID = identity.serverID
+        if let token = identity.authSessionToken {
+            self.authSessionToken = token
         }
-        self.accessToken = token
-        self.currentServerID = token == nil ? nil : serverID
-        if token == nil {
-            self.authSessionToken = nil
-        }
+    }
+
+    /// E: clear the authenticated shared session (bearer, serverID, and
+    /// authSessionToken). The explicit non-authenticated counterpart to
+    /// `setAuthenticatedSession`.
+    func clearSession() {
+        self.accessToken = nil
+        self.currentServerID = nil
+        self.authSessionToken = nil
     }
 
     /// Applies base URL + access token + server id ATOMICALLY, but only if
@@ -558,31 +567,54 @@ actor APIClient {
     /// the SAME stable server identity as its baseURL/bearer; logout can then use
     /// that snapshot's `serverID` for local cleanup and cannot land on a different
     /// server than the /logout network request ended up hitting.
+    /// E (issue #816 reject): apply an AUTHENTICATED shared session under an
+    /// operation currency check. Takes a bundled `AuthenticatedIdentity`, so the
+    /// serverID is structurally required — there is no default-nil `serverID`
+    /// and no way to apply a bearer without a stable server identity. Returns
+    /// whether applied (false when the epoch has advanced past `token`).
     @discardableResult
-    func applySessionIfCurrent(
+    func applyAuthenticatedSessionIfCurrent(
         baseURL: URL?,
-        accessToken: String?,
-        serverID: UUID? = nil,
+        identity: AuthenticatedIdentity,
         epoch: AuthOperationEpoch,
         token: Int
     ) -> Bool {
-        // B: perform the currency check AND the session mutation as ONE atomic
-        // operation under the epoch lock, so the epoch cannot advance between them.
         let applied: Bool? = epoch.withCurrent(token) {
             if let baseURL {
                 self.baseURL = baseURL
                 UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
             }
-            self.accessToken = accessToken
-            // J: the passed `serverID` is applied atomically with the session so
-            // a later snapshot cannot separate "which server was this session for"
-            // from "which host will the network go to". When clearing the session
-            // (accessToken == nil), the serverID is cleared too.
-            self.currentServerID = accessToken == nil ? nil : serverID
-            // A: capture the exact auth-session/operation identity this authenticated
-            // session was applied under, so a later 401 carries it and the handler can
-            // reject a stale event without borrowing the current token.
-            self.authSessionToken = accessToken == nil ? nil : token
+            self.accessToken = identity.accessToken
+            // J: serverID applied atomically with the session so a later snapshot
+            // cannot separate "which server" from "which host".
+            self.currentServerID = identity.serverID
+            // A: the applied session's auth-session identity is the operation
+            // token, so a later 401 carries it and the handler can reject a stale
+            // event without borrowing the current token.
+            self.authSessionToken = token
+            return true
+        }
+        return applied ?? false
+    }
+
+    /// E: clear the shared session under an operation currency check (the
+    /// explicit non-authenticated counterpart to
+    /// `applyAuthenticatedSessionIfCurrent`). Optionally repoints `baseURL`.
+    /// Returns whether cleared (false when the epoch advanced past `token`).
+    @discardableResult
+    func clearSessionIfCurrent(
+        baseURL: URL?,
+        epoch: AuthOperationEpoch,
+        token: Int
+    ) -> Bool {
+        let applied: Bool? = epoch.withCurrent(token) {
+            if let baseURL {
+                self.baseURL = baseURL
+                UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+            }
+            self.accessToken = nil
+            self.currentServerID = nil
+            self.authSessionToken = nil
             return true
         }
         return applied ?? false
@@ -659,15 +691,27 @@ actor APIClient {
         APIClient(baseURL: baseURL, session: session)
     }
 
+    /// E: the current session as a bundled `AuthenticatedIdentity`, or nil when
+    /// unauthenticated. Used to reconstruct snapshot/logout clients so a
+    /// reconstructed authenticated client is ALWAYS built with a paired
+    /// (accessToken, serverID) — never a bearer with a nil serverID. Snapshot
+    /// clients suppress expiry via a nil server generation, so `authSessionToken`
+    /// is intentionally not carried into the reconstruction.
+    private func reconstructionIdentity() -> AuthenticatedIdentity? {
+        guard let accessToken, let currentServerID else { return nil }
+        return AuthenticatedIdentity(accessToken: accessToken, serverID: currentServerID)
+    }
+
     /// J: an immutable client snapshot carrying THIS client's exact current baseURL and
     /// bearer, so a request (e.g. `/logout`) is issued under the captured OLD session
     /// even if the shared client is later repointed to a newer session by a concurrent
     /// login. Carries no server generation, so it never emits its own session-expiry.
-    /// J4: the snapshot's serverID is bound at construction alongside its bearer.
+    /// J4/E: the snapshot's serverID is bound at construction alongside its bearer
+    /// via the bundled identity.
     func sessionSnapshotClient() -> APIClient {
         APIClient(
             baseURL: baseURL, session: session, serverGeneration: nil,
-            accessToken: accessToken, serverID: currentServerID
+            authenticated: reconstructionIdentity()
         )
     }
 
@@ -682,7 +726,7 @@ actor APIClient {
         let snapshot: APIClient? = epoch.withCurrent(token) {
             APIClient(
                 baseURL: baseURL, session: session, serverGeneration: nil,
-                accessToken: accessToken, serverID: currentServerID
+                authenticated: reconstructionIdentity()
             )
         }
         return snapshot
@@ -708,7 +752,7 @@ actor APIClient {
         LogoutSnapshot(
             client: APIClient(
                 baseURL: baseURL, session: session, serverGeneration: nil,
-                accessToken: accessToken, serverID: currentServerID
+                authenticated: reconstructionIdentity()
             ),
             baseURL: baseURL,
             accessToken: accessToken,
@@ -726,7 +770,7 @@ actor APIClient {
             LogoutSnapshot(
                 client: APIClient(
                     baseURL: baseURL, session: session, serverGeneration: nil,
-                    accessToken: accessToken, serverID: currentServerID
+                    authenticated: reconstructionIdentity()
                 ),
                 baseURL: baseURL,
                 accessToken: accessToken,

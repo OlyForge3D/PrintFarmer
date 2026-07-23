@@ -129,7 +129,10 @@ final class ServiceContainer: @unchecked Sendable {
         /// the shipping composition path.
         farmSnapshotRootURL: URL? = nil,
         apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken, serverID: serverID)
+            let identity = accessToken.flatMap { token in
+                serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
+            }
+            return APIClient(baseURL: baseURL, serverGeneration: generation, authenticated: identity)
         },
         signalRServiceFactory: @escaping SignalRServiceFactory = { baseURL, client in
             SignalRService(
@@ -805,8 +808,14 @@ final class ServiceContainer: @unchecked Sendable {
     private func establishReconstructedAuthSession(client: APIClient, accessToken: String?) async {
         guard let accessToken else { return }
         let token = authOperationEpoch.current
-        _ = await client.applySessionIfCurrent(
-            baseURL: nil, accessToken: accessToken, epoch: authOperationEpoch, token: token
+        // E: the reconstructed client already carries its stable serverID from
+        // the factory; re-apply the session under the current epoch using that
+        // same identity, so the authenticated apply is structurally paired.
+        guard let serverID = await client.currentServerIdentity() else { return }
+        _ = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil,
+            identity: AuthenticatedIdentity(accessToken: accessToken, serverID: serverID),
+            epoch: authOperationEpoch, token: token
         )
     }
 
@@ -852,7 +861,10 @@ final class ServiceContainer: @unchecked Sendable {
         self.credentialsStore = ServerCredentialsStore()
         self.userDefaultsBox = AuthServiceUserDefaultsBox(.standard)
         self.apiClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken, serverID: serverID)
+            let identity = accessToken.flatMap { token in
+                serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
+            }
+            return APIClient(baseURL: baseURL, serverGeneration: generation, authenticated: identity)
         }
         self.signalRServiceFactory = { baseURL, client in
             SignalRService(
