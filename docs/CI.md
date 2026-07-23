@@ -222,9 +222,25 @@ given tree.
   status is also returned for EF Core tooling, design-time context, provider
   loading, or restore/build failures. Inspect the failing leg's `dotnet ef`
   output in the job log: if it reports pending model changes, regenerate the
-  affected migrations per [Migrations](../src/migrations/README.md) and
-  commit them; if it reports a tool / design-time / provider / build error,
-  fix that instead — no new migration is needed.
+  affected migration by running (from `src/`, one invocation per affected
+  `context × provider` pair):
+
+  ```bash
+  DB_PROVIDER=<postgres|sqlserver> dotnet ef migrations add <PascalCaseName> \
+    --project ./migrations/<MigrationsProject> \
+    --startup-project ./migrations/<MigrationsProject> \
+    --context <AppDbContext|SlicerDbContext>
+  ```
+
+  where `<MigrationsProject>` is one of `Farm.Migrations.PostgreSQL`,
+  `Farm.Migrations.SqlServer`, `Farm.Slicer.Migrations.PostgreSQL`, or
+  `Farm.Slicer.Migrations.SqlServer` — the matrix leg's `MATRIX_PROJECT`
+  value in the failing job log identifies which one. `AppDbContext` pairs
+  with the two `Farm.Migrations.*` projects; `SlicerDbContext` pairs with
+  the two `Farm.Slicer.Migrations.*` projects. Commit the generated files
+  under `src/migrations/<MigrationsProject>/Migrations/` alongside the
+  model change. If instead the log reports a tool / design-time / provider
+  / build error, fix that — no new migration is needed.
 
 ## Extending
 

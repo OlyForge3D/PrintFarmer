@@ -843,40 +843,95 @@ case_workflow_publish_printf_option_safe() {
 # prose like `# rc=1 means drift` in documentation does not false-trip):
 #   * `[ "$rc" -eq 1 ]`, `[ $rc -eq 1 ]`, `test "$rc" -eq 1`
 #   * `[[ "$rc" -eq 1 ]]`, `[[ "$rc" == 1 ]]`, `[[ $rc = 1 ]]`
+#   * quoted operands on either side: `[[ "$rc" == "1" ]]`, `[[ $rc == '1' ]]`,
+#     `[[ '$rc' -eq 1 ]]`, `[ "1" = "$rc" ]`, `[[ '1' == '$rc' ]]`
 #   * reversed: `[ 1 -eq "$rc" ]`, `[[ 1 == $rc ]]`, `[ 1 = "$rc" ]`
 #   * arithmetic: `(( rc == 1 ))`
-#   * `$?` variants of the above (`[ $? -eq 1 ]`)
+#   * `$?` variants of the above (`[ $? -eq 1 ]`, `[ 1 -eq $? ]`)
 #   * `case` arms whose pattern is literal `1`, `"1"`, or `'1'`
 #
-# Deliberately NOT flagged (legitimate constructs in the current drift step):
+# Deliberately NOT flagged (legitimate constructs in the current drift step
+# and its neighbours):
 #   * `[ "$rc" -eq 0 ]` — success check
 #   * `exit "$rc"` — fail-closed propagation of the tool's raw exit code
 #   * unconditional `exit 1` bailouts (e.g. missing `dotnet` binary) — these
 #     do not classify `rc`, they force an unrelated failure
+#   * assignments `rc=1`, `foo=$rc` — shell assignment forbids whitespace
+#     around `=`, so requiring whitespace on both sides of every operator
+#     naturally excludes them without conflating with the test-command `=`
+#     comparison, which mandates whitespace
+#   * literals adjacent to other digits or dots (`10`, `100`, `1.2`, `21`) —
+#     the boundary character classes reject them on both sides
 #   * annotation text that mentions `$rc` in prose
+#
+# Portability & shape guarantees:
+#   * grep -nE only — POSIX ERE, no PCRE features. Runs on BSD grep (macOS)
+#     as well as GNU grep. `[[:space:]]` is portable.
+#   * Bash 3.2 safe — no bash-4 associative arrays, mapfile, or PCRE.
+#   * CRLF-tolerant — line-anchored patterns end at `[^…]|$`, and the caller
+#     strips trailing `\r` where relevant (see extract_job_block).
 _drift_block_rc1_violations() {
   local block="$1"
   # Strip pure comment lines (YAML `# …` and shell `# …`); they may reference
   # `rc=1` in prose without classifying anything.
   local code
   code="$(printf '%s\n' "$block" | grep -Ev '^[[:space:]]*#' || true)"
-  # Three passes, each targeting a distinct form. `|| true` keeps `set -e`
-  # from tripping when a pass finds nothing.
+
+  # Building blocks reused across the forward/reversed patterns.
+  #
+  # RC_TOKEN matches the LHS/RHS operand that names the exit code, in any of
+  # the shell forms authors reach for:
+  #   * bare `rc` or `$rc`
+  #   * double-quoted `"rc"` / `"$rc"`
+  #   * single-quoted `'rc'` / `'$rc'` (literal; unusual but syntactically valid)
+  #   * `$?`, bare or quoted
+  # Trailing/leading quote characters are matched as a symmetric pair only
+  # (both single, both double, or none) so we do not accept mismatched
+  # `"rc'` / `'$rc"` shapes that no shell would ever accept.
+  local rc_token='("\$?rc"|'\''\$?rc'\''|\$?rc|"\$\?"|'\''\$\?'\''|\$\?)'
+
+  # ONE_TOKEN matches the literal `1` operand with the same balanced-quote
+  # policy. Callers must additionally enforce a non-digit / non-`.` boundary
+  # on the unquoted form so `10` / `100` / `1.2` never match.
+  local one_token='("1"|'\''1'\''|1)'
+
+  # OP matches the comparison operator. We deliberately require whitespace on
+  # BOTH sides at the call site (see the patterns below) rather than inside
+  # this fragment, because whitespace-around-`=` is what distinguishes a
+  # `[ "$rc" = 1 ]` comparison from an `rc=1` assignment.
+  local op='(-eq|==|=)'
+
+  # Boundary character classes. `LB_LHS` (left-boundary for the LHS operand)
+  # ensures we do not match `myrc == 1` where `myrc` incidentally ends in
+  # `rc`. `LB_ONE` additionally excludes `.` so `1.2 == $rc` does not match.
+  # `RB_RC` and `RB_ONE` are their right-side counterparts.
+  local lb_lhs='(^|[^A-Za-z0-9_])'
+  local lb_one='(^|[^A-Za-z0-9_.])'
+  local rb_rc='([^A-Za-z0-9_]|$)'
+  local rb_one='([^0-9.]|$)'
+
+  # Three passes, each targeting a distinct syntactic shape. `|| true` keeps
+  # `set -e` from tripping when a pass finds nothing.
   {
-    # Forward comparison: (rc | $rc | $? ) <op> 1
-    #   op ∈ { -eq, ==, = }
-    #   trailing boundary `[^0-9]|$` rejects `10`, `100`, etc.
+    # Forward comparison: (rc | $rc | $?) OP 1, with balanced optional
+    # quoting on either operand. Whitespace on both sides of OP is
+    # mandatory — this is what excludes `rc=1` assignment (no whitespace)
+    # from the `=` alternative without needing to special-case it.
     printf '%s\n' "$code" | grep -nE \
-      '(\$\?|\$?"?rc"?)[[:space:]]*(-eq|==|=)[[:space:]]*1([^0-9]|$)' || true
-    # Reversed comparison: 1 <op> (rc | $rc | $? )
-    #   leading `^|[^0-9.]` rejects matching inside `21`, `1.2`, etc.
+      "${lb_lhs}${rc_token}[[:space:]]+${op}[[:space:]]+${one_token}${rb_one}" \
+      || true
+    # Reversed comparison: 1 OP (rc | $rc | $?). Same whitespace and
+    # boundary contract, mirrored.
     printf '%s\n' "$code" | grep -nE \
-      '(^|[^0-9.])1[[:space:]]*(-eq|==|=)[[:space:]]*("?\$?rc"?|\$\?)([^A-Za-z0-9_]|$)' || true
+      "${lb_one}${one_token}[[:space:]]+${op}[[:space:]]+${rc_token}${rb_rc}" \
+      || true
     # `case` arm whose pattern token is literal 1 (bare, single-, or
-    # double-quoted). Anchored to leading whitespace + token + `)` so it
-    # only matches arm headers, not arithmetic expressions.
+    # double-quoted). The token must be preceded by leading whitespace or
+    # the start of the line so we only match arm headers, not `1)` that
+    # might appear inside `printf` strings, arithmetic, or prose.
     printf '%s\n' "$code" | grep -nE \
-      "^[[:space:]]+('1'|\"1\"|1)\)" || true
+      "^[[:space:]]+('1'|\"1\"|1)\)" \
+      || true
   }
 }
 
@@ -998,7 +1053,8 @@ case_workflow_migration_drift_restores_before_ef() {
 # workflow-scoped test above may still trip, but this case guarantees
 # every form we've enumerated is caught in isolation. Also asserts NO
 # false positives on the legitimate constructs the drift step currently
-# uses.
+# uses, plus the assignment / boundary shapes that a naive detector
+# commonly conflates with a comparison (`rc=1`, `foo=$rc`, `10`, `1.2`).
 case_drift_detector_catches_representative_rc1_forms() {
   local out="$1" ; : "$out"  # unused; keep run_case signature
 
@@ -1020,6 +1076,21 @@ case_drift_detector_catches_representative_rc1_forms() {
     $'rc=$?\nif (( rc == 1 )); then echo drift; fi'
     # `$?` shortcut instead of a captured `rc`
     $'dotnet ef ...\nif [ $? -eq 1 ]; then echo drift; fi'
+    # `$?` on the RHS of a reversed comparison
+    $'dotnet ef ...\nif [ 1 -eq $? ]; then echo drift; fi'
+    # Quoted RHS: `"1"` and `'1'` on the RHS of the comparison. These are
+    # the same classification as bare `1`, dressed in shell quoting the
+    # detector must see through.
+    $'rc=$?\nif [[ "$rc" == "1" ]]; then echo drift; fi'
+    $'rc=$?\nif [[ $rc == '\''1'\'' ]]; then echo drift; fi'
+    $'rc=$?\nif [ "$rc" -eq "1" ]; then echo drift; fi'
+    # Quoted LHS: `'$rc'` / `"rc"` on the LHS. Rare but syntactically
+    # valid; the detector must catch it because the intent is still
+    # rc==1 classification.
+    $'rc=$?\nif [[ '\''$rc'\'' -eq 1 ]]; then echo drift; fi'
+    # Reversed with quoted 1 operand.
+    $'rc=$?\nif [ "1" = "$rc" ]; then echo drift; fi'
+    $'rc=$?\nif [[ '\''1'\'' == '\''$rc'\'' ]]; then echo drift; fi'
     # `case` arm, bare / double- / single-quoted `1` token
     $'case "$rc" in\n  0) echo ok ;;\n  1) echo drift ;;\nesac'
     $'case "$rc" in\n  0) echo ok ;;\n  "1") echo drift ;;\nesac'
@@ -1052,6 +1123,34 @@ case_drift_detector_catches_representative_rc1_forms() {
     # Comparison against a different value (10) that happens to contain
     # the digit `1` — must not trigger the boundary-aware detector.
     $'rc=$?\nif [ "$rc" -eq 10 ]; then echo weird; fi'
+    # Bare assignment `rc=1` — no whitespace around `=`, therefore an
+    # assignment and not a comparison. This is a common shape in
+    # unrelated jobs of `ci.yml` (e.g. the `select` job seeds `rc=0`
+    # then flips it to `rc=1` on a git-diff failure). The detector must
+    # not conflate it with the `[ "$rc" = 1 ]` comparison it targets.
+    $'rc=0\nif ! some_command; then\n  rc=1\nfi\nexit "$rc"'
+    # Symmetric case: assigning `$rc` into another variable via
+    # `foo=$rc`. The token `rc` appears on the RHS of an assignment,
+    # but there is no comparison here at all — a naive regex that
+    # matched `rc[[:space:]]*=[[:space:]]*1` without the RHS constraint
+    # (or without the whitespace constraint) has been known to fire on
+    # this line by drifting the LHS token match into the RHS.
+    $'foo=$rc\nbar=$foo\nexit "$rc"'
+    # Assignments where the digit-boundary alone (without a whitespace
+    # rule) would false-fire: `rc=10` reads like an rc==1 comparison
+    # only if boundary and whitespace are BOTH ignored. Guard both.
+    $'rc=10\nexit "$rc"'
+    # A dotted literal `1.2` that starts with `1` and could false-fire
+    # if the digit boundary were only enforced on one side.
+    $'rc=$?\nif [ "$rc" -eq 12 ] || printf "%s\\n" "1.2 ignored"; then :; fi'
+    # `case` arm on `10)` — must not conflate with a `1)` arm. The
+    # digit boundary in the case-arm pattern is enforced by the `)`
+    # terminator: `1)` closes the token, `10)` does not.
+    $'case "$rc" in\n  0) echo ok ;;\n  10) echo other ;;\nesac'
+    # Prose in a normal comment line (not code): mentions the `rc == 1`
+    # antipattern while explaining why it is rejected. Stripped by the
+    # leading-comment filter, so must not false-fire.
+    $'# We used to write [ "$rc" -eq 1 ] here; do not do that.\nrc=$?\nexit "$rc"'
   )
   local ok
   idx=0
