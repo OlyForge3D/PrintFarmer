@@ -64,6 +64,11 @@ final class JobHistoryViewModel {
         ) -> Void
 
         private final class MountAttempt: @unchecked Sendable {
+            enum InstallResult {
+                case active
+                case cancelled(cleanupToken: UUID)
+            }
+
             struct CleanupClaim {
                 let isFirst: Bool
                 let activationToken: UUID?
@@ -81,11 +86,13 @@ final class JobHistoryViewModel {
                 return cancelled
             }
 
-            func install(activationToken: UUID) -> Bool {
+            func install(activationToken: UUID) -> InstallResult {
                 lock.lock()
                 defer { lock.unlock() }
                 self.activationToken = activationToken
-                return !cancelled
+                guard cancelled else { return .active }
+                cleanupClaimed = true
+                return .cancelled(cleanupToken: activationToken)
             }
 
             func cancel() {
@@ -114,7 +121,7 @@ final class JobHistoryViewModel {
             func claimCleanup() -> CleanupClaim {
                 lock.lock()
                 defer { lock.unlock() }
-                guard !cleanupClaimed else {
+                guard !cleanupClaimed, let activationToken else {
                     return CleanupClaim(isFirst: false, activationToken: nil)
                 }
                 cleanupClaimed = true
@@ -127,17 +134,23 @@ final class JobHistoryViewModel {
             let onRelease: @MainActor (UUID) -> Void
             let onLifetimeArmed: @MainActor () -> Void
             let initialLoad: @MainActor (UUID) async -> Void
+            let beforeInstall: (@MainActor () async -> Void)?
+            let beforeLifetimeWait: (@MainActor () async -> Void)?
 
             init(
                 onAcquire: @escaping @MainActor (UUID) -> Void,
                 onRelease: @escaping @MainActor (UUID) -> Void,
                 onLifetimeArmed: @escaping @MainActor () -> Void,
-                initialLoad: @escaping @MainActor (UUID) async -> Void
+                initialLoad: @escaping @MainActor (UUID) async -> Void,
+                beforeInstall: (@MainActor () async -> Void)?,
+                beforeLifetimeWait: (@MainActor () async -> Void)?
             ) {
                 self.onAcquire = onAcquire
                 self.onRelease = onRelease
                 self.onLifetimeArmed = onLifetimeArmed
                 self.initialLoad = initialLoad
+                self.beforeInstall = beforeInstall
+                self.beforeLifetimeWait = beforeLifetimeWait
             }
         }
 
@@ -147,6 +160,8 @@ final class JobHistoryViewModel {
             onAcquire: @escaping @MainActor (UUID) -> Void,
             onRelease: @escaping @MainActor (UUID) -> Void,
             onLifetimeArmed: @escaping @MainActor () -> Void = {},
+            beforeInstall: (@MainActor () async -> Void)? = nil,
+            beforeLifetimeWait: (@MainActor () async -> Void)? = nil,
             cleanupEnqueuer: @escaping CleanupEnqueuer = defaultCleanupEnqueuer
         ) async {
             await run(
@@ -155,6 +170,8 @@ final class JobHistoryViewModel {
                 onAcquire: onAcquire,
                 onRelease: onRelease,
                 onLifetimeArmed: onLifetimeArmed,
+                beforeInstall: beforeInstall,
+                beforeLifetimeWait: beforeLifetimeWait,
                 cleanupEnqueuer: cleanupEnqueuer
             ) { activationToken in
                 await viewModel.loadHistory(activationToken: activationToken)
@@ -167,6 +184,8 @@ final class JobHistoryViewModel {
             onAcquire: @escaping @MainActor (UUID) -> Void,
             onRelease: @escaping @MainActor (UUID) -> Void,
             onLifetimeArmed: @escaping @MainActor () -> Void = {},
+            beforeInstall: (@MainActor () async -> Void)? = nil,
+            beforeLifetimeWait: (@MainActor () async -> Void)? = nil,
             cleanupEnqueuer: @escaping CleanupEnqueuer = defaultCleanupEnqueuer
         ) async {
             await run(
@@ -175,6 +194,8 @@ final class JobHistoryViewModel {
                 onAcquire: onAcquire,
                 onRelease: onRelease,
                 onLifetimeArmed: onLifetimeArmed,
+                beforeInstall: beforeInstall,
+                beforeLifetimeWait: beforeLifetimeWait,
                 cleanupEnqueuer: cleanupEnqueuer
             ) { activationToken in
                 await viewModel.loadTimeline(
@@ -191,6 +212,8 @@ final class JobHistoryViewModel {
             onAcquire: @escaping @MainActor (UUID) -> Void,
             onRelease: @escaping @MainActor (UUID) -> Void,
             onLifetimeArmed: @escaping @MainActor () -> Void,
+            beforeInstall: (@MainActor () async -> Void)?,
+            beforeLifetimeWait: (@MainActor () async -> Void)?,
             cleanupEnqueuer: @escaping CleanupEnqueuer,
             initialLoad: @escaping @MainActor (UUID) async -> Void
         ) async {
@@ -199,7 +222,9 @@ final class JobHistoryViewModel {
                 onAcquire: onAcquire,
                 onRelease: onRelease,
                 onLifetimeArmed: onLifetimeArmed,
-                initialLoad: initialLoad
+                initialLoad: initialLoad,
+                beforeInstall: beforeInstall,
+                beforeLifetimeWait: beforeLifetimeWait
             )
 
             await withTaskCancellationHandler {
@@ -207,9 +232,21 @@ final class JobHistoryViewModel {
 
                 viewModel.configure(jobAnalyticsService: service)
                 let activationToken = viewModel.activate()
-                guard attempt.install(activationToken: activationToken),
-                      !Task.isCancelled,
-                      !attempt.isCancelled else {
+                if let beforeInstall = callbacks.beforeInstall {
+                    await beforeInstall()
+                }
+                switch attempt.install(activationToken: activationToken) {
+                case .active:
+                    break
+                case .cancelled(let cleanupToken):
+                    performCleanup(
+                        activationToken: cleanupToken,
+                        viewModel: viewModel,
+                        callbacks: callbacks
+                    )
+                    return
+                }
+                guard !Task.isCancelled, !attempt.isCancelled else {
                     cleanup(attempt: attempt, viewModel: viewModel, callbacks: callbacks)
                     return
                 }
@@ -223,6 +260,9 @@ final class JobHistoryViewModel {
 
                 await callbacks.initialLoad(activationToken)
                 guard !attempt.isCancelled else { return }
+                if let beforeLifetimeWait = callbacks.beforeLifetimeWait {
+                    await beforeLifetimeWait()
+                }
                 callbacks.onLifetimeArmed()
                 await attempt.waitForCancellation()
             } onCancel: {
@@ -240,6 +280,18 @@ final class JobHistoryViewModel {
         ) {
             let claim = attempt.claimCleanup()
             guard claim.isFirst, let activationToken = claim.activationToken else { return }
+            performCleanup(
+                activationToken: activationToken,
+                viewModel: viewModel,
+                callbacks: callbacks
+            )
+        }
+
+        private static func performCleanup(
+            activationToken: UUID,
+            viewModel: JobHistoryViewModel,
+            callbacks: Callbacks
+        ) {
             viewModel.deactivate(activationToken: activationToken)
             callbacks.onRelease(activationToken)
         }

@@ -1,17 +1,60 @@
 import Foundation
 import SwiftUI
 
-struct JobHistoryView: View {
+@MainActor
+final class JobHistoryMountState {
     private struct ActiveTask {
         let activationToken: UUID
         let task: Task<Void, Never>
     }
 
+    private(set) var activationToken: UUID?
+    private var activeTasks: [ActiveTask] = []
+
+    func acquire(activationToken: UUID) {
+        self.activationToken = activationToken
+    }
+
+    func release(activationToken releasedToken: UUID) {
+        activeTasks
+            .filter { $0.activationToken == releasedToken }
+            .forEach { $0.task.cancel() }
+        activeTasks.removeAll { $0.activationToken == releasedToken }
+        if activationToken == releasedToken {
+            activationToken = nil
+        }
+    }
+
+    func startHistoryLoad(viewModel: JobHistoryViewModel) {
+        guard let activationToken else { return }
+        let task = Task {
+            await viewModel.loadHistory(activationToken: activationToken)
+        }
+        track(task: task, activationToken: activationToken)
+    }
+
+    func startLoadMore(viewModel: JobHistoryViewModel) {
+        guard let activationToken else { return }
+        let task = Task {
+            await viewModel.loadMore(activationToken: activationToken)
+        }
+        track(task: task, activationToken: activationToken)
+    }
+
+    func track(task: Task<Void, Never>, activationToken: UUID) {
+        activeTasks.append(ActiveTask(activationToken: activationToken, task: task))
+    }
+
+    func trackedTaskCount(activationToken: UUID) -> Int {
+        activeTasks.filter { $0.activationToken == activationToken }.count
+    }
+}
+
+struct JobHistoryView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = JobHistoryViewModel()
+    @State private var mountState = JobHistoryMountState()
     @State private var showDateFilter = false
-    @State private var activeTasks: [ActiveTask] = []
-    @State private var activationToken: UUID?
 
     var body: some View {
         Group {
@@ -24,7 +67,9 @@ struct JobHistoryView: View {
                 } description: {
                     Text(error)
                 } actions: {
-                    Button("Retry", action: startHistoryLoad)
+                    Button("Retry") {
+                        mountState.startHistoryLoad(viewModel: viewModel)
+                    }
                 }
             } else if viewModel.historyItems.isEmpty {
                 EmptyStateView(
@@ -59,7 +104,7 @@ struct JobHistoryView: View {
             dateFilterSheet
         }
         .refreshable {
-            guard let activationToken else { return }
+            guard let activationToken = mountState.activationToken else { return }
             await viewModel.loadHistory(activationToken: activationToken)
         }
         .task {
@@ -67,10 +112,10 @@ struct JobHistoryView: View {
                 viewModel: viewModel,
                 service: services.jobAnalyticsService,
                 onAcquire: { token in
-                    activationToken = token
+                    mountState.acquire(activationToken: token)
                 },
                 onRelease: { token in
-                    releaseMount(activationToken: token)
+                    mountState.release(activationToken: token)
                 }
             )
         }
@@ -90,7 +135,9 @@ struct JobHistoryView: View {
                     if viewModel.isLoadingMore {
                         ProgressView()
                     } else {
-                        Button("Load More", action: startLoadMore)
+                        Button("Load More") {
+                            mountState.startLoadMore(viewModel: viewModel)
+                        }
                     }
                     Spacer()
                 }
@@ -217,14 +264,14 @@ struct JobHistoryView: View {
                 Section {
                     Button("Apply") {
                         showDateFilter = false
-                        startHistoryLoad()
+                        mountState.startHistoryLoad(viewModel: viewModel)
                     }
 
                     Button("Clear Dates") {
                         viewModel.dateFrom = nil
                         viewModel.dateTo = nil
                         showDateFilter = false
-                        startHistoryLoad()
+                        mountState.startHistoryLoad(viewModel: viewModel)
                     }
                 }
             }
@@ -239,32 +286,6 @@ struct JobHistoryView: View {
             }
         }
         .presentationDetents([.medium])
-    }
-
-    private func startHistoryLoad() {
-        guard let activationToken else { return }
-        let task = Task {
-            await viewModel.loadHistory(activationToken: activationToken)
-        }
-        activeTasks.append(ActiveTask(activationToken: activationToken, task: task))
-    }
-
-    private func startLoadMore() {
-        guard let activationToken else { return }
-        let task = Task {
-            await viewModel.loadMore(activationToken: activationToken)
-        }
-        activeTasks.append(ActiveTask(activationToken: activationToken, task: task))
-    }
-
-    private func releaseMount(activationToken releasedToken: UUID) {
-        activeTasks
-            .filter { $0.activationToken == releasedToken }
-            .forEach { $0.task.cancel() }
-        activeTasks.removeAll { $0.activationToken == releasedToken }
-        if activationToken == releasedToken {
-            activationToken = nil
-        }
     }
 
     // MARK: - Helpers

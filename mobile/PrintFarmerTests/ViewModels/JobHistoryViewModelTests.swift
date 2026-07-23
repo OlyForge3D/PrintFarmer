@@ -1240,6 +1240,58 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertNil(mirroredToken)
     }
 
+    func testPreInstallCleanupDoesNotConsumeExactTokenCleanup() async {
+        mockJobAnalyticsService.historyPageToReturn = historyPage(
+            ["must-not-load"],
+            totalCount: 1,
+            currentPage: 1
+        )
+        let beforeInstallGate = TaskStartGate()
+        let cleanupQueue = ManualCancellationCleanupEnqueuer()
+        var mirroredToken: UUID?
+        var releasedToken: UUID?
+        var releaseCount = 0
+        let task = Task { @MainActor in
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: mockJobAnalyticsService,
+                onAcquire: { mirroredToken = $0 },
+                onRelease: { token in
+                    releasedToken = token
+                    releaseCount += 1
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                },
+                beforeInstall: {
+                    await beforeInstallGate.park()
+                },
+                cleanupEnqueuer: { cleanupQueue.enqueue($0) }
+            )
+        }
+        await beforeInstallGate.awaitEntered()
+        XCTAssertEqual(viewModel.activationCountForTesting, 1)
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertNil(mirroredToken)
+
+        task.cancel()
+        XCTAssertEqual(cleanupQueue.pendingCount, 1)
+        await runNextCleanup(cleanupQueue)
+        XCTAssertEqual(releaseCount, 0)
+        XCTAssertTrue(viewModel.isViewActive)
+
+        let installRelease = await beforeInstallGate.release()
+        XCTAssertEqual(installRelease, .released)
+        await task.value
+
+        XCTAssertEqual(cleanupQueue.pendingCount, 0)
+        XCTAssertEqual(releaseCount, 1)
+        XCTAssertNotNil(releasedToken)
+        XCTAssertNil(mirroredToken)
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertNil(mockJobAnalyticsService.getHistoryCalledWith)
+    }
+
     func testMountCancellationDeactivatesBeforeIgnoringServiceRelease() async {
         let service = ScriptedJobAnalyticsService()
         let registration = await service.register(
@@ -1291,6 +1343,100 @@ final class JobHistoryViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.historyItems.isEmpty)
     }
 
+    func testFailedInitialLoadKeepsMountOwnedUntilCancellation() async {
+        let service = ScriptedJobAnalyticsService()
+        let registration = await service.register(.failure)
+        let cleanupQueue = ManualCancellationCleanupEnqueuer()
+        let lifetimeArmed = MainActorEvent()
+        var mirroredToken: UUID?
+        var releaseCount = 0
+        let task = Task { @MainActor in
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: service,
+                onAcquire: { mirroredToken = $0 },
+                onRelease: { token in
+                    releaseCount += 1
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                },
+                onLifetimeArmed: { lifetimeArmed.signal() },
+                cleanupEnqueuer: { cleanupQueue.enqueue($0) }
+            )
+        }
+        guard await requireEntry(service, registration: registration) != nil else {
+            task.cancel()
+            await task.value
+            return
+        }
+        let serviceRelease = await service.release(registration: registration)
+        XCTAssertEqual(serviceRelease, .released)
+        await lifetimeArmed.wait()
+
+        XCTAssertNotNil(viewModel.error)
+        XCTAssertTrue(viewModel.isViewActive)
+        XCTAssertNotNil(mirroredToken)
+        XCTAssertEqual(releaseCount, 0)
+        XCTAssertFalse(viewModel.isLoading)
+
+        task.cancel()
+        await task.value
+        XCTAssertEqual(cleanupQueue.pendingCount, 2)
+        await runNextCleanup(cleanupQueue)
+        await runNextCleanup(cleanupQueue)
+
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertNil(mirroredToken)
+        XCTAssertEqual(releaseCount, 1)
+    }
+
+    func testCancellationBeforeLifetimeWaitIsBufferedAndCannotLoseWakeup() async {
+        mockJobAnalyticsService.historyPageToReturn = historyPage(
+            ["loaded"],
+            totalCount: 1,
+            currentPage: 1
+        )
+        let beforeLifetimeWaitGate = TaskStartGate()
+        let cleanupQueue = ManualCancellationCleanupEnqueuer()
+        var mirroredToken: UUID?
+        var releaseCount = 0
+        let task = Task { @MainActor in
+            await JobAnalyticsMountLifecycle.runHistory(
+                viewModel: viewModel,
+                service: mockJobAnalyticsService,
+                onAcquire: { mirroredToken = $0 },
+                onRelease: { token in
+                    releaseCount += 1
+                    if mirroredToken == token {
+                        mirroredToken = nil
+                    }
+                },
+                beforeLifetimeWait: {
+                    await beforeLifetimeWaitGate.park()
+                },
+                cleanupEnqueuer: { cleanupQueue.enqueue($0) }
+            )
+        }
+        await beforeLifetimeWaitGate.awaitEntered()
+        XCTAssertEqual(viewModel.historyItems.map(\.id), ["loaded"])
+        XCTAssertNotNil(mirroredToken)
+
+        task.cancel()
+        XCTAssertEqual(cleanupQueue.pendingCount, 1)
+        await runNextCleanup(cleanupQueue)
+        XCTAssertFalse(viewModel.isViewActive)
+        XCTAssertNil(mirroredToken)
+        XCTAssertEqual(releaseCount, 1)
+
+        let lifetimeRelease = await beforeLifetimeWaitGate.release()
+        XCTAssertEqual(lifetimeRelease, .released)
+        await task.value
+        XCTAssertEqual(cleanupQueue.pendingCount, 1)
+        await runNextCleanup(cleanupQueue)
+        XCTAssertEqual(releaseCount, 1)
+    }
+
     func testDelayedMountACleanupCannotClearMountBMirrorOrOwnedTasks() async {
         mockJobAnalyticsService.historyPageToReturn = historyPage(
             ["mounted"],
@@ -1301,8 +1447,11 @@ final class JobHistoryViewModelTests: XCTestCase {
         let cleanupQueueB = ManualCancellationCleanupEnqueuer()
         let lifetimeA = MainActorEvent()
         let lifetimeB = MainActorEvent()
-        var mirroredToken: UUID?
-        var buttonTaskOwners: Set<UUID> = []
+        let buttonGateA = TaskStartGate()
+        let buttonGateB = TaskStartGate()
+        let mountState = JobHistoryMountState()
+        var buttonTaskA: Task<Void, Never>?
+        var buttonTaskB: Task<Void, Never>?
         var releaseCountByToken: [UUID: Int] = [:]
 
         let taskA = Task { @MainActor in
@@ -1310,24 +1459,23 @@ final class JobHistoryViewModelTests: XCTestCase {
                 viewModel: viewModel,
                 service: mockJobAnalyticsService,
                 onAcquire: { token in
-                    mirroredToken = token
-                    buttonTaskOwners.insert(token)
+                    mountState.acquire(activationToken: token)
+                    let task = Task { await buttonGateA.park() }
+                    buttonTaskA = task
+                    mountState.track(task: task, activationToken: token)
                 },
                 onRelease: { token in
-                    buttonTaskOwners.remove(token)
+                    mountState.release(activationToken: token)
                     releaseCountByToken[token, default: 0] += 1
-                    if mirroredToken == token {
-                        mirroredToken = nil
-                    }
                 },
                 onLifetimeArmed: { lifetimeA.signal() },
                 cleanupEnqueuer: { cleanupQueueA.enqueue($0) }
             )
         }
         await lifetimeA.wait()
-        guard let tokenA = mirroredToken else {
-            return XCTFail("mount A should publish its immutable token")
-        }
+        await buttonGateA.awaitEntered()
+        XCTAssertNotNil(mountState.activationToken)
+        let tokenA = mountState.activationToken ?? UUID()
 
         taskA.cancel()
         await taskA.value
@@ -1338,33 +1486,37 @@ final class JobHistoryViewModelTests: XCTestCase {
                 viewModel: viewModel,
                 service: mockJobAnalyticsService,
                 onAcquire: { token in
-                    mirroredToken = token
-                    buttonTaskOwners.insert(token)
+                    mountState.acquire(activationToken: token)
+                    let task = Task { await buttonGateB.park() }
+                    buttonTaskB = task
+                    mountState.track(task: task, activationToken: token)
                 },
                 onRelease: { token in
-                    buttonTaskOwners.remove(token)
+                    mountState.release(activationToken: token)
                     releaseCountByToken[token, default: 0] += 1
-                    if mirroredToken == token {
-                        mirroredToken = nil
-                    }
                 },
                 onLifetimeArmed: { lifetimeB.signal() },
                 cleanupEnqueuer: { cleanupQueueB.enqueue($0) }
             )
         }
         await lifetimeB.wait()
-        guard let tokenB = mirroredToken else {
-            return XCTFail("mount B should publish its immutable token")
-        }
+        await buttonGateB.awaitEntered()
+        XCTAssertNotNil(mountState.activationToken)
+        let tokenB = mountState.activationToken ?? UUID()
         XCTAssertNotEqual(tokenA, tokenB)
 
         await runNextCleanup(cleanupQueueA)
-        XCTAssertEqual(mirroredToken, tokenB)
+        XCTAssertEqual(mountState.activationToken, tokenB)
         XCTAssertTrue(viewModel.isViewActive)
-        XCTAssertTrue(buttonTaskOwners.contains(tokenB))
-        XCTAssertFalse(buttonTaskOwners.contains(tokenA))
+        XCTAssertEqual(mountState.trackedTaskCount(activationToken: tokenA), 0)
+        XCTAssertEqual(mountState.trackedTaskCount(activationToken: tokenB), 1)
+        XCTAssertTrue(buttonTaskA?.isCancelled == true)
+        XCTAssertFalse(buttonTaskB?.isCancelled == true)
         XCTAssertEqual(releaseCountByToken[tokenA], 1)
         XCTAssertNil(releaseCountByToken[tokenB])
+        let buttonReleaseA = await buttonGateA.release()
+        XCTAssertEqual(buttonReleaseA, .released)
+        await buttonTaskA?.value
         await runNextCleanup(cleanupQueueA)
         XCTAssertEqual(releaseCountByToken[tokenA], 1)
 
@@ -1372,10 +1524,14 @@ final class JobHistoryViewModelTests: XCTestCase {
         await taskB.value
         XCTAssertEqual(cleanupQueueB.pendingCount, 2)
         await runNextCleanup(cleanupQueueB)
+        XCTAssertTrue(buttonTaskB?.isCancelled == true)
+        let buttonReleaseB = await buttonGateB.release()
+        XCTAssertEqual(buttonReleaseB, .released)
+        await buttonTaskB?.value
         await runNextCleanup(cleanupQueueB)
-        XCTAssertNil(mirroredToken)
+        XCTAssertNil(mountState.activationToken)
         XCTAssertFalse(viewModel.isViewActive)
-        XCTAssertTrue(buttonTaskOwners.isEmpty)
+        XCTAssertEqual(mountState.trackedTaskCount(activationToken: tokenB), 0)
         XCTAssertEqual(releaseCountByToken[tokenB], 1)
     }
 
