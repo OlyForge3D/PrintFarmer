@@ -6,6 +6,18 @@ struct ServerCredentials: Equatable, Sendable {
     var expiresAt: Date?
 }
 
+/// D (issue #816 reject, Hicks + replacement Vasquez): the prior credential state
+/// captured immediately before a publication, including the operation token that
+/// most recently wrote the destination. A login/restore rollback restores this
+/// EXACT tuple under a compare-and-set on the operation token — so a T2 that
+/// republished the SAME bearer with a new expiry/session under a newer operation
+/// is NOT clobbered by T1's rollback (the frozen head compared only the access
+/// token text and would overwrite T2's fresh expiry).
+struct ServerCredentialsPriorState: Sendable, Equatable {
+    let credentials: ServerCredentials?
+    let operationToken: Int?
+}
+
 final class ServerCredentialsStore: @unchecked Sendable {
     static let legacyTokenKey = "pf_jwt_token"
     static let legacyTokenExpiryKey = "pf_token_expiry"
@@ -62,6 +74,88 @@ final class ServerCredentialsStore: @unchecked Sendable {
         return prior
     }
 
+    /// D (issue #816 reject): publish credentials AND tag the write with the
+    /// operation token, atomically returning the PRIOR full state (credentials +
+    /// operation token). Callers roll back via `restoreIfOperationMatches`, which
+    /// CASes on the operation token so an equal-bearer T2 relogin under a newer
+    /// operation is not lost.
+    @discardableResult
+    func saveCapturingPriorState(
+        _ credentials: ServerCredentials,
+        serverId: UUID,
+        operationToken: Int
+    ) -> ServerCredentialsPriorState {
+        lock.lock()
+        defer { lock.unlock() }
+        let priorAccessToken = keychain.get(tokenKey(serverId: serverId))
+        let priorExpiry = expiryDate(forKey: expiryKey(serverId: serverId))
+        let priorCredentials = priorAccessToken.map {
+            ServerCredentials(accessToken: $0, expiresAt: priorExpiry)
+        }
+        let priorOperationToken = operationTokenValue(serverId: serverId)
+
+        keychain.set(credentials.accessToken, forKey: tokenKey(serverId: serverId), withAccess: keychainAccess)
+        if let expiresAt = credentials.expiresAt {
+            keychain.set(
+                String(expiresAt.timeIntervalSince1970),
+                forKey: expiryKey(serverId: serverId),
+                withAccess: keychainAccess
+            )
+        } else {
+            keychain.delete(expiryKey(serverId: serverId))
+        }
+        keychain.set(String(operationToken), forKey: operationTokenKey(serverId: serverId), withAccess: keychainAccess)
+        return ServerCredentialsPriorState(credentials: priorCredentials, operationToken: priorOperationToken)
+    }
+
+    /// D (issue #816 reject): compare-and-RESTORE the prior credential state IFF
+    /// the currently-persisted credential-operation-token equals
+    /// `expectedOperationToken`. If a newer T2 login has re-published its own
+    /// credentials under a newer operation token, the compare fails and T2's
+    /// full tuple (bearer + expiry + operation) is preserved untouched. Returns
+    /// whether the restore happened.
+    @discardableResult
+    func restoreIfOperationMatches(
+        serverId: UUID,
+        expectedOperationToken: Int,
+        prior: ServerCredentialsPriorState
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard operationTokenValue(serverId: serverId) == expectedOperationToken else {
+            return false
+        }
+        if let priorCredentials = prior.credentials {
+            keychain.set(priorCredentials.accessToken, forKey: tokenKey(serverId: serverId), withAccess: keychainAccess)
+            if let expiresAt = priorCredentials.expiresAt {
+                keychain.set(
+                    String(expiresAt.timeIntervalSince1970),
+                    forKey: expiryKey(serverId: serverId),
+                    withAccess: keychainAccess
+                )
+            } else {
+                keychain.delete(expiryKey(serverId: serverId))
+            }
+        } else {
+            keychain.delete(tokenKey(serverId: serverId))
+            keychain.delete(expiryKey(serverId: serverId))
+        }
+        if let priorOperationToken = prior.operationToken {
+            keychain.set(String(priorOperationToken), forKey: operationTokenKey(serverId: serverId), withAccess: keychainAccess)
+        } else {
+            keychain.delete(operationTokenKey(serverId: serverId))
+        }
+        return true
+    }
+
+    /// D: read-only view of the credential-operation-token tag (for tests /
+    /// diagnostics). Nil when untagged.
+    func credentialOperationToken(serverId: UUID) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        return operationTokenValue(serverId: serverId)
+    }
+
     func load(serverId: UUID) -> ServerCredentials? {
         lock.lock()
         defer { lock.unlock() }
@@ -83,6 +177,7 @@ final class ServerCredentialsStore: @unchecked Sendable {
 
         keychain.delete(tokenKey(serverId: serverId))
         keychain.delete(expiryKey(serverId: serverId))
+        keychain.delete(operationTokenKey(serverId: serverId))
     }
 
     /// J1 (issue #816 reject, Hicks): clear both keychain entries and surface
@@ -214,6 +309,16 @@ final class ServerCredentialsStore: @unchecked Sendable {
 
     func expiryKey(serverId: UUID) -> String {
         "pf_server_\(serverId.uuidString)_token_expiry"
+    }
+
+    /// D: keychain key carrying the operation token that most recently published
+    /// this server's credentials, enabling operation-CAS rollback.
+    func operationTokenKey(serverId: UUID) -> String {
+        "pf_server_\(serverId.uuidString)_cred_op"
+    }
+
+    private func operationTokenValue(serverId: UUID) -> Int? {
+        keychain.get(operationTokenKey(serverId: serverId)).flatMap(Int.init)
     }
 
     private func expiryDate(forKey key: String) -> Date? {

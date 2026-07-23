@@ -279,3 +279,75 @@ final class DallasSnapshotAuthorityHardeningTests: XCTestCase {
         XCTAssertEqual(try recordB.loadReservedHighWater(), 1)
     }
 }
+
+// MARK: - Dallas #816 revision — finding D: operation-revision credential rollback
+//
+// Proves the credential rollback compares the per-publication OPERATION token
+// (full-tuple CAS), not just the access-token text. The frozen head's
+// token-text compare would clobber a T2 that republished the same bearer with a
+// new expiry under a newer operation.
+final class DallasAuthRollbackTests: XCTestCase {
+
+    private let e1 = Date(timeIntervalSince1970: 100)
+    private let e2 = Date(timeIntervalSince1970: 999)
+
+    /// D: T1 publishes a bearer; T2 republishes the SAME bearer with a NEW expiry
+    /// under a newer operation token. T1's rollback CAS on its own (older) token
+    /// MUST fail — T2's full tuple (bearer + fresh expiry) is preserved. A
+    /// token-text-only compare would have matched and destroyed T2's expiry.
+    func testCredentialRollbackIsOperationCASNotTokenText() {
+        let store = ServerCredentialsStore()
+        let sid = UUID()
+        addTeardownBlock { store.clear(serverId: sid) }
+
+        let priorT1 = store.saveCapturingPriorState(
+            ServerCredentials(accessToken: "bearer", expiresAt: e1), serverId: sid, operationToken: 1)
+        XCTAssertNil(priorT1.credentials, "no prior credentials existed")
+
+        let priorT2 = store.saveCapturingPriorState(
+            ServerCredentials(accessToken: "bearer", expiresAt: e2), serverId: sid, operationToken: 2)
+        XCTAssertEqual(priorT2.credentials?.accessToken, "bearer")
+
+        // T1 rollback: current op tag is 2 (T2), not 1 → CAS fails → no-op.
+        XCTAssertFalse(store.restoreIfOperationMatches(serverId: sid, expectedOperationToken: 1, prior: priorT1))
+        let afterT1Rollback = store.load(serverId: sid)
+        XCTAssertEqual(afterT1Rollback?.accessToken, "bearer")
+        XCTAssertEqual(afterT1Rollback?.expiresAt, e2,
+                       "T2's fresh expiry MUST survive T1's rollback (token-text compare would have clobbered it)")
+        XCTAssertEqual(store.credentialOperationToken(serverId: sid), 2)
+    }
+
+    /// D: the operation that actually owns the destination CAN roll back — its
+    /// CAS matches and it restores the exact prior tuple.
+    func testCredentialRollbackByOwnerRestoresPriorTuple() {
+        let store = ServerCredentialsStore()
+        let sid = UUID()
+        addTeardownBlock { store.clear(serverId: sid) }
+
+        _ = store.saveCapturingPriorState(
+            ServerCredentials(accessToken: "bearer-1", expiresAt: e1), serverId: sid, operationToken: 1)
+        let priorT2 = store.saveCapturingPriorState(
+            ServerCredentials(accessToken: "bearer-2", expiresAt: e2), serverId: sid, operationToken: 2)
+
+        // T2 owns the destination (op tag 2) → rollback succeeds, restoring T1.
+        XCTAssertTrue(store.restoreIfOperationMatches(serverId: sid, expectedOperationToken: 2, prior: priorT2))
+        let restored = store.load(serverId: sid)
+        XCTAssertEqual(restored?.accessToken, "bearer-1")
+        XCTAssertEqual(restored?.expiresAt, e1)
+        XCTAssertEqual(store.credentialOperationToken(serverId: sid), 1, "prior op tag restored")
+    }
+
+    /// D: clearing credentials removes the operation tag too, so a later
+    /// publication starts from an untagged destination.
+    func testClearRemovesOperationTag() {
+        let store = ServerCredentialsStore()
+        let sid = UUID()
+        addTeardownBlock { store.clear(serverId: sid) }
+        _ = store.saveCapturingPriorState(
+            ServerCredentials(accessToken: "bearer", expiresAt: e1), serverId: sid, operationToken: 7)
+        XCTAssertEqual(store.credentialOperationToken(serverId: sid), 7)
+        store.clear(serverId: sid)
+        XCTAssertNil(store.credentialOperationToken(serverId: sid))
+        XCTAssertNil(store.load(serverId: sid))
+    }
+}

@@ -60,6 +60,37 @@ actor AuthService: AuthServiceProtocol {
     private let snapshotOwnerStore: FarmSnapshotOwnerStore
     private let authEpoch: AuthOperationEpoch
 
+    // MARK: D — unique fencing tag for legacy `.unspecified` operations
+    //
+    // D (issue #816 reject, Hicks + replacement Vasquez): the frozen head tagged
+    // every durable destination write from a legacy `.unspecified` operation with
+    // the SHARED sentinel `Int.min`. Two concurrent `.unspecified` operations
+    // therefore both wrote the same owner-operation tag, so a T1 rollback CAS on
+    // `Int.min` could match — and destroy — a T2 `.unspecified` publication (ABA).
+    // Each `.unspecified` publication now mints its OWN unique fencing tag from a
+    // dedicated monotonic counter in a namespace strictly disjoint from real
+    // operation tokens (which are >= 1 from `AuthOperationEpoch.advance()`) and
+    // never equal to `Int.min` — so a rollback restores exactly its own write.
+    private static let unspecifiedTagLock = NSLock()
+    nonisolated(unsafe) private static var unspecifiedTagCounter = -1
+    private static func nextUnspecifiedDestinationTag() -> Int {
+        unspecifiedTagLock.lock()
+        defer { unspecifiedTagLock.unlock() }
+        // Decrement toward Int.min but stop one short so the shared `Int.min`
+        // sentinel is never reused as a per-publication tag.
+        if unspecifiedTagCounter > Int.min + 1 {
+            unspecifiedTagCounter -= 1
+        }
+        return unspecifiedTagCounter
+    }
+
+    /// D: the destination-fencing tag for an operation — the real operation token
+    /// for a fenced operation, or a freshly-minted unique tag for a legacy
+    /// `.unspecified` operation (never the shared `Int.min` sentinel).
+    private func destinationTag(for operation: AuthOperationToken) -> Int {
+        operation == .unspecified ? Self.nextUnspecifiedDestinationTag() : operation.value
+    }
+
     init(
         apiClient: APIClient,
         credentialsStore: ServerCredentialsStore = ServerCredentialsStore(),
@@ -212,21 +243,27 @@ actor AuthService: AuthServiceProtocol {
 
         // Step 1: credentials + owner (single synchronous fenced block that
         // atomically captures prior state).
-        var priorCredentials: ServerCredentials?
+        // D: one destination-fencing tag for this publication — the real
+        // operation token, or a unique per-publication tag for `.unspecified`
+        // (never the shared `Int.min` sentinel). Used for BOTH the credential and
+        // owner operation-CAS rollback so an equal-bearer/equal-user T2 relogin
+        // is preserved.
+        let destTag = destinationTag(for: operation)
+        var priorCredentials = ServerCredentialsPriorState(credentials: nil, operationToken: nil)
         var priorOwner: FarmSnapshotOwnerPriorState = FarmSnapshotOwnerPriorState(userID: nil, operationToken: nil)
         let published = fencedMutation(operation) {
-            priorCredentials = credentialsStore.saveCapturingPrior(
+            priorCredentials = credentialsStore.saveCapturingPriorState(
                 ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
-                serverId: server.id
+                serverId: server.id,
+                operationToken: destTag
             )
             // J2: publish the VERIFIED owner unconditionally.
-            // J1: tag with the operation token so an equal-user T2 rollback
-            // CAS is safe (compare on the token, not on userID equality).
-            let opTokenForTag = operation == .unspecified ? Int.min : operation.value
+            // J1/D: tag with the destination fencing tag so an equal-user T2
+            // rollback CAS is safe (compare on the token, not on userID equality).
             priorOwner = snapshotOwnerStore.setOwnerCapturingPrior(
                 userID: identity.id,
                 serverID: server.id,
-                operationToken: opTokenForTag
+                operationToken: destTag
             )
         }
         guard published else {
@@ -255,17 +292,17 @@ actor AuthService: AuthServiceProtocol {
                 epoch: authEpoch, token: operation.value
             )
             guard applied else {
-                // J1: rollback restores the exact prior credentials + owner
-                // rather than clearing them. Owner rollback is CAS on the
-                // operation token — an equal-user T2 that landed here is
-                // preserved because its operation token differs.
-                credentialsStore.restoreIfAccessTokenMatches(
-                    serverId: server.id, expectedAccessToken: token,
+                // J1/D: rollback restores the exact prior credentials + owner
+                // via operation-CAS on the destination fencing tag — an
+                // equal-bearer/equal-user T2 that landed here is preserved
+                // because its operation tag differs.
+                credentialsStore.restoreIfOperationMatches(
+                    serverId: server.id, expectedOperationToken: destTag,
                     prior: priorCredentials
                 )
                 snapshotOwnerStore.restoreOwnerIfOperationMatches(
                     serverID: server.id,
-                    expectedOperationToken: operation.value,
+                    expectedOperationToken: destTag,
                     prior: priorOwner
                 )
                 await rollbackNewlyAddedServer(resolved)
@@ -277,27 +314,24 @@ actor AuthService: AuthServiceProtocol {
         // Step 3: registry activate (fenced on operation).
         let activated = await activate(server, operation: operation)
         guard activated else {
-            // J1: rollback steps 1-2 with prior-state restoration.
-            credentialsStore.restoreIfAccessTokenMatches(
-                serverId: server.id, expectedAccessToken: token,
+            // J1/D: rollback steps 1-2 with prior-state restoration, using the
+            // destination fencing tag so BOTH the real-operation and legacy
+            // `.unspecified` paths CAS-restore their OWN exact prior state
+            // (the unique `.unspecified` tag makes this ABA-safe — no more
+            // shared-sentinel clear that could wipe a concurrent T2).
+            credentialsStore.restoreIfOperationMatches(
+                serverId: server.id, expectedOperationToken: destTag,
                 prior: priorCredentials
             )
+            snapshotOwnerStore.restoreOwnerIfOperationMatches(
+                serverID: server.id,
+                expectedOperationToken: destTag,
+                prior: priorOwner
+            )
             if operation != .unspecified {
-                snapshotOwnerStore.restoreOwnerIfOperationMatches(
-                    serverID: server.id,
-                    expectedOperationToken: operation.value,
-                    prior: priorOwner
-                )
                 await apiClient.clearSessionIfMatches(
                     expectedAccessToken: token,
                     expectedAuthSessionToken: operation.value
-                )
-            } else {
-                // `.unspecified` cannot CAS on operation token; fall back to
-                // clearIfMatches which is at least token/user-safe against a
-                // different-value T2.
-                snapshotOwnerStore.clearOwnerIfMatches(
-                    serverID: server.id, expectedUserID: identity.id
                 )
             }
             await rollbackNewlyAddedServer(resolved)
