@@ -212,6 +212,112 @@ case_backend_plugin_change() {
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   # Backends do not appear as a direct ProjectReference of Slicer.Module.Tests.
   assert_not_contains "matrix slicer absent" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  # Ensure the concrete-plugin edit produces the plugin token, not the core one.
+  assert_contains "reason backend-plugin" "$reason" "backend-plugin" || return 1
+  assert_not_contains "reason not backend-core" "$reason" "backend-core" || return 1
+}
+
+# Second concrete plugin — proves the split classifier is not accidentally
+# specialized to Moonraker. FlashForge sits at the same directory level and
+# only Api.Tests should be selected.
+case_backend_plugin_change_flashforge() {
+  local out="$1"
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.FlashForge/FlashForgeClient.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "matrix slicer absent" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+}
+
+# Farm.Backend.Plugin.Core is the shared plugin abstraction. It is a direct
+# ProjectReference of Farm.Web.Api.Tests AND a transitive dependency of
+# Farm.Slicer.Module.Tests via Farm.Slicer.Module → Farm.Backend.Plugin.Core.
+# A Core edit must therefore select BOTH test projects, not just Api.Tests.
+# This is the r4-blocker regression Hicks flagged.
+case_backend_core_change_selects_both_tests() {
+  local out="$1"
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.Core/IBackendPlugin.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason backend-core" "$reason" "backend-core" || return 1
+}
+
+# Nested path under Farm.Backend.Plugin.Core must classify the same way as
+# a top-level file. Guards against a future refactor that accidentally makes
+# the classifier match only one directory level.
+case_backend_core_nested_path_selects_both_tests() {
+  local out="$1"
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.Core/Contracts/PluginRegistration.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix api nested" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix slicer nested" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+}
+
+# Mixed edit touching Core and a concrete plugin in the same PR must still
+# select both test suites (Core drives the slicer selection). Also verifies
+# dedup so Api.Tests appears exactly once in the matrix.
+case_backend_core_and_plugin_mixed() {
+  local out="$1"
+  CHANGED_FILES=$'src/backends/Farm.Backend.Plugin.Core/IBackendPlugin.cs\nsrc/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix api mixed" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix slicer mixed" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  local api_count slicer_count
+  api_count="$(grep -o '"name":"Farm\.Web\.Api\.Tests"' <<< "$matrix" | wc -l | tr -d ' ')"
+  slicer_count="$(grep -o '"name":"Farm\.Slicer\.Module\.Tests"' <<< "$matrix" | wc -l | tr -d ' ')"
+  if [[ "$api_count" != "1" ]]; then
+    printf '  api appears %s times in mixed matrix: %s\n' "$api_count" "$matrix" >&2
+    return 1
+  fi
+  if [[ "$slicer_count" != "1" ]]; then
+    printf '  slicer appears %s times in mixed matrix: %s\n' "$slicer_count" "$matrix" >&2
+    return 1
+  fi
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason includes core" "$reason" "backend-core" || return 1
+  assert_contains "reason includes plugin" "$reason" "backend-plugin" || return 1
+}
+
+# Static regression: verify the classifier orders backend_core BEFORE
+# backend_plugin so `case` evaluation matches Core first. If a future edit
+# reorders these two patterns, Core would fall through to backend_plugin and
+# silently regress to Api.Tests-only selection.
+case_selector_backend_core_pattern_precedes_plugin() {
+  local core_line plugin_line
+  core_line="$(grep -n 'src/backends/Farm.Backend.Plugin.Core/\*)' "$SELECTOR" | head -n1 | cut -d: -f1)"
+  plugin_line="$(grep -n "^[[:space:]]*src/backends/\*)" "$SELECTOR" | head -n1 | cut -d: -f1)"
+  if [[ -z "$core_line" ]]; then
+    printf '  selector missing src/backends/Farm.Backend.Plugin.Core/* pattern\n' >&2
+    return 1
+  fi
+  if [[ -z "$plugin_line" ]]; then
+    printf '  selector missing src/backends/* pattern\n' >&2
+    return 1
+  fi
+  if (( core_line >= plugin_line )); then
+    printf '  backend_core pattern (line %s) must precede backend_plugin pattern (line %s)\n' \
+      "$core_line" "$plugin_line" >&2
+    return 1
+  fi
 }
 
 case_slicer_change() {
@@ -733,6 +839,11 @@ TESTS=(
   case_infra_entity_change_selects_app_drift
   case_infra_configuration_change_selects_app_drift
   case_backend_plugin_change
+  case_backend_plugin_change_flashforge
+  case_backend_core_change_selects_both_tests
+  case_backend_core_nested_path_selects_both_tests
+  case_backend_core_and_plugin_mixed
+  case_selector_backend_core_pattern_precedes_plugin
   case_slicer_change
   case_orca_worker_change
   case_migration_app_change

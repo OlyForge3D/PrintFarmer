@@ -66,7 +66,8 @@ classify.
 | `frontend`: `src/Web/**` | ✓ | | | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `AppPg`, `AppSqlServer` | |
 | `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `AppPg`, `AppSqlServer` | |
-| `backend_plugin`: `src/backends/**` | | ✓ | `Farm.Web.Api.Tests` | | |
+| `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | | |
+| `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests` | | |
 | `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests` | `AppPg`, `AppSqlServer` | |
 | `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Slicer.Module.Tests` | `SlicerPg`, `SlicerSqlServer` | |

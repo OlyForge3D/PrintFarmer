@@ -212,7 +212,13 @@ load_changed_files() {
 #   frontend        — src/Web/**
 #   api             — src/api/**
 #   infra           — src/infra/** (conservatively includes App model drift)
-#   backend_plugin  — src/backends/**
+#   backend_core    — src/backends/Farm.Backend.Plugin.Core/**
+#                     (referenced by Farm.Slicer.Module in addition to the
+#                     concrete plugins, so both test projects are affected).
+#   backend_plugin  — every other src/backends/** path (concrete plugin
+#                     projects: Moonraker, PrusaLink, OctoPrint, Sdcp,
+#                     FlashForge, TestEmulator). Only Farm.Web.Api.Tests
+#                     directly ProjectReferences these.
 #   slicer          — src/slicer/**, src/Slicers/**, src/worker-shared/**
 #   orca_worker     — src/orcaslicer-worker/**
 #   discovery       — src/discovery/**, src/printer-discovery/**
@@ -272,6 +278,14 @@ classify_path() {
   case "$p" in
     src/api/*)               printf 'api' ; return ;;
     src/infra/*)             printf 'infra' ; return ;;
+    # Farm.Backend.Plugin.Core is the shared plugin abstraction referenced by
+    # BOTH `Farm.Slicer.Module` (via ../../backends/Farm.Backend.Plugin.Core)
+    # and every concrete backend plugin. Because Farm.Slicer.Module.Tests
+    # transitively depends on it through Farm.Slicer.Module, any Core edit
+    # affects the slicer test project too. Match this bucket BEFORE the more
+    # general `src/backends/*` case so concrete plugins keep their narrower
+    # API-tests-only classification. See docs/CI.md for the mapping table.
+    src/backends/Farm.Backend.Plugin.Core/*) printf 'backend_core' ; return ;;
     src/backends/*)          printf 'backend_plugin' ; return ;;
     src/slicer/*)            printf 'slicer' ; return ;;
     src/Slicers/*)           printf 'slicer' ; return ;;
@@ -456,7 +470,7 @@ main() {
 
   # Bucket flags.
   local has_shared_config=0 has_ci_selector=0 has_frontend=0
-  local has_api=0 has_infra=0 has_backend=0 has_slicer=0
+  local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_other=0
@@ -472,6 +486,7 @@ main() {
       api)             has_api=1 ;;
       infra)           has_infra=1 ;;
       backend_plugin)  has_backend=1 ;;
+      backend_core)    has_backend_core=1 ;;
       slicer)          has_slicer=1 ;;
       orca_worker)     has_orca=1 ;;
       discovery)       has_discovery=1 ;;
@@ -533,7 +548,7 @@ main() {
 
   # Any .NET-relevant bucket forces a full solution build to preserve compile
   # coverage across the whole graph.
-  if (( has_api || has_infra || has_backend || has_slicer ||
+  if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tools )); then
     want_dotnet_build="true"
@@ -547,8 +562,19 @@ main() {
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
-    # Backends are referenced by Api.Tests only (per csproj graph).
+    # Concrete backend plugins (Moonraker/PrusaLink/OctoPrint/Sdcp/FlashForge/
+    # TestEmulator) are direct ProjectReferences of Farm.Web.Api.Tests only.
+    # They are NOT referenced by Farm.Slicer.Module or Farm.Slicer.Module.Tests.
     test_names+=("Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_backend_core )); then
+    # Farm.Backend.Plugin.Core is referenced directly by Farm.Web.Api.Tests
+    # AND transitively by Farm.Slicer.Module.Tests through Farm.Slicer.Module
+    # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
+    # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj).
+    # A Core edit must therefore run both test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_slicer )); then
@@ -606,7 +632,8 @@ main() {
   if (( has_frontend )); then reason+="frontend "; fi
   if (( has_api )); then reason+="api "; fi
   if (( has_infra )); then reason+="infra "; fi
-  if (( has_backend )); then reason+="backend "; fi
+  if (( has_backend )); then reason+="backend-plugin "; fi
+  if (( has_backend_core )); then reason+="backend-core "; fi
   if (( has_slicer )); then reason+="slicer "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
