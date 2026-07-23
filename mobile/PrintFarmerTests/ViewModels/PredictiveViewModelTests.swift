@@ -2192,6 +2192,19 @@ final class PredictiveViewModelTests: XCTestCase {
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.observerParkAckTicketCount, 0,
             "enter+drop across \(iterations) iterations must leave EXACTLY zero live boxes; got \(snap.observerParkAckTicketCount)")
+        // Coordinator criterion 2: backing dict key count must ALSO be zero
+        // (compaction removes empty buckets). This proves no dict entries
+        // remain, not merely no live boxes.
+        XCTAssertEqual(snap.observerParkAckTicketBackingKeyCount, 0,
+            "backing dict must be empty after compaction; got \(snap.observerParkAckTicketBackingKeyCount)")
+        // And raw box count (post-compaction, uncompacted-since-snapshot)
+        // must be zero: proves no dead boxes lingering.
+        let rawBoxes = await gate.debugRawObserverParkAckBoxCount()
+        let rawKeys = await gate.debugRawObserverParkAckKeyCount()
+        XCTAssertEqual(rawBoxes, 0,
+            "raw backing box count must be zero after compaction; got \(rawBoxes)")
+        XCTAssertEqual(rawKeys, 0,
+            "raw backing key count must be zero after compaction; got \(rawKeys)")
         await gate.close()
     }
 
@@ -2213,6 +2226,15 @@ final class PredictiveViewModelTests: XCTestCase {
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.waiterParkAckTicketCount, 0,
             "enter+drop across \(iterations) iterations must leave EXACTLY zero live boxes; got \(snap.waiterParkAckTicketCount)")
+        // Coordinator criterion 2: backing dict + raw box counts.
+        XCTAssertEqual(snap.waiterParkAckTicketBackingKeyCount, 0,
+            "backing dict must be empty after compaction; got \(snap.waiterParkAckTicketBackingKeyCount)")
+        let rawBoxes = await gate.debugRawWaiterParkAckBoxCount()
+        let rawKeys = await gate.debugRawWaiterParkAckKeyCount()
+        XCTAssertEqual(rawBoxes, 0,
+            "raw backing box count must be zero after compaction; got \(rawBoxes)")
+        XCTAssertEqual(rawKeys, 0,
+            "raw backing key count must be zero after compaction; got \(rawKeys)")
         await gate.close()
     }
 
@@ -4034,6 +4056,36 @@ private actor AsyncGate {
         // caller has consumed the buffered result.
         let observerParkAckTicketCount: Int
         let waiterParkAckTicketCount: Int
+        // Hicks H2 (coordinator criterion 2): backing-storage metrics.
+        // `*BackingKeyCount` reports the number of dictionary keys still
+        // present in `observerActiveParkAckTickets` / `waiterActiveParkAckTickets`
+        // AFTER compaction. Because compaction removes any bucket that becomes
+        // empty (all dead boxes pruned), a value of 0 proves the backing dict
+        // holds NO entries — not merely that live tickets are gone.
+        // Live count == 0 alone could mask a dict entry holding only dead boxes;
+        // key count == 0 rules that out.
+        let observerParkAckTicketBackingKeyCount: Int
+        let waiterParkAckTicketBackingKeyCount: Int
+    }
+
+    // MARK: Debug metrics (test-only)
+    // Hicks H2 (coordinator criterion 2): expose RAW backing storage counts
+    // WITHOUT triggering compaction. Callable AFTER `snapshot()` (which does
+    // compact) to prove that even the raw box arrays are empty at that
+    // moment. If snapshot() reports 0 but debugRaw* reports >0, that would
+    // reveal a compaction correctness bug. Both must be 0 to prove the
+    // gate holds no per-ticket state after drop.
+    func debugRawObserverParkAckBoxCount() -> Int {
+        observerActiveParkAckTickets.values.reduce(0) { $0 + $1.count }
+    }
+    func debugRawWaiterParkAckBoxCount() -> Int {
+        waiterActiveParkAckTickets.values.reduce(0) { $0 + $1.count }
+    }
+    func debugRawObserverParkAckKeyCount() -> Int {
+        observerActiveParkAckTickets.count
+    }
+    func debugRawWaiterParkAckKeyCount() -> Int {
+        waiterActiveParkAckTickets.count
     }
 
     // MARK: State
@@ -4929,7 +4981,9 @@ private actor AsyncGate {
             observerCancelCountAckQueueTotal: observerCancelCountAcks.values.reduce(0) { $0 + $1.count },
             waiterCancelCountAckQueueTotal: waiterCancelCountAcks.values.reduce(0) { $0 + $1.count },
             observerParkAckTicketCount: observerActiveParkAckTickets.values.reduce(0) { $0 + $1.count },
-            waiterParkAckTicketCount: waiterActiveParkAckTickets.values.reduce(0) { $0 + $1.count }
+            waiterParkAckTicketCount: waiterActiveParkAckTickets.values.reduce(0) { $0 + $1.count },
+            observerParkAckTicketBackingKeyCount: observerActiveParkAckTickets.count,
+            waiterParkAckTicketBackingKeyCount: waiterActiveParkAckTickets.count
         )
     }
 
