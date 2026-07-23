@@ -2011,11 +2011,11 @@ final class PredictiveViewModelTests: XCTestCase {
     //
     // These tests use:
     //   - `ObserverAwaitAttempt` / `WaiterAwaitAttempt` — caller-owned
-    //     per-attempt cancellation context. onCancel synchronously
-    //     installs the exact `Task<CancelReceipt, Never>` into the
-    //     attempt BEFORE returning; consumers await
-    //     `attempt.cancelTask?.value` for the definitive per-attempt
-    //     outcome. The gate stores NO per-attempt receipt map.
+    //     per-attempt cancellation context. The state gate atomically
+    //     commits to either `.completedNaturally` or `.cancellationInitiated`;
+    //     whichever wins is the sole publisher of the buffered outcome.
+    //     Consumers await `attempt.outcome()` for the definitive
+    //     per-attempt receipt. The gate stores NO per-attempt receipt map.
     //   - `enterObserverParkAck(_) -> ObserverParkAckTicket` — caller-
     //     owned one-shot buffered ticket. Actor calls `resolve(_)` at
     //     park/fate/close and removes the ticket entry immediately.
@@ -2692,7 +2692,7 @@ final class PredictiveViewModelTests: XCTestCase {
 
     /// Hicks R1: duplicate-cancel exact receipts. The DUPLICATE
     /// attempt's cancellation is proven per-attempt via the
-    /// caller-owned `attempt.cancelTask?.value` — no gate-level
+    /// caller-owned `attempt.outcome()` API — no gate-level
     /// storage. The ORIGINAL attempt is proven untouched by any
     /// cancel dispatch via `attempt.completedNaturally == true`
     /// after natural completion.
@@ -2740,9 +2740,9 @@ final class PredictiveViewModelTests: XCTestCase {
         // gates: the duplicate attempt's exact receipt (sealed at the cancel
         // dispatch proven above) and the dup task drain.
         await dup.value
-        // R1 authoritative receipt via buffered outcome() API. Legacy
-        // cancelTask accessor removed; outcome() is guaranteed to
-        // resolve because cancel-Task path publishes exactly once.
+        // R1 authoritative receipt via buffered outcome() API — the
+        // sole per-attempt receipt path. outcome() is guaranteed to
+        // resolve because the cancel-Task publishes exactly once.
         let dupOutcome = await dupAttempt.outcome()
         XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
                        "duplicate cancel receipt: bounded no-op via mismatched awaitID")
@@ -2809,8 +2809,8 @@ final class PredictiveViewModelTests: XCTestCase {
     }
 
     /// Hicks R1: matched-cancel receipt. Original attempt is cancelled
-    /// while parked; its own attempt.cancelTask.value returns
-    /// `.processedMatched`. No gate storage.
+    /// while parked; its own `attempt.outcome()` returns
+    /// `.cancelled(.processedMatched)`. No gate storage.
     func testAsyncGateR1MatchedCancelReceipt_observer() async {
         let gate = AsyncGate()
         let token = await gate.registerObserver()
@@ -2875,7 +2875,7 @@ final class PredictiveViewModelTests: XCTestCase {
     /// state. Under the R1 caller-owned design, the gate has no
     /// receipt map to grow at all — the per-attempt result lives
     /// inside each dropped `AwaitAttempt` object. This test drops
-    /// every attempt without ever reading `cancelTask.value`; gate
+    /// every attempt without ever reading `attempt.outcome()`; gate
     /// snapshot fields remain zero.
     func testAsyncGateR4NoConsumerCancelReceiptLeavesGateZero_observer() async {
         let gate = AsyncGate()
@@ -3376,11 +3376,11 @@ final class PredictiveViewModelTests: XCTestCase {
         // the Task level; whether body has entered
         // `withTaskCancellationHandler` yet or not, onCancel is
         // guaranteed to fire (either synchronously if handler active,
-        // or on handler entry if isCancelled==true). `installCancelTask`
-        // therefore runs before body returns, so `dupAttempt.cancelTask`
-        // is guaranteed non-nil once `await duplicate.value` returns
-        // below. This removes the need for the previous stranding
-        // `waitForWaiterParked(holdToken)` proof.
+        // or on handler entry if isCancelled==true). The state gate's
+        // `beginCancellationIfActive` therefore transitions before body
+        // returns, and the cancel Task runs and publishes to the
+        // attempt via `resolveOutcome`. This removes the need for the
+        // previous stranding `waitForWaiterParked(holdToken)` proof.
         duplicate.cancel()
 
         // R3 safety: unconditional holdGate.close BEFORE any
@@ -3393,8 +3393,8 @@ final class PredictiveViewModelTests: XCTestCase {
         await holdGate.close()
         await duplicate.value
 
-        // `dupAttempt` outcome via buffered outcome() API (legacy
-        // cancelTask accessor removed). Bounded: cancel Task always
+        // `dupAttempt` outcome via buffered outcome() API — the sole
+        // per-attempt receipt path. Bounded: cancel Task always
         // resolves via cancelObserver actor call.
         let dupOutcome = await dupAttempt.outcome()
         XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
@@ -4018,13 +4018,14 @@ final class PredictiveViewModelTests: XCTestCase {
 // MARK: - Hicks R1/R2 addendum: caller-owned attempt + ticket objects
 //
 // R1: `AwaitAttempt` replaces the gate-level lazy receipt cache. Each
-// await invocation constructs one and passes it in; onCancel synchronously
-// creates the exact per-attempt cancel `Task<Receipt, Never>` and installs
-// it into the attempt via `installCancelTask` BEFORE onCancel returns.
+// await invocation constructs one and passes it in; onCancel atomically
+// commits the attempt to `.cancellationInitiated` via `beginCancellationIfActive`
+// and (if it wins) launches a `Task<Receipt, Never>` that hops to the actor
+// and publishes the exact receipt to the attempt's buffered outcome latch.
 // The gate itself stores no per-attempt result map; `cancelX(id:, awaitID:)`
-// simply RETURNS the receipt as its function value, and the task handle
-// carried by the attempt is the authoritative receipt consumer. Tests
-// await `attempt.cancelTask?.value` to observe the exact outcome.
+// simply RETURNS the receipt as its function value. Tests await
+// `attempt.outcome()` to observe the exact per-attempt outcome — it is the
+// sole per-attempt receipt API.
 //
 // R2: `ParkAckTicket` replaces the gate-level ticket-to-token/result map.
 // `enterXParkAck` returns a caller-owned ticket object (already-resolved
@@ -4050,10 +4051,10 @@ final class PredictiveViewModelTests: XCTestCase {
 ///     is the sole publisher.
 ///
 /// The buffered outcome latch is the authoritative per-attempt receipt.
-/// Consumers await `attempt.outcome()` for the exact result. Legacy
-/// callers reading `attempt.cancelTask` may still race with the Task-
-/// launch window; new tests must use `outcome()` for the definitive
-/// per-attempt receipt.
+/// Consumers await `attempt.outcome()` for the exact result — the sole
+/// per-attempt receipt API. The legacy `cancelTask` accessor is not
+/// exposed; using `outcome()` avoids the install-window race that a
+/// direct Task-handle read would create.
 final class ObserverAwaitAttempt: @unchecked Sendable {
     let id: UUID
 
@@ -4386,10 +4387,12 @@ private actor AsyncGate {
     /// await attempt owns a caller-supplied `AwaitAttempt` context that
     /// carries the awaitID; `cancelObserver`/`cancelWaiter` returns one
     /// of these outcomes as its function value (no gate-side storage).
-    /// The caller-owned attempt holds the wrapping `Task<Receipt,Never>`
-    /// handle, and consumers await `attempt.cancelTask?.value` to observe
-    /// the definitive per-attempt outcome. `finishedBeforeProcessing` is
-    /// signaled by `attempt.completedNaturally` (cancelTask remained nil).
+    /// The onCancel body atomically commits the attempt to
+    /// `.cancellationInitiated` and launches a cancel Task that publishes
+    /// the receipt to the attempt's buffered outcome latch. Consumers
+    /// await `attempt.outcome()` for the definitive per-attempt outcome.
+    /// `finishedBeforeProcessing` is emitted by the natural-completion
+    /// path when the state gate is still `.active` at body return.
     enum ObserverCancelReceipt: Sendable, Hashable {
         case processedMatched              // cancelObserver drained THIS awaitID's parked continuation
         case processedIgnoredMismatch      // cancelObserver ran but this awaitID was not parked (or another awaitID was)
@@ -4632,12 +4635,13 @@ private actor AsyncGate {
     }
 
     /// Hicks R1: labeled overload that accepts a caller-owned
-    /// `ObserverAwaitAttempt`. onCancel synchronously creates the exact
-    /// cancel Task and installs it into `attempt` BEFORE onCancel
-    /// returns; callers/tests obtain the definitive per-attempt
-    /// receipt by awaiting `attempt.cancelTask?.value`. On natural
-    /// completion, `attempt.markCompletedNaturally()` fires; the
-    /// gate stores NO per-attempt outcome.
+    /// `ObserverAwaitAttempt`. onCancel atomically commits the attempt
+    /// via `beginCancellationIfActive` and launches a cancel Task that
+    /// publishes the receipt to the attempt's outcome latch; callers/
+    /// tests obtain the definitive per-attempt receipt by awaiting
+    /// `attempt.outcome()`. On natural completion,
+    /// `attempt.markCompletedNaturallyIfActive()` fires and publishes
+    /// `.finishedBeforeProcessing`; the gate stores NO per-attempt outcome.
     func awaitObserver(_ token: ObserverToken, attempt: ObserverAwaitAttempt) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
@@ -4716,10 +4720,10 @@ private actor AsyncGate {
     ///
     /// Hicks R1: this method now RETURNS the exact per-attempt
     /// `ObserverCancelReceipt` as its function value rather than
-    /// storing it in a gate map. The caller-owned `AwaitAttempt`
-    /// holds the `Task<ObserverCancelReceipt, Never>` handle that
-    /// wraps this call, so tests read the definitive per-attempt
-    /// outcome by awaiting `attempt.cancelTask?.value`.
+    /// storing it in a gate map. The cancel Task launched by onCancel
+    /// wraps this call and publishes the receipt to the caller-owned
+    /// `AwaitAttempt`'s outcome latch, so tests read the definitive
+    /// per-attempt outcome by awaiting `attempt.outcome()`.
     ///
     /// Hicks D: bumps `observerCancelInvocationCount` and flushes any
     /// ACKs waiting for a specific cancel-invocation threshold, so
@@ -5504,8 +5508,8 @@ private actor AsyncGate {
         // `AwaitAttempt` contexts). Any in-flight cancel Task that
         // races with close() observes `closed == true` in
         // `cancelObserver`/`cancelWaiter` and returns
-        // `.closedBeforeProcessing`; the caller's attempt.cancelTask
-        // .value delivers that exact receipt.
+        // `.closedBeforeProcessing`; the caller's `attempt.outcome()`
+        // delivers that exact receipt via the buffered outcome latch.
 
         // Hicks R2 addendum: drain any still-pending park-ACK tickets
         // with `.closedOrConsumed`. Resolution is exactly-once inside
