@@ -22,6 +22,10 @@ public class ModelCollectionConfiguration : IEntityTypeConfiguration<ModelCollec
         _ = builder.Property(c => c.OwnerUserId).IsRequired();
         _ = builder.Property(c => c.IsShared).IsRequired();
 
+        // Sync revision / optimistic-concurrency metadata (#844). Additive columns.
+        _ = builder.Property(c => c.Revision).IsRequired().HasDefaultValue(0L);
+        _ = builder.Property(c => c.ConcurrencyToken).IsConcurrencyToken();
+
         // Owner scoping for list queries.
         _ = builder.HasIndex(c => c.OwnerUserId);
 

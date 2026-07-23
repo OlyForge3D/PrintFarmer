@@ -26,4 +26,11 @@ public class ModelCollectionMembership
 
     /// <summary>UTC timestamp of the last mutation to this membership row.</summary>
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Monotonically increasing per-membership revision, bumped on every mutation. Enables
+    /// #845 to apply and auto-merge independent membership changes. Additive and
+    /// backward-compatible: existing rows default to 0.
+    /// </summary>
+    public long Revision { get; set; }
 }

@@ -41,6 +41,19 @@ public class ModelCollection
     /// <summary>UTC timestamp of the last mutation (metadata or membership change).</summary>
     public DateTime UpdatedAt { get; set; }
 
+    /// <summary>
+    /// Monotonically increasing per-collection revision, bumped on every metadata mutation.
+    /// Sync clients use it as the base revision / ETag for optimistic-concurrency (#844/#845).
+    /// Additive and backward-compatible: existing rows default to 0.
+    /// </summary>
+    public long Revision { get; set; }
+
+    /// <summary>
+    /// Optimistic-concurrency token regenerated on every metadata mutation. Configured as an
+    /// EF concurrency token; stored as a plain GUID column for provider portability.
+    /// </summary>
+    public Guid ConcurrencyToken { get; set; }
+
     /// <summary>Membership rows linking this collection to model references.</summary>
     public ICollection<ModelCollectionMembership> Memberships { get; set; } = new List<ModelCollectionMembership>();
 }

@@ -155,6 +155,8 @@ ModelCollection
 ├── Description (string, optional)
 ├── OwnerUserId (GUID, cross-context reference — no FK)
 ├── IsShared (bool)
+├── Revision (long, per-entity, app-incremented — sync base revision)
+├── ConcurrencyToken (GUID, optimistic-concurrency ETag)
 ├── CreatedAt, UpdatedAt
 └── Memberships (navigation collection)
 
@@ -162,8 +164,19 @@ ModelCollectionMembership
 ├── Id (GUID)
 ├── CollectionId (FK → ModelCollections, cascade)
 ├── ModelId (GUID, cross-context reference to Model3D — no FK)
+├── Revision (long, per-entity)
 ├── CreatedAt, UpdatedAt
 └── Collection (navigation)
+
+LibrarySyncChange (append-only sync journal + tombstones)
+├── Revision (long, store-generated identity PK — global monotonic cursor)
+├── EntityType (string enum: ModelCollection | ModelCollectionMembership | Tag)
+├── EntityId (GUID, soft reference — no FK, survives hard delete)
+├── Operation (string enum: Create | Update | Delete)
+├── OwnerUserId (GUID?, owner at time of change)
+├── Visibility (string enum: Private | Shared)
+├── ActorUserId (GUID, who made the change)
+└── Timestamp (UTC)
 ```
 
 #### Features
@@ -173,6 +186,67 @@ ModelCollectionMembership
 **Normalization**: Printer counts denormalized on Location for performance  
 **Encryption**: API keys encrypted at rest in database  
 **Cross-Context References**: Some entities (e.g. `ModelCollectionMembership.ModelId`, `OwnerUserId`) reference records owned by another bounded context/DbContext. These are stored as plain GUIDs with **no EF foreign key**; existence is validated at the service layer through the model query abstraction, following the tag/context-boundary precedent.  
+
+#### Library Sync Journal (issue #844)
+
+The library sync layer records an append-only change journal that a desktop client can pull to
+mirror collection/membership state (epic #835; the pull/apply endpoints are described in the
+[Library Sync Pull/Apply Endpoints](#library-sync-pullapply-endpoints-issue-845) section below).
+
+- **`LibrarySyncChange`** is the journal. Its `Revision` is a **store-generated identity** primary
+  key, which is provider-safe and strictly monotonic across PostgreSQL (`bigint` identity),
+  SQL Server (`IDENTITY`), and SQLite (`AUTOINCREMENT`). Ordering by `Revision` is the pull cursor.
+- **Transactional atomicity**: `ILibrarySyncJournal.Record(...)` enlists a journal row into the
+  same `AppDbContext` change tracker used by `EfModelCollectionRepository`. The service's single
+  `SaveChangesAsync` commits the entity mutation and its journal entry in one transaction, so
+  state and journal cannot diverge. Every collection/membership mutation
+  (create/update/delete/set-shared/add-member/remove-member/replace-members) journals an entry.
+- **Durable tombstones**: a `Delete` journal row has **no foreign key** to the entity it
+  references, so it persists after the row is hard-deleted. Deleting a collection first emits a
+  membership `Delete` tombstone for each current membership and then a collection `Delete`
+  tombstone, letting a puller propagate removals.
+- **Optimistic concurrency**: `ModelCollection` and `Tag` carry a `Revision` (base revision) and a
+  `ConcurrencyToken` (`IsConcurrencyToken`, regenerated each write). `TagService.UpdateTagAsync`
+  guards on an `ExpectedRevision` and throws `TagConcurrencyException` (HTTP 409) on a stale write.
+  The token is a plain `Guid` (not `rowversion`/`xmin`) to stay portable across all providers,
+  including SQLite. These columns are additive with safe defaults, so the change is
+  backward-compatible.
+
+#### Library Sync Pull/Apply Endpoints (issue #845)
+
+`LibrarySyncService` (behind `ILibrarySyncService`) and `LibrarySyncController` expose the journal
+to desktop clients as a cursor-based **pull** and a batched, transactional **apply**. Both reuse the
+#843 collection repository and the #844 journal, so mutations and their journal rows still commit
+under one unit of work (exactly-once journaling).
+
+- **Pull** — `GET /api/library-sync/changes?cursor={opaque}&limit={n}`:
+  - Orders strictly by the monotonic `Revision` and pages deterministically. The service fetches
+    `pageSize + 1` rows to compute `hasMore` without a second query.
+  - `limit` is clamped to `[1, MaxPageSize=500]` (`DefaultPageSize=100`). The `cursor` is an opaque,
+    validated token (`SyncCursor`) encoding only the last-seen revision; a malformed cursor yields
+    HTTP 400 (`InvalidSyncCursorException`), never a leak.
+  - **Visibility is always enforced in-store** via `GetVisibleChangesSinceAsync`: a non-admin sees
+    only rows they own, `Shared` rows, or owner-less rows; an admin sees all. Because filtering runs
+    in the query — not after paging — a forged cursor can never surface another user's changes.
+  - Tombstone (`Delete`) rows flow through so clients propagate removals. The response carries
+    `changes`, `nextCursor`, `hasMore`, and `serverRevision` (all camelCase; string enums).
+- **Apply** — `POST /api/library-sync/apply`:
+  - Accepts up to `MaxBatchSize=500` operations. Each op is authorized with the same
+    owner-or-administrator policy as the collection service (`EnsureCanWrite` → HTTP 403 on denial).
+  - Collection update/delete require a base revision and/or concurrency token; a stale or missing
+    token is rejected (HTTP 409/400) rather than silently overwriting.
+  - The batch is processed sequentially **without saving**; conflicts are accumulated. If any
+    operation conflicts, the unit of work is abandoned (no `SaveChangesAsync`), rolling the whole
+    batch back, and the service throws `SyncConflictException` → **HTTP 409** with a structured body
+    of `conflicts` (each carrying the safe **server** version and the **submitted** version) plus the
+    current `serverRevision`. A `DbUpdateConcurrencyException` at save time is translated into the
+    same 409 shape.
+  - **Auto-merge** is limited to genuinely independent collection-membership changes: re-adding an
+    existing membership or removing an absent one is idempotent (`merged: true`, no duplicate journal
+    row). Idempotent no-ops (deleting an already-gone entity) likewise succeed without journaling.
+  - Actor/audit metadata and exactly-once journal semantics are preserved; the endpoints honor
+    `CancellationToken` and are backward-compatible (additive routes only).
+
 
 ### Data Flow
 

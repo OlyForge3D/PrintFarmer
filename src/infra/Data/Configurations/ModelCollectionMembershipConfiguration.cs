@@ -21,6 +21,9 @@ public class ModelCollectionMembershipConfiguration : IEntityTypeConfiguration<M
         _ = builder.Property(m => m.CollectionId).IsRequired();
         _ = builder.Property(m => m.ModelId).IsRequired();
 
+        // Sync revision metadata (#844). Additive column.
+        _ = builder.Property(m => m.Revision).IsRequired().HasDefaultValue(0L);
+
         // A model may appear at most once per collection.
         _ = builder.HasIndex(m => new { m.CollectionId, m.ModelId }).IsUnique();
 

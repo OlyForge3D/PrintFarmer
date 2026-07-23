@@ -1,8 +1,10 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Domain.Sync;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Repositories.Collections;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Sync;
 
 namespace Farm.Infrastructure.Services.Collections;
 
@@ -13,11 +15,19 @@ namespace Farm.Infrastructure.Services.Collections;
 /// when the slicer module is not loaded the provider is absent and validation degrades
 /// gracefully, mirroring the tag repository precedent.
 /// </summary>
+/// <remarks>
+/// Every mutation records a <see cref="ILibrarySyncJournal"/> entry and bumps the affected
+/// entity's revision/concurrency metadata within the same unit of work, so the collection
+/// state and the sync journal are committed by a single <c>SaveChangesAsync</c> and cannot
+/// diverge (#844).
+/// </remarks>
 public class ModelCollectionService(
     IModelCollectionRepository repository,
+    ILibrarySyncJournal journal,
     IModel3DQueryProvider? model3DQuery = null) : IModelCollectionService
 {
     private readonly IModelCollectionRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    private readonly ILibrarySyncJournal _journal = journal ?? throw new ArgumentNullException(nameof(journal));
     private readonly IModel3DQueryProvider? _model3DQuery = model3DQuery;
 
     /// <inheritdoc/>
@@ -71,10 +81,13 @@ public class ModelCollectionService(
             OwnerUserId = callerUserId,
             IsShared = false,
             CreatedAt = now,
-            UpdatedAt = now
+            UpdatedAt = now,
+            Revision = 1,
+            ConcurrencyToken = Guid.NewGuid()
         };
 
         await _repository.AddAsync(collection, ct);
+        _journal.Record(SyncEntityType.ModelCollection, collection.Id, SyncOperation.Create, collection.OwnerUserId, VisibilityOf(collection), callerUserId, now);
         await _repository.SaveChangesAsync(ct);
 
         return MapToDto(collection, []);
@@ -96,7 +109,9 @@ public class ModelCollectionService(
         collection.Name = name;
         collection.Description = dto.Description;
         collection.UpdatedAt = DateTime.UtcNow;
+        BumpCollection(collection);
 
+        _journal.Record(SyncEntityType.ModelCollection, collection.Id, SyncOperation.Update, collection.OwnerUserId, VisibilityOf(collection), callerUserId, collection.UpdatedAt);
         await _repository.SaveChangesAsync(ct);
 
         IReadOnlyList<ModelCollectionMembership> memberships = await _repository.ListMembershipsAsync(collection.Id, ct);
@@ -107,6 +122,21 @@ public class ModelCollectionService(
     public async Task DeleteCollectionAsync(Guid collectionId, Guid callerUserId, bool callerIsAdmin, CancellationToken ct)
     {
         ModelCollection collection = await GetForWriteAsync(collectionId, callerUserId, callerIsAdmin, ct);
+
+        // Emit durable tombstones for every membership and the collection itself before the
+        // hard delete. The journal rows are soft references (no FK), so they persist after the
+        // rows are removed and let #845 propagate the deletions.
+        IReadOnlyList<ModelCollectionMembership> memberships = await _repository.ListMembershipsAsync(collectionId, ct);
+        DateTime now = DateTime.UtcNow;
+        SyncVisibility visibility = VisibilityOf(collection);
+
+        foreach (ModelCollectionMembership membership in memberships)
+        {
+            _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Delete, collection.OwnerUserId, visibility, callerUserId, now);
+        }
+
+        _journal.Record(SyncEntityType.ModelCollection, collection.Id, SyncOperation.Delete, collection.OwnerUserId, visibility, callerUserId, now);
+
         _repository.Remove(collection);
         await _repository.SaveChangesAsync(ct);
     }
@@ -120,6 +150,8 @@ public class ModelCollectionService(
         {
             collection.IsShared = shared;
             collection.UpdatedAt = DateTime.UtcNow;
+            BumpCollection(collection);
+            _journal.Record(SyncEntityType.ModelCollection, collection.Id, SyncOperation.Update, collection.OwnerUserId, VisibilityOf(collection), callerUserId, collection.UpdatedAt);
             await _repository.SaveChangesAsync(ct);
         }
 
@@ -157,11 +189,13 @@ public class ModelCollectionService(
             CollectionId = collectionId,
             ModelId = modelId,
             CreatedAt = now,
-            UpdatedAt = now
+            UpdatedAt = now,
+            Revision = 1
         };
 
         await _repository.AddMembershipAsync(membership, ct);
         collection.UpdatedAt = now;
+        _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Create, collection.OwnerUserId, VisibilityOf(collection), callerUserId, now);
         await _repository.SaveChangesAsync(ct);
 
         return MapMembershipToDto(membership);
@@ -178,8 +212,10 @@ public class ModelCollectionService(
             return;
         }
 
+        DateTime now = DateTime.UtcNow;
         _repository.RemoveMembership(existing);
-        collection.UpdatedAt = DateTime.UtcNow;
+        collection.UpdatedAt = now;
+        _journal.Record(SyncEntityType.ModelCollectionMembership, existing.Id, SyncOperation.Delete, collection.OwnerUserId, VisibilityOf(collection), callerUserId, now);
         await _repository.SaveChangesAsync(ct);
     }
 
@@ -209,6 +245,7 @@ public class ModelCollectionService(
 
         DateTime now = DateTime.UtcNow;
         bool changed = false;
+        SyncVisibility visibility = VisibilityOf(collection);
 
         // Remove memberships that are no longer desired.
         foreach (ModelCollectionMembership membership in current)
@@ -216,6 +253,7 @@ public class ModelCollectionService(
             if (!desiredSet.Contains(membership.ModelId))
             {
                 _repository.RemoveMembership(membership);
+                _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Delete, collection.OwnerUserId, visibility, callerUserId, now);
                 changed = true;
             }
         }
@@ -231,9 +269,11 @@ public class ModelCollectionService(
                     CollectionId = collectionId,
                     ModelId = modelId,
                     CreatedAt = now,
-                    UpdatedAt = now
+                    UpdatedAt = now,
+                    Revision = 1
                 };
                 await _repository.AddMembershipAsync(membership, ct);
+                _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Create, collection.OwnerUserId, visibility, callerUserId, now);
                 changed = true;
             }
         }
@@ -315,6 +355,15 @@ public class ModelCollectionService(
             .ToList();
     }
 
+    private static SyncVisibility VisibilityOf(ModelCollection collection)
+        => collection.IsShared ? SyncVisibility.Shared : SyncVisibility.Private;
+
+    private static void BumpCollection(ModelCollection collection)
+    {
+        collection.Revision++;
+        collection.ConcurrencyToken = Guid.NewGuid();
+    }
+
     private static ModelCollectionDto MapToDto(ModelCollection collection, IReadOnlyList<ModelCollectionMembership> memberships)
     {
         return new ModelCollectionDto
@@ -327,7 +376,9 @@ public class ModelCollectionService(
             CreatedAt = collection.CreatedAt,
             UpdatedAt = collection.UpdatedAt,
             MemberCount = memberships.Count,
-            ModelIds = memberships.Select(m => m.ModelId).ToList()
+            ModelIds = memberships.Select(m => m.ModelId).ToList(),
+            Revision = collection.Revision,
+            ConcurrencyToken = collection.ConcurrencyToken
         };
     }
 
@@ -339,7 +390,8 @@ public class ModelCollectionService(
             CollectionId = membership.CollectionId,
             ModelId = membership.ModelId,
             CreatedAt = membership.CreatedAt,
-            UpdatedAt = membership.UpdatedAt
+            UpdatedAt = membership.UpdatedAt,
+            Revision = membership.Revision
         };
     }
 }
