@@ -433,6 +433,36 @@ extension AuthViewModelTests {
         XCTAssertFalse(viewModel.isLoading, "logout (the newer op) owns and clears the loading flag")
     }
 
+    /// V5 (issue #816 reject, Vasquez): a SUPERSEDED restore must make ZERO view
+    /// state changes — in particular it must NOT set `hasCheckedAuth`. Here the
+    /// restore is superseded by a bare epoch advance (no other operation touches
+    /// `hasCheckedAuth`), so the flag isolates the frozen bug: the frozen code set
+    /// `hasCheckedAuth = true` in the superseded branch.
+    func testSupersededRestoreDoesNotSetHasCheckedAuth() async {
+        let prog = ProgrammableAuthService(user: makeUser(roles: ["operator"]))
+        services.authService = prog
+        let restoreBarrier = AsyncBarrier()
+        prog.restoreBarrier = restoreBarrier
+
+        XCTAssertFalse(viewModel.hasCheckedAuth, "precondition: not yet checked")
+
+        // Restore in flight, parked at the network barrier (it advanced the epoch
+        // to its own token when it started).
+        let restoreTask = Task { await self.viewModel.restoreSession() }
+        await restoreBarrier.waitUntilArrived()
+
+        // Supersede the restore by advancing the epoch WITHOUT any other operation
+        // that would legitimately set hasCheckedAuth.
+        _ = services.authOperationEpoch.advance()
+
+        restoreBarrier.release()
+        await restoreTask.value
+
+        XCTAssertFalse(viewModel.hasCheckedAuth,
+                       "a superseded restore must NOT set hasCheckedAuth (V5)")
+        XCTAssertFalse(viewModel.isAuthenticated, "superseded restore must not authenticate")
+    }
+
     func testOperationOwnedLoadingFlagAcrossOverlappingLogins() async {
         let prog = ProgrammableAuthService(user: makeUser(roles: ["operator"]))
         services.authService = prog

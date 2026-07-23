@@ -156,6 +156,21 @@ final class ServerCredentialsStore: @unchecked Sendable {
         return operationTokenValue(serverId: serverId)
     }
 
+    /// V4 (issue #816 reject, Vasquez): advance the credential operation tag for a
+    /// server WITHOUT rewriting the bearer, used by a successful restore that
+    /// re-verified an existing credential under a newer operation. This makes a
+    /// concurrent stale login's rollback CAS (on an older tag) fail, so the
+    /// restore's freshly-verified credential is not clobbered. No-op when no
+    /// credential is stored (nothing to retag).
+    @discardableResult
+    func retagOperation(serverId: UUID, operationToken: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard keychain.get(tokenKey(serverId: serverId)) != nil else { return false }
+        keychain.set(String(operationToken), forKey: operationTokenKey(serverId: serverId), withAccess: keychainAccess)
+        return true
+    }
+
     func load(serverId: UUID) -> ServerCredentials? {
         lock.lock()
         defer { lock.unlock() }

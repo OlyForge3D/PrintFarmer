@@ -278,13 +278,11 @@ actor AuthService: AuthServiceProtocol {
         // serverID so a later logout snapshot cannot separate baseURL from
         // server identity).
         if operation == .unspecified {
-            await apiClient.updateBaseURL(server.baseURL)
-            // J4: even the legacy `.unspecified` path binds the stable serverID
-            // alongside the bearer so a later logout snapshot's serverID
-            // matches the captured bearer/baseURL. There is no reachable
-            // authenticated APIClient mutation that leaves serverID nil.
-            await apiClient.setAuthenticatedSession(
-                AuthenticatedIdentity(accessToken: token, serverID: server.id))
+            // V2: apply baseURL + identity in ONE actor hop so no request can
+            // observe a (new baseURL, stale bearer) window on the legacy path.
+            await apiClient.applyAuthenticatedSession(
+                baseURL: server.baseURL,
+                identity: AuthenticatedIdentity(accessToken: token, serverID: server.id))
         } else {
             let applied = await apiClient.applyAuthenticatedSessionIfCurrent(
                 baseURL: server.baseURL,
@@ -423,9 +421,10 @@ actor AuthService: AuthServiceProtocol {
         // session. Legacy unspecified callers keep the unconditional behavior but
         // still bind the stable serverID with the bearer (J4).
         if operation == .unspecified {
-            await apiClient.updateBaseURL(server.baseURL)
-            await apiClient.setAuthenticatedSession(
-                AuthenticatedIdentity(accessToken: credentials.accessToken, serverID: server.id))
+            // V2: baseURL + identity applied atomically in one actor hop.
+            await apiClient.applyAuthenticatedSession(
+                baseURL: server.baseURL,
+                identity: AuthenticatedIdentity(accessToken: credentials.accessToken, serverID: server.id))
         } else {
             let applied = await apiClient.applyAuthenticatedSessionIfCurrent(
                 baseURL: server.baseURL,
@@ -452,7 +451,17 @@ actor AuthService: AuthServiceProtocol {
                 return .superseded
             }
             let published = fencedMutation(operation) {
-                snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
+                // V4 (issue #816 reject, Vasquez): a successful restore advances
+                // BOTH the owner and credential operation tags to this restore's
+                // destination tag, so a concurrent stale login's rollback CAS (on
+                // an older tag) can no longer clobber the freshly re-verified
+                // owner/credential. `setOwnerCapturingPrior` publishes the tagged
+                // owner; `retagOperation` bumps the credential tag without
+                // rewriting the bearer.
+                let restoreTag = destinationTag(for: operation)
+                snapshotOwnerStore.setOwnerCapturingPrior(
+                    userID: user.id, serverID: server.id, operationToken: restoreTag)
+                credentialsStore.retagOperation(serverId: server.id, operationToken: restoreTag)
             }
             guard published else {
                 if operation != .unspecified {
@@ -549,21 +558,31 @@ actor AuthService: AuthServiceProtocol {
     private struct ResolvedServer {
         let server: RegisteredServer
         let wasCreatedByThisLogin: Bool
+        /// V3 (issue #816 reject, Vasquez): the monotonic add-revision this login
+        /// captured when it created the entry. `rollbackNewlyAddedServer`
+        /// CAS-consumes it, so a rollback whose entry was since reused (revision
+        /// bumped) is refused. Zero for a reused entry (no rollback of the entry).
+        let addRevision: UInt64
     }
 
     private func resolveActiveServer(for url: URL, normalizedURLString: String) async throws -> ResolvedServer {
         if let serverRegistry {
             return try await MainActor.run {
                 if let matching = serverRegistry.servers.first(where: { $0.normalizedURLString == normalizedURLString }) {
-                    return ResolvedServer(server: matching, wasCreatedByThisLogin: false)
+                    // V3: reusing an existing entry bumps its revision so any prior
+                    // creator's rollback CAS fails.
+                    ServerRegistry.claimReuse(matching.id)
+                    return ResolvedServer(server: matching, wasCreatedByThisLogin: false, addRevision: 0)
                 }
 
                 if let active = serverRegistry.activeServer, active.normalizedURLString == normalizedURLString {
-                    return ResolvedServer(server: active, wasCreatedByThisLogin: false)
+                    ServerRegistry.claimReuse(active.id)
+                    return ResolvedServer(server: active, wasCreatedByThisLogin: false, addRevision: 0)
                 }
 
                 let created = try serverRegistry.add(displayName: url.host ?? "PrintFarmer", baseURL: url, makeActiveIfNeeded: false)
-                return ResolvedServer(server: created, wasCreatedByThisLogin: true)
+                let revision = ServerRegistry.currentAddRevision(created.id) ?? 0
+                return ResolvedServer(server: created, wasCreatedByThisLogin: true, addRevision: revision)
             }
         }
 
@@ -575,15 +594,18 @@ actor AuthService: AuthServiceProtocol {
                 migrateLegacyServerURL: migrateLegacyServerURL
             )
             if let matching = registry.servers.first(where: { $0.normalizedURLString == normalizedURLString }) {
-                return ResolvedServer(server: matching, wasCreatedByThisLogin: false)
+                ServerRegistry.claimReuse(matching.id)
+                return ResolvedServer(server: matching, wasCreatedByThisLogin: false, addRevision: 0)
             }
 
             if let active = registry.activeServer, active.normalizedURLString == normalizedURLString {
-                return ResolvedServer(server: active, wasCreatedByThisLogin: false)
+                ServerRegistry.claimReuse(active.id)
+                return ResolvedServer(server: active, wasCreatedByThisLogin: false, addRevision: 0)
             }
 
             let server = try registry.add(displayName: url.host ?? "PrintFarmer", baseURL: url, makeActiveIfNeeded: false)
-            return ResolvedServer(server: server, wasCreatedByThisLogin: true)
+            let revision = ServerRegistry.currentAddRevision(server.id) ?? 0
+            return ResolvedServer(server: server, wasCreatedByThisLogin: true, addRevision: revision)
         }
     }
 
@@ -597,9 +619,10 @@ actor AuthService: AuthServiceProtocol {
     private func rollbackNewlyAddedServer(_ resolved: ResolvedServer) async {
         guard resolved.wasCreatedByThisLogin else { return }
         let server = resolved.server
+        let expectedRevision = resolved.addRevision
         if let serverRegistry {
             await MainActor.run {
-                _ = serverRegistry.rollbackAdd(server)
+                _ = serverRegistry.rollbackAdd(server, expectedRevision: expectedRevision)
             }
             return
         }
@@ -610,7 +633,7 @@ actor AuthService: AuthServiceProtocol {
                 userDefaults: userDefaultsBox.userDefaults,
                 migrateLegacyServerURL: migrateLegacyServerURL
             )
-            _ = registry.rollbackAdd(server)
+            _ = registry.rollbackAdd(server, expectedRevision: expectedRevision)
         }
     }
 

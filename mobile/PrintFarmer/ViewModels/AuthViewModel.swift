@@ -166,20 +166,22 @@ final class AuthViewModel {
         isLoading = true
         if case .restored(let user) = await services.authService.restoreSession(operation: token) {
             guard services.authOperationEpoch.isCurrent(token.value) else {
-                hasCheckedAuth = true
+                // V5 (issue #816 reject, Vasquez): a SUPERSEDED restore must make
+                // ZERO view-state changes — `hasCheckedAuth` (like loading/user/
+                // auth) belongs to the newer operation that superseded us. Setting
+                // it here let a stale restore flip the flag out from under a newer
+                // login/logout. Return without touching any view state.
                 return
             }
             currentUser = user
             isAuthenticated = true
             let activation = await services.activateFarmSnapshotForActiveServer(authToken: token.value)
             guard services.authOperationEpoch.isCurrent(token.value) else {
-                hasCheckedAuth = true
                 return
             }
             recordActivationOutcome(activation, authToken: token.value)
         } else {
             guard services.authOperationEpoch.isCurrent(token.value) else {
-                hasCheckedAuth = true
                 return
             }
         }

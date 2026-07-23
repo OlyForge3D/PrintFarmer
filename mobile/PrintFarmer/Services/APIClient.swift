@@ -555,6 +555,37 @@ actor APIClient {
         self.authSessionToken = nil
     }
 
+    /// V2 (issue #816 reject, Vasquez): apply baseURL + authenticated identity in
+    /// ONE actor hop UNCONDITIONALLY (for legacy `.unspecified` callers that do
+    /// not participate in the epoch protocol). The frozen head applied these in
+    /// two separate actor hops (`updateBaseURL` then `setAuthenticatedSession`),
+    /// leaving a window in which a concurrent request could snapshot the NEW
+    /// baseURL against the OLD bearer (or vice-versa) — a cross-server bearer
+    /// leak. Coalescing them into a single actor-isolated mutation closes that
+    /// window: baseURL, bearer, and serverID always describe the same server.
+    func applyAuthenticatedSession(baseURL: URL, identity: AuthenticatedIdentity) {
+        self.baseURL = baseURL
+        UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+        self.accessToken = identity.accessToken
+        self.currentServerID = identity.serverID
+        if let token = identity.authSessionToken {
+            self.authSessionToken = token
+        }
+    }
+
+    /// V2: clear the session AND (optionally) repoint baseURL in ONE actor hop for
+    /// legacy `.unspecified` callers, so no request can observe a half-applied
+    /// (new baseURL, stale bearer) session between two separate hops.
+    func clearAuthenticatedSession(baseURL: URL? = nil) {
+        if let baseURL {
+            self.baseURL = baseURL
+            UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+        }
+        self.accessToken = nil
+        self.currentServerID = nil
+        self.authSessionToken = nil
+    }
+
     /// Applies base URL + access token + server id ATOMICALLY, but only if
     /// `epoch.isCurrent(token)` at the moment of application — a destination
     /// compare-and-set for the shared session (issue #816 H2). Because this runs

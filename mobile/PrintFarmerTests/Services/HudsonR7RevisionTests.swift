@@ -288,7 +288,8 @@ final class HudsonR7RevisionTests: XCTestCase {
     func testWriteVerifyFailureRestoresPriorBytes() throws {
         let root = FarmSnapshotFixtures.tempRoot()
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
-        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        let hook = ArmableWriteHook()
+        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root, afterAtomicWriteHook: hook.hook)
         let recordURL = root.appendingPathComponent(FarmSnapshotDurableAuthorityRecord.filename)
 
         // Baseline: reserve token 1 and adopt it. This is the "prior verified"
@@ -303,9 +304,9 @@ final class HudsonR7RevisionTests: XCTestCase {
         // verifying re-read sees .absent → writeLocked throws
         // .persistenceFailure and MUST restore priorBytes.
         addTeardownBlock {
-            record.setAfterAtomicWriteHookForTesting(nil)
+            hook.disarm()
         }
-        record.setAfterAtomicWriteHookForTesting { url in
+        hook.arm { url in
             try? FileManager.default.removeItem(at: url)
         }
 
@@ -314,7 +315,7 @@ final class HudsonR7RevisionTests: XCTestCase {
             XCTAssertEqual(err as? FarmSnapshotAuthorityError, .persistenceFailure)
         }
         // Clear the injection so we can observe restored bytes.
-        record.setAfterAtomicWriteHookForTesting(nil)
+        hook.disarm()
 
         // H3: prior bytes are restored. The record is again readable and
         // reports the baseline high-water — no reset to zero, no partial

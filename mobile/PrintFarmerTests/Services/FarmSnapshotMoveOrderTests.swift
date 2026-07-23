@@ -55,6 +55,98 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
         try? bytes.write(to: live)
     }
 
+    /// V7 (issue #816 reject, Vasquez): a spy owner-clearing dependency. `purge`
+    /// calls `clearOwner(serverID:)` as the LAST synchronous statement before it
+    /// `await`s the lease drain, so signaling here causally confirms purge has
+    /// reached the drain contention point — WITHOUT blocking the store actor.
+    private final class ClearOwnerSpy: FarmSnapshotOwnerClearing, @unchecked Sendable {
+        let reachedDrainSignal = AsyncBarrier()
+        func clearOwner(serverID: UUID) {
+            reachedDrainSignal.signal()
+        }
+    }
+
+    // MARK: - V7 (Dallas #816 cycle 2): genuine async-yielding lease contention
+
+    /// V7: the frozen move/purge test parked the recovery inside the SYNCHRONOUS
+    /// `moveIfContentEquals`, which blocks the store actor's thread — so `purge`
+    /// could not even enter the actor and the test proved only actor
+    /// serialization, never lease contention. This test parks an in-flight
+    /// recovery at the ASYNC `createDirectory` suspension (which YIELDS the actor)
+    /// while it holds the lease, then lets `purge` genuinely ENTER the actor and
+    /// park on the lease `drain`. A `ClearOwnerSpy` causally confirms purge reached
+    /// the drain contention point (clearOwner runs immediately before `await
+    /// drain`, while the lease is still held). The proof of GENUINE lease
+    /// contention — as opposed to blocked-actor serialization — is that purge has
+    /// fully entered the actor and run its synchronous prefix (tombstone, clear
+    /// owner) yet CANNOT sweep (`removeCount == 0`) because the in-flight lease is
+    /// still held. Only after the recovery releases the lease does purge sweep.
+    func testPurgeGenuinelyContendsLeaseWhileRecoveryParkedAtAsyncBoundary() async throws {
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let ownerSpy = ClearOwnerSpy()
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root, ownerStore: ownerSpy)
+        _ = try await activate(store, authority, ns)
+        // Ensure startup preparation is fully complete so purge's
+        // `ensureStartupPreparation()` cannot introduce an unrelated suspension.
+        _ = await store.prepareStartup()
+
+        let corrupt = Data("{ broken".utf8)
+        seedCorruptLive(root: root, ns, bytes: corrupt)
+
+        // Park recovery at the ASYNC createDirectory boundary — the lease is
+        // already held (acquireLease precedes createDirectory) and this await
+        // YIELDS the store actor, unlike the synchronous move barrier.
+        let createDirBarrier = AsyncBarrier()
+        addTeardownBlock { createDirBarrier.close() }
+        addTeardownBlock { ownerSpy.reachedDrainSignal.close() }
+        io.createDirectoryBarrier = createDirBarrier
+
+        let recoverTask = Task { await store.hydrateActive() }
+        await createDirBarrier.waitUntilArrived()
+        // Recovery is suspended holding the lease; the actor is free.
+        XCTAssertEqual(io.moveCount, 0, "move not yet entered — recovery is parked before the move")
+        XCTAssertEqual(io.removeCount, 0, "no purge sweep yet")
+
+        // Start purge. It ENTERS the actor (recovery yielded), tombstones,
+        // refuses new leases, clears the owner (spy signal), then awaits the lease
+        // drain — where it parks because recovery still holds the lease.
+        let purgeTask = Task { await store.purge(serverID: ns.serverID) }
+
+        // Causally confirm purge reached the drain contention point.
+        await ownerSpy.reachedDrainSignal.waitUntilArrived()
+        // THE CONTENTION PROOF: purge has fully entered the actor and run its
+        // synchronous prefix (tombstone + clear owner), yet it CANNOT sweep while
+        // the in-flight recovery still holds the lease. `removeCount == 0` here
+        // proves purge is blocked on the LEASE, not on the actor (it clearly ran
+        // on the actor to get here). The frozen test could never observe this
+        // because its sync-move barrier blocked the actor thread outright.
+        XCTAssertEqual(io.removeCount, 0, "purge is blocked on the lease drain — no sweep while recovery holds the lease")
+        XCTAssertTrue(authority.isTombstoned(ns.serverID), "purge ran its synchronous prefix on the actor (tombstoned)")
+
+        // Release recovery → it drops the lease (the move is correctly abandoned
+        // because purge tombstoned the server first — the tombstone barrier).
+        // Only now can the drained purge proceed to its sweep.
+        createDirBarrier.release()
+
+        let recoverOutcome = await recoverTask.value
+        XCTAssertNotEqual(recoverOutcome, .recovered,
+                          "a recovery whose server was tombstoned mid-flight MUST NOT report recovery")
+        let purgeOutcome = await purgeTask.value
+        XCTAssertEqual(purgeOutcome, .purged, "purge succeeded after the lease drained")
+
+        // After the lease drained, purge swept exactly [serverDir, quarantineDir].
+        XCTAssertEqual(io.removeCount, 2, "purge sweeps [serverDir, quarantineDir] — exactly 2 removes")
+        XCTAssertEqual(io.removedURLs,
+                       [serverDir(root: root, ns.serverID), quarantineDir(root: root, ns.serverID)],
+                       "exact ordered sweep identities")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path),
+                       "server dir swept after the lease drained")
+    }
+
     // MARK: - E1: move-first — real move entered/recorded, purge serializes after
 
     /// Move-first: the recovery move enters `moveIfContentEquals` (the destructive

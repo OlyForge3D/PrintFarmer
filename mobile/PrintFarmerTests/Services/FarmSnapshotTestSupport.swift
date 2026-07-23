@@ -2,6 +2,42 @@ import Foundation
 import XCTest
 @testable import PrintFarmer
 
+/// V1 (issue #816 reject, Vasquez): a thread-safe armable holder for the durable
+/// record's constructor-injected after-atomic-write hook. The record's hook is an
+/// immutable closure (so the seam compiles in a Release test build and there is no
+/// shipping mutable global), while tests still need to arm the fault only for a
+/// specific mutation. This helper hands the record a STABLE closure at
+/// construction; the test arms/disarms the underlying action at will. Fully
+/// synchronized so it is safe under parallel tests.
+final class ArmableWriteHook: @unchecked Sendable {
+    private let lock = NSLock()
+    private var action: (@Sendable (URL) -> Void)?
+
+    /// The stable closure to pass to `FarmSnapshotDurableAuthorityRecord(rootURL:
+    /// afterAtomicWriteHook:)`. Invokes the currently-armed action (if any).
+    var hook: (@Sendable (URL) -> Void) {
+        { [weak self] url in
+            guard let self else { return }
+            self.lock.lock()
+            let current = self.action
+            self.lock.unlock()
+            current?(url)
+        }
+    }
+
+    func arm(_ action: @escaping @Sendable (URL) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.action = action
+    }
+
+    func disarm() {
+        lock.lock()
+        defer { lock.unlock() }
+        action = nil
+    }
+}
+
 // MARK: - Deterministic test support for the farm snapshot store (F10-C1a, #816)
 //
 // All ordering here is mutation-bound: real `Task`s rendezvous on continuation

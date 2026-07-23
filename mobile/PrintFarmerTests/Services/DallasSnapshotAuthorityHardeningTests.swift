@@ -223,20 +223,21 @@ final class DallasSnapshotAuthorityHardeningTests: XCTestCase {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
             try? FileManager.default.removeItem(at: root)
         }
-        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        let hook = ArmableWriteHook()
+        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root, afterAtomicWriteHook: hook.hook)
 
         // Baseline present record with prior bytes to restore.
         XCTAssertEqual(try record.reserveNextToken(), 1)
         XCTAssertTrue(try record.tryAdopt(token: 1))
 
-        record.setAfterAtomicWriteHookForTesting { hookURL in
+        hook.arm { hookURL in
             // 1) Lose the acknowledged write → verify re-read fails.
             try? FileManager.default.removeItem(at: hookURL)
             // 2) Make restoration of prior bytes impossible → read-only directory.
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o555], ofItemAtPath: hookURL.deletingLastPathComponent().path)
         }
-        addTeardownBlock { record.setAfterAtomicWriteHookForTesting(nil) }
+        addTeardownBlock { hook.disarm() }
 
         XCTAssertThrowsError(try record.reserveNextToken()) { err in
             guard case let .restorationFailure(primary, recovery)? = err as? FarmSnapshotAuthorityError else {
@@ -248,12 +249,14 @@ final class DallasSnapshotAuthorityHardeningTests: XCTestCase {
         _ = url
     }
 
-    // MARK: F — per-instance test seam, no global leakage
+    // MARK: F/V1 — constructor-injected test seam, no global leakage, Release-safe
 
-    /// F: installing an after-write hook on one record instance must NOT affect a
-    /// different record instance (proving the seam is per-instance state, not a
-    /// shipping global). Record A's hook deletes-on-write and fails; record B (no
-    /// hook) writes normally.
+    /// F/V1: a hook injected into one record instance must NOT affect a different
+    /// record instance (proving the seam is per-instance construction state, not a
+    /// shipping global) — and because the seam is a plain constructor-injected
+    /// closure (not a `#if DEBUG` method), this test compiles in a Release test
+    /// build too. Record A is constructed WITH a delete-on-write hook and fails;
+    /// record B is constructed WITHOUT a hook and writes normally.
     func testAfterWriteHookIsPerInstance() throws {
         let rootA = tempRoot()
         let rootB = tempRoot()
@@ -261,13 +264,10 @@ final class DallasSnapshotAuthorityHardeningTests: XCTestCase {
             try? FileManager.default.removeItem(at: rootA)
             try? FileManager.default.removeItem(at: rootB)
         }
-        let recordA = FarmSnapshotDurableAuthorityRecord(rootURL: rootA)
-        let recordB = FarmSnapshotDurableAuthorityRecord(rootURL: rootB)
-        addTeardownBlock { recordA.setAfterAtomicWriteHookForTesting(nil) }
-
-        recordA.setAfterAtomicWriteHookForTesting { url in
+        let recordA = FarmSnapshotDurableAuthorityRecord(rootURL: rootA, afterAtomicWriteHook: { url in
             try? FileManager.default.removeItem(at: url)
-        }
+        })
+        let recordB = FarmSnapshotDurableAuthorityRecord(rootURL: rootB)
 
         // Record A: hooked → write-verify fails.
         XCTAssertThrowsError(try recordA.reserveNextToken()) {
@@ -413,5 +413,121 @@ final class DallasAsyncBarrierTests: XCTestCase {
         // Any subsequent registration still resolves.
         await barrier.arriveAndWait()
         await barrier.waitUntilReleaseWaiterCount(3)
+    }
+}
+
+// MARK: - Dallas #816 cycle 2 — V3 registry rollback revision ownership
+
+/// V3: a login's registry rollback must not delete a NEWER login's reused entry.
+/// The frozen head compared only a (createdAt, updatedAt, URL) tuple, which a
+/// fixed clock / reuse can defeat. A monotonic add-revision CAS closes it.
+final class DallasRegistryRollbackTests: XCTestCase {
+    private func suite() -> UserDefaults {
+        UserDefaults(suiteName: "dallas-reg-\(UUID().uuidString)")!
+    }
+
+    @MainActor
+    func testRollbackRefusesAfterEntryReused() throws {
+        let registry = ServerRegistry(userDefaults: suite(), migrateLegacyServerURL: false)
+        let created = try registry.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!, makeActiveIfNeeded: false)
+        let t1Revision = ServerRegistry.currentAddRevision(created.id)!
+
+        // A newer login REUSES the same entry → revision bumped.
+        ServerRegistry.claimReuse(created.id)
+
+        // T1's rollback carries its stale captured revision → CAS refuses.
+        XCTAssertFalse(registry.rollbackAdd(created, expectedRevision: t1Revision),
+                       "rollback must refuse to delete a reused entry")
+        XCTAssertTrue(registry.servers.contains(where: { $0.id == created.id }),
+                      "the reused entry is preserved")
+    }
+
+    @MainActor
+    func testRollbackRemovesUntouchedEntryByRevision() throws {
+        let registry = ServerRegistry(userDefaults: suite(), migrateLegacyServerURL: false)
+        let created = try registry.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!, makeActiveIfNeeded: false)
+        let rev = ServerRegistry.currentAddRevision(created.id)!
+        XCTAssertTrue(registry.rollbackAdd(created, expectedRevision: rev),
+                      "an untouched newly-added entry is rolled back")
+        XCTAssertFalse(registry.servers.contains(where: { $0.id == created.id }))
+    }
+}
+
+// MARK: - Dallas #816 cycle 2 — V4 restore advances credential operation tag
+
+/// V4: a successful restore advances the credential operation tag so a concurrent
+/// stale login's rollback CAS (on an older tag) can no longer clobber it.
+final class DallasCredentialRetagTests: XCTestCase {
+    func testRetagOperationAdvancesTagWithoutRewritingBearer() {
+        let store = ServerCredentialsStore()
+        let sid = UUID()
+        addTeardownBlock { store.clear(serverId: sid) }
+        _ = store.saveCapturingPriorState(
+            ServerCredentials(accessToken: "bearer", expiresAt: nil), serverId: sid, operationToken: 1)
+        XCTAssertEqual(store.credentialOperationToken(serverId: sid), 1)
+
+        // Restore under a newer operation retags without touching the bearer.
+        XCTAssertTrue(store.retagOperation(serverId: sid, operationToken: 5))
+        XCTAssertEqual(store.credentialOperationToken(serverId: sid), 5)
+        XCTAssertEqual(store.load(serverId: sid)?.accessToken, "bearer", "bearer unchanged")
+
+        // A stale login's rollback CAS on the OLD tag now fails.
+        let stalePrior = ServerCredentialsPriorState(credentials: nil, operationToken: nil)
+        XCTAssertFalse(store.restoreIfOperationMatches(serverId: sid, expectedOperationToken: 1, prior: stalePrior),
+                       "stale rollback on the pre-retag tag must fail")
+        XCTAssertEqual(store.load(serverId: sid)?.accessToken, "bearer", "credential preserved")
+    }
+
+    func testRetagOperationIsNoOpWhenNoCredential() {
+        let store = ServerCredentialsStore()
+        let sid = UUID()
+        XCTAssertFalse(store.retagOperation(serverId: sid, operationToken: 3),
+                       "retag is a no-op when no credential is stored")
+        XCTAssertNil(store.credentialOperationToken(serverId: sid))
+    }
+}
+
+// MARK: - Dallas #816 cycle 2 — V6 restore-verify
+
+/// V6: `restoreLocked` must VERIFY the restored bytes. When the restore write is
+/// itself lost, the record surfaces a composite `.restorationFailure` instead of
+/// a plain `.persistenceFailure` that would falsely imply the prior bytes intact.
+final class DallasRestoreVerifyTests: XCTestCase {
+    func testRestoreThatDoesNotLandSurfacesCompositeFailure() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dallas-rv-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let recordURL = root.appendingPathComponent(FarmSnapshotDurableAuthorityRecord.filename)
+
+        // The hook deletes BOTH the just-written record (→ verify fails) AND, on
+        // the restore's re-read, keeps deleting so the restored bytes never verify.
+        let hook = ArmableWriteHook()
+        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root, afterAtomicWriteHook: hook.hook)
+        addTeardownBlock { hook.disarm() }
+
+        // Baseline present record with prior bytes.
+        XCTAssertEqual(try record.reserveNextToken(), 1)
+        XCTAssertTrue(try record.tryAdopt(token: 1))
+
+        // Arm: on the write's atomic-write hook, delete the file (write-verify
+        // fails). The restore then writes prior bytes directly; we make THAT not
+        // land by immediately deleting via a filesystem-presented race is hard, so
+        // instead we make the record directory read-only inside the hook AFTER
+        // deleting, so restore's write cannot land and readback cannot verify.
+        hook.arm { url in
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o555], ofItemAtPath: url.deletingLastPathComponent().path)
+        }
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        }
+
+        XCTAssertThrowsError(try record.reserveNextToken()) { err in
+            guard case .restorationFailure = err as? FarmSnapshotAuthorityError else {
+                return XCTFail("expected composite .restorationFailure, got \(err)")
+            }
+        }
+        _ = recordURL
     }
 }

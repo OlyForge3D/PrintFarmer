@@ -49,6 +49,59 @@ final class ServerRegistry {
     @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private let now: () -> Date
 
+    // MARK: V3 — monotonic add-revision ownership (issue #816 reject, Vasquez)
+    //
+    // Registry rollback previously compared only a (createdAt, updatedAt,
+    // normalizedURLString) tuple. With a fixed clock (tests) or a renamed/updated
+    // reused entry, that tuple can collide, letting one login's rollback delete a
+    // NEWER login's reused entry. Each add stamps a process-wide monotonic
+    // revision on the entry's id; any subsequent REUSE of that entry by another
+    // login bumps the revision. `rollbackAdd` CAS-compares the exact revision the
+    // creating login captured, so a rollback whose entry was since reused (bumped)
+    // is refused. The map is process-wide (shared across the multiple short-lived
+    // ServerRegistry instances the legacy fallback constructs) and NSLock-guarded.
+    private static let revisionLock = NSLock()
+    nonisolated(unsafe) private static var addRevisions: [UUID: UInt64] = [:]
+    nonisolated(unsafe) private static var revisionCounter: UInt64 = 0
+
+    /// Stamp a fresh monotonic revision for a newly-added entry; returns it.
+    @discardableResult
+    static func stampAddRevision(_ id: UUID) -> UInt64 {
+        revisionLock.lock()
+        defer { revisionLock.unlock() }
+        revisionCounter &+= 1
+        addRevisions[id] = revisionCounter
+        return revisionCounter
+    }
+
+    /// Bump the revision for an entry being REUSED by a (different) login, so any
+    /// prior creator's captured revision no longer matches and its rollback CAS
+    /// fails. Always advances (defines a revision even for a pre-existing/persisted
+    /// entry that had none).
+    static func claimReuse(_ id: UUID) {
+        revisionLock.lock()
+        defer { revisionLock.unlock() }
+        revisionCounter &+= 1
+        addRevisions[id] = revisionCounter
+    }
+
+    /// The current add-revision for an entry, or nil when untracked.
+    static func currentAddRevision(_ id: UUID) -> UInt64? {
+        revisionLock.lock()
+        defer { revisionLock.unlock() }
+        return addRevisions[id]
+    }
+
+    /// CAS: succeeds (and clears the tracked revision) iff the entry's current
+    /// revision equals `expected`. Refused when the revision has advanced (reuse).
+    private static func consumeAddRevision(_ id: UUID, expected: UInt64) -> Bool {
+        revisionLock.lock()
+        defer { revisionLock.unlock() }
+        guard addRevisions[id] == expected else { return false }
+        addRevisions[id] = nil
+        return true
+    }
+
     init(
         userDefaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init,
@@ -103,6 +156,7 @@ final class ServerRegistry {
         if makeActiveIfNeeded && activeServerID == nil {
             activeServerID = server.id
         }
+        Self.stampAddRevision(server.id) // V3: monotonic ownership for rollback CAS
         persist()
         return server
     }
@@ -152,13 +206,18 @@ final class ServerRegistry {
     /// Fails silently (returns false) when the entry no longer matches —
     /// preserves any concurrent state a peer operation may have written.
     @discardableResult
-    func rollbackAdd(_ candidate: RegisteredServer) -> Bool {
+    func rollbackAdd(_ candidate: RegisteredServer, expectedRevision: UInt64) -> Bool {
         guard let index = servers.firstIndex(where: { $0.id == candidate.id }) else {
             return false
         }
         let existing = servers[index]
-        // Match id + createdAt + updatedAt so an intervening update or
-        // concurrent re-registration is not clobbered.
+        // V3 (issue #816 reject, Vasquez): the PRIMARY gate is the monotonic
+        // add-revision CAS — a rollback is refused if the entry's revision has
+        // advanced since this login created it (i.e. another login reused it).
+        // This is robust to a fixed clock / renamed entry that would defeat the
+        // timestamp-tuple compare below. The timestamp/URL tuple is retained as an
+        // ADDITIONAL guard (defense in depth) so an intervening `update` (rename)
+        // that does not bump the revision still blocks a stale rollback.
         guard existing.createdAt == candidate.createdAt,
               existing.updatedAt == candidate.updatedAt,
               existing.normalizedURLString == candidate.normalizedURLString else {
@@ -168,9 +227,20 @@ final class ServerRegistry {
         // not happen: our resolveActiveServer passes makeActiveIfNeeded=false,
         // and only `activate()` sets it active). Defense in depth.
         if activeServerID == candidate.id { return false }
+        // Consume the revision CAS FIRST (side-effect-free on failure).
+        guard Self.consumeAddRevision(candidate.id, expected: expectedRevision) else { return false }
         servers.remove(at: index)
         persist()
         return true
+    }
+
+    /// Backward-compatible overload: derives the current revision. Retained for
+    /// callers that did not capture the add-revision. Prefer the
+    /// `expectedRevision:` variant so a reused entry cannot be deleted.
+    @discardableResult
+    func rollbackAdd(_ candidate: RegisteredServer) -> Bool {
+        guard let revision = Self.currentAddRevision(candidate.id) else { return false }
+        return rollbackAdd(candidate, expectedRevision: revision)
     }
 
     /// Remove a server only after its snapshot namespace has been fully purged.

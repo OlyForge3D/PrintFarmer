@@ -215,13 +215,13 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     private let authority: FarmSnapshotAuthority
     private let fileIO: FarmSnapshotFileIO
     private let rootURL: URL
-    private let ownerStore: FarmSnapshotOwnerStore?
+    private let ownerStore: FarmSnapshotOwnerClearing?
 
     init(
         authority: FarmSnapshotAuthority,
         fileIO: FarmSnapshotFileIO = DiskFarmSnapshotFileIO(),
         rootURL: URL = FarmSnapshotStore.defaultRootURL(),
-        ownerStore: FarmSnapshotOwnerStore? = nil
+        ownerStore: FarmSnapshotOwnerClearing? = nil
     ) {
         self.authority = authority
         self.fileIO = fileIO

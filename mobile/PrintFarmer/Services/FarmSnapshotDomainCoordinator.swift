@@ -374,17 +374,18 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
     /// containers with different durable roots never share/discard one record.
     let canonicalPathIdentity: String
 
-    // MARK: F — instance-scoped, synchronized test seam (no shipping global)
+    // MARK: F/V1 — constructor-injected test seam (no shipping global, no #if DEBUG)
 
-    /// F (issue #816 reject): per-instance hook invoked AFTER the atomic write and
-    /// BEFORE the verifying re-read, used by tests to inject an
-    /// acknowledged-but-lost persistence event. Replaces the previous
-    /// module-global `nonisolated(unsafe) static var` — there is no shipping
-    /// global mutable test state. It is owned by exactly one record instance,
-    /// guarded by its own lock, keyed implicitly to that record's physical path,
-    /// and reset by test teardown. Nil in every production composition.
-    private let hookLock = NSLock()
-    private var afterAtomicWriteHook: (@Sendable (URL) -> Void)?
+    /// F/V1 (issue #816 reject, Vasquez): the after-atomic-write hook is injected
+    /// at construction as an immutable dependency — NOT a `#if DEBUG` settable
+    /// var. This closes two defects: (F) there is no shipping global/mutable test
+    /// state, and (V1) the seam compiles in EVERY configuration including a
+    /// Release test build (a `#if DEBUG` method would not exist there, so the test
+    /// call site failed to compile). Production compositions construct the record
+    /// WITHOUT a hook (`nil`), so the seam is fully inert/absent in the shipping
+    /// Release product. Tests pass an arm-able closure to simulate an
+    /// acknowledged-but-lost persistence event.
+    private let afterAtomicWriteHook: (@Sendable (URL) -> Void)?
 
     /// Path relative to the snapshot root. The file name is stable so multiple
     /// instances pointing at the same root converge on the same file.
@@ -450,29 +451,13 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         return true
     }
 
-    init(rootURL: URL) {
+    init(rootURL: URL, afterAtomicWriteHook: (@Sendable (URL) -> Void)? = nil) {
         let url = rootURL.appendingPathComponent(Self.filename, isDirectory: false)
         self.recordURL = url
         let identity = FarmSnapshotDurableAuthorityRecord.canonicalIdentity(for: url)
         self.canonicalPathIdentity = identity
         self.lockLease = FarmSnapshotDurableAuthorityRecord.lease(forIdentity: identity)
-    }
-
-    #if DEBUG
-    /// F: install/clear the per-instance after-atomic-write hook. DEBUG-only so
-    /// it cannot exist in a Release build. Synchronized; each test owns exactly
-    /// one record instance and resets the hook in teardown.
-    func setAfterAtomicWriteHookForTesting(_ hook: (@Sendable (URL) -> Void)?) {
-        hookLock.lock()
-        defer { hookLock.unlock() }
-        afterAtomicWriteHook = hook
-    }
-    #endif
-
-    private func currentAfterAtomicWriteHook() -> (@Sendable (URL) -> Void)? {
-        hookLock.lock()
-        defer { hookLock.unlock() }
-        return afterAtomicWriteHook
+        self.afterAtomicWriteHook = afterAtomicWriteHook
     }
 
     // MARK: Read / write primitives
@@ -607,7 +592,7 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         // F: per-instance test hook between the acknowledged write and the
         // verifying re-read, so an acknowledged-but-lost persistence event can be
         // deterministically reproduced. Nil in production.
-        currentAfterAtomicWriteHook()?(recordURL)
+        afterAtomicWriteHook?(recordURL)
         // Verify via re-read — if the OS reported success but a crash / partial
         // flush left different bytes, surface that as a typed failure. C: on
         // failure, restore the exact captured prior bytes (or remove the file if
@@ -646,6 +631,37 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
             throw FarmSnapshotAuthorityError.restorationFailure(
                 primary: primaryContext,
                 recovery: String(describing: error)
+            )
+        }
+        // V6 (issue #816 reject, Vasquez): a restore is not trustworthy until it is
+        // VERIFIED. Re-read the record and confirm it is byte-identical to the
+        // captured prior bytes (or genuinely absent when there were none). If the
+        // acknowledged restore write did not actually land, surface the typed
+        // COMPOSITE failure rather than reporting a plain persistence failure that
+        // falsely implies the prior bytes are intact.
+        do {
+            if let priorBytes {
+                let readback = try Data(contentsOf: recordURL)
+                guard readback == priorBytes else {
+                    throw FarmSnapshotAuthorityError.restorationFailure(
+                        primary: primaryContext,
+                        recovery: "restored bytes did not verify (readback mismatch)"
+                    )
+                }
+            } else {
+                guard !fileManager.fileExists(atPath: recordURL.path) else {
+                    throw FarmSnapshotAuthorityError.restorationFailure(
+                        primary: primaryContext,
+                        recovery: "record still present after restore-to-absent"
+                    )
+                }
+            }
+        } catch let error as FarmSnapshotAuthorityError {
+            throw error
+        } catch {
+            throw FarmSnapshotAuthorityError.restorationFailure(
+                primary: primaryContext,
+                recovery: "restoration readback failed: \(String(describing: error))"
             )
         }
     }

@@ -28,6 +28,18 @@ struct FarmSnapshotOwnerPriorState: Sendable, Equatable {
     let operationToken: Int?
 }
 
+/// V7 (issue #816 reject, Vasquez): the narrow owner-clearing capability the
+/// snapshot store depends on during purge (it calls `clearOwner` immediately
+/// before it awaits the lease drain). Extracting this as a protocol lets a test
+/// inject a spy that causally confirms purge has reached the drain contention
+/// point WITHOUT blocking the store actor — the frozen move/purge test blocked
+/// the actor thread inside the synchronous move primitive, so it proved only
+/// actor serialization, never genuine lease contention. Production passes the
+/// real `FarmSnapshotOwnerStore`.
+protocol FarmSnapshotOwnerClearing: AnyObject, Sendable {
+    func clearOwner(serverID: UUID)
+}
+
 /// Records who is verified on each server, keyed strictly by the stable server UUID.
 final class FarmSnapshotOwnerStore: @unchecked Sendable {
     static let keyPrefix = "pf_snapshot_owner_"
@@ -170,6 +182,10 @@ final class FarmSnapshotOwnerStore: @unchecked Sendable {
         return true
     }
 }
+
+/// V7: FarmSnapshotOwnerStore satisfies the narrow owner-clearing capability the
+/// store depends on during purge. `clearOwner(serverID:)` already matches.
+extension FarmSnapshotOwnerStore: FarmSnapshotOwnerClearing {}
 
 // MARK: - Durable tombstone store (F10-C1a, #816, H4)
 //

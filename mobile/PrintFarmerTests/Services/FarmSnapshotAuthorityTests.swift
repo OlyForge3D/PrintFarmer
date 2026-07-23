@@ -601,7 +601,8 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     func testFileBackedRecordSurfacesPersistenceFailureOnWriteLoss() throws {
         let root = FarmSnapshotFixtures.tempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        let hook = ArmableWriteHook()
+        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root, afterAtomicWriteHook: hook.hook)
 
         // Baseline: first reserve succeeds → durable high-water = 1.
         let baseline = try record.reserveNextToken()
@@ -613,9 +614,9 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         // observes a missing file (default payload) and the exact-equality
         // check fails, throwing the typed error.
         addTeardownBlock {
-            record.setAfterAtomicWriteHookForTesting(nil)
+            hook.disarm()
         }
-        record.setAfterAtomicWriteHookForTesting { url in
+        hook.arm { url in
             try? FileManager.default.removeItem(at: url)
         }
 
@@ -625,7 +626,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         }
 
         // Clear the injection so we can re-observe durable state.
-        record.setAfterAtomicWriteHookForTesting(nil)
+        hook.disarm()
 
         // State-advance invariant: the failed reserve MUST NOT have advanced
         // the durable counter. A caller who observed .persistenceFailure and
