@@ -626,21 +626,25 @@ final class PredictiveViewModelTests: XCTestCase {
         // resumed exactly once via SOME site. If cancel invocation ran
         // (counter = 1) but no site fired (sum = 0), the continuation
         // is leaked — this assertion catches that regression.
-        let totalWaiterResumes =
-            (snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0)
-          + (snap.waiterResumeCounts[.parkedResumedByClose] ?? 0)
-          + (snap.waiterResumeCounts[.parkedResumedByOpen] ?? 0)
-          + (snap.waiterResumeCounts[.latchConsumed] ?? 0)
-          + (snap.waiterResumeCounts[.closedImmediate] ?? 0)
-          + (snap.waiterResumeCounts[.openedImmediate] ?? 0)
-          + (snap.waiterResumeCounts[.duplicateAfterFated] ?? 0)
-          + (snap.waiterResumeCounts[.duplicateAfterParked] ?? 0)
-          + (snap.waiterResumeCounts[.unknownToken] ?? 0)
+        // Broken into per-site subtotals to keep the type-checker fast.
+        let rc = snap.waiterResumeCounts
+        let r1 = (rc[.parkedResumedByCancel] ?? 0) + (rc[.parkedResumedByClose] ?? 0)
+        let r2 = (rc[.parkedResumedByOpen] ?? 0) + (rc[.latchConsumed] ?? 0)
+        let r3 = (rc[.closedImmediate] ?? 0) + (rc[.openedImmediate] ?? 0)
+        let r4 = (rc[.duplicateAfterFated] ?? 0) + (rc[.duplicateAfterParked] ?? 0)
+        let r5 = (rc[.unknownToken] ?? 0)
+        let totalWaiterResumes = r1 + r2 + r3 + r4 + r5
         XCTAssertEqual(totalWaiterResumes, 1,
                        "cancel invocation without any observable continuation resume — LEAK; got resume-site sum = \(totalWaiterResumes)")
 
         // Correlated per-receipt evidence: narrows which resume-site
         // group is expected. A receipt-vs-observed-drain mismatch fails.
+        // WaiterCancelReceipt has 4 cases; .finishedBeforeProcessing
+        // cannot occur here because we're inside `.cancelled(let r)`
+        // and the natural-completion receipt is only produced by
+        // `AwaitAttempt.markCompletedNaturallyIfActive()`, never by
+        // cancelWaiter. Include it for switch exhaustiveness with a
+        // failing branch to catch a future misuse.
         switch r {
         case .processedMatched:
             // Cancel Task drained the parked entry directly.
@@ -654,10 +658,10 @@ final class PredictiveViewModelTests: XCTestCase {
             // Cancel Task ran before park was observable; parked/registered
             // continuation was subsequently drained by close's terminal
             // drain (parked or before-park) — proven by one drain site.
-            let closedDrain =
-                (snap.waiterResumeCounts[.parkedResumedByClose] ?? 0)
-              + (snap.waiterResumeCounts[.closedImmediate] ?? 0)
-              + (snap.waiterResumeCounts[.duplicateAfterFated] ?? 0)
+            let a = (rc[.parkedResumedByClose] ?? 0)
+            let b = (rc[.closedImmediate] ?? 0)
+            let c = (rc[.duplicateAfterFated] ?? 0)
+            let closedDrain = a + b + c
             XCTAssertEqual(closedDrain, 1,
                            ".processedIgnoredMismatch: close-side drain must fire exactly once; got \(closedDrain)")
             XCTAssertEqual(snap.waiterCancelIgnoredCount, 1,
@@ -667,19 +671,20 @@ final class PredictiveViewModelTests: XCTestCase {
             // before close (→ .parkedResumedByClose + .closedWhileParked),
             // or task never parked (→ close sealed order as
             // .closedBeforePark + body's late-await took the fated branch).
-            let closedDrain =
-                (snap.waiterResumeCounts[.parkedResumedByClose] ?? 0)
-              + (snap.waiterResumeCounts[.closedImmediate] ?? 0)
-              + (snap.waiterResumeCounts[.duplicateAfterFated] ?? 0)
+            let a = (rc[.parkedResumedByClose] ?? 0)
+            let b = (rc[.closedImmediate] ?? 0)
+            let c = (rc[.duplicateAfterFated] ?? 0)
+            let closedDrain = a + b + c
             XCTAssertEqual(closedDrain, 1,
                            ".closedBeforeProcessing: close-side drain must fire exactly once; got \(closedDrain)")
-            let closedFate =
-                (snap.waiterFateCounts[.closedWhileParked] ?? 0)
-              + (snap.waiterFateCounts[.closedBeforePark] ?? 0)
+            let fc = snap.waiterFateCounts
+            let closedFate = (fc[.closedWhileParked] ?? 0) + (fc[.closedBeforePark] ?? 0)
             XCTAssertEqual(closedFate, 1,
                            ".closedBeforeProcessing: close-side fate seal must fire exactly once; got \(closedFate)")
             XCTAssertEqual(snap.waiterCancelIgnoredCount, 1,
                            ".closedBeforeProcessing: closed-guard bumps ignored count by one")
+        case .finishedBeforeProcessing:
+            XCTFail(".finishedBeforeProcessing is a natural-path receipt; cancelWaiter must not produce it")
         }
     }
 
