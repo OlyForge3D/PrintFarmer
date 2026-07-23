@@ -83,6 +83,19 @@ actor AuthService: AuthServiceProtocol {
         operation == .unspecified || authEpoch.isCurrent(operation.value)
     }
 
+    /// J: run a durable destination mutation FENCED on exactly this operation — atomic
+    /// under the auth-operation epoch for real operations (no await inside the lock), or
+    /// unconditional for legacy `.unspecified`. Returns whether the mutation ran; a
+    /// superseded operation performs zero side effects. Because the epoch currency check
+    /// and the mutation share one lock domain, the epoch cannot advance between them, so
+    /// a parked/late operation can neither persist nor clear a newer session's state.
+    @discardableResult
+    private func fencedMutation(_ operation: AuthOperationToken, _ body: () -> Void) -> Bool {
+        if operation == .unspecified { body(); return true }
+        let ran: Void? = authEpoch.withCurrent(operation.value) { body() }
+        return ran != nil
+    }
+
     /// Authenticate against a Printfarmer server.
     /// Stores the JWT and applies it to the shared API client for the active server on success.
     func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
@@ -101,24 +114,22 @@ actor AuthService: AuthServiceProtocol {
         let response: AuthResponse = try await loginClient.post("/api/auth/login", body: request)
 
         guard response.success, let token = response.token else {
-            // H2: a superseded/stale failed login must not clear a newer login's stored
-            // credentials — gate the clear on exactly this operation.
-            if isCurrentOperation(operation) {
-                credentialsStore.clear(serverId: server.id)
-            }
+            // H2/J: a superseded/stale failed login must not clear a newer login's
+            // stored credentials — fence the clear atomically on exactly this operation.
+            fencedMutation(operation) { credentialsStore.clear(serverId: server.id) }
             throw NetworkError.authFailed(response.error ?? "Login failed")
         }
 
-        // H2: gate every durable mutation on exactly this operation token at the
-        // mutation point. A superseded login performs no durable work. The credential
-        // write (synchronous) is atomic with the check on this actor; the shared
+        // H2/J: fence every durable mutation atomically on exactly this operation at the
+        // mutation point. A superseded login performs no durable work. The shared
         // APIClient session is applied via a destination compare-and-set so a login
         // superseded DURING the await cannot clobber a newer session.
-        guard isCurrentOperation(operation) else { return .superseded }
-        credentialsStore.save(
-            ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
-            serverId: server.id
-        )
+        guard fencedMutation(operation, {
+            credentialsStore.save(
+                ServerCredentials(accessToken: token, expiresAt: response.expiresAt),
+                serverId: server.id
+            )
+        }) else { return .superseded }
         if operation == .unspecified {
             await apiClient.updateBaseURL(server.baseURL)
             await apiClient.setAccessToken(token)
@@ -139,10 +150,12 @@ actor AuthService: AuthServiceProtocol {
             verifiedUser = try? await currentUser()
         }
         guard isCurrentOperation(operation) else { return .superseded }
-        if let user = verifiedUser {
-            snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
-        } else {
-            snapshotOwnerStore.clearOwner(serverID: server.id)
+        fencedMutation(operation) {
+            if let user = verifiedUser {
+                snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
+            } else {
+                snapshotOwnerStore.clearOwner(serverID: server.id)
+            }
         }
         await activate(server)
         // Carry the VERIFIED user back to the caller (not the original nil).
@@ -158,16 +171,30 @@ actor AuthService: AuthServiceProtocol {
 
     func logout(operation: AuthOperationToken) async {
         let currentServer = await activeServer()
-        try? await apiClient.postVoid("/api/auth/logout")
-        // H2: a late logout whose operation was superseded by a newer login must
-        // not erase the newer login's credentials/owner/session.
-        guard isCurrentOperation(operation) else { return }
-        if let server = currentServer {
-            credentialsStore.clear(serverId: server.id)
-            // Explicit logout clears the persisted owner identity for this server.
-            snapshotOwnerStore.clearOwner(serverID: server.id)
+        // J: issue `/logout` through an IMMUTABLE client carrying the exact captured
+        // old-session bearer — never the shared client, which a newer login could have
+        // repointed to a different session. A stale logout thus cannot contact the
+        // server as the newer session.
+        let logoutClient = await apiClient.sessionSnapshotClient()
+        try? await logoutClient.postVoid("/api/auth/logout")
+        // After the network await, clear local + durable state only if THIS operation is
+        // still current, each mutation fenced atomically on the operation.
+        fencedMutation(operation) {
+            if let server = currentServer {
+                credentialsStore.clear(serverId: server.id)
+                // Explicit logout clears the persisted owner identity for this server.
+                snapshotOwnerStore.clearOwner(serverID: server.id)
+            }
         }
-        await apiClient.setAccessToken(nil)
+        // Clear the shared session only if still current (destination CAS), so a stale
+        // logout can never clear a newer session's APIClient bearer.
+        if operation == .unspecified {
+            await apiClient.setAccessToken(nil)
+        } else {
+            _ = await apiClient.applySessionIfCurrent(
+                baseURL: nil, accessToken: nil, epoch: authEpoch, token: operation.value
+            )
+        }
     }
 
     /// Attempt to restore a previous session from Keychain.
@@ -197,21 +224,27 @@ actor AuthService: AuthServiceProtocol {
             guard isCurrentOperation(operation) else { return .superseded }
             // Online-verified restore: persist the owner (transient offline never
             // reaches here, so the last verified owner is preserved).
-            snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
+            guard fencedMutation(operation, {
+                snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
+            }) else { return .superseded }
             return .restored(user)
         } catch {
-            // H2: a stale restore's late 401 must not clear a newer login's
-            // credentials/owner/session — gate the definitive-rejection clears on the
-            // token, and CAS the APIClient clear.
-            if isDefinitiveAuthRejection(error), isCurrentOperation(operation) {
-                credentialsStore.clear(serverId: server.id)
-                snapshotOwnerStore.clearOwner(serverID: server.id)
-                if operation == .unspecified {
-                    await apiClient.setAccessToken(nil)
-                } else {
-                    _ = await apiClient.applySessionIfCurrent(
-                        baseURL: nil, accessToken: nil, epoch: authEpoch, token: operation.value
-                    )
+            // H2/J: a stale restore's late 401 must not clear a newer login's
+            // credentials/owner/session — fence the definitive-rejection clears on the
+            // operation, and CAS the APIClient clear.
+            if isDefinitiveAuthRejection(error) {
+                fencedMutation(operation) {
+                    credentialsStore.clear(serverId: server.id)
+                    snapshotOwnerStore.clearOwner(serverID: server.id)
+                }
+                if isCurrentOperation(operation) {
+                    if operation == .unspecified {
+                        await apiClient.setAccessToken(nil)
+                    } else {
+                        _ = await apiClient.applySessionIfCurrent(
+                            baseURL: nil, accessToken: nil, epoch: authEpoch, token: operation.value
+                        )
+                    }
                 }
             }
             return .noSession

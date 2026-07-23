@@ -177,7 +177,13 @@ final class ServiceContainer: @unchecked Sendable {
 
         if let activeServer {
             userDefaultsBox.userDefaults.set(activeServer.normalizedURLString, forKey: APIClient.serverURLKey)
-            Task { await self.configureTokenExpiryChecker(client: client, serverID: activeServer.id) }
+            let reconstructedToken = accessToken
+            Task {
+                // A: establish the reconstructed authenticated client's session identity
+                // (cold-launch restore) so a later 401 is not suppressed.
+                await self.establishReconstructedAuthSession(client: client, accessToken: reconstructedToken)
+                await self.configureTokenExpiryChecker(client: client, serverID: activeServer.id)
+            }
         }
 
         if observeRegistry {
@@ -309,7 +315,10 @@ final class ServiceContainer: @unchecked Sendable {
         // in the same process (issue #816, Gate B).
         ensureObservingRegistry()
         if let server {
-            Task { await self.configureTokenExpiryChecker(client: client, serverID: server.id) }
+            Task {
+                await self.establishReconstructedAuthSession(client: client, accessToken: accessToken)
+                await self.configureTokenExpiryChecker(client: client, serverID: server.id)
+            }
         }
     }
 
@@ -328,9 +337,20 @@ final class ServiceContainer: @unchecked Sendable {
     /// server, then resolves that server's OWN verified owner. A user verified on
     /// one server can never activate under another — `(serverB, userA)` is
     /// structurally impossible because the owner is read by the settled server id.
-    func activateFarmSnapshotForActiveServer(authToken: Int? = nil) async {
+    @discardableResult
+    func activateFarmSnapshotForActiveServer(authToken: Int? = nil) async -> FarmSnapshotActivationResult {
         await activeServerSwitchTask?.value
-        await bindSnapshotToActiveServer(authToken: authToken)
+        return await bindSnapshotToActiveServer(authToken: authToken)
+    }
+
+    /// D: retry a previously `.preparationFailed` activation WITHOUT requiring a new
+    /// login. Re-runs the bind for the settled active server under the given auth token;
+    /// if startup preparation now succeeds the snapshot binds. Callers hold the auth
+    /// token from the original login/restore so identity is preserved across the retry.
+    @discardableResult
+    func retryFarmSnapshotActivation(authToken: Int? = nil) async -> FarmSnapshotActivationResult {
+        await activeServerSwitchTask?.value
+        return await bindSnapshotToActiveServer(authToken: authToken)
     }
 
     /// Await any in-flight active-server reconciliation so callers observe the settled
@@ -366,7 +386,8 @@ final class ServiceContainer: @unchecked Sendable {
     /// epoch and revokes authority; this binding then fails its final exact-token CAS
     /// at the publication point — even if the logout lands DURING the activation await
     /// (H2, Bishop). Switch-driven binds pass `nil` and rely on the transition epoch.
-    private func bindSnapshotToActiveServer(authToken: Int? = nil) async {
+    @discardableResult
+    private func bindSnapshotToActiveServer(authToken: Int? = nil) async -> FarmSnapshotActivationResult {
         func authStillCurrent() -> Bool { authToken.map { authOperationEpoch.isCurrent($0) } ?? true }
         // Bishop: never bind a real snapshot session while demo is the desired target —
         // a late real login/activation must not resurrect a real binding under demo.
@@ -374,14 +395,14 @@ final class ServiceContainer: @unchecked Sendable {
             if let session = farmSnapshotAuthority.currentSession() {
                 farmSnapshotAuthority.deactivate(session)
             }
-            return
+            return .notApplicable
         }
         guard let serverRegistry, let active = serverRegistry.activeServer else {
             // No active server: conditionally clear the current session if any.
             if let session = farmSnapshotAuthority.currentSession() {
                 farmSnapshotAuthority.deactivate(session)
             }
-            return
+            return .notApplicable
         }
         guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: active.id) else {
             // Token-only / unverified server: fail closed. Deactivate only a session
@@ -389,10 +410,10 @@ final class ServiceContainer: @unchecked Sendable {
             if let session = farmSnapshotAuthority.currentSession(), session.serverID == active.id {
                 farmSnapshotAuthority.deactivate(session)
             }
-            return
+            return .notApplicable
         }
         // Fail closed early if this login/restore was already superseded.
-        guard authStillCurrent() else { return }
+        guard authStillCurrent() else { return .superseded }
         let namespace = FarmSnapshotNamespace(serverID: active.id, userID: ownerID)
         // P3: RESERVE an unpublished candidate (not yet current, so no commit can be
         // authorized against it), await store readiness, THEN publish it via a single
@@ -400,10 +421,11 @@ final class ServiceContainer: @unchecked Sendable {
         // token with NO await between the guard and the adopt.
         let capturedGeneration = activeGeneration.current
         guard let candidate = farmSnapshotAuthority.reserve(namespace: namespace, generation: capturedGeneration) else {
-            return // tombstoned (purged) server — do not resurrect
+            return .notApplicable // tombstoned (purged) server — do not resurrect
         }
-        // D: fail closed if startup readiness (residue sweep) did not succeed.
-        guard await farmSnapshotStore.prepareStartup() else { return }
+        // D: fail closed with a RETRYABLE result if startup readiness (residue sweep)
+        // did not succeed, so the auth flow can surface it and retry without a new login.
+        guard await farmSnapshotStore.prepareStartup() else { return .preparationFailed }
         // Re-validate at publication (no await between here and the adopt): the desired
         // target must still be a real server (not demo), the active server unchanged,
         // the generation current, and the auth token current.
@@ -412,8 +434,9 @@ final class ServiceContainer: @unchecked Sendable {
               activeGeneration.isCurrent(capturedGeneration),
               authStillCurrent(),
               farmSnapshotAuthority.adopt(candidate) else {
-            return // superseded during readiness, or an older token — candidate never published
+            return .superseded // superseded during readiness, or an older token — candidate never published
         }
+        return .activated
     }
 
     private var isDemoDesiredTarget: Bool {
@@ -518,6 +541,9 @@ final class ServiceContainer: @unchecked Sendable {
         // between them, so an older switch cannot publish stale services.
         let client = rebuildRealServices(baseURL: server.baseURL, server: server, accessToken: accessToken)
         userDefaultsBox.userDefaults.set(server.normalizedURLString, forKey: APIClient.serverURLKey)
+        // A: give a reconstructed AUTHENTICATED client the current auth-session identity
+        // so a later 401 is not suppressed.
+        await establishReconstructedAuthSession(client: client, accessToken: accessToken)
         await configureTokenExpiryChecker(client: client, serverID: server.id)
         guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
 
@@ -637,6 +663,21 @@ final class ServiceContainer: @unchecked Sendable {
         await client.setTokenExpiryChecker {
             credentialsStore.isExpired(serverId: serverID)
         }
+    }
+
+    /// A: establish the exact current auth-session identity on a freshly RECONSTRUCTED
+    /// authenticated APIClient (switch / cold-launch restore). A reconstructed client
+    /// otherwise carries a bearer but a nil auth-session token, which silently
+    /// SUPPRESSES a legitimate 401 session-expiry. Applying the current auth-operation
+    /// epoch as the session identity (only if it still holds) makes a later expiry emit
+    /// the current exact identity. No-op for unauthenticated (nil-token) clients, which
+    /// must remain unable to log out an authenticated session.
+    private func establishReconstructedAuthSession(client: APIClient, accessToken: String?) async {
+        guard let accessToken else { return }
+        let token = authOperationEpoch.current
+        _ = await client.applySessionIfCurrent(
+            baseURL: nil, accessToken: accessToken, epoch: authOperationEpoch, token: token
+        )
     }
 
     private static func validAccessToken(

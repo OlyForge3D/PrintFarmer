@@ -10,6 +10,15 @@ final class AuthViewModel {
     var isLoading = false
     var errorMessage: String?
 
+    /// D: true when authentication succeeded but the farm-snapshot activation could not
+    /// complete because startup preparation failed. The session is authenticated, but
+    /// the snapshot is NOT yet ready — the app must not treat it as fully ready and can
+    /// retry activation (without a new login) via `retrySnapshotActivationIfPending()`.
+    private(set) var snapshotActivationPending = false
+    /// The auth-operation token to reuse when retrying a pending activation, so identity
+    /// is preserved across the retry without re-authenticating.
+    @ObservationIgnored private var pendingActivationAuthToken: Int?
+
     /// The current user's primary role for permission gating.
     /// Returns "farm_admin" when the user has that role; otherwise the first role; nil if unauthenticated.
     var currentUserRole: String? {
@@ -59,6 +68,38 @@ final class AuthViewModel {
         currentUser = nil
     }
 
+    /// D: record a snapshot activation outcome. `.preparationFailed` marks a retryable
+    /// pending activation (session stays authenticated, snapshot NOT ready); any other
+    /// outcome clears the pending state.
+    private func recordActivationOutcome(_ result: FarmSnapshotActivationResult, authToken: Int) {
+        if result == .preparationFailed {
+            snapshotActivationPending = true
+            pendingActivationAuthToken = authToken
+        } else {
+            snapshotActivationPending = false
+            pendingActivationAuthToken = nil
+        }
+    }
+
+    /// D: retry a pending snapshot activation WITHOUT a new login. Reuses the original
+    /// auth-operation token so identity is preserved. On success (or any non-retryable
+    /// outcome) the pending flag clears; if preparation still fails it stays pending for
+    /// a future retry. No-op when nothing is pending or the token was superseded.
+    @discardableResult
+    func retrySnapshotActivationIfPending() async -> FarmSnapshotActivationResult? {
+        guard snapshotActivationPending, let token = pendingActivationAuthToken else { return nil }
+        guard services.authOperationEpoch.isCurrent(token) else {
+            // A newer op (logout/login) superseded this session: drop the stale pending.
+            snapshotActivationPending = false
+            pendingActivationAuthToken = nil
+            return nil
+        }
+        let result = await services.retryFarmSnapshotActivation(authToken: token)
+        guard services.authOperationEpoch.isCurrent(token) else { return nil }
+        recordActivationOutcome(result, authToken: token)
+        return result
+    }
+
     // MARK: - Session Restoration
 
     func restoreSession() async {
@@ -87,11 +128,12 @@ final class AuthViewModel {
             }
             currentUser = user
             isAuthenticated = true
-            await services.activateFarmSnapshotForActiveServer(authToken: token.value)
+            let activation = await services.activateFarmSnapshotForActiveServer(authToken: token.value)
             guard services.authOperationEpoch.isCurrent(token.value) else {
                 hasCheckedAuth = true
                 return
             }
+            recordActivationOutcome(activation, authToken: token.value)
         } else {
             guard services.authOperationEpoch.isCurrent(token.value) else {
                 hasCheckedAuth = true
@@ -143,9 +185,13 @@ final class AuthViewModel {
             case .applied(let response):
                 currentUser = response.user // VERIFIED user
                 isAuthenticated = true
-                await services.activateFarmSnapshotForActiveServer(authToken: token.value)
+                let activation = await services.activateFarmSnapshotForActiveServer(authToken: token.value)
                 // Logout / newer login may have landed during the activation awaits.
                 guard services.authOperationEpoch.isCurrent(token.value) else { return }
+                // D: if startup preparation failed, the session is authenticated but the
+                // snapshot is NOT ready — record a retryable pending activation instead of
+                // silently declaring fully ready.
+                recordActivationOutcome(activation, authToken: token.value)
                 isLoading = false
             case .superseded:
                 return // no view-state change, no loading clobber, for superseded work
@@ -175,6 +221,8 @@ final class AuthViewModel {
         isAuthenticated = false
         currentUser = nil
         isLoading = false
+        snapshotActivationPending = false
+        pendingActivationAuthToken = nil
     }
 
     func logoutIfServerRegistryUnavailable(_ registry: ServerRegistry) async {

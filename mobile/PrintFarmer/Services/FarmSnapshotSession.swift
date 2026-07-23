@@ -105,6 +105,18 @@ enum FarmSnapshotCommitResult: Sendable, Equatable {
     case persistenceFailure(cleanupFailed: Bool)
 }
 
+/// Result of a snapshot activation/bind attempt (issue #816 D). Distinguishes a
+/// legitimate no-op (`.notApplicable` — demo target, no active server, token-only /
+/// unverified owner, tombstoned) and supersession (`.superseded`) from a RETRYABLE
+/// `.preparationFailed`, so the auth flow can surface a startup-preparation failure and
+/// retry activation later WITHOUT a new login instead of silently declaring ready.
+enum FarmSnapshotActivationResult: Sendable, Equatable {
+    case activated
+    case notApplicable
+    case superseded
+    case preparationFailed
+}
+
 /// Result of purging a server namespace.
 enum FarmSnapshotPurgeResult: Sendable, Equatable {
     /// The namespace (and all of its temp/quarantine artifacts) is gone, or was

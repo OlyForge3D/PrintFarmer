@@ -561,6 +561,14 @@ actor APIClient {
         APIClient(baseURL: baseURL, session: session)
     }
 
+    /// J: an immutable client snapshot carrying THIS client's exact current baseURL and
+    /// bearer, so a request (e.g. `/logout`) is issued under the captured OLD session
+    /// even if the shared client is later repointed to a newer session by a concurrent
+    /// login. Carries no server generation, so it never emits its own session-expiry.
+    func sessionSnapshotClient() -> APIClient {
+        APIClient(baseURL: baseURL, session: session, serverGeneration: nil, accessToken: accessToken)
+    }
+
     /// Restores a previously-saved server URL from UserDefaults.
     /// Upgrades legacy `http://` IP URLs to `https://` to match current behavior.
     static func savedBaseURL() -> URL? {
@@ -583,12 +591,12 @@ actor APIClient {
     }
 
     func getData(_ path: String) async throws -> Data {
-        try await checkTokenExpiry()
+        let requestSession = captureRequestSession() // A: capture at entry, before any await
+        try await checkTokenExpiry(session: requestSession)
         let request = try buildRequest(path: path, method: "GET")
-        let requestAuthToken = authSessionToken // A: capture before the network await
         let (data, response) = try await performRequest(request)
         try validateActiveServerGeneration()
-        try validateResponse(response, data: data, authSessionToken: requestAuthToken)
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
         return data
     }
 
@@ -691,15 +699,30 @@ actor APIClient {
         return request
     }
 
+    /// Immutable snapshot of the authenticated request session, captured at API-call
+    /// ENTRY — before request construction, the token-expiry checker, or ANY await (A).
+    /// Every downstream step (expiry preflight and the 401 post) uses THIS snapshot's
+    /// identity, so a concurrent same-server re-login applied during an await can never
+    /// make this request's expiry/401 borrow the newer session's token, and the
+    /// snapshot is never re-read from `self` after a suspension.
+    private struct RequestSession {
+        let generationAtCreation: Int?
+        let authSessionToken: Int?
+    }
+
+    /// Capture the immutable request-session identity synchronously (no await). Must be
+    /// the FIRST thing every request path does, before building the request or awaiting.
+    private func captureRequestSession() -> RequestSession {
+        RequestSession(generationAtCreation: generationAtCreation, authSessionToken: authSessionToken)
+    }
+
     private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
-        try await checkTokenExpiry()
-        // A: capture the auth-session token the request is issued under, BEFORE the
-        // network await, so a concurrent same-server re-login applied during the await
-        // cannot make a 401 for THIS request carry the newer session's token.
-        let requestAuthToken = authSessionToken
+        // A: capture the immutable request-session identity at ENTRY, before any await.
+        let requestSession = captureRequestSession()
+        try await checkTokenExpiry(session: requestSession)
         let (data, response) = try await performRequest(request)
         try validateActiveServerGeneration()
-        try validateResponse(response, data: data, authSessionToken: requestAuthToken)
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
         
         // Handle empty response body for Optional types (e.g., 204 No Content, 200 with empty body)
         if data.isEmpty {
@@ -735,17 +758,19 @@ actor APIClient {
     }
 
     private func executeVoid(_ request: URLRequest) async throws {
-        try await checkTokenExpiry()
-        let requestAuthToken = authSessionToken // A: capture before the network await
+        let requestSession = captureRequestSession() // A: capture at entry, before any await
+        try await checkTokenExpiry(session: requestSession)
         let (data, response) = try await performRequest(request)
         try validateActiveServerGeneration()
-        try validateResponse(response, data: data, authSessionToken: requestAuthToken)
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
     }
 
-    private func checkTokenExpiry() async throws {
+    private func checkTokenExpiry(session: RequestSession) async throws {
         try validateActiveServerGeneration()
         if let checker = tokenExpiryChecker, await checker() {
-            postSessionExpired(authSessionToken: authSessionToken)
+            // A: post the captured request-session token, NEVER `self.authSessionToken`
+            // read after the checker's await (which a concurrent re-login could change).
+            postSessionExpired(authSessionToken: session.authSessionToken)
             throw NetworkError.unauthorized
         }
     }
