@@ -351,3 +351,67 @@ final class DallasAuthRollbackTests: XCTestCase {
         XCTAssertNil(store.load(serverId: sid))
     }
 }
+
+// MARK: - Dallas #816 revision — finding G: AsyncBarrier multi-waiter proof
+//
+// Proves TWO release waiters are causally confirmed BOTH parked before release,
+// so a regressed single-slot barrier (which could only park one) would deadlock
+// `waitUntilReleaseWaiterCount(2)` instead of passing. No sleeps/yields/polls/
+// wall-clock timeouts; every barrier has unconditional teardown.
+private actor DallasCounter {
+    private(set) var value = 0
+    func increment() { value += 1 }
+}
+
+final class DallasAsyncBarrierTests: XCTestCase {
+
+    func testTwoReleaseWaitersBothParkBeforeReleaseThenBothResume() async {
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let counter = DallasCounter()
+
+        async let first: Void = { await barrier.arriveAndWait(); await counter.increment() }()
+        async let second: Void = { await barrier.arriveAndWait(); await counter.increment() }()
+
+        // Causally confirm BOTH callers are simultaneously parked on their own
+        // release continuation BEFORE we release — the crux of the finding.
+        await barrier.waitUntilReleaseWaiterCount(2)
+        let progressedBeforeRelease = await counter.value
+        XCTAssertEqual(progressedBeforeRelease, 0, "no waiter may proceed before release")
+
+        barrier.release()
+        _ = await (first, second)
+        let progressedAfterRelease = await counter.value
+        XCTAssertEqual(progressedAfterRelease, 2, "both parked waiters must resume after a single release")
+    }
+
+    func testReleaseBeforeRegisterResumesImmediately() async {
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        barrier.release()
+        // A waiter registered AFTER release must not hang.
+        await barrier.arriveAndWait()
+        // A count observer on an already-released barrier resolves immediately.
+        await barrier.waitUntilReleaseWaiterCount(5)
+    }
+
+    func testCloseBeforeReleaseResumesParkedWaiter() async {
+        let barrier = AsyncBarrier()
+        async let parked: Void = barrier.arriveAndWait()
+        await barrier.waitUntilReleaseWaiterCount(1)
+        barrier.close()   // close (not release) must still resume the parked waiter
+        await parked
+    }
+
+    func testRepeatedCloseAndReleaseAreIdempotent() async {
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        barrier.release()
+        barrier.release()
+        barrier.close()
+        barrier.close()
+        // Any subsequent registration still resolves.
+        await barrier.arriveAndWait()
+        await barrier.waitUntilReleaseWaiterCount(3)
+    }
+}

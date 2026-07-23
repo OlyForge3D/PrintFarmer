@@ -155,21 +155,17 @@ final class HudsonR7RevisionTests: XCTestCase {
     /// serverID is now a COMPILE-TIME-impossible state (bundled
     /// `AuthenticatedIdentity`) rather than a runtime precondition trap. We prove
     /// the authenticated identity is bound atomically at construction.
-    func testAPIClientAuthenticatedConstructionWithoutServerIDIsProhibited() {
+    func testAPIClientAuthenticatedConstructionWithoutServerIDIsProhibited() async {
         // Identity is bundled, so a bearer and serverID are inseparable.
         let serverID = UUID()
         let client = APIClient(
             baseURL: URL(string: "https://a.example.com")!,
             authenticated: AuthenticatedIdentity(accessToken: "bearer", serverID: serverID)
         )
-        // Read via the actor-isolated accessor.
-        let expectation = expectation(description: "currentServerIdentity")
-        Task {
-            let observed = await client.currentServerIdentity()
-            XCTAssertEqual(observed, serverID, "J4: serverID bound atomically at construction")
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 5.0)
+        // G (issue #816 reject): read the actor-isolated accessor by awaiting it
+        // directly — no expectation + wall-clock `wait(for:timeout:)`.
+        let observed = await client.currentServerIdentity()
+        XCTAssertEqual(observed, serverID, "serverID bound atomically at construction")
     }
 
     /// E: clearSession() clears everything — accessToken, serverID,

@@ -23,6 +23,28 @@ final class AsyncBarrier: @unchecked Sendable {
     /// concurrency test could never prove both parked because a second
     /// arrival destroyed the first's release path.
     private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    /// G (issue #816 reject, Hicks + replacement Vasquez): observers awaiting a
+    /// causal confirmation that at least `target` release waiters are
+    /// SIMULTANEOUSLY parked. Lets a test prove two `arriveAndWait()` callers are
+    /// both parked BEFORE `release()` — with no sleeps/yields/polls/wall-clock
+    /// timeouts — so a regressed single-slot barrier (which could only ever park
+    /// one) would deadlock the test instead of passing.
+    private var countObservers: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    /// G: causally await until at least `target` release waiters are parked.
+    /// Resolves immediately if already met or the barrier is released/closed.
+    func waitUntilReleaseWaiterCount(_ target: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if released || releaseWaiters.count >= target {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                countObservers.append((target, continuation))
+                lock.unlock()
+            }
+        }
+    }
 
     func arriveAndWait() async {
         let waiters = markArrived()
@@ -62,9 +84,12 @@ final class AsyncBarrier: @unchecked Sendable {
         releaseWaiters = []
         let arrivals = arrivalWaiters
         arrivalWaiters = []
+        let observers = countObservers
+        countObservers = []
         lock.unlock()
         releaseWaitersNow.forEach { $0.resume() }
         arrivals.forEach { $0.resume() }
+        observers.forEach { $0.continuation.resume() }
     }
 
     /// Fire-and-forget arrival signal (no wait for release). Lets a background thread
@@ -85,9 +110,12 @@ final class AsyncBarrier: @unchecked Sendable {
         releaseWaiters = []
         let arrivals = arrivalWaiters
         arrivalWaiters = []
+        let observers = countObservers
+        countObservers = []
         lock.unlock()
         releases.forEach { $0.resume() }
         arrivals.forEach { $0.resume() }
+        observers.forEach { $0.continuation.resume() }
     }
 
     // MARK: Synchronous lock helpers (kept out of async scope)
@@ -111,7 +139,13 @@ final class AsyncBarrier: @unchecked Sendable {
             // all park on their own continuation slot; release() resumes them
             // all together.
             releaseWaiters.append(continuation)
+            // G: a newly-parked release waiter may satisfy pending count
+            // observers — resume any whose target is now met (causal, no poll).
+            let count = releaseWaiters.count
+            let ready = countObservers.filter { $0.target <= count }
+            countObservers.removeAll { $0.target <= count }
             lock.unlock()
+            ready.forEach { $0.continuation.resume() }
         }
     }
 
@@ -132,6 +166,11 @@ final class AsyncBarrier: @unchecked Sendable {
         released = true
         let waiters = releaseWaiters
         releaseWaiters = []
+        // G: releasing satisfies any pending count observers (the barrier is now
+        // released), so drain them here to avoid a stranded observer.
+        let observers = countObservers
+        countObservers = []
+        observers.forEach { $0.continuation.resume() }
         return waiters
     }
 }
