@@ -579,23 +579,33 @@ actor APIClient {
     // MARK: - HTTP Methods
 
     func get<T: Decodable & Sendable>(_ path: String) async throws -> T {
-        let request = try buildRequest(path: path, method: "GET")
-        return try await execute(request)
+        // A1: capture the immutable session snapshot (bearer + generation +
+        // authSessionToken) atomically at PUBLIC API ENTRY, before any await, and
+        // thread it through request-build/checker/perform so no downstream step
+        // reads mutable `self` after a suspension.
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "GET")
+        return try await execute(request, session: requestSession)
     }
 
     func post<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await execute(request)
+        return try await execute(request, session: requestSession)
     }
 
     func getData(_ path: String) async throws -> Data {
-        let requestSession = captureRequestSession() // A: capture at entry, before any await
+        let requestSession = captureRequestSession() // A1: capture at entry, before any await
         try await checkTokenExpiry(session: requestSession)
-        let request = try buildRequest(path: path, method: "GET")
+        // A1: build from the captured snapshot's bearer, NEVER `self.accessToken`
+        // which a concurrent applySessionIfCurrent could have advanced during the
+        // checker's await — that would let this request go out with T2's bearer
+        // while it is still labeled with T1's generation/authSessionToken.
+        let request = try buildRequest(session: requestSession, path: path, method: "GET")
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
+        try validateResponseGeneration(session: requestSession)
         try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
         return data
     }
@@ -624,67 +634,77 @@ actor APIClient {
     }
 
     func post<T: Decodable & Sendable>(_ path: String) async throws -> T {
-        let request = try buildRequest(path: path, method: "POST")
-        return try await execute(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "POST")
+        return try await execute(request, session: requestSession)
     }
 
     func postVoid(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "POST")
-        try await executeVoid(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "POST")
+        try await executeVoid(request, session: requestSession)
     }
 
     func postVoid(_ path: String, headers: [String: String]) async throws {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         for (name, value) in headers {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        try await executeVoid(request)
+        try await executeVoid(request, session: requestSession)
     }
 
     func postVoid<B: Encodable & Sendable>(_ path: String, body: B) async throws {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        try await executeVoid(request)
+        try await executeVoid(request, session: requestSession)
     }
 
     func putVoid(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "PUT")
-        try await executeVoid(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "PUT")
+        try await executeVoid(request, session: requestSession)
     }
 
     func putVoid<B: Encodable & Sendable>(_ path: String, body: B) async throws {
-        var request = try buildRequest(path: path, method: "PUT")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "PUT")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        try await executeVoid(request)
+        try await executeVoid(request, session: requestSession)
     }
 
     func put<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
-        var request = try buildRequest(path: path, method: "PUT")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "PUT")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await execute(request)
+        return try await execute(request, session: requestSession)
     }
 
     func patch<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
-        var request = try buildRequest(path: path, method: "PATCH")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "PATCH")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await execute(request)
+        return try await execute(request, session: requestSession)
     }
 
     func delete(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "DELETE")
-        try await executeVoid(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "DELETE")
+        try await executeVoid(request, session: requestSession)
     }
 
     // MARK: - Internal
 
-    private func buildRequest(path: String, method: String) throws -> URLRequest {
-        try validateActiveServerGeneration()
-        // Pre-flight: reject if token is known to be expired
-        // (check is sync-safe — the actual async check happens in execute/executeVoid wrappers)
+    private func buildRequest(session requestSession: RequestSession, path: String, method: String) throws -> URLRequest {
+        // A1: validate against the captured generation, not `self`, so a concurrent
+        // session mutation cannot change our decision after we already committed to
+        // building under this snapshot's identity.
+        try validateRequestGeneration(session: requestSession)
         guard let url = URL(string: path, relativeTo: baseURL) else {
             throw NetworkError.invalidURL(path)
         }
@@ -692,7 +712,12 @@ actor APIClient {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        if let token = accessToken {
+        // A1: use the captured snapshot's bearer, NEVER `self.accessToken` after any
+        // suspension — a concurrent applySessionIfCurrent could have advanced the
+        // shared client to T2 by now; the snapshot still carries T1's bearer so this
+        // request cannot be built with T2's bearer while it is still labeled with
+        // T1's identity (or vice versa).
+        if let token = requestSession.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -700,28 +725,36 @@ actor APIClient {
     }
 
     /// Immutable snapshot of the authenticated request session, captured at API-call
-    /// ENTRY — before request construction, the token-expiry checker, or ANY await (A).
-    /// Every downstream step (expiry preflight and the 401 post) uses THIS snapshot's
-    /// identity, so a concurrent same-server re-login applied during an await can never
-    /// make this request's expiry/401 borrow the newer session's token, and the
-    /// snapshot is never re-read from `self` after a suspension.
+    /// ENTRY — before request construction, the token-expiry checker, or ANY await (A1).
+    /// Every downstream step — request building, expiry preflight, and the 401 post —
+    /// uses THIS snapshot's identity (bearer + generation + authSessionToken) so a
+    /// concurrent same-server re-login applied during an await can never make this
+    /// request build with T2's bearer while it is still labeled with T1's identity,
+    /// or vice versa. The snapshot is never re-read from `self` after a suspension.
     private struct RequestSession {
+        let accessToken: String?
         let generationAtCreation: Int?
         let authSessionToken: Int?
     }
 
     /// Capture the immutable request-session identity synchronously (no await). Must be
-    /// the FIRST thing every request path does, before building the request or awaiting.
+    /// the FIRST thing every public request method does, before building the request or
+    /// awaiting the checker.
     private func captureRequestSession() -> RequestSession {
-        RequestSession(generationAtCreation: generationAtCreation, authSessionToken: authSessionToken)
+        RequestSession(
+            accessToken: accessToken,
+            generationAtCreation: generationAtCreation,
+            authSessionToken: authSessionToken
+        )
     }
 
-    private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
-        // A: capture the immutable request-session identity at ENTRY, before any await.
-        let requestSession = captureRequestSession()
+    private func execute<T: Decodable>(_ request: URLRequest, session requestSession: RequestSession) async throws -> T {
+        // A1: the caller captured `requestSession` at PUBLIC API ENTRY before ANY
+        // await; downstream steps thread it through so no path re-reads mutable
+        // `self` after a suspension.
         try await checkTokenExpiry(session: requestSession)
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
+        try validateResponseGeneration(session: requestSession)
         try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
         
         // Handle empty response body for Optional types (e.g., 204 No Content, 200 with empty body)
@@ -757,22 +790,35 @@ actor APIClient {
         }
     }
 
-    private func executeVoid(_ request: URLRequest) async throws {
-        let requestSession = captureRequestSession() // A: capture at entry, before any await
+    private func executeVoid(_ request: URLRequest, session requestSession: RequestSession) async throws {
         try await checkTokenExpiry(session: requestSession)
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
+        try validateResponseGeneration(session: requestSession)
         try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
     }
 
     private func checkTokenExpiry(session: RequestSession) async throws {
-        try validateActiveServerGeneration()
+        try validateRequestGeneration(session: session)
         if let checker = tokenExpiryChecker, await checker() {
-            // A: post the captured request-session token, NEVER `self.authSessionToken`
+            // A1: post the captured request-session token, NEVER `self.authSessionToken`
             // read after the checker's await (which a concurrent re-login could change).
             postSessionExpired(authSessionToken: session.authSessionToken)
             throw NetworkError.unauthorized
         }
+    }
+
+    /// A1: validate the request-session generation against the shared server generation
+    /// using the SNAPSHOT's `generationAtCreation`. Used at request build & response
+    /// validation; never re-read from `self.generationAtCreation` after an await.
+    private func validateRequestGeneration(session: RequestSession) throws {
+        guard let serverGeneration, let generationAtCreation = session.generationAtCreation else { return }
+        if !serverGeneration.isCurrent(generationAtCreation) {
+            throw NetworkError.staleServerResponse
+        }
+    }
+
+    private func validateResponseGeneration(session: RequestSession) throws {
+        try validateRequestGeneration(session: session)
     }
 
     private func validateActiveServerGeneration() throws {
