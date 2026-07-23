@@ -329,6 +329,13 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ClientUploadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("ClientUploadId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -417,6 +424,7 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("UploadedAt")
@@ -446,6 +454,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("UploadedAt");
 
                     b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("UploadedByUserId", "ClientUploadId")
+                        .IsUnique();
 
                     b.ToTable("Models3D", "slicer");
                 });
