@@ -846,7 +846,10 @@ case_workflow_publish_printf_option_safe() {
 #   * quoted operands on either side: `[[ "$rc" == "1" ]]`, `[[ $rc == '1' ]]`,
 #     `[[ '$rc' -eq 1 ]]`, `[ "1" = "$rc" ]`, `[[ '1' == '$rc' ]]`
 #   * reversed: `[ 1 -eq "$rc" ]`, `[[ 1 == $rc ]]`, `[ 1 = "$rc" ]`
-#   * arithmetic: `(( rc == 1 ))`
+#   * arithmetic, whitespace-agnostic: `((rc==1))`, `(( rc==1 ))`,
+#     `((rc == 1))`, `(( rc == 1 ))`, reversed `((1==rc))` / `((1 == rc))`,
+#     and their `$rc` / `$?` variants — see `_drift_block_rc1_arith_violations`
+#     for the exact grammar the arithmetic pass covers
 #   * `$?` variants of the above (`[ $? -eq 1 ]`, `[ 1 -eq $? ]`)
 #   * `case` arms whose pattern is literal `1`, `"1"`, or `'1'`
 #
@@ -860,6 +863,10 @@ case_workflow_publish_printf_option_safe() {
 #     around `=`, so requiring whitespace on both sides of every operator
 #     naturally excludes them without conflating with the test-command `=`
 #     comparison, which mandates whitespace
+#   * arithmetic ASSIGNMENT `((rc = 1))` / `((rc=1))` — a single `=` inside
+#     `(( ))` is assignment, not comparison; the arithmetic pass only
+#     recognizes `==` (the sole arithmetic equality operator; `-eq` is a
+#     bash syntax error inside `(( ))`)
 #   * literals adjacent to other digits or dots (`10`, `100`, `1.2`, `21`) —
 #     the boundary character classes reject them on both sides
 #   * annotation text that mentions `$rc` in prose
@@ -931,6 +938,98 @@ _drift_block_rc1_violations() {
     # might appear inside `printf` strings, arithmetic, or prose.
     printf '%s\n' "$code" | grep -nE \
       "^[[:space:]]+('1'|\"1\"|1)\)" \
+      || true
+    # Arithmetic pass: `(( ... rc == 1 ... ))` and reversed. The rules
+    # above mandate whitespace around the operator to keep `rc=1`
+    # assignments out of the shell/test regex, but that mandate is
+    # wrong for arithmetic context — `((rc==1))` and `(( rc == 1 ))`
+    # are equally valid classifications there. Delegate to a scoped
+    # helper that keeps the whitespace-flexible rule from leaking back
+    # into the shell/test regex above.
+    _drift_block_rc1_arith_violations "$code"
+  }
+}
+
+# _drift_block_rc1_arith_violations <code>
+#
+# Emit (to stdout) rc==1 classifications that occur inside a Bash
+# arithmetic context (`(( ... ))` or `$(( ... ))`) on the same line.
+# Complements the shell/test regex in `_drift_block_rc1_violations`,
+# which cannot be reused verbatim because arithmetic and POSIX-test
+# obey opposite whitespace rules:
+#
+#   * `[ "$rc" -eq 1 ]` requires whitespace on both sides of every
+#     operator; the shell/test pass leans on that to safely reject the
+#     `rc=1` shell-assignment shape.
+#   * `((rc==1))` is a valid arithmetic comparison with zero whitespace
+#     around `==`. Requiring whitespace there would silently pass a
+#     regression that ships `((rc==1))` in the drift step.
+#
+# Assignment-safety inside `(( ))` comes from ONLY recognizing `==`:
+#   * `-eq` is not a valid arithmetic operator — bash reports
+#     `syntax error in expression (error token is "1")` on
+#     `(( rc -eq 1 ))`, so it is not a real form we need to detect.
+#   * A single `=` inside `(( ))` is arithmetic assignment (`((rc = 1))`
+#     sets rc to 1 and evaluates to 1 — always truthy). Matching `=`
+#     here would false-fire on assignments and yield the opposite of
+#     the bug the shell/test regex avoids.
+#
+# Operands: bare `rc`, `$rc`, and `$?` only. Bash strips quotes before
+# parsing arithmetic, so quoted operands sometimes work (`(( "rc" == 1 ))`)
+# but they always have whitespace around `==` — the shell/test regex
+# already catches those. We do not add quote alternation here.
+#
+# Boundary rules match the shell/test pass:
+#   * word boundary on `rc` — `((myrc==1))` and `((rc==1foo))` are not
+#     matched (the second is also a syntax error, but the boundary is
+#     what the regex enforces)
+#   * digit / dot boundary on `1` — `((rc==10))`, `((rc==100))`,
+#     `((10==rc))`, `((1.2==rc))` are not matched. Arithmetic is
+#     integer-only in bash, so `1.2` is actually a syntax error, but
+#     the boundary is still enforced for defense in depth.
+#
+# Grep is line-scoped: multi-line arithmetic such as
+#   ```
+#   (( rc
+#      ==
+#      1 ))
+#   ```
+# is not covered. Extraordinarily rare, and not observed anywhere in
+# this repo's `.github/workflows/*.yml`.
+_drift_block_rc1_arith_violations() {
+  local code="$1"
+
+  # ARITH_RC matches the exit-code operand as it can appear unquoted
+  # inside `(( ))`: bare `rc`, `$rc`, or `$?`. The `\$?` fragment is
+  # `$` optional so a single alternative covers both `rc` and `$rc`.
+  local arith_rc='(\$?rc|\$\?)'
+
+  # Boundary character classes. The LHS boundary is expressed as an
+  # OPTIONAL group `(.*[^A-Za-z0-9_])?` after the `((` opener so that
+  # the operand may appear either immediately after `((` (with `(` as
+  # the natural boundary, already consumed by `\(\(`) or later in the
+  # expression (with `.*` skipping over `foo && ` etc. and a trailing
+  # non-word character enforcing the boundary at the operand's start).
+  local arith_lb_rc='(.*[^A-Za-z0-9_])?'
+  local arith_rb_rc='([^A-Za-z0-9_]|$)'
+  local arith_lb_one='(.*[^A-Za-z0-9_.])?'
+  local arith_rb_one='([^0-9.]|$)'
+
+  # Two passes, forward and reversed, mirroring the shell/test regex.
+  # `|| true` keeps `set -e` from tripping on grep's "no match" exit.
+  #
+  # NOTE: the LHS boundary group is intentionally OPTIONAL so that
+  # `((rc==1))` matches (nothing between `((` and `rc`), while
+  # `((myrc==1))` does not (there is no way to consume `my` and still
+  # end on a non-word char before `rc`).
+  {
+    # Forward: `(( … rc == 1 … ))`
+    printf '%s\n' "$code" | grep -nE \
+      "\\(\\(${arith_lb_rc}${arith_rc}[[:space:]]*==[[:space:]]*1${arith_rb_one}" \
+      || true
+    # Reversed: `(( … 1 == rc … ))`
+    printf '%s\n' "$code" | grep -nE \
+      "\\(\\(${arith_lb_one}1[[:space:]]*==[[:space:]]*${arith_rc}${arith_rb_rc}" \
       || true
   }
 }
@@ -1095,6 +1194,38 @@ case_drift_detector_catches_representative_rc1_forms() {
     $'case "$rc" in\n  0) echo ok ;;\n  1) echo drift ;;\nesac'
     $'case "$rc" in\n  0) echo ok ;;\n  "1") echo drift ;;\nesac'
     $'case "$rc" in\n  0) echo ok ;;\n  \'1\') echo drift ;;\nesac'
+    # Arithmetic, compact form — no whitespace anywhere around the
+    # operator or inside `(( ))`. The R9 shell/test regex required
+    # `[[:space:]]+` on both sides of the operator to safely
+    # distinguish `[ = 1 ]` from `rc=1`; that constraint leaves the
+    # equally-valid arithmetic `((rc==1))` uncovered because bash
+    # arithmetic permits any amount of whitespace around `==`. The
+    # dedicated arith pass covers it. See `_drift_block_rc1_arith_
+    # violations` for the exact grammar.
+    $'rc=$?\nif ((rc==1)); then echo drift; fi'
+    # Arithmetic, mixed-space form — spaces at the parens but none
+    # around `==`.
+    $'rc=$?\nif (( rc==1 )); then echo drift; fi'
+    # Arithmetic, mixed-space form — spaces around `==` but none at
+    # the parens. Bash accepts this; the arith pass must too.
+    $'rc=$?\nif ((rc == 1)); then echo drift; fi'
+    # Arithmetic, reversed compact.
+    $'rc=$?\nif ((1==rc)); then echo drift; fi'
+    # Arithmetic, reversed with spaces.
+    $'rc=$?\nif (( 1 == rc )); then echo drift; fi'
+    # Arithmetic with `$rc` — bash strips the `$` before parsing the
+    # arithmetic expression, but the syntactic shape authors reach
+    # for still uses the sigil, so the detector must see through it.
+    $'rc=$?\nif (($rc==1)); then echo drift; fi'
+    $'rc=$?\nif (( $rc == 1 )); then echo drift; fi'
+    # Arithmetic with `$?` on either side — no intermediate rc capture.
+    $'dotnet ef ...\nif (($?==1)); then echo drift; fi'
+    $'dotnet ef ...\nif ((1==$?)); then echo drift; fi'
+    # Arithmetic EXPANSION `$((...))` that materializes the rc==1
+    # classification into a variable. Same intent as `if ((rc==1))`,
+    # different syntactic dress; the detector's `((` anchor is
+    # deliberately loose enough to see `((` inside `$((`.
+    $'rc=$?\nis_drift=$((rc==1))\nexit "$is_drift"'
   )
   local snip idx=0
   for snip in "${rejected[@]}"; do
@@ -1151,6 +1282,45 @@ case_drift_detector_catches_representative_rc1_forms() {
     # antipattern while explaining why it is rejected. Stripped by the
     # leading-comment filter, so must not false-fire.
     $'# We used to write [ "$rc" -eq 1 ] here; do not do that.\nrc=$?\nexit "$rc"'
+    # Arithmetic ASSIGNMENT — compact form only. `((rc=1))` sets rc to
+    # 1 and evaluates to 1 (always truthy); a bug in its own right,
+    # but not the rc==1 CLASSIFICATION we detect. The arith pass
+    # only recognizes `==`, so this shape is deliberately out of
+    # scope. Note: the whitespace-around-`=` form `((rc = 1))` is
+    # textually indistinguishable from a POSIX-test comparison and
+    # is still caught by the shell/test regex above — that's a
+    # cross-pass side effect the prompt requires we preserve (do
+    # not loosen the shell/test regex to accommodate arithmetic
+    # context), and in practice it blocks a buggy shape that
+    # should never ship anyway.
+    $'rc=$?\nif ((rc=1)); then echo weird; fi'
+    # Arithmetic success check — `((rc==0))` is the correct
+    # fail-closed shape (drift step returns 0 only when the tool
+    # ran successfully and reported no pending changes). It must
+    # not be conflated with rc==1 classification.
+    $'rc=$?\nif ((rc==0)); then echo ok; fi'
+    # Arithmetic comparison against a different integer value that
+    # starts with the digit `1`. The RHS digit boundary must reject
+    # `10`, or the arith pass would over-fire on unrelated integer
+    # comparisons in unrelated jobs (e.g. rate-limit retries).
+    $'rc=$?\nif ((rc==10)); then echo weird; fi'
+    $'rc=$?\nif ((10==rc)); then echo weird; fi'
+    # A `1.2`-shaped literal inside the arithmetic block — bash's
+    # integer arithmetic rejects `1.2` at parse time, but the
+    # detector inspects TEXT, not runtime validity, so the dot
+    # boundary must still keep `1.2` out of the rc==1 match set.
+    # Defense in depth against future ksh/zsh-style arithmetic
+    # extensions that permit non-integer literals.
+    $'rc=$?\nif ((rc==12)) || printf "%s\\n" "((1.2==rc)) is nonsense"; then :; fi'
+    # Different variable — `foo` and `myrc` are not `rc`. The word
+    # boundary on the rc operand must not let `myrc==1` or
+    # `foo==1` slip through as rc==1 classification.
+    $'foo=$?\nif ((foo==1)); then echo unrelated; fi'
+    $'myrc=$?\nif ((myrc==1)); then echo unrelated; fi'
+    # Arithmetic expansion used for a value computation rather than
+    # a boolean — `$((rc + 1))` returns rc plus one, not an rc==1
+    # boolean, and must not classify.
+    $'rc=$?\nnext=$((rc + 1))\nexit "$next"'
   )
   local ok
   idx=0
