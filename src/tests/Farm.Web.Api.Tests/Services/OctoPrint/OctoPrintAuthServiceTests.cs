@@ -78,4 +78,55 @@ public class OctoPrintAuthServiceTests
         bool ok = await svc.ValidateApiKeyAsync(raw);
         Assert.True(ok);
     }
+
+    [Fact]
+    public async Task ValidateApiKeyAsync_DesktopPurposeKey_IsRejected()
+    {
+        using AppDbContext ctx = CreateInMemoryContext();
+        var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = true });
+        var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
+        IConfigurationRoot config = new ConfigurationBuilder().Build();
+        string raw = "desktopscopedkey";
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(raw)));
+        var ak = new ApiKey
+        {
+            KeyHash = hash,
+            UserId = Guid.NewGuid(),
+            Name = "desktop",
+            Purpose = ApiKeyPurpose.Desktop,
+            Scopes = ApiKeyScope.ModelRead,
+            ExpiresAt = DateTime.UtcNow.AddDays(30),
+        };
+        await repo.AddAsync(ak);
+
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        bool ok = await svc.ValidateApiKeyAsync(raw);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public async Task ValidateApiKeyAsync_ExpiredOctoPrintKey_IsRejected()
+    {
+        using AppDbContext ctx = CreateInMemoryContext();
+        var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = true });
+        var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
+        IConfigurationRoot config = new ConfigurationBuilder().Build();
+        string raw = "expiredkey";
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(raw)));
+        var ak = new ApiKey
+        {
+            KeyHash = hash,
+            UserId = Guid.NewGuid(),
+            Name = "expired",
+            Purpose = ApiKeyPurpose.OctoPrint,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(-5),
+        };
+        await repo.AddAsync(ak);
+
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        bool ok = await svc.ValidateApiKeyAsync(raw);
+
+        Assert.False(ok);
+    }
 }

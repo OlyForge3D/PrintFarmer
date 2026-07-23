@@ -25,7 +25,7 @@ public class InMemoryRateLimitServiceTests
             PasswordReset = new PasswordResetRateLimitOptions { MaxAttemptsPerHour = 3, MaxAttemptsPerDay = 10 },
             EmailConfirmation = new EmailConfirmationRateLimitOptions { MaxAttemptsPerHour = 5, MaxAttemptsPerDay = 20 },
             SliceJobs = new SliceJobRateLimitOptions { MaxAttemptsPerHour = 20, MaxAttemptsPerDay = 200 },
-            Authentication = new AuthenticationRateLimitOptions { MaxLoginAttemptsPerMinute = 10, MaxRegisterAttemptsPerMinute = 10 }
+            Authentication = new AuthenticationRateLimitOptions { MaxLoginAttemptsPerMinute = 10, MaxRegisterAttemptsPerMinute = 10, MaxApiKeyExchangeAttemptsPerMinute = 5 }
         };
     }
 
@@ -428,6 +428,130 @@ public class InMemoryRateLimitServiceTests
 
         // Assert
         Assert.Equal(9, result.RemainingAttempts); // 10 - 1 recorded = 9 remaining
+    }
+
+    #endregion
+
+    #region API Key Exchange Rate Limiting Tests (issue #839)
+
+    [Fact]
+    public async Task CheckApiKeyExchangeLimitAsync_FirstAttempt_ReturnsAllowed()
+    {
+        // Arrange
+        string ipAddress = "192.168.1.1";
+
+        // Act
+        RateLimitResult result = await _service.CheckApiKeyExchangeLimitAsync(ipAddress);
+
+        // Assert
+        Assert.True(result.IsAllowed);
+        Assert.Equal(5, result.RemainingAttempts); // No attempts yet, all 5 remaining
+    }
+
+    [Fact]
+    public async Task CheckApiKeyExchangeLimitAsync_WithinMinuteLimit_ReturnsAllowed()
+    {
+        // Arrange
+        string ipAddress = "192.168.1.1";
+
+        // Record 4 attempts
+        for (int i = 0; i < 4; i++)
+        {
+            await _service.RecordApiKeyExchangeAttemptAsync(ipAddress);
+        }
+
+        // Act
+        RateLimitResult result = await _service.CheckApiKeyExchangeLimitAsync(ipAddress);
+
+        // Assert
+        Assert.True(result.IsAllowed);
+        Assert.Equal(1, result.RemainingAttempts); // 5 - 4 = 1
+    }
+
+    [Fact]
+    public async Task CheckApiKeyExchangeLimitAsync_ExceedsLimit_ReturnsBlockedWithRetryAfterAndMessage()
+    {
+        // Arrange
+        string ipAddress = "192.168.1.1";
+
+        // Record all 5 per-minute attempts (tighter than login/register's default of 10 - the
+        // exchange endpoint is deliberately stricter since it converts a long-lived secret into
+        // a bearer token).
+        for (int i = 0; i < 5; i++)
+        {
+            await _service.RecordApiKeyExchangeAttemptAsync(ipAddress);
+        }
+
+        // Act
+        RateLimitResult result = await _service.CheckApiKeyExchangeLimitAsync(ipAddress);
+
+        // Assert
+        Assert.False(result.IsAllowed);
+        Assert.NotNull(result.RetryAfter);
+        Assert.NotNull(result.Message);
+    }
+
+    [Fact]
+    public async Task CheckApiKeyExchangeLimitAsync_IsIsolatedPerIpAddress()
+    {
+        // Arrange
+        string attackerIp = "10.0.0.1";
+        string legitimateIp = "10.0.0.2";
+
+        for (int i = 0; i < 5; i++)
+        {
+            await _service.RecordApiKeyExchangeAttemptAsync(attackerIp);
+        }
+
+        // Act
+        RateLimitResult attackerResult = await _service.CheckApiKeyExchangeLimitAsync(attackerIp);
+        RateLimitResult legitimateResult = await _service.CheckApiKeyExchangeLimitAsync(legitimateIp);
+
+        // Assert
+        Assert.False(attackerResult.IsAllowed);
+        Assert.True(legitimateResult.IsAllowed);
+        Assert.Equal(5, legitimateResult.RemainingAttempts);
+    }
+
+    /// <summary>
+    /// The exchange limiter must be tracked independently from login/register so that hammering
+    /// the API-key exchange endpoint from one IP does not lock out that IP's ability to log in
+    /// (and vice versa).
+    /// </summary>
+    [Fact]
+    public async Task CheckApiKeyExchangeLimitAsync_IsIndependentFromLoginAndRegisterLimits()
+    {
+        // Arrange
+        string ipAddress = "192.168.1.50";
+
+        for (int i = 0; i < 5; i++)
+        {
+            await _service.RecordApiKeyExchangeAttemptAsync(ipAddress);
+        }
+
+        // Act
+        RateLimitResult exchangeResult = await _service.CheckApiKeyExchangeLimitAsync(ipAddress);
+        RateLimitResult loginResult = await _service.CheckLoginLimitAsync(ipAddress);
+        RateLimitResult registerResult = await _service.CheckRegisterLimitAsync(ipAddress);
+
+        // Assert
+        Assert.False(exchangeResult.IsAllowed);
+        Assert.True(loginResult.IsAllowed);
+        Assert.True(registerResult.IsAllowed);
+    }
+
+    [Fact]
+    public async Task RecordApiKeyExchangeAttemptAsync_RecordsAttempt()
+    {
+        // Arrange
+        string ipAddress = "192.168.1.1";
+
+        // Act
+        await _service.RecordApiKeyExchangeAttemptAsync(ipAddress);
+        RateLimitResult result = await _service.CheckApiKeyExchangeLimitAsync(ipAddress);
+
+        // Assert
+        Assert.Equal(4, result.RemainingAttempts); // 5 - 1 recorded = 4 remaining
     }
 
     #endregion

@@ -15,6 +15,14 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/users/{userId:guid}/apikeys")]
 public class UserApiKeysController : ControllerBase
 {
+    internal const int MaxNameLength = 256;
+
+    /// <summary>Applied to Desktop-purpose keys when the caller doesn't specify an expiry.</summary>
+    internal static readonly TimeSpan DefaultDesktopKeyLifetime = TimeSpan.FromDays(90);
+
+    /// <summary>Maximum allowed expiry horizon for a Desktop-purpose key.</summary>
+    internal static readonly TimeSpan MaxKeyLifetime = TimeSpan.FromDays(365);
+
     private readonly Farm.Infrastructure.Repositories.Api.IApiKeyRepository _repo;
     private readonly ISettingsService _settingsService;
 
@@ -41,7 +49,10 @@ public class UserApiKeysController : ControllerBase
             k.Name,
             k.IsActive,
             k.CreatedAt,
-            k.ExpiresAt));
+            k.ExpiresAt,
+            k.Purpose,
+            k.Scopes,
+            k.IsExpired));
         return Ok(result);
     }
 
@@ -54,21 +65,45 @@ public class UserApiKeysController : ControllerBase
             return Forbid();
         }
 
-        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+        string name = string.IsNullOrWhiteSpace(req.Name) ? "user-generated" : req.Name.Trim();
+        if (name.Length > MaxNameLength)
+        {
+            return BadRequest(new { error = $"API key name cannot exceed {MaxNameLength} characters." });
+        }
+
+        ApiKeyPurpose purpose = req.Purpose ?? ApiKeyPurpose.OctoPrint;
+        ApiKeyScope scopes = req.Scopes ?? ApiKeyScope.None;
+        DateTime? expiresAt = req.ExpiresAt;
+
+        if (!TryValidateScopesAndExpiry(purpose, scopes, ref expiresAt, out string? validationError))
+        {
+            return BadRequest(new { error = validationError });
+        }
+
         string rawKey = GenerateKey();
-        string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
+        string storedValue = GetValueForStorage(rawKey, purpose);
 
         var key = new Farm.Infrastructure.Domain.ApiKey
         {
             UserId = userId,
-            Name = req?.Name ?? "user-generated",
+            Name = name,
             KeyHash = storedValue,
-            IsActive = true
+            IsActive = true,
+            Purpose = purpose,
+            Scopes = scopes,
+            ExpiresAt = expiresAt
         };
 
         await _repo.AddAsync(key);
 
-        return Ok(new { key = rawKey, id = key.Id });
+        return Ok(new
+        {
+            key = rawKey,
+            id = key.Id,
+            purpose = key.Purpose,
+            scopes = key.Scopes,
+            expiresAt = key.ExpiresAt
+        });
     }
 
     [HttpPatch("{keyId:guid}/toggle")]
@@ -126,10 +161,13 @@ public class UserApiKeysController : ControllerBase
             return NotFound();
         }
 
-        // Generate new key
-        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+        if (oldKey.IsExpired)
+        {
+            return BadRequest(new { error = "Expired API keys cannot be rotated. Create a new API key instead." });
+        }
+
         string rawKey = GenerateKey();
-        string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
+        string storedValue = GetValueForStorage(rawKey, oldKey.Purpose);
 
         oldKey.KeyHash = storedValue;
         await _repo.UpdateAsync(oldKey);
@@ -138,7 +176,8 @@ public class UserApiKeysController : ControllerBase
     }
 
     /// <summary>
-    /// Reveal the raw API key. Only works when HashStoredApiKeys is disabled.
+    /// Reveal a legacy OctoPrint API key when HashStoredApiKeys is disabled.
+    /// Desktop API keys are always one-time secrets and cannot be revealed.
     /// </summary>
     [HttpGet("{keyId:guid}/reveal")]
     [Authorize]
@@ -149,16 +188,21 @@ public class UserApiKeysController : ControllerBase
             return Forbid();
         }
 
-        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
-        if (settings.HashStoredApiKeys)
-        {
-            return BadRequest(new { error = "Cannot reveal API key when hashing is enabled. Keys are stored as one-way hashes." });
-        }
-
         ApiKey? key = await _repo.GetByIdAsync(keyId);
         if (key == null || key.UserId != userId)
         {
             return NotFound();
+        }
+
+        if (key.Purpose == ApiKeyPurpose.Desktop)
+        {
+            return BadRequest(new { error = "Desktop API keys are one-time secrets and cannot be revealed. Rotate the key to generate a new secret." });
+        }
+
+        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+        if (settings.HashStoredApiKeys)
+        {
+            return BadRequest(new { error = "Cannot reveal API key when hashing is enabled. Keys are stored as one-way hashes." });
         }
 
         // When hashing is disabled, KeyHash contains the raw key
@@ -189,7 +233,90 @@ public class UserApiKeysController : ControllerBase
             return true;
         }
 
-        return User.IsInRole("Admin") || User.IsInRole("Administrator");
+        return User.IsInRole("farm_admin");
+    }
+
+    /// <summary>
+    /// Validates and normalizes the requested purpose/scopes/expiry combination, applying
+    /// safe defaults for Desktop-purpose keys. OctoPrint-purpose and legacy keys are
+    /// never allowed to carry scopes, so existing or unscoped keys can never gain desktop
+    /// access.
+    /// </summary>
+    private static bool TryValidateScopesAndExpiry(
+        ApiKeyPurpose purpose,
+        ApiKeyScope scopes,
+        ref DateTime? expiresAt,
+        out string? error)
+    {
+        error = null;
+
+        if (!Enum.IsDefined(purpose))
+        {
+            error = "Invalid API key purpose.";
+            return false;
+        }
+
+        if ((scopes & ~ApiKeyScope.All) != ApiKeyScope.None)
+        {
+            error = "Invalid API key scope.";
+            return false;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        if (expiresAt is not null)
+        {
+            expiresAt = expiresAt.Value.Kind switch
+            {
+                DateTimeKind.Utc => expiresAt.Value,
+                DateTimeKind.Local => expiresAt.Value.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(expiresAt.Value, DateTimeKind.Utc),
+            };
+
+            if (expiresAt <= now)
+            {
+                error = "API key expiry must be in the future.";
+                return false;
+            }
+
+            if (expiresAt > now.Add(MaxKeyLifetime))
+            {
+                error = $"API key expiry cannot exceed {MaxKeyLifetime.TotalDays:0} days from now.";
+                return false;
+            }
+        }
+
+        switch (purpose)
+        {
+            case ApiKeyPurpose.OctoPrint:
+                if (scopes != ApiKeyScope.None)
+                {
+                    error = "Scopes can only be granted to Desktop-purpose API keys.";
+                    return false;
+                }
+
+                break;
+
+            case ApiKeyPurpose.Desktop:
+                if (scopes == ApiKeyScope.None)
+                {
+                    error = "At least one scope (ModelRead, ModelWrite, or LibrarySync) is required for Desktop-purpose API keys.";
+                    return false;
+                }
+
+                if (expiresAt is null)
+                {
+                    // Safe default: Desktop keys always expire even when the caller doesn't specify a date.
+                    expiresAt = now.Add(DefaultDesktopKeyLifetime);
+                }
+
+                break;
+
+            default:
+                error = "Unsupported API key purpose.";
+                return false;
+        }
+
+        return true;
     }
 
     private static string GenerateKey()
@@ -198,6 +325,14 @@ public class UserApiKeysController : ControllerBase
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(data);
         return Convert.ToHexString(data);
+    }
+
+    private string GetValueForStorage(string rawKey, ApiKeyPurpose purpose)
+    {
+        OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+        return purpose == ApiKeyPurpose.Desktop || settings.HashStoredApiKeys
+            ? ComputeSha256Hash(rawKey)
+            : rawKey;
     }
 
     private static string ComputeSha256Hash(string rawData)
@@ -209,11 +344,14 @@ public class UserApiKeysController : ControllerBase
     }
 }
 
-public record CreateApiKeyRequest(string? Name);
+public record CreateApiKeyRequest(string? Name, ApiKeyPurpose? Purpose = null, ApiKeyScope? Scopes = null, DateTime? ExpiresAt = null);
 
 public record ApiKeyDto(
     Guid Id,
     string Name,
     bool IsActive,
     DateTime CreatedAt,
-    DateTime? ExpiresAt);
+    DateTime? ExpiresAt,
+    ApiKeyPurpose Purpose,
+    ApiKeyScope Scopes,
+    bool IsExpired);

@@ -49,7 +49,13 @@ public enum AuthEventType
     RefreshToken = 10,
 
     /// <summary>Token revoked (logout, security action, or admin).</summary>
-    TokenRevoked = 11
+    TokenRevoked = 11,
+
+    /// <summary>Desktop API key successfully exchanged for a short-lived JWT.</summary>
+    ApiKeyExchange = 12,
+
+    /// <summary>Desktop API key exchange failed (invalid, expired, revoked, wrong purpose, or unscoped key).</summary>
+    ApiKeyExchangeFailed = 13
 }
 
 #endregion

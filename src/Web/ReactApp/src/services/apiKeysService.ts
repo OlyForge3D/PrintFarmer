@@ -1,20 +1,33 @@
 import { apiClient } from '@/services/api';
 
+export type ApiKeyPurpose = 'OctoPrint' | 'Desktop';
+
+export type ApiKeyScope = 'ModelRead' | 'ModelWrite' | 'LibrarySync';
+
 export interface ApiKeyDto {
   id: string;
   name: string;
   isActive: boolean;
   createdAt: string;
   expiresAt?: string;
+  purpose: ApiKeyPurpose;
+  scopes: string;
+  isExpired: boolean;
 }
 
 export interface CreateApiKeyResponse {
   key: string;
   id: string;
+  purpose?: ApiKeyPurpose;
+  scopes?: string;
+  expiresAt?: string;
 }
 
 export interface CreateApiKeyRequest {
   name: string;
+  purpose?: ApiKeyPurpose;
+  scopes?: string;
+  expiresAt?: string;
 }
 
 export interface ToggleApiKeyResponse {
