@@ -23,22 +23,11 @@ final class PredictiveViewModelTests: XCTestCase {
         super.tearDown()
     }
 
-    /// Predicate over `AsyncGate.ParkAckResult` accepting any bounded
-    /// classification produced by the actor: park-succeeded (`.parked`),
-    /// close-drained-active (`.closedOrConsumed`), or terminal fate
-    /// (any `ResumeReason`). This is the correct assertion for tests
-    /// that follow the Hicks H3 close-first ordering: which of the
-    /// bounded slots we land in depends on actor-scheduling races the
-    /// test intentionally does NOT constrain. The proof is boundedness,
-    /// not slot ordering.
-    static fileprivate func isBoundedParkAckResult(_ r: AsyncGate.ParkAckResult) -> Bool {
-        switch r {
-        case .parked, .closedOrConsumed, .unknown:
-            return true
-        case .terminal:
-            return true
-        }
-    }
+    /// Removed: the previous `isBoundedParkAckResult` helper returned
+    /// `true` for every `ParkAckResult` case, making all assertions
+    /// tautological. Reviewer finding #5 requires per-test exact expected
+    /// results/sets. Each call site now asserts the specific classification(s)
+    /// that its actor timeline can produce.
     
     // MARK: - Initial State
     
@@ -1862,12 +1851,20 @@ final class PredictiveViewModelTests: XCTestCase {
         let r2 = await ticket2.value()
         await t.value
 
-        // Exact result: either park won the race (both `.parked`) or
-        // close won (both drained via close). No hang, no lost result.
-        XCTAssertTrue(Self.isBoundedParkAckResult(r1),
-                      "ticket 1 exact receipt: got \(r1)")
-        XCTAssertTrue(Self.isBoundedParkAckResult(r2),
-                      "ticket 2 exact receipt: got \(r2)")
+        // Exact result set: either park won the race (both `.parked`)
+        // or close won (both drained via close observerOrder-loop's
+        // else branch, seal `.closedBeforePark`, flushed to tickets).
+        // No other bounded classification is reachable here:
+        // - `.terminal(.closedWhileParked)` is impossible because ticket
+        //   is resolved `.parked` at park time and is one-shot; the
+        //   subsequent close's seal-flush is a no-op on the ticket.
+        // - `.closedOrConsumed` / `.unknown` cannot appear for a
+        //   registered, active-until-close token entered pre-spawn.
+        let expected: Set<AsyncGate.ParkAckResult> = [.parked, .terminal(.closedBeforePark)]
+        XCTAssertTrue(expected.contains(r1),
+                      "ticket 1 exact receipt must be .parked or .terminal(.closedBeforePark); got \(r1)")
+        XCTAssertTrue(expected.contains(r2),
+                      "ticket 2 exact receipt must be .parked or .terminal(.closedBeforePark); got \(r2)")
         // Both tickets must resolve to the SAME classification — they
         // observed the same actor timeline.
         XCTAssertEqual(r1, r2, "tickets share timeline; must agree")
@@ -1878,33 +1875,63 @@ final class PredictiveViewModelTests: XCTestCase {
                        "all tickets removed at resolution")
     }
 
-    /// Hicks A: ACK call AFTER park returns immediately `.parked`.
+    /// Hicks A / reviewer finding #5: ACK call AFTER park returns
+    /// immediately `.parked` — proven CAUSALLY (not via a race). The
+    /// prior version raced the ticket enter against the park schedule
+    /// and accepted any bounded classification, which meant a regression
+    /// that failed to resolve tickets on park would still pass because
+    /// close-drain would produce a bounded value. This version:
+    ///
+    ///   1. Spawns the parking task
+    ///   2. Awaits `waitForObserverParked(token)` — synchronous causal
+    ///      proof that the continuation is parked BEFORE we enter the
+    ///      ticket
+    ///   3. Enters the ticket. Because the token is parked, the
+    ///      `enterObserverParkAck` `parkedObservers[token.id] != nil`
+    ///      branch fires and the ticket is `.resolve(.parked)`d
+    ///      SYNCHRONOUSLY on the actor — `isResolved` MUST be true
+    ///   4. Asserts `ticket.value()` is exactly `.parked` (no OR)
+    ///
+    /// If `enterObserverParkAck`'s parked-branch is removed or its
+    /// resolution reason regresses, this test fails deterministically.
     func testAsyncGateParkAckAfterParkIsImmediate() async {
         let gate = AsyncGate()
         let token = await gate.registerObserver()
         let t = Task { await gate.awaitObserver(token) }
 
-        // Coordinator R3: enter a ticket synchronously; do NOT await
-        // any stranding ACK value before close. `isResolved` is a
-        // non-stranding sync property.
+        // Causal park proof: block until the parking task has actually
+        // installed the continuation. `waitForObserverParked` returns
+        // `.parked` when `parkedObservers[token.id] != nil` is true.
+        let parkAck = await gate.waitForObserverParked(token)
+        XCTAssertEqual(parkAck, .parked,
+                       "waitForObserverParked must observe the continuation parked before we enter the ticket")
+
+        // Enter ticket AFTER parked-proof. `enterObserverParkAck` runs
+        // synchronously on the actor: its `parkedObservers[token.id] != nil`
+        // branch calls `ticket.resolve(.parked)` and returns. The ticket
+        // MUST be resolved on return; `.value()` MUST be exactly `.parked`.
         let ticket = await gate.enterObserverParkAck(token)
-        // Whether isResolved is true here depends on actor scheduling
-        // (park may or may not have run yet). Both are valid; the
-        // ticket buffer resolves exactly once regardless.
-        _ = ticket.isResolved
+        XCTAssertTrue(ticket.isResolved,
+                      "ticket entered against a parked token must be resolved synchronously by enterObserverParkAck")
 
-        // Hicks H3: close UNCONDITIONALLY before awaiting task or
-        // ticket values.
-        await gate.close()
         let r = await ticket.value()
-        await t.value
+        XCTAssertEqual(r, .parked,
+                       "ticket entered after park must resolve exactly .parked; got \(r)")
 
-        XCTAssertTrue(Self.isBoundedParkAckResult(r),
-                      "ticket exact receipt: got \(r)")
+        // Close for bounded teardown; drains the parked continuation via
+        // .closedWhileParked (does not affect the already-resolved ticket).
+        await gate.close()
+        await t.value
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
         XCTAssertEqual(final.observerParkAckTicketCount, 0)
+        // Exact resume-count evidence: the parked continuation was
+        // resumed by close (not by cancel or signal).
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
+                       "exactly one parkedResumedByClose from the terminal drain")
+        XCTAssertEqual(final.observerFateCounts[.closedWhileParked] ?? 0, 1,
+                       "fate sealed exactly .closedWhileParked")
     }
 
     /// Hicks A: pre-park ACK on an active token is drained by close()
@@ -1981,11 +2008,12 @@ final class PredictiveViewModelTests: XCTestCase {
         let r2 = await ticket2.value()
         await park.value
 
-        // Exact receipts: park+signal path yields `.parked`; if close
-        // beat the park in actor scheduling, drained via close. Both
-        // tickets share timeline.
-        XCTAssertTrue(Self.isBoundedParkAckResult(r1),
-                      "ticket 1 exact receipt: got \(r1)")
+        // Exact result set: `.parked` when park won, or
+        // `.terminal(.closedBeforePark)` when close won. Both tickets
+        // share timeline. No `.closedOrConsumed`/`.unknown` reachable.
+        let expected: Set<AsyncGate.ParkAckResult> = [.parked, .terminal(.closedBeforePark)]
+        XCTAssertTrue(expected.contains(r1),
+                      "ticket 1 exact receipt must be .parked or .terminal(.closedBeforePark); got \(r1)")
         XCTAssertEqual(r1, r2, "tickets share timeline")
 
         let final = await gate.snapshot()
@@ -2018,8 +2046,13 @@ final class PredictiveViewModelTests: XCTestCase {
         let r2 = await ticket2.value()
         await park.value
 
-        XCTAssertTrue(Self.isBoundedParkAckResult(r1),
-                      "ticket 1 exact receipt: got \(r1)")
+        // Exact result set (waiter variant): `.parked` when park won,
+        // or `.terminal(.openedBeforePark)` when open() latched the
+        // token before the parking task ran and the latch flushed
+        // ticket resolution to that reason. Both tickets share timeline.
+        let expected: Set<AsyncGate.ParkAckResult> = [.parked, .terminal(.openedBeforePark)]
+        XCTAssertTrue(expected.contains(r1),
+                      "ticket 1 exact receipt must be .parked or .terminal(.openedBeforePark); got \(r1)")
         XCTAssertEqual(r1, r2, "tickets share timeline")
 
         let final = await gate.snapshot()
@@ -2422,11 +2455,15 @@ final class PredictiveViewModelTests: XCTestCase {
         let r = await ticket.value()
         await park.value
 
-        // Ticket buffers first resolution: either `.parked` (park won)
-        // or `.closedOrConsumed`/`.terminal(.closedBeforePark)` (close
-        // won). All exact non-hang classifications.
-        XCTAssertTrue(Self.isBoundedParkAckResult(r),
-                      "ticket exact receipt: got \(r)")
+        // Exact result set (observer transition via signal): `.parked`
+        // if park won and installed the continuation before the
+        // subsequent registerWaiter signal drained it, or
+        // `.terminal(.signaledBeforePark)` if the signal latched
+        // before the parking task actually parked. Both are exact
+        // classifications produced by the actor's signalEntry paths.
+        let expected: Set<AsyncGate.ParkAckResult> = [.parked, .terminal(.signaledBeforePark)]
+        XCTAssertTrue(expected.contains(r),
+                      "ticket exact receipt must be .parked or .terminal(.signaledBeforePark); got \(r)")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.observerParkAckTicketCount, 0,
@@ -2449,8 +2486,13 @@ final class PredictiveViewModelTests: XCTestCase {
         let r = await ticket.value()
         await park.value
 
-        XCTAssertTrue(Self.isBoundedParkAckResult(r),
-                      "ticket exact receipt: got \(r)")
+        // Exact result set (waiter transition via open): `.parked` if
+        // park won and installed the continuation before open() drained
+        // it, or `.terminal(.openedBeforePark)` if open() latched the
+        // token before the parking task actually parked.
+        let expected: Set<AsyncGate.ParkAckResult> = [.parked, .terminal(.openedBeforePark)]
+        XCTAssertTrue(expected.contains(r),
+                      "ticket exact receipt must be .parked or .terminal(.openedBeforePark); got \(r)")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.waiterParkAckTicketCount, 0)
