@@ -84,6 +84,41 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         XCTAssertEqual(result, .superseded)
     }
 
+    // MARK: P3 — reserve/publish split (unpublished activation candidate)
+
+    func testReserveDoesNotPublishUntilAdopt() async {
+        let root = FarmSnapshotFixtures.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let ns = FarmSnapshotFixtures.namespace()
+
+        // Reserve a candidate — it is NOT current, so nothing can commit against it.
+        let candidate = authority.reserve(namespace: ns, generation: 0)!
+        XCTAssertNil(authority.currentSession(), "a reserved candidate is not current")
+        XCTAssertFalse(authority.isCurrent(candidate))
+        let earlyCommit = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: candidate)
+        XCTAssertEqual(earlyCommit, .superseded, "no commit can be authorized before adopt")
+
+        // Publish via adopt — now it is authoritative and can commit.
+        XCTAssertTrue(authority.adopt(candidate))
+        XCTAssertTrue(authority.isCurrent(candidate))
+        let liveCommit = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 2), capturedSession: candidate)
+        XCTAssertEqual(liveCommit, .committed)
+    }
+
+    func testAdoptHigherThenReserveDoesNotRewindOrPublish() {
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let ns = FarmSnapshotFixtures.namespace()
+        let high = FarmSnapshotSession(namespace: ns, generation: 0, token: 100)
+        XCTAssertTrue(authority.adopt(high))
+        // reserve issues 101 (strictly above the adopted high-water) and does NOT change
+        // the current session.
+        let candidate = authority.reserve(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(candidate.token, 100)
+        XCTAssertTrue(authority.isCurrent(high), "reserve must not publish over the current session")
+    }
+
     func testTombstonedServerCannotMint() {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()

@@ -135,6 +135,21 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
     /// Returns `nil` when the server is tombstoned (purged) so nothing can
     /// resurrect it. Every mint advances the monotonic token AND the high-water
     /// mark, so a same-user / same-server relogin supersedes any in-flight session.
+    /// Reserve a token for a candidate session WITHOUT publishing it as current (P3).
+    /// The candidate is not authoritative — no commit can be authorized against it —
+    /// until a later `adopt` publishes it. Returns `nil` when the server is tombstoned.
+    func reserve(namespace: FarmSnapshotNamespace, generation: Int) -> FarmSnapshotSession? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !tombstones.contains(namespace.serverID) else { return nil }
+        // Advance the counter above both the counter and the permanent high-water so a
+        // reservation following an externally-adopted higher token never collides or
+        // rewinds (H3). The high-water is only advanced at `adopt` (publication).
+        let next = max(tokenCounter, highWater) + 1
+        tokenCounter = next
+        return FarmSnapshotSession(namespace: namespace, generation: generation, token: next)
+    }
+
     func mint(namespace: FarmSnapshotNamespace, generation: Int) -> FarmSnapshotSession? {
         lock.lock()
         defer { lock.unlock() }
@@ -379,6 +394,7 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     // MARK: Hydrate
 
     func hydrateActive() async -> FarmSnapshotHydration {
+        await ensureStartupPreparation() // P4: every public op ensures startup readiness
         guard let session = authority.currentSession() else { return .inactive }
         let live = liveURL(session.namespace)
 
@@ -452,6 +468,7 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     // MARK: Commit
 
     func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult {
+        await ensureStartupPreparation() // P4: ensure startup readiness before any commit
         // 1. Reject unsupported incoming schema before any durable mutation.
         guard envelope.isSupportedSchema else { return .schemaUnsupported }
         // 2. The candidate must belong to the captured session's namespace.

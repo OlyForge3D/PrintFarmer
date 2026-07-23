@@ -376,21 +376,20 @@ final class ServiceContainer: @unchecked Sendable {
         // Fail closed early if this login/restore was already superseded.
         guard authStillCurrent() else { return }
         let namespace = FarmSnapshotNamespace(serverID: active.id, userID: ownerID)
-        guard let session = farmSnapshotAuthority.mint(namespace: namespace, generation: activeGeneration.current) else {
-            // Tombstoned (purged) server — do not resurrect.
-            return
+        // P3: RESERVE an unpublished candidate (not yet current, so no commit can be
+        // authorized against it), await store readiness, THEN publish it via a single
+        // synchronous critical section that re-validates target + generation + auth
+        // token with NO await between the guard and the adopt.
+        let capturedGeneration = activeGeneration.current
+        guard let candidate = farmSnapshotAuthority.reserve(namespace: namespace, generation: capturedGeneration) else {
+            return // tombstoned (purged) server — do not resurrect
         }
-        // Bind only if the authority ACCEPTS the session (H3: a rejected/older token
-        // must not be treated as bound).
-        guard await farmSnapshotStore.activate(session: session) else { return }
-        // Final exact-token CAS at publication: the active server did not change, the
-        // session is still authority-current, AND the auth operation is still current
-        // (no logout/newer login landed during the activate await).
+        await farmSnapshotStore.prepareStartup()
         guard serverRegistry.activeServerID == active.id,
-              farmSnapshotAuthority.isCurrent(session),
-              authStillCurrent() else {
-            farmSnapshotAuthority.deactivate(session) // conditional; never clobbers newer
-            return
+              activeGeneration.isCurrent(capturedGeneration),
+              authStillCurrent(),
+              farmSnapshotAuthority.adopt(candidate) else {
+            return // superseded during readiness, or an older token — candidate never published
         }
     }
 
@@ -515,11 +514,13 @@ final class ServiceContainer: @unchecked Sendable {
         guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: server.id) else { return }
         guard transitionEpoch.isCurrent(epoch) else { return }
         let namespace = FarmSnapshotNamespace(serverID: server.id, userID: ownerID)
-        guard let session = farmSnapshotAuthority.mint(namespace: namespace, generation: generation) else { return }
-        guard await farmSnapshotStore.activate(session: session) else { return }
-        guard transitionEpoch.isCurrent(epoch), farmSnapshotAuthority.isCurrent(session) else {
-            farmSnapshotAuthority.deactivate(session) // conditional: only if still exactly this session
-            return
+        // P3: reserve an unpublished candidate, await readiness, then publish it in a
+        // single synchronous critical section that re-validates the transition epoch —
+        // no await between the guard and the adopt.
+        guard let candidate = farmSnapshotAuthority.reserve(namespace: namespace, generation: generation) else { return }
+        await farmSnapshotStore.prepareStartup()
+        guard transitionEpoch.isCurrent(epoch), farmSnapshotAuthority.adopt(candidate) else {
+            return // superseded during readiness, or an older token — candidate never published
         }
     }
 

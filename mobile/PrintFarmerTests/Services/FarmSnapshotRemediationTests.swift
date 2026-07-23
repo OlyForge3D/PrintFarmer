@@ -400,6 +400,52 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertEqual(try? Data(contentsOf: live), corrupt)
     }
 
+    func testMoveBoundaryConcurrentPurgeSerializesAfterMove() async {
+        // move vs purge: a purge started while a quarantine move holds its lease must
+        // drain that lease before sweeping — the move recovers atomically and the purge
+        // completes strictly after (issue #816 H5).
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        let session = await activate(store, authority, ns)
+
+        let live = liveURL(root: root, ns)
+        try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data("{ broken".utf8).write(to: live)
+
+        let recorder = CompletionOrderRecorder()
+        let moveBarrier = AsyncBarrier()
+        let ackBarrier = AsyncBarrier()
+        io.createDirectoryBarrier = moveBarrier // park recover just before the move (lease held)
+        io.purgeWillDrainBarrier = ackBarrier
+
+        let recoverTask = Task { () -> FarmSnapshotHydration in
+            let r = await store.hydrateActive()
+            await recorder.record("recover")
+            return r
+        }
+        await moveBarrier.waitUntilArrived() // recover holds a lease, parked pre-move
+
+        let purgeTask = Task { () -> FarmSnapshotPurgeResult in
+            let r = await store.purge(serverID: ns.serverID)
+            await recorder.record("purge")
+            return r
+        }
+        await ackBarrier.waitUntilArrived() // purge tombstoned + purging installed
+        ackBarrier.release()
+        moveBarrier.release()
+
+        _ = await recoverTask.value
+        XAssertEqual(await purgeTask.value, .purged)
+        // Purge drained the recover lease before completing.
+        let order = await recorder.order
+        XCTAssertEqual(order.last, "purge")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path))
+        _ = session
+    }
+
     // MARK: H7 — atomicity / interruption
 
     func testQuarantineCompareFalseAtMoveBoundaryPreservesLiveByteIdentical() async {
