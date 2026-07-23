@@ -58,7 +58,7 @@ struct ServersView: View {
             presenting: deletingServer
         ) { server in
             Button("Delete \(server.displayName)", role: .destructive) {
-                viewModel?.delete(server)
+                Task { await viewModel?.delete(server) }
                 deletingServer = nil
             }
             Button("Cancel", role: .cancel) { deletingServer = nil }

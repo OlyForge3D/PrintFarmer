@@ -377,6 +377,7 @@
 		D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0630DF455D4C1F4FA86F892 /* PrinterDetailView.swift */; };
 		D71037FADE952266CE7F84B8 /* NotificationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2099E58B96BAECC1E27BEE93 /* NotificationsView.swift */; };
 		D8F9A0B1C2E3D4F5A6B7C8D9 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */; };
+		D816D0A0000000000816D0A0 /* SnapshotActivationPendingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D816D0A1000000000816D0A1 /* SnapshotActivationPendingView.swift */; };
 		D99CD2AB46AD4834B0BC33CA /* PredictiveInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B82175969F41E18F12CE414 /* PredictiveInsightsView.swift */; };
 		DADAA45CEF6DEBFEFF5B983D /* UptimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9613964BDF412E866655E27 /* UptimeView.swift */; };
 		DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CD7956B1ACA5B4B641B1E2 /* TestProtocols.swift */; };
@@ -439,6 +440,25 @@
 		G1D0E211DA844BED9C0F19BD /* MockJobAnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1A233F477344637B2AC9E9C /* MockJobAnalyticsService.swift */; };
 		G1DB496BA05449D7B73D5824 /* JobHistoryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1ABD0C2A6934D9D81A7CC12 /* JobHistoryViewModelTests.swift */; };
 		G1FA23A10AE54780B6CF1B3F /* JobAnalyticsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1E89C5DD6EE494193525CAA /* JobAnalyticsViewModelTests.swift */; };
+		FA5A00000000000000000001 /* FarmSnapshotEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000002 /* FarmSnapshotEnvelope.swift */; };
+		FA5A00000000000000000003 /* FarmSnapshotSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000004 /* FarmSnapshotSession.swift */; };
+		FA5A00000000000000000005 /* FarmSnapshotOwnerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */; };
+		FA5A00000000000000000007 /* FarmSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000008 /* FarmSnapshotStore.swift */; };
+		FADC00000000000000000001 /* FarmSnapshotDomainCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */; };
+		FA5A00000000000000000009 /* FarmSnapshotEnvelopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */; };
+		FA5A0000000000000000000B /* FarmSnapshotTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */; };
+		FA5A0000000000000000000D /* FarmSnapshotAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */; };
+		FC7A00000000000000000001 /* APIClientAuthSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000002 /* APIClientAuthSessionTests.swift */; };
+		FC7A00000000000000000003 /* AuthServiceFencedMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000004 /* AuthServiceFencedMutationTests.swift */; };
+		FC7A000000000000000000A1 /* HudsonR7RevisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A000000000000000000A2 /* HudsonR7RevisionTests.swift */; };
+		FC7A000000000000000000B1 /* DallasSnapshotAuthorityHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A000000000000000000B2 /* DallasSnapshotAuthorityHardeningTests.swift */; };
+		FC7A00000000000000000005 /* FarmSnapshotStartupFailureRetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000006 /* FarmSnapshotStartupFailureRetryTests.swift */; };
+		FC7A00000000000000000007 /* FarmSnapshotMoveOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC7A00000000000000000008 /* FarmSnapshotMoveOrderTests.swift */; };
+		FA5A0000000000000000000F /* FarmSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000010 /* FarmSnapshotStoreTests.swift */; };
+		FA5A00000000000000000011 /* FarmSnapshotConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000012 /* FarmSnapshotConcurrencyTests.swift */; };
+		FA5A00000000000000000013 /* FarmSnapshotContainerAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */; };
+		FB6B00000000000000000001 /* FarmSnapshotRemediationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */; };
+		FB6B00000000000000000003 /* AuthSnapshotIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -664,6 +684,7 @@
 		C419E5042E5AB2FD54B88C0F /* AutoDispatchSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchSection.swift; sourceTree = "<group>"; };
 		C5B16CA4D9FC52BF34ADB51B /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		D816D0A1000000000816D0A1 /* SnapshotActivationPendingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotActivationPendingView.swift; sourceTree = "<group>"; };
 		C7D2128F28601E1ED8FEE835 /* DeepLinkHandlerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeepLinkHandlerTests.swift; sourceTree = "<group>"; };
 		C8090CB206CE8E8AE1084796 /* NotificationsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsViewModel.swift; sourceTree = "<group>"; };
 		C81783B769C3897AF7B30353 /* DemoNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoNotificationService.swift; sourceTree = "<group>"; };
@@ -773,6 +794,25 @@
 		G1F98AD41C304A60BBBD3F43 /* MockDispatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDispatchService.swift; sourceTree = "<group>"; };
 		G1FDD71A064346A897BF9641 /* MockPredictiveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockPredictiveService.swift; sourceTree = "<group>"; };
 		NFC0000000000000000000001 /* PrintFarmer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PrintFarmer.entitlements; sourceTree = "<group>"; };
+		FA5A00000000000000000002 /* FarmSnapshotEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotEnvelope.swift; sourceTree = "<group>"; };
+		FA5A00000000000000000004 /* FarmSnapshotSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotSession.swift; sourceTree = "<group>"; };
+		FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotOwnerStore.swift; sourceTree = "<group>"; };
+		FA5A00000000000000000008 /* FarmSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotStore.swift; sourceTree = "<group>"; };
+		FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotDomainCoordinator.swift; sourceTree = "<group>"; };
+		FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotEnvelopeTests.swift; sourceTree = "<group>"; };
+		FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotTestSupport.swift; sourceTree = "<group>"; };
+		FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotAuthorityTests.swift; sourceTree = "<group>"; };
+		FC7A00000000000000000002 /* APIClientAuthSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientAuthSessionTests.swift; sourceTree = "<group>"; };
+		FC7A00000000000000000004 /* AuthServiceFencedMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceFencedMutationTests.swift; sourceTree = "<group>"; };
+		FC7A000000000000000000A2 /* HudsonR7RevisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HudsonR7RevisionTests.swift; sourceTree = "<group>"; };
+		FC7A000000000000000000B2 /* DallasSnapshotAuthorityHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DallasSnapshotAuthorityHardeningTests.swift; sourceTree = "<group>"; };
+		FC7A00000000000000000006 /* FarmSnapshotStartupFailureRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotStartupFailureRetryTests.swift; sourceTree = "<group>"; };
+		FC7A00000000000000000008 /* FarmSnapshotMoveOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotMoveOrderTests.swift; sourceTree = "<group>"; };
+		FA5A00000000000000000010 /* FarmSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotStoreTests.swift; sourceTree = "<group>"; };
+		FA5A00000000000000000012 /* FarmSnapshotConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotConcurrencyTests.swift; sourceTree = "<group>"; };
+		FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotContainerAuthorityTests.swift; sourceTree = "<group>"; };
+		FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotRemediationTests.swift; sourceTree = "<group>"; };
+		FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSnapshotIdentityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -883,6 +923,10 @@
 		15E99E10A0724AD818418752 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				FA5A00000000000000000004 /* FarmSnapshotSession.swift */,
+				FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */,
+				FA5A00000000000000000008 /* FarmSnapshotStore.swift */,
+				FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */,
 				9FB00D1FA66F23705042FF95 /* Demo */,
 				BC2000000000000000000004 /* BarcodeIntakeService.swift */,
 				BC2000000000000000000003 /* BarcodeScannerService.swift */,
@@ -942,6 +986,7 @@
 		2A991A21494BE0619C801F85 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				FA5A00000000000000000002 /* FarmSnapshotEnvelope.swift */,
 				4B4E2EE087E92C131271B37F /* FilamentModels.swift */,
 				D61000000000000000000001 /* RegisteredServer.swift */,
 				B8D7C5C4CE62E9F3684E5B1F /* Models.swift */,
@@ -1120,6 +1165,7 @@
 				CBAC88193AFA3F2403893113 /* Settings */,
 				255B7030A4CC2759FC7FC79B /* ContentView.swift */,
 				C7A8B9D0E1F2A3B4C5D6E7F8 /* RootView.swift */,
+				D816D0A1000000000816D0A1 /* SnapshotActivationPendingView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1283,6 +1329,19 @@
 		D7EABE37D6B7E8A44802BE1A /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */,
+				FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */,
+				FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */,
+				FA5A0000000000000000000E /* FarmSnapshotAuthorityTests.swift */,
+				FC7A00000000000000000002 /* APIClientAuthSessionTests.swift */,
+				FC7A00000000000000000004 /* AuthServiceFencedMutationTests.swift */,
+				FC7A000000000000000000A2 /* HudsonR7RevisionTests.swift */,
+				FC7A000000000000000000B2 /* DallasSnapshotAuthorityHardeningTests.swift */,
+				FC7A00000000000000000006 /* FarmSnapshotStartupFailureRetryTests.swift */,
+				FC7A00000000000000000008 /* FarmSnapshotMoveOrderTests.swift */,
+				FA5A00000000000000000010 /* FarmSnapshotStoreTests.swift */,
+				FA5A00000000000000000012 /* FarmSnapshotConcurrencyTests.swift */,
+				FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */,
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
 				A70A710000000000B0000102 /* AttentionServiceTests.swift */,
 				BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */,
@@ -1366,6 +1425,7 @@
 		E5820B747E34564BD76FED89 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */,
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
 				A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */,
 				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
@@ -1553,6 +1613,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FB6B00000000000000000001 /* FarmSnapshotRemediationTests.swift in Sources */,
+				FB6B00000000000000000003 /* AuthSnapshotIdentityTests.swift in Sources */,
+				FA5A00000000000000000009 /* FarmSnapshotEnvelopeTests.swift in Sources */,
+				FA5A0000000000000000000B /* FarmSnapshotTestSupport.swift in Sources */,
+				FA5A0000000000000000000D /* FarmSnapshotAuthorityTests.swift in Sources */,
+				FC7A00000000000000000001 /* APIClientAuthSessionTests.swift in Sources */,
+				FC7A00000000000000000003 /* AuthServiceFencedMutationTests.swift in Sources */,
+				FC7A000000000000000000A1 /* HudsonR7RevisionTests.swift in Sources */,
+				FC7A000000000000000000B1 /* DallasSnapshotAuthorityHardeningTests.swift in Sources */,
+				FC7A00000000000000000005 /* FarmSnapshotStartupFailureRetryTests.swift in Sources */,
+				FC7A00000000000000000007 /* FarmSnapshotMoveOrderTests.swift in Sources */,
+				FA5A0000000000000000000F /* FarmSnapshotStoreTests.swift in Sources */,
+				FA5A00000000000000000011 /* FarmSnapshotConcurrencyTests.swift in Sources */,
+				FA5A00000000000000000013 /* FarmSnapshotContainerAuthorityTests.swift in Sources */,
 				G1C5E77D0F5644239382149E /* MockMaintenanceService.swift in Sources */,
 				G1B2DE97C03D425FABD4BDD4 /* MockAutoDispatchService.swift in Sources */,
 				G1D0E211DA844BED9C0F19BD /* MockJobAnalyticsService.swift in Sources */,
@@ -1655,6 +1729,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FA5A00000000000000000001 /* FarmSnapshotEnvelope.swift in Sources */,
+				FA5A00000000000000000003 /* FarmSnapshotSession.swift in Sources */,
+				FA5A00000000000000000005 /* FarmSnapshotOwnerStore.swift in Sources */,
+				FA5A00000000000000000007 /* FarmSnapshotStore.swift in Sources */,
+				FADC00000000000000000001 /* FarmSnapshotDomainCoordinator.swift in Sources */,
 				BC1000000000000000000001 /* BarcodeScannerProtocol.swift in Sources */,
 				BC1000000000000000000002 /* BarcodeIntakeServiceProtocol.swift in Sources */,
 				BC1000000000000000000003 /* BarcodeScannerService.swift in Sources */,
@@ -1741,6 +1820,7 @@
 				FF2EE1DD0CC9BB8AA7F6E5D4 /* LocalNetworkAuthorization.swift in Sources */,
 				C6B5A4F3E2D1C0B9A8F7E6D5 /* LocalNetworkPermissionView.swift in Sources */,
 				D8F9A0B1C2E3D4F5A6B7C8D9 /* RootView.swift in Sources */,
+				D816D0A0000000000816D0A0 /* SnapshotActivationPendingView.swift in Sources */,
 				0165CA554584E940BBCF8A15 /* EmptyStateView.swift in Sources */,
 				13A9714DB66389EFE231ED4E /* ActionButtonStyle.swift in Sources */,
 				2145660BC57194889CDBC78A /* JobCardView.swift in Sources */,

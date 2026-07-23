@@ -357,12 +357,46 @@ final class ActiveServerGeneration: @unchecked Sendable {
 
 // MARK: - API Client
 
+/// E (issue #816 reject, Hicks + replacement Vasquez): an authenticated APIClient
+/// session is represented by this bundled value so that "an authenticated session
+/// without a stable serverID" is a COMPILE-TIME-IMPOSSIBLE state — the access
+/// token and the serverID are inseparable. Every authenticated
+/// constructor/mutator/apply/reconstruction boundary takes this instead of loose
+/// optionals, which is what lets us delete the production `precondition` traps
+/// (invalid states can no longer be expressed) without a runtime crash.
+struct AuthenticatedIdentity: Sendable, Equatable {
+    let accessToken: String
+    let serverID: UUID
+    /// The auth-session/operation token the session was applied under, if any.
+    /// Nil for a freshly-constructed or snapshot client (which suppress
+    /// session-expiry anyway via a nil server generation).
+    var authSessionToken: Int?
+
+    init(accessToken: String, serverID: UUID, authSessionToken: Int? = nil) {
+        self.accessToken = accessToken
+        self.serverID = serverID
+        self.authSessionToken = authSessionToken
+    }
+}
+
 actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
     private var baseURL: URL
     private var accessToken: String?
+    /// J (issue #816 reject, Hicks): the STABLE server-identity id the current
+    /// authenticated session was applied for. Carried atomically in the same
+    /// mutation as `baseURL`/`accessToken`/`authSessionToken` so
+    /// `sessionSnapshotClient*` / `logoutOperationSnapshot*` can produce an
+    /// immutable snapshot whose network destination AND local-cleanup target
+    /// stay consistent even across a server switch that does NOT advance the
+    /// auth-operation epoch (registry-driven server switch).
+    private var currentServerID: UUID?
+    /// The exact auth-session/operation token this client's authenticated session was
+    /// applied under (A). Carried on a 401 so the expiry handler can reject a stale
+    /// event; nil for unauthenticated / login clients.
+    private var authSessionToken: Int?
     private var tokenExpiryChecker: (@Sendable () async -> Bool)?
     private let serverGeneration: ActiveServerGeneration?
     private let generationAtCreation: Int?
@@ -465,13 +499,21 @@ actor APIClient {
         baseURL: URL,
         session: URLSession? = nil,
         serverGeneration: ActiveServerGeneration? = nil,
-        accessToken: String? = nil
+        authenticated: AuthenticatedIdentity? = nil
     ) {
         self.baseURL = baseURL
         self.session = session ?? Self.makePrivateNetworkSession()
-        self.accessToken = accessToken
+        self.accessToken = authenticated?.accessToken
         self.serverGeneration = serverGeneration
         self.generationAtCreation = serverGeneration?.current
+        // E (issue #816 reject): identity is bundled, so an authenticated client
+        // (non-nil `authenticated`) ALWAYS carries a serverID and an access token
+        // together — the previous `precondition(serverID != nil)` trap is gone
+        // because "token without serverID" can no longer be constructed. An
+        // unauthenticated client (nil `authenticated`) carries nil token /
+        // serverID / authSessionToken.
+        self.authSessionToken = authenticated?.authSessionToken
+        self.currentServerID = authenticated?.serverID
 
         self.decoder = JSONDecoder()
         // ASP.NET Core can emit fractional seconds; the built-in .iso8601 strategy
@@ -491,8 +533,163 @@ actor APIClient {
         encoder.dateEncodingStrategy = .iso8601
     }
 
-    func setAccessToken(_ token: String?) {
-        self.accessToken = token
+    /// E (issue #816 reject): set the authenticated shared session. Takes a
+    /// bundled `AuthenticatedIdentity`, so a serverID is structurally required —
+    /// there is no default-nil authenticated setter and no precondition trap.
+    /// Leaves `authSessionToken` unchanged unless the identity supplies one
+    /// (mirrors the prior setter, which did not touch it on a plain set).
+    func setAuthenticatedSession(_ identity: AuthenticatedIdentity) {
+        self.accessToken = identity.accessToken
+        self.currentServerID = identity.serverID
+        if let token = identity.authSessionToken {
+            self.authSessionToken = token
+        }
+    }
+
+    /// E: clear the authenticated shared session (bearer, serverID, and
+    /// authSessionToken). The explicit non-authenticated counterpart to
+    /// `setAuthenticatedSession`.
+    func clearSession() {
+        self.accessToken = nil
+        self.currentServerID = nil
+        self.authSessionToken = nil
+    }
+
+    /// V2 (issue #816 reject, Vasquez): apply baseURL + authenticated identity in
+    /// ONE actor hop UNCONDITIONALLY (for legacy `.unspecified` callers that do
+    /// not participate in the epoch protocol). The frozen head applied these in
+    /// two separate actor hops (`updateBaseURL` then `setAuthenticatedSession`),
+    /// leaving a window in which a concurrent request could snapshot the NEW
+    /// baseURL against the OLD bearer (or vice-versa) — a cross-server bearer
+    /// leak. Coalescing them into a single actor-isolated mutation closes that
+    /// window: baseURL, bearer, and serverID always describe the same server.
+    func applyAuthenticatedSession(baseURL: URL, identity: AuthenticatedIdentity) {
+        self.baseURL = baseURL
+        UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+        self.accessToken = identity.accessToken
+        self.currentServerID = identity.serverID
+        if let token = identity.authSessionToken {
+            self.authSessionToken = token
+        }
+    }
+
+    /// V2: clear the session AND (optionally) repoint baseURL in ONE actor hop for
+    /// legacy `.unspecified` callers, so no request can observe a half-applied
+    /// (new baseURL, stale bearer) session between two separate hops.
+    func clearAuthenticatedSession(baseURL: URL? = nil) {
+        if let baseURL {
+            self.baseURL = baseURL
+            UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+        }
+        self.accessToken = nil
+        self.currentServerID = nil
+        self.authSessionToken = nil
+    }
+
+    /// Applies base URL + access token + server id ATOMICALLY, but only if
+    /// `epoch.isCurrent(token)` at the moment of application — a destination
+    /// compare-and-set for the shared session (issue #816 H2). Because this runs
+    /// inside the APIClient actor, the epoch check and the mutation cannot be
+    /// separated by an await, so a superseded login / restore can never clobber a
+    /// newer operation's session. Returns whether applied.
+    ///
+    /// J (issue #816 reject, Hicks): `serverID` is applied atomically with
+    /// baseURL/accessToken so a `sessionSnapshotClient*` produced later carries
+    /// the SAME stable server identity as its baseURL/bearer; logout can then use
+    /// that snapshot's `serverID` for local cleanup and cannot land on a different
+    /// server than the /logout network request ended up hitting.
+    /// E (issue #816 reject): apply an AUTHENTICATED shared session under an
+    /// operation currency check. Takes a bundled `AuthenticatedIdentity`, so the
+    /// serverID is structurally required — there is no default-nil `serverID`
+    /// and no way to apply a bearer without a stable server identity. Returns
+    /// whether applied (false when the epoch has advanced past `token`).
+    @discardableResult
+    func applyAuthenticatedSessionIfCurrent(
+        baseURL: URL?,
+        identity: AuthenticatedIdentity,
+        epoch: AuthOperationEpoch,
+        token: Int
+    ) -> Bool {
+        let applied: Bool? = epoch.withCurrent(token) {
+            if let baseURL {
+                self.baseURL = baseURL
+                UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+            }
+            self.accessToken = identity.accessToken
+            // J: serverID applied atomically with the session so a later snapshot
+            // cannot separate "which server" from "which host".
+            self.currentServerID = identity.serverID
+            // A: the applied session's auth-session identity is the operation
+            // token, so a later 401 carries it and the handler can reject a stale
+            // event without borrowing the current token.
+            self.authSessionToken = token
+            return true
+        }
+        return applied ?? false
+    }
+
+    /// E: clear the shared session under an operation currency check (the
+    /// explicit non-authenticated counterpart to
+    /// `applyAuthenticatedSessionIfCurrent`). Optionally repoints `baseURL`.
+    /// Returns whether cleared (false when the epoch advanced past `token`).
+    @discardableResult
+    func clearSessionIfCurrent(
+        baseURL: URL?,
+        epoch: AuthOperationEpoch,
+        token: Int
+    ) -> Bool {
+        let applied: Bool? = epoch.withCurrent(token) {
+            if let baseURL {
+                self.baseURL = baseURL
+                UserDefaults.standard.set(baseURL.absoluteString, forKey: Self.serverURLKey)
+            }
+            self.accessToken = nil
+            self.currentServerID = nil
+            self.authSessionToken = nil
+            return true
+        }
+        return applied ?? false
+    }
+
+    /// J (issue #816 reject, Hicks): compare-and-clear the authenticated session
+    /// IFF the client still holds exactly `(expectedAccessToken,
+    /// expectedAuthSessionToken)`. Rollback primitive for a login/restore that
+    /// installed the shared session and then failed a subsequent operation-fenced
+    /// destination — clears our own T1 session, but if a newer T2 login has
+    /// already applied its own session (different accessToken/authSessionToken)
+    /// the compare fails and T2's session is left untouched. Does NOT change
+    /// baseURL (a rollback cannot restore an unknown prior baseURL; leaving the
+    /// last-applied baseURL is safe because any subsequent authenticated request
+    /// captures baseURL synchronously with the bearer via `RequestSession`, and
+    /// no request can be issued without a bearer). Returns whether cleared.
+    @discardableResult
+    func clearSessionIfMatches(
+        expectedAccessToken: String,
+        expectedAuthSessionToken: Int
+    ) -> Bool {
+        guard self.accessToken == expectedAccessToken,
+              self.authSessionToken == expectedAuthSessionToken else {
+            return false
+        }
+        self.accessToken = nil
+        self.authSessionToken = nil
+        self.currentServerID = nil
+        return true
+    }
+
+    /// Post a session-expiry event carrying the originating auth-session identity
+    /// `{serverGeneration, authSessionToken}` (A). SUPPRESSED for unauthenticated /
+    /// login clients (nil generation or no captured auth session), which must never be
+    /// able to log out an authenticated session. `authSessionToken` is the token the
+    /// FAILING REQUEST was issued under (captured before the network await), never a
+    /// later-applied session's token.
+    private func postSessionExpired(authSessionToken: Int?) {
+        guard let generationAtCreation, let authSessionToken else { return }
+        NotificationCenter.default.post(
+            name: .sessionExpired,
+            object: nil,
+            userInfo: ["generation": generationAtCreation, "authSessionToken": authSessionToken]
+        )
     }
 
     /// Registers a closure that checks whether the current token is expired.
@@ -514,8 +711,103 @@ actor APIClient {
         accessToken
     }
 
+    /// J (issue #816 reject, Hicks): the stable server-identity id the current
+    /// authenticated session was applied for. Used by tests / callers that need
+    /// to prove the atomic (baseURL, accessToken, serverID) coupling.
+    func currentServerIdentity() -> UUID? {
+        currentServerID
+    }
+
     func unauthenticatedClient(baseURL: URL) -> APIClient {
         APIClient(baseURL: baseURL, session: session)
+    }
+
+    /// E: the current session as a bundled `AuthenticatedIdentity`, or nil when
+    /// unauthenticated. Used to reconstruct snapshot/logout clients so a
+    /// reconstructed authenticated client is ALWAYS built with a paired
+    /// (accessToken, serverID) — never a bearer with a nil serverID. Snapshot
+    /// clients suppress expiry via a nil server generation, so `authSessionToken`
+    /// is intentionally not carried into the reconstruction.
+    private func reconstructionIdentity() -> AuthenticatedIdentity? {
+        guard let accessToken, let currentServerID else { return nil }
+        return AuthenticatedIdentity(accessToken: accessToken, serverID: currentServerID)
+    }
+
+    /// J: an immutable client snapshot carrying THIS client's exact current baseURL and
+    /// bearer, so a request (e.g. `/logout`) is issued under the captured OLD session
+    /// even if the shared client is later repointed to a newer session by a concurrent
+    /// login. Carries no server generation, so it never emits its own session-expiry.
+    /// J4/E: the snapshot's serverID is bound at construction alongside its bearer
+    /// via the bundled identity.
+    func sessionSnapshotClient() -> APIClient {
+        APIClient(
+            baseURL: baseURL, session: session, serverGeneration: nil,
+            authenticated: reconstructionIdentity()
+        )
+    }
+
+    /// J (issue #816 reject): capture the session snapshot ATOMICALLY under an
+    /// operation currency check, so the returned client's bearer/baseURL matches
+    /// EXACTLY the operation the caller is running. Returns nil if the epoch has
+    /// advanced past `token` — a stale logout thus cannot contact the server as a
+    /// newer session. Because the currency check and the snapshot capture share
+    /// this actor call (no await between them), the epoch cannot advance between
+    /// them.
+    func sessionSnapshotClientIfCurrent(epoch: AuthOperationEpoch, token: Int) -> APIClient? {
+        let snapshot: APIClient? = epoch.withCurrent(token) {
+            APIClient(
+                baseURL: baseURL, session: session, serverGeneration: nil,
+                authenticated: reconstructionIdentity()
+            )
+        }
+        return snapshot
+    }
+
+    /// J (issue #816 reject, Hicks): the immutable full-fidelity logout snapshot.
+    /// Captured atomically in ONE APIClient actor hop, so `client.currentBaseURL`,
+    /// `accessToken`, and `serverID` all describe the SAME session and cannot be
+    /// separated by a concurrent registry-driven server switch. Callers use
+    /// `client` for the /logout network request AND `serverID` (when non-nil)
+    /// for local per-server cleanup, so a switch landing without an epoch
+    /// advance cannot cause /logout to hit server A while cleanup wipes server B.
+    struct LogoutSnapshot: Sendable {
+        let client: APIClient
+        let baseURL: URL
+        let accessToken: String?
+        let serverID: UUID?
+    }
+
+    /// J: unconditional atomic logout snapshot (used by legacy `.unspecified`
+    /// callers). Captures baseURL / accessToken / serverID in ONE actor hop.
+    func logoutOperationSnapshot() -> LogoutSnapshot {
+        LogoutSnapshot(
+            client: APIClient(
+                baseURL: baseURL, session: session, serverGeneration: nil,
+                authenticated: reconstructionIdentity()
+            ),
+            baseURL: baseURL,
+            accessToken: accessToken,
+            serverID: currentServerID
+        )
+    }
+
+    /// J: operation-fenced atomic logout snapshot. Returns nil when the epoch has
+    /// advanced past `token` (a stale logout skips the network AND local cleanup
+    /// entirely); otherwise returns the immutable snapshot in ONE hop so a switch
+    /// landing between epoch check and capture cannot separate baseURL from
+    /// serverID.
+    func logoutOperationSnapshotIfCurrent(epoch: AuthOperationEpoch, token: Int) -> LogoutSnapshot? {
+        epoch.withCurrent(token) {
+            LogoutSnapshot(
+                client: APIClient(
+                    baseURL: baseURL, session: session, serverGeneration: nil,
+                    authenticated: reconstructionIdentity()
+                ),
+                baseURL: baseURL,
+                accessToken: accessToken,
+                serverID: currentServerID
+            )
+        }
     }
 
     /// Restores a previously-saved server URL from UserDefaults.
@@ -528,23 +820,34 @@ actor APIClient {
     // MARK: - HTTP Methods
 
     func get<T: Decodable & Sendable>(_ path: String) async throws -> T {
-        let request = try buildRequest(path: path, method: "GET")
-        return try await execute(request)
+        // A1: capture the immutable session snapshot (bearer + generation +
+        // authSessionToken) atomically at PUBLIC API ENTRY, before any await, and
+        // thread it through request-build/checker/perform so no downstream step
+        // reads mutable `self` after a suspension.
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "GET")
+        return try await execute(request, session: requestSession)
     }
 
     func post<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await execute(request)
+        return try await execute(request, session: requestSession)
     }
 
     func getData(_ path: String) async throws -> Data {
-        try await checkTokenExpiry()
-        let request = try buildRequest(path: path, method: "GET")
+        let requestSession = captureRequestSession() // A1: capture at entry, before any await
+        try await checkTokenExpiry(session: requestSession)
+        // A1: build from the captured snapshot's bearer, NEVER `self.accessToken`
+        // which a concurrent applySessionIfCurrent could have advanced during the
+        // checker's await — that would let this request go out with T2's bearer
+        // while it is still labeled with T1's generation/authSessionToken.
+        let request = try buildRequest(session: requestSession, path: path, method: "GET")
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
-        try validateResponse(response, data: data)
+        try validateResponseGeneration(session: requestSession)
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
         return data
     }
 
@@ -572,86 +875,144 @@ actor APIClient {
     }
 
     func post<T: Decodable & Sendable>(_ path: String) async throws -> T {
-        let request = try buildRequest(path: path, method: "POST")
-        return try await execute(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "POST")
+        return try await execute(request, session: requestSession)
     }
 
     func postVoid(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "POST")
-        try await executeVoid(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "POST")
+        try await executeVoid(request, session: requestSession)
     }
 
     func postVoid(_ path: String, headers: [String: String]) async throws {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         for (name, value) in headers {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        try await executeVoid(request)
+        try await executeVoid(request, session: requestSession)
     }
 
     func postVoid<B: Encodable & Sendable>(_ path: String, body: B) async throws {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        try await executeVoid(request)
+        try await executeVoid(request, session: requestSession)
     }
 
     func putVoid(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "PUT")
-        try await executeVoid(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "PUT")
+        try await executeVoid(request, session: requestSession)
     }
 
     func putVoid<B: Encodable & Sendable>(_ path: String, body: B) async throws {
-        var request = try buildRequest(path: path, method: "PUT")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "PUT")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        try await executeVoid(request)
+        try await executeVoid(request, session: requestSession)
     }
 
     func put<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
-        var request = try buildRequest(path: path, method: "PUT")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "PUT")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await execute(request)
+        return try await execute(request, session: requestSession)
     }
 
     func patch<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
-        var request = try buildRequest(path: path, method: "PATCH")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "PATCH")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await execute(request)
+        return try await execute(request, session: requestSession)
     }
 
     func delete(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "DELETE")
-        try await executeVoid(request)
+        let requestSession = captureRequestSession()
+        let request = try buildRequest(session: requestSession, path: path, method: "DELETE")
+        try await executeVoid(request, session: requestSession)
     }
 
     // MARK: - Internal
 
-    private func buildRequest(path: String, method: String) throws -> URLRequest {
-        try validateActiveServerGeneration()
-        // Pre-flight: reject if token is known to be expired
-        // (check is sync-safe — the actual async check happens in execute/executeVoid wrappers)
-        guard let url = URL(string: path, relativeTo: baseURL) else {
+    private func buildRequest(session requestSession: RequestSession, path: String, method: String) throws -> URLRequest {
+        // A1: validate against the captured generation, not `self`, so a concurrent
+        // session mutation cannot change our decision after we already committed to
+        // building under this snapshot's identity.
+        try validateRequestGeneration(session: requestSession)
+        // A1 (issue #816 reject, Hicks): resolve the URL against the SNAPSHOT's
+        // baseURL, NEVER `self.baseURL` — a concurrent applySessionIfCurrent /
+        // updateBaseURL during a preceding await (e.g. `getData`'s expiry checker
+        // await) could have repointed the shared client to server B, and building
+        // this request against `self.baseURL` would send a T1-labeled request
+        // under T1's bearer to server B's host.
+        guard let url = URL(string: path, relativeTo: requestSession.baseURL) else {
             throw NetworkError.invalidURL(path)
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        if let token = accessToken {
+        // A1: use the captured snapshot's bearer, NEVER `self.accessToken` after any
+        // suspension — a concurrent applySessionIfCurrent could have advanced the
+        // shared client to T2 by now; the snapshot still carries T1's bearer so this
+        // request cannot be built with T2's bearer while it is still labeled with
+        // T1's identity (or vice versa).
+        if let token = requestSession.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
         return request
     }
 
-    private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
-        try await checkTokenExpiry()
+    /// Immutable snapshot of the authenticated request session, captured at API-call
+    /// ENTRY — before request construction, the token-expiry checker, or ANY await (A1).
+    /// Every downstream step — request building, expiry preflight, and the 401 post —
+    /// uses THIS snapshot's identity (URL host / bearer / generation / authSessionToken)
+    /// so a concurrent same-client re-apply (login or server switch) executed during an
+    /// await can never make this request build with T2's URL host OR T2's bearer while
+    /// it is still labeled with T1's identity, or vice versa. The snapshot is never
+    /// re-read from `self` after a suspension.
+    ///
+    /// A1 (issue #816 reject, Hicks): `baseURL` is included in the SAME pre-await
+    /// capture as the bearer/generation/authSessionToken so a request that suspends on
+    /// the token-expiry checker cannot resume and read a newer `self.baseURL` (which
+    /// `applySessionIfCurrent`/`updateBaseURL` could have advanced during the await),
+    /// causing the outbound request to hit server B under T1's bearer / T1's identity.
+    private struct RequestSession {
+        let baseURL: URL
+        let accessToken: String?
+        let generationAtCreation: Int?
+        let authSessionToken: Int?
+    }
+
+    /// Capture the immutable request-session identity synchronously (no await). Must be
+    /// the FIRST thing every public request method does, before building the request or
+    /// awaiting the checker. Captures `baseURL` in the same atomic read as the bearer
+    /// so host and bearer cannot diverge across any downstream suspension (A1).
+    private func captureRequestSession() -> RequestSession {
+        RequestSession(
+            baseURL: baseURL,
+            accessToken: accessToken,
+            generationAtCreation: generationAtCreation,
+            authSessionToken: authSessionToken
+        )
+    }
+
+    private func execute<T: Decodable>(_ request: URLRequest, session requestSession: RequestSession) async throws -> T {
+        // A1: the caller captured `requestSession` at PUBLIC API ENTRY before ANY
+        // await; downstream steps thread it through so no path re-reads mutable
+        // `self` after a suspension.
+        try await checkTokenExpiry(session: requestSession)
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
-        try validateResponse(response, data: data)
+        try validateResponseGeneration(session: requestSession)
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
         
         // Handle empty response body for Optional types (e.g., 204 No Content, 200 with empty body)
         if data.isEmpty {
@@ -686,19 +1047,35 @@ actor APIClient {
         }
     }
 
-    private func executeVoid(_ request: URLRequest) async throws {
-        try await checkTokenExpiry()
+    private func executeVoid(_ request: URLRequest, session requestSession: RequestSession) async throws {
+        try await checkTokenExpiry(session: requestSession)
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
-        try validateResponse(response, data: data)
+        try validateResponseGeneration(session: requestSession)
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
     }
 
-    private func checkTokenExpiry() async throws {
-        try validateActiveServerGeneration()
+    private func checkTokenExpiry(session: RequestSession) async throws {
+        try validateRequestGeneration(session: session)
         if let checker = tokenExpiryChecker, await checker() {
-            NotificationCenter.default.post(name: .sessionExpired, object: nil)
+            // A1: post the captured request-session token, NEVER `self.authSessionToken`
+            // read after the checker's await (which a concurrent re-login could change).
+            postSessionExpired(authSessionToken: session.authSessionToken)
             throw NetworkError.unauthorized
         }
+    }
+
+    /// A1: validate the request-session generation against the shared server generation
+    /// using the SNAPSHOT's `generationAtCreation`. Used at request build & response
+    /// validation; never re-read from `self.generationAtCreation` after an await.
+    private func validateRequestGeneration(session: RequestSession) throws {
+        guard let serverGeneration, let generationAtCreation = session.generationAtCreation else { return }
+        if !serverGeneration.isCurrent(generationAtCreation) {
+            throw NetworkError.staleServerResponse
+        }
+    }
+
+    private func validateResponseGeneration(session: RequestSession) throws {
+        try validateRequestGeneration(session: session)
     }
 
     private func validateActiveServerGeneration() throws {
@@ -736,7 +1113,7 @@ actor APIClient {
         }
     }
 
-    private func validateResponse(_ response: URLResponse, data: Data) throws {
+    private func validateResponse(_ response: URLResponse, data: Data, authSessionToken: Int?) throws {
         guard let http = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
@@ -744,7 +1121,7 @@ actor APIClient {
         case 200...299:
             return
         case 401:
-            NotificationCenter.default.post(name: .sessionExpired, object: nil)
+            postSessionExpired(authSessionToken: authSessionToken)
             throw NetworkError.unauthorized
         case 403:
             throw NetworkError.forbidden

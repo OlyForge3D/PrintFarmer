@@ -6,7 +6,7 @@ import Observation
 @MainActor
 @Observable
 final class ServiceContainer: @unchecked Sendable {
-    typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?) -> APIClient
+    typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?, Int?, UUID?) -> APIClient
     typealias SignalRServiceFactory = @MainActor (URL, APIClient) -> any SignalRServiceProtocol
 
     var apiClient: APIClient?
@@ -46,10 +46,59 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
-    @ObservationIgnored private let observesRegistry: Bool
+    @ObservationIgnored private var observesRegistry: Bool
     @ObservationIgnored private var activeServerID: UUID?
     @ObservationIgnored private var activeServerSwitchTask: Task<Void, Never>?
-    @ObservationIgnored private var activeServerSwitchRequested = false
+    /// Shared monotonic transition epoch (H1). Advanced SYNCHRONOUSLY at every
+    /// target-intent change (registry callback, demo/real, switch requests), not
+    /// when the worker later observes it, so a suspended switch is invalidated the
+    /// instant a newer intent arrives.
+    @ObservationIgnored private let transitionEpoch = ActiveServerGeneration()
+    /// The immutable desired composition target (H1). Set SYNCHRONOUSLY at every
+    /// intent change together with a transition-epoch advance. The reconciliation
+    /// worker reconciles ONLY this captured target and NEVER re-reads the registry to
+    /// infer intent after a suspension — so a suspended real switch can never resume
+    /// and undo a newer demo/logout intent.
+    @ObservationIgnored private var desiredTarget: DesiredTarget = .none
+
+    /// An immutable snapshot of the intended composition. `.server` carries the
+    /// captured server so the worker never re-derives it from the mutable registry.
+    enum DesiredTarget {
+        case none        // logged out / no active server
+        case demo        // demo composition (applied synchronously; worker never rebuilds real)
+        case server(RegisteredServer)
+    }
+
+    /// Record a new desired target and advance the transition epoch synchronously,
+    /// WITHOUT scheduling the worker (used by paths that apply the composition
+    /// synchronously themselves, e.g. demo/real toggles).
+    private func recordTarget(_ target: DesiredTarget) {
+        transitionEpoch.advance()
+        desiredTarget = target
+    }
+
+    /// Record a new desired target and schedule the reconciliation worker to apply it.
+    private func requestTarget(_ target: DesiredTarget) {
+        recordTarget(target)
+        scheduleActiveServerSwitch()
+    }
+
+    // MARK: Farm snapshot lifecycle authority (issue #816)
+    /// Shared synchronous authority for origin-pinned snapshot sessions. A
+    /// container-side revoke/tombstone has program-order happens-before with the
+    /// store's durable promotion, so no stale/cross-bound write can slip through.
+    @ObservationIgnored let farmSnapshotAuthority: FarmSnapshotAuthority
+    @ObservationIgnored let farmSnapshotStore: any FarmSnapshotStoring
+    /// Non-secret per-server owner identity. Activation resolves the settled
+    /// server's OWN owner from here — never a carried cross-server user id.
+    @ObservationIgnored let farmSnapshotOwnerStore: FarmSnapshotOwnerStore
+    /// H (issue #816 reject, Hicks): the CANONICAL file-backed durable authority
+    /// record every production/demo composition wires into the shared
+    /// `FarmSnapshotDomainCoordinator`. Held here so tests and inspection paths
+    /// can observe the exact same record the coordinator uses for durability.
+    @ObservationIgnored let farmSnapshotDurableRecord: FarmSnapshotDurableAuthorityRecord?
+    /// Shared monotonic auth-operation epoch fencing late login/restore vs logout (H2).
+    @ObservationIgnored let authOperationEpoch = AuthOperationEpoch()
 
     init(
         baseURL: URL? = nil,
@@ -57,8 +106,33 @@ final class ServiceContainer: @unchecked Sendable {
         credentialsStore: ServerCredentialsStore = ServerCredentialsStore(),
         userDefaultsBox: AuthServiceUserDefaultsBox = AuthServiceUserDefaultsBox(.standard),
         observeRegistry: Bool = true,
-        apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken)
+        farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
+        farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
+        farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
+        /// H (issue #816 reject, Hicks): injectable canonical durable
+        /// authority record. Tests pass a temp-rooted instance so the
+        /// production-container reopen test can prove distinct record
+        /// objects observe the same file WITHOUT polluting the real
+        /// Application Support directory. When nil AND no explicit
+        /// `farmSnapshotAuthority` is provided, production composition
+        /// synthesises a record rooted at `farmSnapshotRootURL` (or
+        /// `FarmSnapshotStore.defaultRootURL()` when that is nil too).
+        farmSnapshotDurableAuthorityRecord: FarmSnapshotDurableAuthorityRecord? = nil,
+        /// H4/E (issue #816 reject, Bishop+Hicks): inject ONLY the snapshot
+        /// root URL and let the shipping ServiceContainer composition build
+        /// its canonical `FarmSnapshotDurableAuthorityRecord` AND
+        /// `FarmSnapshotStore` from that root. The reject-under-remediation
+        /// asked that tests prove production composition — not tests-owned
+        /// manually-injected record objects — actually converges on the
+        /// same durable file across reopen. Passing a temp root here
+        /// (instead of a temp-rooted pre-built record) exercises exactly
+        /// the shipping composition path.
+        farmSnapshotRootURL: URL? = nil,
+        apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
+            let identity = accessToken.flatMap { token in
+                serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
+            }
+            return APIClient(baseURL: baseURL, serverGeneration: generation, authenticated: identity)
         },
         signalRServiceFactory: @escaping SignalRServiceFactory = { baseURL, client in
             SignalRService(
@@ -77,13 +151,61 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
 
+        // H4/E (issue #816 reject, Bishop+Hicks): the effective snapshot root
+        // is the injected `farmSnapshotRootURL` (test seam) OR the shipping
+        // default. This is the single source of truth for both the durable
+        // authority record and the store when production composition is
+        // used, so both objects converge on the same on-disk root.
+        let effectiveRootURL = farmSnapshotRootURL ?? FarmSnapshotStore.defaultRootURL()
+
+        let authority: FarmSnapshotAuthority
+        let durableRecord: FarmSnapshotDurableAuthorityRecord?
+        if let farmSnapshotAuthority {
+            // Test/injected authority: honor caller-provided wiring exactly and do
+            // not attach a canonical durable record (the injection owns durability).
+            authority = farmSnapshotAuthority
+            durableRecord = farmSnapshotDurableAuthorityRecord
+        } else {
+            // H (issue #816 reject, Hicks): production composition wires ONE
+            // canonical file-backed durable authority record. If the caller
+            // supplied a record (e.g. a tests's temp-rooted instance) use it;
+            // otherwise construct one at the effective root, so the shared
+            // coordinator sees durable reserved/adopted high-water AND
+            // durable tombstones on every reopen — a distinct record object
+            // constructed from the same root on the next launch observes
+            // the exact same file.
+            let record = farmSnapshotDurableAuthorityRecord
+                ?? FarmSnapshotDurableAuthorityRecord(rootURL: effectiveRootURL)
+            durableRecord = record
+            authority = FarmSnapshotAuthority(durableAuthorityRecord: record)
+        }
+        let ownerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore(userDefaults: userDefaultsBox.userDefaults)
+        self.farmSnapshotAuthority = authority
+        self.farmSnapshotDurableRecord = durableRecord
+        self.farmSnapshotOwnerStore = ownerStore
+        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(
+            authority: authority,
+            rootURL: effectiveRootURL,
+            ownerStore: ownerStore
+        )
+
         let activeServer = serverRegistry.activeServer
         let resolvedURL = activeServer?.baseURL
             ?? baseURL
             ?? APIClient.savedBaseURL()
             ?? AppConfig.baseURL
         let accessToken = Self.validAccessToken(for: activeServer, credentialsStore: credentialsStore)
-        let client = apiClientFactory(resolvedURL, activeGeneration, accessToken)
+        // A2: capture the auth-operation epoch SYNCHRONOUSLY (before any await or Task
+        // spawn) and bind identity + bearer in the SAME atomic construction. A later
+        // fire-and-forget Task cannot read a newer epoch and clobber this client's
+        // identity with a superseded operation's token.
+        let reconstructedAuthToken = accessToken == nil ? nil : authOperationEpoch.current
+        // J4 (issue #816 reject, Hicks): reconstructing an authenticated
+        // APIClient requires the stable serverID atomically at construction.
+        // The active server IS the identity this reconstructed session was
+        // established for.
+        let reconstructedServerID = accessToken == nil ? nil : activeServer?.id
+        let client = apiClientFactory(resolvedURL, activeGeneration, accessToken, reconstructedAuthToken, reconstructedServerID)
 
         self.apiClient = client
         self.authService = AuthService(
@@ -91,7 +213,9 @@ final class ServiceContainer: @unchecked Sendable {
             credentialsStore: credentialsStore,
             userDefaultsBox: userDefaultsBox,
             migrateLegacyServerURL: false,
-            serverRegistry: serverRegistry
+            serverRegistry: serverRegistry,
+            snapshotOwnerStore: ownerStore,
+            authEpoch: authOperationEpoch
         )
         self.printerService = PrinterService(apiClient: client)
         self.jobService = JobService(apiClient: client)
@@ -122,16 +246,48 @@ final class ServiceContainer: @unchecked Sendable {
 
         if let activeServer {
             userDefaultsBox.userDefaults.set(activeServer.normalizedURLString, forKey: APIClient.serverURLKey)
-            Task { await self.configureTokenExpiryChecker(client: client, serverID: activeServer.id) }
+            Task {
+                // A2: no fire-and-forget establishReconstructedAuthSession — bearer
+                // AND identity were bound atomically at APIClient construction (above)
+                // from a synchronously captured epoch, so a later fire-and-forget Task
+                // cannot read a newer epoch and clobber a fresher session's identity.
+                await self.configureTokenExpiryChecker(client: client, serverID: activeServer.id)
+            }
         }
 
         if observeRegistry {
             observeActiveServer()
         }
+
+        wireSnapshotPurgeHandler()
+        // H4: sweep any durable-tombstone residue a prior crash may have left,
+        // independently of (and before) any activation.
+        let startupStore = self.farmSnapshotStore
+        Task { await startupStore.prepareStartup() }
+    }
+
+    /// Route registry deletion through the store's awaited purge (Gate E). Wired
+    /// for every production composition that exposes a real registry, so deletion
+    /// can never drop a server without first clearing its cached namespace.
+    private func wireSnapshotPurgeHandler() {
+        guard let serverRegistry else { return }
+        let store = farmSnapshotStore
+        serverRegistry.snapshotPurgeHandler = { serverID in
+            await store.purge(serverID: serverID)
+        }
     }
 
     /// Creates a ServiceContainer wired with demo (mock) services.
-    static func demo() -> ServiceContainer {
+    ///
+    /// A production `serverRegistry` may be supplied so that persisted-demo mode
+    /// still routes server deletion through the awaited snapshot purge and can
+    /// reattach the registry observer on demo exit (issue #816, Gate D/B).
+    static func demo(
+        serverRegistry: ServerRegistry? = nil,
+        farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
+        farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
+        farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil
+    ) -> ServiceContainer {
         return ServiceContainer(
             authService: DemoAuthService(),
             printerService: DemoPrinterService(),
@@ -152,12 +308,33 @@ final class ServiceContainer: @unchecked Sendable {
             predictiveService: DemoPredictiveService(),
             dispatchService: DemoDispatchService(),
             failureDetectionService: DemoFailureDetectionService(),
-            capabilitiesService: StubSystemCapabilitiesService()
+            capabilitiesService: StubSystemCapabilitiesService(),
+            serverRegistry: serverRegistry,
+            farmSnapshotAuthority: farmSnapshotAuthority,
+            farmSnapshotStore: farmSnapshotStore,
+            farmSnapshotOwnerStore: farmSnapshotOwnerStore
         )
     }
 
     /// Replaces all services with demo implementations at runtime.
     func switchToDemo() {
+        // H1: record the demo desired target + advance the transition epoch
+        // synchronously, so any suspended real switch is invalidated and the worker
+        // reconciles `.demo` (a no-op that never rebuilds real) instead of re-reading
+        // the registry and undoing demo.
+        recordTarget(.demo)
+        // Bishop: entering demo must also supersede any IN-FLIGHT login/restore auth
+        // operation. Advancing the auth epoch fails-closes a late-returning real login
+        // at every token-gated destination (VM state, credentials, owner, APIClient
+        // session, and the snapshot publication CAS), so it can have zero real side
+        // effects while demo is active — not merely a disabled button.
+        authOperationEpoch.advance()
+        // Revoke synchronously before advancing the generation so no stale
+        // snapshot commit can apply across the demo transition.
+        farmSnapshotAuthority.revoke()
+        // C: capture the displaced real signalR and disconnect that EXACT instance so a
+        // connected real receive loop cannot linger as an orphan under demo.
+        let displacedSignalR = self.signalRService
         self.apiClient = nil
         self.authService = DemoAuthService()
         self.printerService = DemoPrinterService()
@@ -181,6 +358,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.capabilitiesService = StubSystemCapabilitiesService()
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
+        Task { await displacedSignalR.disconnect() }
         #if canImport(UIKit)
         self.qrScannerService = nil
         self.barcodeScannerService = nil
@@ -191,40 +369,228 @@ final class ServiceContainer: @unchecked Sendable {
     /// Replaces all services with real implementations backed by the active or given base URL.
     func switchToReal(baseURL: URL? = nil) {
         let server = serverRegistry?.activeServer
+        // H1: record the real/none desired target + advance the epoch synchronously.
+        recordTarget(server.map { .server($0) } ?? .none)
+        // Revoke synchronously before the composition changes.
+        farmSnapshotAuthority.revoke()
         let resolvedURL = server?.baseURL
             ?? baseURL
             ?? APIClient.savedBaseURL()
             ?? AppConfig.baseURL
         let accessToken = Self.validAccessToken(for: server, credentialsStore: credentialsStore)
         let client = rebuildRealServices(baseURL: resolvedURL, server: server, accessToken: accessToken)
+        // Persisted-demo exit: reattach the production registry observer so
+        // subsequent real login/restore activates snapshots and observes switches
+        // in the same process (issue #816, Gate B).
+        ensureObservingRegistry()
         if let server {
-            Task { await self.configureTokenExpiryChecker(client: client, serverID: server.id) }
+            Task {
+                // A2: no fire-and-forget identity establishment — bearer AND identity
+                // are set atomically inside rebuildRealServices from a synchronously
+                // captured epoch.
+                await self.configureTokenExpiryChecker(client: client, serverID: server.id)
+            }
         }
     }
 
     func switchToServer(_ server: RegisteredServer) async {
         guard activeServerID != server.id else { return }
-        await switchToActiveServer(server)
+        // H1: request the server target and let the single reconciliation worker apply
+        // it; await the worker so callers observe the settled switch.
+        requestTarget(.server(server))
+        await activeServerSwitchTask?.value
+    }
+
+    // MARK: - Farm snapshot lifecycle authority (issue #816)
+
+    /// Activate the snapshot session for the settled active server. Awaits any
+    /// pending registry-driven switch so binding happens against the truly-settled
+    /// server, then resolves that server's OWN verified owner. A user verified on
+    /// one server can never activate under another — `(serverB, userA)` is
+    /// structurally impossible because the owner is read by the settled server id.
+    @discardableResult
+    func activateFarmSnapshotForActiveServer(authToken: Int? = nil) async -> FarmSnapshotActivationResult {
+        await activeServerSwitchTask?.value
+        return await bindSnapshotToActiveServer(authToken: authToken)
+    }
+
+    /// D: retry a previously `.preparationFailed` activation WITHOUT requiring a new
+    /// login. Re-runs the bind for the settled active server under the given auth token;
+    /// if startup preparation now succeeds the snapshot binds. Callers hold the auth
+    /// token from the original login/restore so identity is preserved across the retry.
+    ///
+    /// D-strengthening: retry is PINNED to the failed server/generation. If the caller's
+    /// pending record no longer matches the current active server or the current
+    /// generation, the retry refuses to bind and returns `.notApplicable`. This
+    /// implements the reject: "Retry targets only failed server and cannot bind current
+    /// different server."
+    @discardableResult
+    func retryFarmSnapshotActivation(
+        authToken: Int? = nil,
+        expectedServerID: UUID? = nil,
+        expectedGeneration: Int? = nil
+    ) async -> FarmSnapshotActivationResult {
+        await activeServerSwitchTask?.value
+        if let expectedServerID,
+           serverRegistry?.activeServerID != expectedServerID {
+            return .notApplicable
+        }
+        if let expectedGeneration,
+           !activeGeneration.isCurrent(expectedGeneration) {
+            return .notApplicable
+        }
+        return await bindSnapshotToActiveServer(authToken: authToken)
+    }
+
+    /// Await any in-flight active-server reconciliation so callers observe the settled
+    /// composition. Public API (a caller may legitimately wait for a switch to settle).
+    func awaitActiveServerSettled() async {
+        await activeServerSwitchTask?.value
+    }
+
+    /// D: expose the current active-server id (read-only) so the AuthViewModel can pin
+    /// pending-activation state to the failed server and invalidate the pending record
+    /// when the user switches servers.
+    var currentActiveServerID: UUID? { serverRegistry?.activeServerID }
+
+    /// Whether `generation` is the current active-server generation. Used to discard a
+    /// stale session-expiry event posted by an APIClient we already switched away from
+    /// (issue #816 H2).
+    func isActiveGeneration(_ generation: Int) -> Bool {
+        activeGeneration.isCurrent(generation)
+    }
+
+    /// Capture the current session, then conditionally deactivate ONLY that captured
+    /// session in both the synchronous authority and the async store. A newer
+    /// activation that lands during the store await survives — this never globally
+    /// revokes (H3).
+    func revokeFarmSnapshot() async {
+        guard let session = farmSnapshotAuthority.currentSession() else { return }
+        farmSnapshotAuthority.deactivate(session)
+        _ = await farmSnapshotStore.deactivate(session: session)
+    }
+
+    /// Bind the snapshot session to the current active server using only that
+    /// server's persisted owner identity. Uses conditional deactivation only — it
+    /// never globally revokes, so a concurrent newer switch's binding is never
+    /// cleared (H1).
+    ///
+    /// When called from an authenticated login/restore, `authToken` carries that
+    /// operation's auth epoch. A logout/session-expiry/newer login advances the auth
+    /// epoch and revokes authority; this binding then fails its final exact-token CAS
+    /// at the publication point — even if the logout lands DURING the activation await
+    /// (H2, Bishop). Switch-driven binds pass `nil` and rely on the transition epoch.
+    @discardableResult
+    private func bindSnapshotToActiveServer(authToken: Int? = nil) async -> FarmSnapshotActivationResult {
+        func authStillCurrent() -> Bool { authToken.map { authOperationEpoch.isCurrent($0) } ?? true }
+        // Bishop: never bind a real snapshot session while demo is the desired target —
+        // a late real login/activation must not resurrect a real binding under demo.
+        if case .demo = desiredTarget {
+            if let session = farmSnapshotAuthority.currentSession() {
+                farmSnapshotAuthority.deactivate(session)
+            }
+            return .notApplicable
+        }
+        guard let serverRegistry, let active = serverRegistry.activeServer else {
+            // No active server: conditionally clear the current session if any.
+            if let session = farmSnapshotAuthority.currentSession() {
+                farmSnapshotAuthority.deactivate(session)
+            }
+            return .notApplicable
+        }
+        guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: active.id) else {
+            // Token-only / unverified server: fail closed. Deactivate only a session
+            // belonging to THIS active server; never a newer server's binding.
+            if let session = farmSnapshotAuthority.currentSession(), session.serverID == active.id {
+                farmSnapshotAuthority.deactivate(session)
+            }
+            return .notApplicable
+        }
+        // Fail closed early if this login/restore was already superseded.
+        guard authStillCurrent() else { return .superseded }
+        let namespace = FarmSnapshotNamespace(serverID: active.id, userID: ownerID)
+        // P3: RESERVE an unpublished candidate (not yet current, so no commit can be
+        // authorized against it), await store readiness, THEN publish it via a single
+        // synchronous critical section that re-validates target + generation + auth
+        // token with NO await between the guard and the adopt.
+        //
+        // H: reserve/adopt are now typed-throwing (durable overflow / persistence
+        // failure) — a caught error becomes `.preparationFailed` (retryable) so the
+        // auth flow surfaces and retries without a new login.
+        let capturedGeneration = activeGeneration.current
+        let candidate: FarmSnapshotSession?
+        do {
+            candidate = try farmSnapshotAuthority.reserve(namespace: namespace, generation: capturedGeneration)
+        } catch {
+            return .preparationFailed
+        }
+        guard let candidate else {
+            return .notApplicable // tombstoned (purged) server — do not resurrect
+        }
+        // D: fail closed with a RETRYABLE result if startup readiness (residue sweep)
+        // did not succeed, so the auth flow can surface it and retry without a new login.
+        guard await farmSnapshotStore.prepareStartup() else { return .preparationFailed }
+        // Re-validate at publication (no await between here and the adopt): the desired
+        // target must still be a real server (not demo), the active server unchanged,
+        // the generation current, and the auth token current.
+        guard !isDemoDesiredTarget,
+              serverRegistry.activeServerID == active.id,
+              activeGeneration.isCurrent(capturedGeneration),
+              authStillCurrent() else {
+            return .superseded
+        }
+        let adopted: Bool
+        do {
+            adopted = try farmSnapshotAuthority.adopt(candidate)
+        } catch {
+            return .preparationFailed
+        }
+        guard adopted else { return .superseded }
+        return .activated
+    }
+
+    private var isDemoDesiredTarget: Bool {
+        if case .demo = desiredTarget { return true }
+        return false
+    }
+
+    /// Attach the registry observer if a production registry is present and not
+    /// already observed. Used to reattach after a persisted-demo exit.
+    private func ensureObservingRegistry() {
+        guard serverRegistry != nil, !observesRegistry else { return }
+        observesRegistry = true
+        observeActiveServer()
     }
 
     private func observeActiveServer() {
         guard observesRegistry, let serverRegistry else { return }
+        let transitionEpoch = self.transitionEpoch
         withObservationTracking {
             _ = serverRegistry.activeServerID
             _ = serverRegistry.servers
         } onChange: { [weak self] in
+            // Reserve an ordering slot SYNCHRONOUSLY on the mutating (MainActor) thread
+            // so this notification is ordered against any concurrent explicit intent.
+            transitionEpoch.advance()
+            let stamp = transitionEpoch.current
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Re-register for the next change (reads the new registry state).
                 self.observeActiveServer()
+                // Apply this observation's intent ONLY if no NEWER intent (a later
+                // explicit demo/logout, or a newer registry change) has superseded it
+                // (H1: a late/out-of-order observer notification cannot overwrite a
+                // newer explicit intent). The registry read here TRANSLATES state into
+                // a captured target; the worker itself never re-reads the registry.
+                guard self.transitionEpoch.isCurrent(stamp) else { return }
+                self.desiredTarget = serverRegistry.activeServer.map { .server($0) } ?? .none
                 self.scheduleActiveServerSwitch()
             }
         }
     }
 
     private func scheduleActiveServerSwitch() {
-        activeServerSwitchRequested = true
         guard activeServerSwitchTask == nil else { return }
-
         activeServerSwitchTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.runActiveServerSwitchLoop()
@@ -233,47 +599,142 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     private func runActiveServerSwitchLoop() async {
-        guard let serverRegistry else { return }
-
         while true {
-            activeServerSwitchRequested = false
-            let targetID = serverRegistry.activeServerID
-            if let server = serverRegistry.activeServer {
-                await switchToServer(server)
-            } else {
-                await switchToNoActiveServer()
-            }
-
-            if serverRegistry.activeServerID == targetID && !activeServerSwitchRequested {
+            // Capture the intent epoch AND the immutable desired target for THIS pass.
+            // The worker reconciles ONLY the captured target and never re-reads the
+            // registry to infer intent after a suspension (H1).
+            let epoch = transitionEpoch.current
+            let target = desiredTarget
+            switch target {
+            case .demo:
+                // Demo is applied synchronously by `switchToDemo`; the worker never
+                // rebuilds real services while demo is the desired target (no undo).
                 break
+            case .none:
+                await switchToNoActiveServer(epoch: epoch)
+            case .server(let server):
+                await switchToActiveServer(server, epoch: epoch)
             }
+            // Re-process only if the target intent changed during the pass.
+            if transitionEpoch.isCurrent(epoch) { break }
         }
     }
 
-    private func switchToActiveServer(_ server: RegisteredServer) async {
-        let oldSignalRService = signalRService
-        await oldSignalRService.disconnect()
+    private func switchToActiveServer(_ server: RegisteredServer, epoch: Int) async {
+        // Capture immutable target + outgoing service/session BEFORE any await (H1).
+        let outgoingSignalR = signalRService
+        let outgoingSession = farmSnapshotAuthority.currentSession()
+        await outgoingSignalR.disconnect()
+        guard transitionEpoch.isCurrent(epoch) else {
+            // Superseded during disconnect. If NOBODY replaced the outgoing service we
+            // just disconnected (identity match), install a fresh one so the next pass
+            // does not re-tear-down a dead service. If a newer intent (e.g. demo)
+            // already swapped `signalRService`, leave it untouched — an older switch
+            // never rebuilds or clobbers newer state (H1).
+            if signalRService === outgoingSignalR {
+                replaceSignalRAfterSupersededSwitch()
+            }
+            return
+        }
+
+        // Conditionally deactivate ONLY the captured outgoing session (never a
+        // global revoke that could clear a newer binding).
+        if let outgoingSession {
+            farmSnapshotAuthority.deactivate(outgoingSession)
+        }
         activeServerGeneration = activeGeneration.advance()
+        let capturedGeneration = activeServerGeneration
 
         let accessToken = Self.validAccessToken(for: server, credentialsStore: credentialsStore)
+        guard transitionEpoch.isCurrent(epoch) else { return }
+        // CAS publish: the synchronous rebuild follows the epoch check with no await
+        // between them, so an older switch cannot publish stale services.
         let client = rebuildRealServices(baseURL: server.baseURL, server: server, accessToken: accessToken)
         userDefaultsBox.userDefaults.set(server.normalizedURLString, forKey: APIClient.serverURLKey)
+        // A2: rebuildRealServices already bound bearer + identity atomically at
+        // construction from a synchronously captured epoch. No fire-and-forget
+        // identity establishment — a later Task could read a newer epoch and
+        // overwrite this client's identity with a superseded token.
         await configureTokenExpiryChecker(client: client, serverID: server.id)
+        guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
 
-        guard accessToken != nil else { return }
+        // Bind the snapshot to the SAME captured server + generation the services
+        // were rebuilt for.
+        await bindSnapshotToServer(server, generation: capturedGeneration, epoch: epoch)
+
+        guard transitionEpoch.isCurrent(epoch), accessToken != nil else { return }
+        // Capture the EXACT instance we are about to connect. After connect returns, if
+        // this switch was superseded (demo/none/newer switch) or the field was swapped,
+        // disconnect THIS exact instance so its receive loop cannot linger as an orphan
+        // (Hicks H1 / C).
+        let connectingSignalR = signalRService
         do {
-            try await signalRService.connect()
+            try await connectingSignalR.connect()
         } catch {
             // RootView will also attempt connection when authenticated; keep switching non-fatal.
         }
+        if !transitionEpoch.isCurrent(epoch) || signalRService !== connectingSignalR {
+            await connectingSignalR.disconnect()
+        }
     }
 
-    private func switchToNoActiveServer() async {
+    /// Bind the snapshot to a specific captured server + generation for a switch
+    /// operation, guarded by the transition epoch (H1). Resolves that server's OWN
+    /// verified owner; token-only/unverified or tombstoned → no bind (fail closed).
+    /// A superseded/older switch conditionally deactivates only its own session and
+    /// never clears newer authority.
+    ///
+    /// H: reserve/adopt are typed-throwing; a durable overflow or persistence failure
+    /// silently fails closed here (this is a switch, not a login — there is no VM
+    /// caller to expose a retryable state to yet; the next login/restore drives the
+    /// retry through `bindSnapshotToActiveServer`).
+    private func bindSnapshotToServer(_ server: RegisteredServer, generation: Int, epoch: Int) async {
+        guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: server.id) else { return }
+        guard transitionEpoch.isCurrent(epoch) else { return }
+        let namespace = FarmSnapshotNamespace(serverID: server.id, userID: ownerID)
+        // P3: reserve an unpublished candidate, await readiness, then publish it in a
+        // single synchronous critical section that re-validates the transition epoch —
+        // no await between the guard and the adopt.
+        let candidate: FarmSnapshotSession?
+        do {
+            candidate = try farmSnapshotAuthority.reserve(namespace: namespace, generation: generation)
+        } catch {
+            return // durable overflow / persistence failure — fail closed
+        }
+        guard let candidate else { return }
+        guard await farmSnapshotStore.prepareStartup() else { return } // D: fail closed on prep failure
+        guard transitionEpoch.isCurrent(epoch) else { return }
+        do {
+            guard try farmSnapshotAuthority.adopt(candidate) else { return }
+        } catch {
+            return // durable persistence failure at adopt — do not publish
+        }
+    }
+
+    private func switchToNoActiveServer(epoch: Int) async {
         guard activeServerID != nil else { return }
-        let oldSignalRService = signalRService
-        await oldSignalRService.disconnect()
+        let outgoingSignalR = signalRService
+        let outgoingSession = farmSnapshotAuthority.currentSession()
+        await outgoingSignalR.disconnect()
+        guard transitionEpoch.isCurrent(epoch) else {
+            if signalRService === outgoingSignalR {
+                replaceSignalRAfterSupersededSwitch()
+            }
+            return
+        }
+        if let outgoingSession {
+            farmSnapshotAuthority.deactivate(outgoingSession)
+        }
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
+    }
+
+    /// After a superseded switch (which must not rebuild/publish), replace the
+    /// already-disconnected signalR with a fresh one so the reconciliation loop's
+    /// next pass tears down a clean service rather than the outgoing one again.
+    private func replaceSignalRAfterSupersededSwitch() {
+        guard let client = apiClient else { return }
+        signalRService = signalRServiceFactory(APIClient.savedBaseURL() ?? AppConfig.baseURL, client)
     }
 
     @discardableResult
@@ -282,14 +743,23 @@ final class ServiceContainer: @unchecked Sendable {
         server: RegisteredServer?,
         accessToken: String?
     ) -> APIClient {
-        let client = apiClientFactory(baseURL, activeGeneration, accessToken)
+        // A2: capture the auth-operation epoch SYNCHRONOUSLY (no await, no Task
+        // between capture and factory call) and bind identity + bearer atomically at
+        // APIClient construction. A superseded operation cannot later overwrite this
+        // client's identity because the identity is fixed at init.
+        let reconstructedAuthToken = accessToken == nil ? nil : authOperationEpoch.current
+        // J4: same atomic serverID binding on rebuild after a server switch.
+        let reconstructedServerID = accessToken == nil ? nil : server?.id
+        let client = apiClientFactory(baseURL, activeGeneration, accessToken, reconstructedAuthToken, reconstructedServerID)
         self.apiClient = client
         self.authService = AuthService(
             apiClient: client,
             credentialsStore: credentialsStore,
             userDefaultsBox: userDefaultsBox,
             migrateLegacyServerURL: false,
-            serverRegistry: serverRegistry
+            serverRegistry: serverRegistry,
+            snapshotOwnerStore: farmSnapshotOwnerStore,
+            authEpoch: authOperationEpoch
         )
         self.printerService = PrinterService(apiClient: client)
         self.jobService = JobService(apiClient: client)
@@ -327,6 +797,28 @@ final class ServiceContainer: @unchecked Sendable {
         }
     }
 
+    /// A2: identity establishment is now atomic AT APIClient CONSTRUCTION. This method
+    /// is retained only for the identity-carry test (AuthSnapshotIdentityTests /
+    /// APIClientAuthSessionTests) that exercises the compare-and-set path directly.
+    /// Production composition never calls this method — it captures the epoch
+    /// synchronously in the same synchronous scope as the factory call and passes
+    /// the token via `APIClient.init(authSessionToken:)`. A fire-and-forget Task
+    /// that reads the epoch LATE would (and did, before A2) allow a superseded
+    /// operation's identity to clobber a fresher session's identity.
+    private func establishReconstructedAuthSession(client: APIClient, accessToken: String?) async {
+        guard let accessToken else { return }
+        let token = authOperationEpoch.current
+        // E: the reconstructed client already carries its stable serverID from
+        // the factory; re-apply the session under the current epoch using that
+        // same identity, so the authenticated apply is structurally paired.
+        guard let serverID = await client.currentServerIdentity() else { return }
+        _ = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil,
+            identity: AuthenticatedIdentity(accessToken: accessToken, serverID: serverID),
+            epoch: authOperationEpoch, token: token
+        )
+    }
+
     private static func validAccessToken(
         for server: RegisteredServer?,
         credentialsStore: ServerCredentialsStore
@@ -359,13 +851,20 @@ final class ServiceContainer: @unchecked Sendable {
         predictiveService: any PredictiveServiceProtocol,
         dispatchService: any DispatchServiceProtocol,
         failureDetectionService: any FailureDetectionServiceProtocol,
-        capabilitiesService: any SystemCapabilitiesServiceProtocol
+        capabilitiesService: any SystemCapabilitiesServiceProtocol,
+        serverRegistry: ServerRegistry? = nil,
+        farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
+        farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
+        farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil
     ) {
-        self.serverRegistry = nil
+        self.serverRegistry = serverRegistry
         self.credentialsStore = ServerCredentialsStore()
         self.userDefaultsBox = AuthServiceUserDefaultsBox(.standard)
-        self.apiClientFactory = { baseURL, generation, accessToken in
-            APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken)
+        self.apiClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
+            let identity = accessToken.flatMap { token in
+                serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
+            }
+            return APIClient(baseURL: baseURL, serverGeneration: generation, authenticated: identity)
         }
         self.signalRServiceFactory = { baseURL, client in
             SignalRService(
@@ -376,7 +875,30 @@ final class ServiceContainer: @unchecked Sendable {
             }
         }
         self.activeGeneration = ActiveServerGeneration()
+        // Demo composition does not rebuild real services on registry changes, so
+        // it does not observe until a real login reattaches the observer.
         self.observesRegistry = false
+        let authority: FarmSnapshotAuthority
+        let durableRecord: FarmSnapshotDurableAuthorityRecord?
+        if let farmSnapshotAuthority {
+            authority = farmSnapshotAuthority
+            durableRecord = nil
+        } else {
+            // H (issue #816 reject, Hicks): demo composition also wires the
+            // canonical durable record so a demo→real→relaunch sequence
+            // observes the same durable reserved/adopted/tombstone state as
+            // a pure production launch.
+            let record = FarmSnapshotDurableAuthorityRecord(
+                rootURL: FarmSnapshotStore.defaultRootURL()
+            )
+            durableRecord = record
+            authority = FarmSnapshotAuthority(durableAuthorityRecord: record)
+        }
+        self.farmSnapshotAuthority = authority
+        self.farmSnapshotDurableRecord = durableRecord
+        let demoOwnerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore()
+        self.farmSnapshotOwnerStore = demoOwnerStore
+        self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority, ownerStore: demoOwnerStore)
         self.activeServerID = nil
         self.apiClient = nil
         self.authService = authService
@@ -404,5 +926,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeScannerService = nil
         self.nfcService = nil
         #endif
+
+        wireSnapshotPurgeHandler()
     }
 }

@@ -1,0 +1,606 @@
+import Foundation
+import XCTest
+@testable import PrintFarmer
+
+/// V1 (issue #816 reject, Vasquez): a thread-safe armable holder for the durable
+/// record's constructor-injected after-atomic-write hook. The record's hook is an
+/// immutable closure (so the seam compiles in a Release test build and there is no
+/// shipping mutable global), while tests still need to arm the fault only for a
+/// specific mutation. This helper hands the record a STABLE closure at
+/// construction; the test arms/disarms the underlying action at will. Fully
+/// synchronized so it is safe under parallel tests.
+final class ArmableWriteHook: @unchecked Sendable {
+    private let lock = NSLock()
+    private var action: (@Sendable (URL) -> Void)?
+
+    /// The stable closure to pass to `FarmSnapshotDurableAuthorityRecord(rootURL:
+    /// afterAtomicWriteHook:)`. Invokes the currently-armed action (if any).
+    var hook: (@Sendable (URL) -> Void) {
+        { [weak self] url in
+            guard let self else { return }
+            self.lock.lock()
+            let current = self.action
+            self.lock.unlock()
+            current?(url)
+        }
+    }
+
+    func arm(_ action: @escaping @Sendable (URL) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.action = action
+    }
+
+    func disarm() {
+        lock.lock()
+        defer { lock.unlock() }
+        action = nil
+    }
+}
+
+// MARK: - Deterministic test support for the farm snapshot store (F10-C1a, #816)
+//
+// All ordering here is mutation-bound: real `Task`s rendezvous on continuation
+// barriers, never on sleeps/polling/retries/elapsed time.
+
+/// A one-shot rendezvous barrier. The code under test calls `arriveAndWait()` at
+/// a chosen suspension point; the test observes arrival with `waitUntilArrived()`,
+/// performs an interleaving mutation, then `release()`s to let execution resume.
+final class AsyncBarrier: @unchecked Sendable {
+    private let lock = NSLock()
+    private var arrived = false
+    private var released = false
+    private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+    /// I (issue #816 reject, Hicks): support multiple parked
+    /// `arriveAndWait()` continuations. The previous implementation stored
+    /// ONE `releaseWaiter` and silently overwrote it when a second task
+    /// registered — the first task stranded on its continuation until
+    /// `close()` / deinit, so a "two waiters both parked, then released"
+    /// concurrency test could never prove both parked because a second
+    /// arrival destroyed the first's release path.
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    /// G (issue #816 reject, Hicks + replacement Vasquez): observers awaiting a
+    /// causal confirmation that at least `target` release waiters are
+    /// SIMULTANEOUSLY parked. Lets a test prove two `arriveAndWait()` callers are
+    /// both parked BEFORE `release()` — with no sleeps/yields/polls/wall-clock
+    /// timeouts — so a regressed single-slot barrier (which could only ever park
+    /// one) would deadlock the test instead of passing.
+    private var countObservers: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    /// G: causally await until at least `target` release waiters are parked.
+    /// Resolves immediately if already met or the barrier is released/closed.
+    func waitUntilReleaseWaiterCount(_ target: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if released || releaseWaiters.count >= target {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                countObservers.append((target, continuation))
+                lock.unlock()
+            }
+        }
+    }
+
+    func arriveAndWait() async {
+        let waiters = markArrived()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            registerRelease(continuation)
+        }
+    }
+
+    func waitUntilArrived() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            registerArrival(continuation)
+        }
+    }
+
+    /// I: resume ALL parked release waiters (was: only one). Idempotent — a
+    /// subsequent `release()` on an already-released barrier resumes any
+    /// waiters that arrived after the release.
+    func release() {
+        let waiters = markReleased()
+        waiters.forEach { $0.resume() }
+    }
+
+    /// I (issue #816): idempotent close that resumes BOTH arrival waiters AND
+    /// EVERY release waiter, so tests can register `defer barrier.close()` /
+    /// `addTeardownBlock { barrier.close() }` and be certain no continuation
+    /// strands on a failed assertion path. Distinct from `release()` (which
+    /// only signals released and does not resume `waitUntilArrived()`
+    /// observers) and from `deinit` (which is only a secondary rescue —
+    /// cannot be relied on when a captured Task retains the barrier).
+    /// Idempotent: safe to call any number of times; a re-close is a no-op.
+    func close() {
+        lock.lock()
+        released = true
+        arrived = true
+        let releaseWaitersNow = releaseWaiters
+        releaseWaiters = []
+        let arrivals = arrivalWaiters
+        arrivalWaiters = []
+        let observers = countObservers
+        countObservers = []
+        lock.unlock()
+        releaseWaitersNow.forEach { $0.resume() }
+        arrivals.forEach { $0.resume() }
+        observers.forEach { $0.continuation.resume() }
+    }
+
+    /// Fire-and-forget arrival signal (no wait for release). Lets a background thread
+    /// notify the test it completed without blocking that thread.
+    func signal() {
+        let waiters = markArrived()
+        waiters.forEach { $0.resume() }
+    }
+
+    /// Secondary rescue (issue #816 I): if the barrier is deallocated while a
+    /// continuation is still parked (e.g. a test threw before releasing and nothing
+    /// retains the barrier), resume it so the suspended task cannot strand. This is a
+    /// backstop only — tests must still `defer { barrier.release() }` after creation,
+    /// and `release()`/`markReleased` are idempotent so double-release is a no-op.
+    deinit {
+        lock.lock()
+        let releases = releaseWaiters
+        releaseWaiters = []
+        let arrivals = arrivalWaiters
+        arrivalWaiters = []
+        let observers = countObservers
+        countObservers = []
+        lock.unlock()
+        releases.forEach { $0.resume() }
+        arrivals.forEach { $0.resume() }
+        observers.forEach { $0.continuation.resume() }
+    }
+
+    // MARK: Synchronous lock helpers (kept out of async scope)
+
+    private func markArrived() -> [CheckedContinuation<Void, Never>] {
+        lock.lock()
+        defer { lock.unlock() }
+        arrived = true
+        let waiters = arrivalWaiters
+        arrivalWaiters = []
+        return waiters
+    }
+
+    private func registerRelease(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if released {
+            lock.unlock()
+            continuation.resume()
+        } else {
+            // I: append instead of overwrite so N parked arriveAndWait callers
+            // all park on their own continuation slot; release() resumes them
+            // all together.
+            releaseWaiters.append(continuation)
+            // G: a newly-parked release waiter may satisfy pending count
+            // observers — resume any whose target is now met (causal, no poll).
+            let count = releaseWaiters.count
+            let ready = countObservers.filter { $0.target <= count }
+            countObservers.removeAll { $0.target <= count }
+            lock.unlock()
+            ready.forEach { $0.continuation.resume() }
+        }
+    }
+
+    private func registerArrival(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if arrived {
+            lock.unlock()
+            continuation.resume()
+        } else {
+            arrivalWaiters.append(continuation)
+            lock.unlock()
+        }
+    }
+
+    private func markReleased() -> [CheckedContinuation<Void, Never>] {
+        lock.lock()
+        defer { lock.unlock() }
+        released = true
+        let waiters = releaseWaiters
+        releaseWaiters = []
+        // G: releasing satisfies any pending count observers (the barrier is now
+        // released), so drain them here to avoid a stranded observer.
+        let observers = countObservers
+        countObservers = []
+        observers.forEach { $0.continuation.resume() }
+        return waiters
+    }
+}
+
+// MARK: - Async-friendly assertion wrappers
+//
+// XCTAssert*'s `@autoclosure` parameters cannot contain `await`. These plain
+// wrappers evaluate their arguments in the caller's async context first.
+
+func XAssertEqual<T: Equatable>(_ lhs: T, _ rhs: T, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertEqual(lhs, rhs, message, file: file, line: line)
+}
+
+func XAssertNotEqual<T: Equatable>(_ lhs: T, _ rhs: T, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertNotEqual(lhs, rhs, message, file: file, line: line)
+}
+
+func XAssertNil(_ value: Any?, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertNil(value, message, file: file, line: line)
+}
+
+func XAssertNotNil(_ value: Any?, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertNotNil(value, message, file: file, line: line)
+}
+
+func XAssertTrue(_ value: Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertTrue(value, message, file: file, line: line)
+}
+
+func XAssertFalse(_ value: Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertFalse(value, message, file: file, line: line)
+}
+
+/// Injectable file I/O that wraps a real on-disk backing (so real atomic
+/// `FileManager` behavior is exercised) and adds per-operation fault injection,
+/// barriers, and exact call counts.
+final class ControlledFarmSnapshotFileIO: FarmSnapshotFileIO, @unchecked Sendable {
+    struct IOFailure: Error {}
+
+    private let backing: DiskFarmSnapshotFileIO
+    private let lock = NSLock()
+
+    // Fault toggles.
+    var failWriteCandidate = false
+    var failPromote = false
+    var failMove = false
+    var failRemove = false
+    var failReadDataSync = false
+
+    // Barriers (fire on first call of each op unless nil).
+    var writeCandidateBarrier: AsyncBarrier?
+    /// Fires AFTER the candidate is fully written+closed and returns, i.e. exactly
+    /// between candidate durability and the atomic promote (issue #816 H7). This is
+    /// the correct phase to prove the externally observable live path is old-or-new,
+    /// never torn. The synchronous `promoteAtomically` primitive is left untouched so
+    /// the atomic section is never made reentrant.
+    var postWriteCandidateBarrier: AsyncBarrier?
+    var readDataBarrier: AsyncBarrier?
+    var createDirectoryBarrier: AsyncBarrier?
+    /// Fires on the first `removeItem` (e.g. the startup tombstone sweep inside
+    /// `store.activate`). Lets a test park an activation mid-await and advance the
+    /// auth epoch to prove the final snapshot-publication CAS (issue #816 H2, Bishop).
+    var removeItemBarrier: AsyncBarrier?
+    /// E (issue #816): fires at the ENTRY of `moveIfContentEquals` — i.e. exactly
+    /// at the destructive compare-and-move boundary. Tests use this to causally gate
+    /// real move entry and prove ordering vs concurrent revoke/purge without any
+    /// sleep/yield/poll. Because `moveIfContentEquals` is synchronous, the barrier
+    /// is dispatched on a background thread and blocked on a semaphore so the caller
+    /// suspends at move entry without changing the production primitive to async.
+    var moveEntryBarrier: AsyncBarrier?
+    /// E: records the ordered sequence of significant real IO events (move-entered,
+    /// move-returned, remove-entered) so tests can assert causal order without time.
+    private(set) var eventLog: [String] = []
+
+    // Exact counts.
+    private(set) var readCount = 0
+    private(set) var readSyncCount = 0
+    private(set) var writeCount = 0
+    private(set) var promoteCount = 0
+    private(set) var removeCount = 0
+    private(set) var moveCount = 0
+
+    // E (issue #816 reject, Hicks): ordered identities of removeItem targets
+    // so tests can assert EXACT sweep identity + order, not just count.
+    private(set) var removedURLs: [URL] = []
+
+    /// E (issue #816 reject, Hicks): the EXACT source, destination, expected
+    /// bytes, and return value of every `moveIfContentEquals` invocation.
+    /// A wrong-path or wrong-bytes move that returned `true` (i.e. destroyed
+    /// live bytes and quarantined the wrong file) is provable by inspecting
+    /// these arrays — the move-order test asserts they are the exact live
+    /// URL, exact quarantine URL, and exact seeded corrupt bytes.
+    struct MoveRecord: Equatable {
+        let from: URL
+        let to: URL
+        let expected: Data
+        let result: Bool
+    }
+    private(set) var moveRecords: [MoveRecord] = []
+
+    init(backing: DiskFarmSnapshotFileIO = DiskFarmSnapshotFileIO()) {
+        self.backing = backing
+    }
+
+    private func bump(_ keyPath: ReferenceWritableKeyPath<ControlledFarmSnapshotFileIO, Int>) {
+        lock.lock()
+        self[keyPath: keyPath] += 1
+        lock.unlock()
+    }
+
+    func readData(at url: URL) async throws -> Data? {
+        bump(\.readCount)
+        if let barrier = readDataBarrier {
+            readDataBarrier = nil
+            await barrier.arriveAndWait()
+        }
+        return try backing.readDataSync(at: url)
+    }
+
+    func writeCandidate(_ data: Data, to url: URL) async throws {
+        bump(\.writeCount)
+        if let barrier = writeCandidateBarrier {
+            writeCandidateBarrier = nil
+            await barrier.arriveAndWait()
+        }
+        if failWriteCandidate { throw IOFailure() }
+        try await backing.writeCandidate(data, to: url)
+        // Post-write seam: candidate bytes are now fully durable on disk but not yet
+        // promoted. A test can park here and observe live==old, candidate==new (H7).
+        if let barrier = postWriteCandidateBarrier {
+            postWriteCandidateBarrier = nil
+            await barrier.arriveAndWait()
+        }
+    }
+
+    func removeItem(at url: URL) async throws {
+        bump(\.removeCount)
+        appendEvent("remove-entered")
+        appendRemovedURL(url)
+        if let barrier = removeItemBarrier {
+            removeItemBarrier = nil
+            await barrier.arriveAndWait()
+        }
+        if failRemove { throw IOFailure() }
+        try await backing.removeItem(at: url)
+    }
+
+    func createDirectory(at url: URL) async throws {
+        if let barrier = createDirectoryBarrier {
+            createDirectoryBarrier = nil
+            await barrier.arriveAndWait()
+        }
+        try await backing.createDirectory(at: url)
+    }
+
+    func readDataSync(at url: URL) throws -> Data? {
+        bump(\.readSyncCount)
+        if failReadDataSync { throw IOFailure() }
+        return try backing.readDataSync(at: url)
+    }
+
+    func promoteAtomically(candidate: URL, to live: URL) throws {
+        bump(\.promoteCount)
+        if failPromote { throw IOFailure() }
+        try backing.promoteAtomically(candidate: candidate, to: live)
+    }
+
+    func moveIfContentEquals(from: URL, to: URL, expected: Data) throws -> Bool {
+        bump(\.moveCount)
+        appendEvent("move-entered")
+        // E (issue #816): if a test armed a moveEntryBarrier, park the synchronous
+        // caller at real move entry — the caller is a sync primitive so we cannot
+        // `await` here. A detached Task fires arrival for the test's `waitUntilArrived()`,
+        // then `await`s release; a semaphore hands control back to the sync caller.
+        if let barrier = moveEntryBarrier {
+            moveEntryBarrier = nil
+            let released = DispatchSemaphore(value: 0)
+            Task { [released, barrier] in
+                barrier.signal() // notify test's waitUntilArrived() observer
+                await barrier.arriveAndWait() // block until test calls release() / close()
+                released.signal() // unblock sync caller
+            }
+            released.wait()
+        }
+        if failMove { throw IOFailure() }
+        defer { appendEvent("move-returned") }
+        let result = try backing.moveIfContentEquals(from: from, to: to, expected: expected)
+        // E (issue #816 reject, Hicks): record the EXACT move call so tests can
+        // prove source, destination, expected bytes, and result — a
+        // wrong-path/wrong-bytes move that returned true is provable.
+        appendMoveRecord(MoveRecord(from: from, to: to, expected: expected, result: result))
+        return result
+    }
+
+    private func appendEvent(_ event: String) {
+        lock.lock()
+        eventLog.append(event)
+        lock.unlock()
+    }
+
+    private func appendRemovedURL(_ url: URL) {
+        lock.lock()
+        removedURLs.append(url)
+        lock.unlock()
+    }
+
+    private func appendMoveRecord(_ record: MoveRecord) {
+        lock.lock()
+        moveRecords.append(record)
+        lock.unlock()
+    }
+}
+
+// MARK: - Factories
+
+/// Central, test-owned UserDefaults suite hygiene (issue #816). The exact-domain
+/// removal primitive is shared by `trackedSuiteName`'s teardown and is directly
+/// callable so a focused proof can exercise the same cleanup without spawning an
+/// untracked suite.
+enum TrackedDefaults {
+    /// Removes a suite's persistent domain and returns whether the domain is empty
+    /// afterwards (nil/empty). This is the single cleanup primitive used everywhere.
+    @discardableResult
+    static func removeDomain(_ suite: String) -> Bool {
+        UserDefaults().removePersistentDomain(forName: suite)
+        let residual = UserDefaults().persistentDomain(forName: suite) ?? [:]
+        return residual.isEmpty
+    }
+}
+
+extension XCTestCase {
+    /// Returns a uniquely-named, TEST-OWNED suite name and registers a teardown block
+    /// that removes the persistent domain (on success or failure) via the shared
+    /// `TrackedDefaults.removeDomain` primitive and asserts it no longer contains any
+    /// keys. Prevents leaked persistent domains from accumulating in
+    /// `~/Library/Preferences` across runs (issue #816 test hygiene). Callers build
+    /// their own `UserDefaults(suiteName:)` from this name so fixtures never construct
+    /// an untracked random suite. Returning only the `Sendable` String also keeps the
+    /// non-Sendable `UserDefaults` within the caller's isolation domain.
+    func trackedSuiteName(_ prefix: String, file: StaticString = #filePath, line: UInt = #line) -> String {
+        let suite = "\(prefix)-\(UUID().uuidString)"
+        addTeardownBlock {
+            XCTAssertTrue(TrackedDefaults.removeDomain(suite),
+                          "leaked persistent domain \(suite)", file: file, line: line)
+        }
+        return suite
+    }
+}
+
+enum FarmSnapshotFixtures {
+    static func tempRoot() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("FarmSnapshotTests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    /// Authority backed by a caller-provided, test-owned UserDefaults suite so
+    /// durable tombstones never leak into `.standard` or across tests (H4). The
+    /// suite MUST be tracked by the test (see `XCTestCase.trackedSuiteName`).
+    ///
+    /// `domainIdentifier` (H) selects which per-domain cross-instance NSLock this
+    /// store coordinates on. Fixtures default it to a random UUID so no two tests
+    /// (or two calls within a test) accidentally coordinate through the shared
+    /// static lock; tests that need two authorities to share coordination pass a
+    /// stable identifier explicitly.
+    static func makeAuthority(
+        tombstoneDefaults: UserDefaults,
+        domainIdentifier: String = "test-domain-\(UUID().uuidString)"
+    ) -> FarmSnapshotAuthority {
+        FarmSnapshotAuthority(
+            tombstoneStore: FarmSnapshotTombstoneStore(
+                userDefaults: tombstoneDefaults,
+                domainIdentifier: domainIdentifier
+            )
+        )
+    }
+
+    /// Isolated tombstone store on a caller-provided, test-owned suite (used by
+    /// restart-durability fixtures that recreate the store on the SAME suite).
+    ///
+    /// `domainIdentifier` selects the cross-instance coordinator lock (H). Default
+    /// is a random UUID so a fixture call does not accidentally cross-serialize with
+    /// unrelated tests; recreation/cross-instance tests pass a stable identifier so
+    /// two stores share one coordinator.
+    static func makeTombstoneStore(
+        _ defaults: UserDefaults,
+        domainIdentifier: String = "test-domain-\(UUID().uuidString)"
+    ) -> FarmSnapshotTombstoneStore {
+        FarmSnapshotTombstoneStore(userDefaults: defaults, domainIdentifier: domainIdentifier)
+    }
+
+    static func makeOwnerStore(_ defaults: UserDefaults) -> FarmSnapshotOwnerStore {
+        FarmSnapshotOwnerStore(userDefaults: defaults)
+    }
+
+    static func namespace(server: UUID = UUID(), user: UUID = UUID()) -> FarmSnapshotNamespace {
+        FarmSnapshotNamespace(serverID: server, userID: user)
+    }
+
+    static func envelope(
+        namespace: FarmSnapshotNamespace,
+        millis: Int64,
+        printers: [FarmSnapshotPrinter] = []
+    ) -> FarmSnapshotEnvelope {
+        FarmSnapshotEnvelope(namespace: namespace, payload: printers, lastUpdatedAtMillis: millis)
+    }
+
+    /// Sentinel secret markers embedded in a decoded `Printer` — every one of
+    /// these must be structurally impossible to find in the encoded envelope.
+    static let secretSentinels: [String] = [
+        "SENTINEL_APIKEY",
+        "SENTINEL_ORIGINURL",
+        "SENTINEL_BACKENDURL",
+        "SENTINEL_FRONTENDURL",
+        "SENTINEL_CAMSTREAM",
+        "SENTINEL_CAMSNAP",
+        "SENTINEL_THUMBNAIL",
+        "SENTINEL_NOTES"
+    ]
+
+    /// Keys that must never appear anywhere in the encoded JSON.
+    static let forbiddenKeys: Set<String> = [
+        "apiKey", "originalServerUrl", "backendUrl", "frontendUrl",
+        "backendPort", "frontendPort", "backend",
+        "cameraStreamUrl", "cameraSnapshotUrl", "cameraAccessMode",
+        "cameraStreamFormat", "cameraSnapshotStrategy",
+        "thumbnailUrl", "x", "y", "z", "homedAxes", "notes",
+        "manufacturerId", "modelId", "motionType",
+        "token", "password", "cookie", "header", "accessToken"
+    ]
+
+    /// A `Printer` decoded from JSON that carries every non-secret card field AND
+    /// sentinel secrets, so projection can be proved to drop the secrets.
+    static func printerWithSecrets(id: UUID = UUID(), locationID: UUID = UUID()) -> Printer {
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "name": "Voron-01",
+          "notes": "SENTINEL_NOTES",
+          "manufacturerId": "\(UUID().uuidString)",
+          "manufacturerName": "Voron Design",
+          "modelId": "\(UUID().uuidString)",
+          "modelName": "Trident",
+          "motionType": "coreXY",
+          "backend": "moonraker",
+          "apiKey": "SENTINEL_APIKEY",
+          "originalServerUrl": "https://SENTINEL_ORIGINURL.example.com",
+          "backendPort": 7125,
+          "frontendPort": 80,
+          "inMaintenance": false,
+          "isEnabled": true,
+          "isOnline": true,
+          "state": "printing",
+          "progress": 42.0,
+          "jobName": "bracket.gcode",
+          "fileName": "bracket.gcode",
+          "thumbnailUrl": "https://SENTINEL_THUMBNAIL.example.com/t.png",
+          "cameraStreamUrl": "https://SENTINEL_CAMSTREAM.example.com/stream",
+          "cameraSnapshotUrl": "https://SENTINEL_CAMSNAP.example.com/snap",
+          "cameraAccessMode": "direct",
+          "x": 10.0, "y": 20.0, "z": 30.0,
+          "hotendTemp": 210.0, "bedTemp": 60.0,
+          "hotendTarget": 215.0, "bedTarget": 60.0,
+          "homedAxes": "xyz",
+          "spoolInfo": {
+            "hasActiveSpool": true,
+            "activeSpoolId": 7,
+            "spoolName": "PLA Black",
+            "material": "PLA",
+            "colorHex": "#000000",
+            "filamentName": "Prusament PLA",
+            "vendor": "Prusa",
+            "remainingWeightG": 812.5,
+            "spoolInUse": true
+          },
+          "backendUrl": "https://SENTINEL_BACKENDURL.example.com",
+          "frontendUrl": "https://SENTINEL_FRONTENDURL.example.com",
+          "location": { "id": "\(locationID.uuidString)", "name": "Rack A", "description": "Top shelf" },
+          "obicoEnabled": true
+        }
+        """
+        return try! JSONDecoder().decode(Printer.self, from: Data(json.utf8))
+    }
+
+    /// Recursively collect every object key in a decoded JSON value.
+    static func collectKeys(_ value: Any, into keys: inout Set<String>) {
+        if let dict = value as? [String: Any] {
+            for (key, nested) in dict {
+                keys.insert(key)
+                collectKeys(nested, into: &keys)
+            }
+        } else if let array = value as? [Any] {
+            for element in array {
+                collectKeys(element, into: &keys)
+            }
+        }
+    }
+}

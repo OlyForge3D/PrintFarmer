@@ -28,7 +28,7 @@ struct PFarmApp: App {
         let registry = ServerRegistry()
         _serverRegistry = State(initialValue: registry)
         if DemoMode.shared.isActive {
-            let container = ServiceContainer.demo()
+            let container = ServiceContainer.demo(serverRegistry: registry)
             _services = State(initialValue: container)
             _authViewModel = State(initialValue: AuthViewModel(services: container))
         } else {
