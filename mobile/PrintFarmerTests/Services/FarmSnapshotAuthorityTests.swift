@@ -6,12 +6,12 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
 
     // MARK: Authority
 
-    func testMintAdvancesMonotonicTokenAndSupersedes() {
+    func testMintAdvancesMonotonicTokenAndSupersedes()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
 
-        let first = authority.mint(namespace: namespace, generation: 0)
-        let second = authority.mint(namespace: namespace, generation: 0)
+        let first = try authority.mint(namespace: namespace, generation: 0)
+        let second = try authority.mint(namespace: namespace, generation: 0)
 
         XCTAssertNotNil(first)
         XCTAssertNotNil(second)
@@ -23,39 +23,39 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
 
     // MARK: H3 — high-water CAS never rewinds; conditional deactivation
 
-    func testAdoptHigherTokenThenMintDoesNotRewind() {
+    func testAdoptHigherTokenThenMintDoesNotRewind()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
         // Externally adopt a high token (models a token minted on another counter).
         let high = FarmSnapshotSession(namespace: ns, generation: 0, token: 100)
-        XCTAssertTrue(authority.adopt(high))
+        XCTAssertTrue(try authority.adopt(high))
         // A subsequent mint must issue a token STRICTLY above the adopted high-water —
         // never rewind to 1.
-        let minted = authority.mint(namespace: ns, generation: 0)!
+        let minted = try authority.mint(namespace: ns, generation: 0)!
         XCTAssertGreaterThan(minted.token, 100)
         XCTAssertTrue(authority.isCurrent(minted))
         // A delayed older adopt (below the high-water) is rejected.
         let stale = FarmSnapshotSession(namespace: ns, generation: 0, token: 50)
-        XCTAssertFalse(authority.adopt(stale))
+        XCTAssertFalse(try authority.adopt(stale))
         XCTAssertTrue(authority.isCurrent(minted))
     }
 
-    func testAdoptAfterRevokeRejectsOldToken() {
+    func testAdoptAfterRevokeRejectsOldToken()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
-        let s1 = authority.mint(namespace: ns, generation: 0)!
+        let s1 = try authority.mint(namespace: ns, generation: 0)!
         authority.revoke() // current == nil, but high-water retained
         // Re-adopting the old (now consumed) session must fail — no resurrection after
         // the current was cleared.
-        XCTAssertFalse(authority.adopt(s1))
+        XCTAssertFalse(try authority.adopt(s1))
         XCTAssertNil(authority.currentSession())
     }
 
-    func testDelayedOldDeactivateAfterNewerActivationSurvives() {
+    func testDelayedOldDeactivateAfterNewerActivationSurvives()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
-        let s1 = authority.mint(namespace: ns, generation: 0)!
-        let s2 = authority.mint(namespace: ns, generation: 0)! // newer supersedes s1
+        let s1 = try authority.mint(namespace: ns, generation: 0)!
+        let s2 = try authority.mint(namespace: ns, generation: 0)! // newer supersedes s1
         // A delayed conditional deactivate of the OLD session must NOT clear the newer
         // one — it returns false and s2 survives.
         XCTAssertFalse(authority.deactivate(s1))
@@ -65,14 +65,14 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         XCTAssertNil(authority.currentSession())
     }
 
-    func testActivateRejectionPreventsBindAndCommit() async {
+    func testActivateRejectionPreventsBindAndCommit() async throws {
         let root = FarmSnapshotFixtures.tempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let ns = FarmSnapshotFixtures.namespace()
         // Newer session is current.
-        let newer = authority.mint(namespace: ns, generation: 0)!
+        let newer = try authority.mint(namespace: ns, generation: 0)!
         _ = await store.activate(session: newer)
         // An OLDER externally-constructed session (lower token) is rejected by activate.
         let older = FarmSnapshotSession(namespace: ns, generation: 0, token: newer.token - 1)
@@ -86,37 +86,37 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
 
     // MARK: H — durable authority monotonicity across restart
 
-    func testHighWaterSurvivesAuthorityRecreation() {
+    func testHighWaterSurvivesAuthorityRecreation()throws {
         let suite = trackedSuiteName("tomb")
         let ns = FarmSnapshotFixtures.namespace()
         // Adopt a high token, then recreate the authority on the SAME durable store.
         let a1 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
-        XCTAssertTrue(a1.adopt(FarmSnapshotSession(namespace: ns, generation: 0, token: 500)))
+        XCTAssertTrue(try a1.adopt(FarmSnapshotSession(namespace: ns, generation: 0, token: 500)))
         let a2 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
         // The next mint on the recreated authority is STRICTLY greater than the durable
         // high-water — a delayed older token can never re-adopt after relaunch.
-        let minted = a2.mint(namespace: ns, generation: 0)!
+        let minted = try a2.mint(namespace: ns, generation: 0)!
         XCTAssertGreaterThan(minted.token, 500)
         // A stale token at-or-below the persisted high-water is rejected.
-        XCTAssertFalse(a2.adopt(FarmSnapshotSession(namespace: ns, generation: 0, token: 400)))
+        XCTAssertFalse(try a2.adopt(FarmSnapshotSession(namespace: ns, generation: 0, token: 400)))
         XCTAssertTrue(a2.isCurrent(minted))
     }
 
-    func testHighWaterFromMintSurvivesRecreationAndRevokeStaysNonReusable() {
+    func testHighWaterFromMintSurvivesRecreationAndRevokeStaysNonReusable()throws {
         let suite = trackedSuiteName("tomb")
         let ns = FarmSnapshotFixtures.namespace()
         let a1 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
-        let s1 = a1.mint(namespace: ns, generation: 0)!
+        let s1 = try a1.mint(namespace: ns, generation: 0)!
         a1.revoke()
         // Recreate; the revoked token remains non-reusable and the counter is monotonic.
         let a2 = FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: suite)!))
-        XCTAssertFalse(a2.adopt(s1), "a revoked/consumed token cannot re-adopt after restart")
-        let s2 = a2.mint(namespace: ns, generation: 0)!
+        XCTAssertFalse(try a2.adopt(s1), "a revoked/consumed token cannot re-adopt after restart")
+        let s2 = try a2.mint(namespace: ns, generation: 0)!
         XCTAssertGreaterThan(s2.token, s1.token)
     }
 
 
-    func testReserveDoesNotPublishUntilAdopt() async {
+    func testReserveDoesNotPublishUntilAdopt() async throws {
         let root = FarmSnapshotFixtures.tempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
@@ -124,61 +124,61 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         let ns = FarmSnapshotFixtures.namespace()
 
         // Reserve a candidate — it is NOT current, so nothing can commit against it.
-        let candidate = authority.reserve(namespace: ns, generation: 0)!
+        let candidate = try authority.reserve(namespace: ns, generation: 0)!
         XCTAssertNil(authority.currentSession(), "a reserved candidate is not current")
         XCTAssertFalse(authority.isCurrent(candidate))
         let earlyCommit = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: candidate)
         XCTAssertEqual(earlyCommit, .superseded, "no commit can be authorized before adopt")
 
         // Publish via adopt — now it is authoritative and can commit.
-        XCTAssertTrue(authority.adopt(candidate))
+        XCTAssertTrue(try authority.adopt(candidate))
         XCTAssertTrue(authority.isCurrent(candidate))
         let liveCommit = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 2), capturedSession: candidate)
         XCTAssertEqual(liveCommit, .committed)
     }
 
-    func testAdoptHigherThenReserveDoesNotRewindOrPublish() {
+    func testAdoptHigherThenReserveDoesNotRewindOrPublish()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
         let high = FarmSnapshotSession(namespace: ns, generation: 0, token: 100)
-        XCTAssertTrue(authority.adopt(high))
+        XCTAssertTrue(try authority.adopt(high))
         // reserve issues 101 (strictly above the adopted high-water) and does NOT change
         // the current session.
-        let candidate = authority.reserve(namespace: ns, generation: 0)!
+        let candidate = try authority.reserve(namespace: ns, generation: 0)!
         XCTAssertGreaterThan(candidate.token, 100)
         XCTAssertTrue(authority.isCurrent(high), "reserve must not publish over the current session")
     }
 
-    func testTombstonedServerCannotMint() {
+    func testTombstonedServerCannotMint()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
         authority.tombstone(namespace.serverID)
 
-        XCTAssertNil(authority.mint(namespace: namespace, generation: 0))
+        XCTAssertNil(try authority.mint(namespace: namespace, generation: 0))
         XCTAssertTrue(authority.isTombstoned(namespace.serverID))
     }
 
-    func testTombstoneRevokesMatchingCurrentSession() {
+    func testTombstoneRevokesMatchingCurrentSession()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
-        let session = authority.mint(namespace: namespace, generation: 0)!
+        let session = try authority.mint(namespace: namespace, generation: 0)!
 
         authority.tombstone(namespace.serverID)
         XCTAssertFalse(authority.isCurrent(session))
         XCTAssertNil(authority.currentSession())
     }
 
-    func testRevokeClearsCurrent() {
+    func testRevokeClearsCurrent()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
-        let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
+        let session = try authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         authority.revoke()
         XCTAssertNil(authority.currentSession())
         XCTAssertFalse(authority.isCurrent(session))
     }
 
-    func testWithPromotionSkipsWhenNotCurrent() {
+    func testWithPromotionSkipsWhenNotCurrent()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
-        let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
+        let session = try authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         authority.revoke()
 
         var ran = false
@@ -190,9 +190,9 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         XCTAssertFalse(ran)
     }
 
-    func testWithPromotionSkipsWhenCancelled() {
+    func testWithPromotionSkipsWhenCancelled()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
-        let session = authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
+        let session = try authority.mint(namespace: FarmSnapshotFixtures.namespace(), generation: 0)!
         var ran = false
         let result: Bool? = authority.withPromotion(session, cancelled: { true }) {
             ran = true
@@ -202,10 +202,10 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         XCTAssertFalse(ran)
     }
 
-    func testIsCurrentRequiresExactSession() {
+    func testIsCurrentRequiresExactSession()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
-        let session = authority.mint(namespace: namespace, generation: 0)!
+        let session = try authority.mint(namespace: namespace, generation: 0)!
         // A same-namespace/same-generation session with a different token is not current.
         let impostor = FarmSnapshotSession(namespace: namespace, generation: 0, token: session.token + 99)
         XCTAssertTrue(authority.isCurrent(session))

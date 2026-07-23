@@ -214,7 +214,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
         _ = printer
     }
 
-    func testStoreQuarantinesHandAuthoredCorruptV1() async {
+    func testStoreQuarantinesHandAuthoredCorruptV1() async throws {
         // A corrupt v1 record (missing a required key) written as the live file must be
         // quarantined by the store on hydrate — never coerced.
         let root = FarmSnapshotFixtures.tempRoot()
@@ -222,7 +222,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let ns = FarmSnapshotFixtures.namespace()
-        let session = authority.mint(namespace: ns, generation: 0)!
+        let session = try authority.mint(namespace: ns, generation: 0)!
         _ = await store.activate(session: session)
 
         let live = root.appendingPathComponent("servers", isDirectory: true)

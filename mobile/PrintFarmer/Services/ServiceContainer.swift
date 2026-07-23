@@ -419,8 +419,18 @@ final class ServiceContainer: @unchecked Sendable {
         // authorized against it), await store readiness, THEN publish it via a single
         // synchronous critical section that re-validates target + generation + auth
         // token with NO await between the guard and the adopt.
+        //
+        // H: reserve/adopt are now typed-throwing (durable overflow / persistence
+        // failure) — a caught error becomes `.preparationFailed` (retryable) so the
+        // auth flow surfaces and retries without a new login.
         let capturedGeneration = activeGeneration.current
-        guard let candidate = farmSnapshotAuthority.reserve(namespace: namespace, generation: capturedGeneration) else {
+        let candidate: FarmSnapshotSession?
+        do {
+            candidate = try farmSnapshotAuthority.reserve(namespace: namespace, generation: capturedGeneration)
+        } catch {
+            return .preparationFailed
+        }
+        guard let candidate else {
             return .notApplicable // tombstoned (purged) server — do not resurrect
         }
         // D: fail closed with a RETRYABLE result if startup readiness (residue sweep)
@@ -432,10 +442,16 @@ final class ServiceContainer: @unchecked Sendable {
         guard !isDemoDesiredTarget,
               serverRegistry.activeServerID == active.id,
               activeGeneration.isCurrent(capturedGeneration),
-              authStillCurrent(),
-              farmSnapshotAuthority.adopt(candidate) else {
-            return .superseded // superseded during readiness, or an older token — candidate never published
+              authStillCurrent() else {
+            return .superseded
         }
+        let adopted: Bool
+        do {
+            adopted = try farmSnapshotAuthority.adopt(candidate)
+        } catch {
+            return .preparationFailed
+        }
+        guard adopted else { return .superseded }
         return .activated
     }
 
@@ -572,6 +588,11 @@ final class ServiceContainer: @unchecked Sendable {
     /// verified owner; token-only/unverified or tombstoned → no bind (fail closed).
     /// A superseded/older switch conditionally deactivates only its own session and
     /// never clears newer authority.
+    ///
+    /// H: reserve/adopt are typed-throwing; a durable overflow or persistence failure
+    /// silently fails closed here (this is a switch, not a login — there is no VM
+    /// caller to expose a retryable state to yet; the next login/restore drives the
+    /// retry through `bindSnapshotToActiveServer`).
     private func bindSnapshotToServer(_ server: RegisteredServer, generation: Int, epoch: Int) async {
         guard let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: server.id) else { return }
         guard transitionEpoch.isCurrent(epoch) else { return }
@@ -579,10 +600,19 @@ final class ServiceContainer: @unchecked Sendable {
         // P3: reserve an unpublished candidate, await readiness, then publish it in a
         // single synchronous critical section that re-validates the transition epoch —
         // no await between the guard and the adopt.
-        guard let candidate = farmSnapshotAuthority.reserve(namespace: namespace, generation: generation) else { return }
+        let candidate: FarmSnapshotSession?
+        do {
+            candidate = try farmSnapshotAuthority.reserve(namespace: namespace, generation: generation)
+        } catch {
+            return // durable overflow / persistence failure — fail closed
+        }
+        guard let candidate else { return }
         guard await farmSnapshotStore.prepareStartup() else { return } // D: fail closed on prep failure
-        guard transitionEpoch.isCurrent(epoch), farmSnapshotAuthority.adopt(candidate) else {
-            return // superseded during readiness, or an older token — candidate never published
+        guard transitionEpoch.isCurrent(epoch) else { return }
+        do {
+            guard try farmSnapshotAuthority.adopt(candidate) else { return }
+        } catch {
+            return // durable persistence failure at adopt — do not publish
         }
     }
 

@@ -127,37 +127,47 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         self.tokenCounter = persistedHighWater
     }
 
+    /// Reserve a token for a candidate session WITHOUT publishing it as current (P3).
+    /// The candidate is not authoritative — no commit can be authorized against it —
+    /// until a later `adopt` publishes it. Returns `nil` when the server is tombstoned.
+    ///
+    /// H: the underlying token reservation is DURABLE and cross-instance atomic — the
+    /// tombstone store's coordinator lock serializes the read-modify-write on the
+    /// persisted high-water even across two live authorities on the same persistence
+    /// domain, so two concurrent reserves cannot collide (H bug). Overflow at
+    /// `UInt64.max` and durable-persistence failure are typed errors — the caller MUST
+    /// treat them as fail-closed and MUST NOT publish an un-reserved token.
+    func reserve(namespace: FarmSnapshotNamespace, generation: Int) throws -> FarmSnapshotSession? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !tombstones.contains(namespace.serverID) else { return nil }
+        // H: read the DURABLE high-water inside the critical section (a peer authority
+        // on the same domain may have advanced it), then atomically reserve one above
+        // both the local counter and the durable value. The token is durably persisted
+        // BEFORE we return, so a subsequent same-domain reserve/mint sees it.
+        let reserved = try tombstoneStore.reserveNextToken(atLeast: max(tokenCounter, highWater))
+        tokenCounter = reserved
+        // H: the durable high-water IS advanced by reservation (real durable CAS), so
+        // reflect it locally too. Publication (`adopt`) still gates authority.
+        highWater = max(highWater, reserved)
+        return FarmSnapshotSession(namespace: namespace, generation: generation, token: reserved)
+    }
+
     /// Mint a fresh authoritative session for a settled server + verified owner.
     /// Returns `nil` when the server is tombstoned (purged) so nothing can
     /// resurrect it. Every mint advances the monotonic token AND the high-water
     /// mark, so a same-user / same-server relogin supersedes any in-flight session.
-    /// Reserve a token for a candidate session WITHOUT publishing it as current (P3).
-    /// The candidate is not authoritative — no commit can be authorized against it —
-    /// until a later `adopt` publishes it. Returns `nil` when the server is tombstoned.
-    func reserve(namespace: FarmSnapshotNamespace, generation: Int) -> FarmSnapshotSession? {
+    ///
+    /// H: uses the same durable atomic reservation as `reserve`; a mint failure
+    /// (overflow / persistence) throws WITHOUT publishing a session.
+    func mint(namespace: FarmSnapshotNamespace, generation: Int) throws -> FarmSnapshotSession? {
         lock.lock()
         defer { lock.unlock() }
         guard !tombstones.contains(namespace.serverID) else { return nil }
-        // Advance the counter above both the counter and the permanent high-water so a
-        // reservation following an externally-adopted higher token never collides or
-        // rewinds (H3). The high-water is only advanced at `adopt` (publication).
-        let next = max(tokenCounter, highWater) + 1
-        tokenCounter = next
-        return FarmSnapshotSession(namespace: namespace, generation: generation, token: next)
-    }
-
-    func mint(namespace: FarmSnapshotNamespace, generation: Int) -> FarmSnapshotSession? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !tombstones.contains(namespace.serverID) else { return nil }
-        // Advance strictly above BOTH the local counter and the permanent high-water
-        // mark, so a mint that follows an externally-adopted higher token can never
-        // rewind the high-water (H3).
-        let next = max(tokenCounter, highWater) + 1
-        tokenCounter = next
-        highWater = next
-        tombstoneStore.storeHighWater(highWater) // H: durable monotonic high-water
-        let session = FarmSnapshotSession(namespace: namespace, generation: generation, token: next)
+        let reserved = try tombstoneStore.reserveNextToken(atLeast: max(tokenCounter, highWater))
+        tokenCounter = reserved
+        highWater = reserved
+        let session = FarmSnapshotSession(namespace: namespace, generation: generation, token: reserved)
         current = session
         return session
     }
@@ -167,17 +177,26 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
     /// token can never re-adopt, even after the current was revoked/deactivated
     /// (H3). Re-adopting the exact current session is idempotent. Returns whether
     /// the session is current after the call.
+    ///
+    /// H: reads the DURABLE high-water inside the critical section so a same-domain
+    /// peer's advance is observed. Advancing the durable high-water on adopt is
+    /// mandatory and its failure is typed — the caller MUST treat a throw as
+    /// fail-closed and MUST NOT publish the session.
     @discardableResult
-    func adopt(_ session: FarmSnapshotSession) -> Bool {
+    func adopt(_ session: FarmSnapshotSession) throws -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard !tombstones.contains(session.serverID) else { return false }
         if session == current { return true } // idempotent for the exact current
-        guard session.token > highWater else { return false }
+        // H: re-read the durable value here — a peer authority may have advanced it.
+        let durable = tombstoneStore.loadHighWater()
+        let effectiveHighWater = max(highWater, durable)
+        guard session.token > effectiveHighWater else { return false }
+        // H: durable CAS — if the write can't be verified, we MUST NOT publish.
+        guard tombstoneStore.storeHighWater(session.token) else {
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
         highWater = session.token
-        tombstoneStore.storeHighWater(highWater) // H: durable monotonic high-water
-        // Keep the mint counter monotonically ahead of any adopted token so a later
-        // mint never issues a token at-or-below an already-adopted one (H3).
         tokenCounter = max(tokenCounter, session.token)
         current = session
         return true
@@ -374,8 +393,13 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         // fail closed rather than activate over a possibly-resurrected namespace.
         guard await ensureStartupPreparation() else { return false }
         // H3: honor the compare-and-set result so callers can refuse to bind a
-        // session the authority rejected (older/consumed token).
-        return authority.adopt(session)
+        // session the authority rejected (older/consumed token). A durable
+        // persistence failure at the CAS is also a fail-closed outcome.
+        do {
+            return try authority.adopt(session)
+        } catch {
+            return false
+        }
     }
 
     /// Conditionally deactivate ONLY the captured session (H3). A newer activation

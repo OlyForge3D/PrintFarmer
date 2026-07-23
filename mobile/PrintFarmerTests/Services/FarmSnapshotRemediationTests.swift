@@ -41,30 +41,30 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         return try? Data(contentsOf: dir.appendingPathComponent(name))
     }
 
-    private func activate(_ store: FarmSnapshotStore, _ authority: FarmSnapshotAuthority, _ ns: FarmSnapshotNamespace) async -> FarmSnapshotSession {
-        let session = authority.mint(namespace: ns, generation: 0)!
+    private func activate(_ store: FarmSnapshotStore, _ authority: FarmSnapshotAuthority, _ ns: FarmSnapshotNamespace) async throws -> FarmSnapshotSession {
+        let session = try authority.mint(namespace: ns, generation: 0)!
         await store.activate(session: session)
         return session
     }
 
     // MARK: H3 — store lifecycle monotonicity
 
-    func testAdoptRejectsDelayedOlderSession() {
+    func testAdoptRejectsDelayedOlderSession()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
-        let older = authority.mint(namespace: ns, generation: 0)!   // token 1
-        let newer = authority.mint(namespace: ns, generation: 0)!   // token 2 (current)
+        let older = try authority.mint(namespace: ns, generation: 0)!   // token 1
+        let newer = try authority.mint(namespace: ns, generation: 0)!   // token 2 (current)
         // A delayed re-adopt of the older session must not replace the newer one.
-        XCTAssertFalse(authority.adopt(older))
+        XCTAssertFalse(try authority.adopt(older))
         XCTAssertTrue(authority.isCurrent(newer))
         XCTAssertFalse(authority.isCurrent(older))
     }
 
-    func testConditionalDeactivateDoesNotClearNewerSession() {
+    func testConditionalDeactivateDoesNotClearNewerSession()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
-        let older = authority.mint(namespace: ns, generation: 0)!
-        let newer = authority.mint(namespace: ns, generation: 0)!
+        let older = try authority.mint(namespace: ns, generation: 0)!
+        let newer = try authority.mint(namespace: ns, generation: 0)!
         // A stale deactivate keyed to the older session must not clear the newer one.
         XCTAssertFalse(authority.deactivate(older))
         XCTAssertTrue(authority.isCurrent(newer))
@@ -73,13 +73,13 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertNil(authority.currentSession())
     }
 
-    func testDelayedAdoptToken1AfterActivateToken2ABALoses() async {
+    func testDelayedAdoptToken1AfterActivateToken2ABALoses() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
-        let s1 = authority.mint(namespace: ns, generation: 0)!
-        let s2 = authority.mint(namespace: ns, generation: 0)!
+        let s1 = try authority.mint(namespace: ns, generation: 0)!
+        let s2 = try authority.mint(namespace: ns, generation: 0)!
         // Store.activate adopts monotonically; the older s1 cannot displace s2.
         await store.activate(session: s1)
         XAssertEqual(await store.currentSession(), s2)
@@ -87,7 +87,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
     // MARK: H4 — durable tombstone across recreation
 
-    func testDurableTombstoneSurvivesAuthorityRecreation() {
+    func testDurableTombstoneSurvivesAuthorityRecreation()throws {
         let tombstoneStore = FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
         let a1 = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
@@ -95,10 +95,10 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         // Recreate the authority on the SAME durable store (models a relaunch).
         let a2 = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
         XCTAssertTrue(a2.isTombstoned(ns.serverID))
-        XCTAssertNil(a2.mint(namespace: ns, generation: 0))
+        XCTAssertNil(try a2.mint(namespace: ns, generation: 0))
     }
 
-    func testPurgeClearsOwnerMappingAndTombstonesDurably() async {
+    func testPurgeClearsOwnerMappingAndTombstonesDurably() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let ownerStore = FarmSnapshotFixtures.makeOwnerStore(UserDefaults(suiteName: trackedSuiteName("owner"))!)
@@ -107,23 +107,23 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let authority = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
         let store = FarmSnapshotStore(authority: authority, rootURL: root, ownerStore: ownerStore)
 
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         _ = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session)
 
         XAssertEqual(await store.purge(serverID: ns.serverID), .purged)
         XCTAssertNil(ownerStore.ownerUserID(serverID: ns.serverID)) // owner cleared
         // Durable across recreation: a relaunched authority still refuses the server.
         let a2 = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
-        XCTAssertNil(a2.mint(namespace: ns, generation: 0))
+        XCTAssertNil(try a2.mint(namespace: ns, generation: 0))
     }
 
-    func testPurgeVsSuspendedPreWriteCommitNoResurrection() async {
+    func testPurgeVsSuspendedPreWriteCommitNoResurrection() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let barrier = AsyncBarrier()
         io.writeCandidateBarrier = barrier
@@ -182,7 +182,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertTrue(retry, "retry after a transient failure completes")
     }
 
-    func testPurgeDrainsInFlightLeaseViaLeaseThenSweepsNoResurrection() async {
+    func testPurgeDrainsInFlightLeaseViaLeaseThenSweepsNoResurrection() async throws {
         // The lease is the real serialization primitive: a commit holding a lease (parked
         // pre-write) forces purge to DRAIN before it can sweep/return. The completion
         // order proves purge finishes strictly after the commit releases its lease, and
@@ -192,7 +192,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let recorder = CompletionOrderRecorder()
         let writeBarrier = AsyncBarrier()
@@ -224,13 +224,13 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path))
     }
 
-    func testPurgeFinalDeletionFailureYieldsFailure() async {
+    func testPurgeFinalDeletionFailureYieldsFailure() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         _ = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session)
 
         io.failRemove = true // final sweep removal fails
@@ -241,12 +241,12 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertTrue(authority.isTombstoned(ns.serverID))
     }
 
-    func testRepeatedPurgeIsBounded() async {
+    func testRepeatedPurgeIsBounded() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
-        _ = await activate(store, authority, ns)
+        _ = try await activate(store, authority, ns)
         XAssertEqual(await store.purge(serverID: ns.serverID), .purged)
         // A repeated purge of an already-purged server still succeeds and does not hang.
         XAssertEqual(await store.purge(serverID: ns.serverID), .purged)
@@ -254,7 +254,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
     // MARK: H5 — quarantine linearization (both completion orders)
 
-    func testPurgeDrainsInFlightLeaseBeforeCompleting() async {
+    func testPurgeDrainsInFlightLeaseBeforeCompleting() async throws {
         // Deterministic completion-order proof: purge must not finish until an
         // in-flight commit (holding a filesystem lease) releases it (issue #816 H4).
         let root = newRoot()
@@ -262,7 +262,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let recorder = CompletionOrderRecorder()
         let barrier = AsyncBarrier()
@@ -292,7 +292,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         func record(_ label: String) { order.append(label) }
     }
 
-    func testQuarantineMoveCommitsWhenAuthorityHeldToRelease() async {
+    func testQuarantineMoveCommitsWhenAuthorityHeldToRelease() async throws {
         // Corrupt record; authority stays current across the suspended dir-create;
         // the compare-and-move recovers under the lock.
         let root = newRoot()
@@ -300,7 +300,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        _ = await activate(store, authority, ns)
+        _ = try await activate(store, authority, ns)
 
         let live = liveURL(root: root, ns)
         try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -316,13 +316,13 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: live.path)) // quarantined
     }
 
-    func testQuarantineMoveRevokedBeforeMoveDoesNotRecover() async {
+    func testQuarantineMoveRevokedBeforeMoveDoesNotRecover() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        _ = await activate(store, authority, ns)
+        _ = try await activate(store, authority, ns)
 
         let live = liveURL(root: root, ns)
         try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -342,7 +342,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
     // MARK: H5 — real move-boundary, both orders + concurrent-revoke serialization
 
-    func testQuarantineMoveIsAtomicSinglePrimitive() async {
+    func testQuarantineMoveIsAtomicSinglePrimitive() async throws {
         // The destructive compare-and-move is a single serialized primitive: a corrupt
         // record is recovered with exactly ONE move, the live file is quarantined away,
         // and the session remains authoritative. (The concurrent-serialization order is
@@ -352,7 +352,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let live = liveURL(root: root, ns)
         try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -365,7 +365,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertTrue(authority.isCurrent(session))
     }
 
-    func testMoveBoundaryRevokeFirstPreventsMove() async {
+    func testMoveBoundaryRevokeFirstPreventsMove() async throws {
         // Order B (revoke-first): the authority is lost BEFORE the move boundary; the
         // synchronous primitive never runs and the live bytes are preserved.
         let root = newRoot()
@@ -373,7 +373,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        _ = await activate(store, authority, ns)
+        _ = try await activate(store, authority, ns)
 
         let live = liveURL(root: root, ns)
         try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -391,7 +391,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertEqual(try? Data(contentsOf: live), corrupt)
     }
 
-    func testMoveBoundaryConcurrentPurgeSerializesAfterMove() async {
+    func testMoveBoundaryConcurrentPurgeSerializesAfterMove() async throws {
         // move vs purge: a purge started while a quarantine move holds its lease must
         // drain that lease before sweeping — the move recovers atomically and the purge
         // completes strictly after (issue #816 H5).
@@ -400,7 +400,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let live = liveURL(root: root, ns)
         try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -437,7 +437,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
     // MARK: H7 — atomicity / interruption
 
-    func testQuarantineCompareFalseAtMoveBoundaryPreservesLiveByteIdentical() async {
+    func testQuarantineCompareFalseAtMoveBoundaryPreservesLiveByteIdentical() async throws {
         // A change landing at the exact compare-and-move boundary (the live file is
         // rewritten just before the destructive move) makes the content no longer
         // match `expected`; the move must decline and preserve the live bytes
@@ -447,7 +447,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        _ = await activate(store, authority, ns)
+        _ = try await activate(store, authority, ns)
 
         let live = liveURL(root: root, ns)
         try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -477,13 +477,13 @@ final class FarmSnapshotRemediationTests: XCTestCase {
     }
 
 
-    func testInterruptionAtTempWriteLeavesLiveUnchanged() async {
+    func testInterruptionAtTempWriteLeavesLiveUnchanged() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
@@ -497,13 +497,13 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertEqual(onDisk, prior)
     }
 
-    func testExternallyObservableOldThenNewNeverTornAcrossPromotion() async {
+    func testExternallyObservableOldThenNewNeverTornAcrossPromotion() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
@@ -536,7 +536,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertEqual(afterCommit, newer)
     }
 
-    func testInterruptionBetweenCandidateWriteAndPromoteLeavesLiveOld() async {
+    func testInterruptionBetweenCandidateWriteAndPromoteLeavesLiveOld() async throws {
         // Interruption at the post-write / pre-promote seam: the candidate is fully
         // written but the atomic promote then fails (models a crash before promotion).
         // The externally observable live path must remain the exact OLD valid record —
@@ -547,7 +547,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
@@ -574,7 +574,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertEqual(onDisk, prior)
     }
 
-    func testCancellationAfterCandidateWriteLeavesLiveOldAndCleansCandidate() async {
+    func testCancellationAfterCandidateWriteLeavesLiveOldAndCleansCandidate() async throws {
         // Cancellation at the post-write / pre-promote seam: the candidate is fully
         // written, then the commit task is cancelled and the seam terminally released
         // (no stranded continuation). No promote happens (promoteCount unchanged), the
@@ -584,7 +584,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
         let promotesAfterPrior = io.promoteCount
@@ -605,7 +605,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertNil(candidateTempData(root: root, ns), "the candidate temp is cleaned up")
     }
 
-    func testPostPromotionLeavesLiveNewWithExactCounts() async {
+    func testPostPromotionLeavesLiveNewWithExactCounts() async throws {
         // After the atomic promote, the live path is the NEW valid record and exactly
         // one promote occurred for the newer commit. Real FileManager path.
         let root = newRoot()
@@ -613,7 +613,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
         let promotesAfterPrior = io.promoteCount
@@ -627,14 +627,14 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertNil(candidateTempData(root: root, ns), "no candidate temp remains after promotion")
     }
 
-    func testRealFileManagerInterruptionStagedTempLeavesOldRecord() async {
+    func testRealFileManagerInterruptionStagedTempLeavesOldRecord() async throws {
         // Real FileManager: stage a candidate temp but never promote — the live
         // record remains the old valid JSON (proves no torn/absent live path).
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 500)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
@@ -647,13 +647,13 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         XCTAssertEqual(onDisk, prior)
     }
 
-    func testPurgeVsSuspendedWriteExactCounts() async {
+    func testPurgeVsSuspendedWriteExactCounts() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let barrier = AsyncBarrier()
         io.writeCandidateBarrier = barrier

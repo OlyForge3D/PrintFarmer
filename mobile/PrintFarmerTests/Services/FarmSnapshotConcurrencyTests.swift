@@ -30,20 +30,20 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         return (FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root), authority)
     }
 
-    private func activate(_ store: FarmSnapshotStore, _ authority: FarmSnapshotAuthority, _ ns: FarmSnapshotNamespace) async -> FarmSnapshotSession {
-        let session = authority.mint(namespace: ns, generation: 0)!
+    private func activate(_ store: FarmSnapshotStore, _ authority: FarmSnapshotAuthority, _ ns: FarmSnapshotNamespace) async throws -> FarmSnapshotSession {
+        let session = try authority.mint(namespace: ns, generation: 0)!
         await store.activate(session: session)
         return session
     }
 
     // MARK: Revoke / tombstone / cancel during a suspended candidate write
 
-    func testRevokeDuringSuspendedWritePreservesPriorBytesAndDoesNotCommit() async {
+    func testRevokeDuringSuspendedWritePreservesPriorBytesAndDoesNotCommit() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, io: io)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
@@ -64,12 +64,12 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XCTAssertEqual(onDisk, prior)
     }
 
-    func testTombstoneDuringSuspendedWriteSuperseded() async {
+    func testTombstoneDuringSuspendedWriteSuperseded() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, io: io)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let barrier = AsyncBarrier()
         io.writeCandidateBarrier = barrier
@@ -84,12 +84,12 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .inactive)
     }
 
-    func testCancellationDuringSuspendedWriteDoesNotCommit() async {
+    func testCancellationDuringSuspendedWriteDoesNotCommit() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, io: io)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
@@ -107,12 +107,12 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .snapshot(prior))
     }
 
-    func testRevokeDuringSuspendedWriteWithCleanupFailureIsSurfaced() async {
+    func testRevokeDuringSuspendedWriteWithCleanupFailureIsSurfaced() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, io: io)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         let prior = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
@@ -136,12 +136,12 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
 
     // MARK: Reverse-order commits — newest survives, exact counts
 
-    func testConcurrentReverseOrderCommitsNewestSurvivesWithExactCounts() async {
+    func testConcurrentReverseOrderCommitsNewestSurvivesWithExactCounts() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, io: io)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         // Hold the OLDER commit at its candidate write.
         let barrier = AsyncBarrier()
@@ -172,12 +172,12 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
 
     // MARK: Hydrate / quarantine suspended, revoked
 
-    func testHydrateRevokedDuringReadReturnsInactive() async {
+    func testHydrateRevokedDuringReadReturnsInactive() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, io: io)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
         XAssertEqual(await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000), capturedSession: session), .committed)
 
         let barrier = AsyncBarrier()
@@ -190,12 +190,12 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XAssertEqual(await task.value, .inactive)
     }
 
-    func testQuarantineSuspendedThenRevokeReturnsInactiveAndKeepsCorruptFile() async {
+    func testQuarantineSuspendedThenRevokeReturnsInactiveAndKeepsCorruptFile() async throws {
         let root = newRoot()
         let ns = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, io: io)
-        let session = await activate(store, authority, ns)
+        let session = try await activate(store, authority, ns)
 
         // Seed corrupt live bytes so hydrate enters recovery.
         let live = liveURL(root: root, ns)

@@ -191,7 +191,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         // Phase 1 (online): seed a cached snapshot for (A, userA).
         let seedAuthority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let seedStore = FarmSnapshotStore(authority: seedAuthority, rootURL: root)
-        let seedSession = seedAuthority.mint(namespace: namespace, generation: 0)!
+        let seedSession = try seedAuthority.mint(namespace: namespace, generation: 0)!
         await seedStore.activate(session: seedSession)
         let env = FarmSnapshotFixtures.envelope(
             namespace: namespace, millis: 5000,
@@ -233,10 +233,10 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let seedStore = FarmSnapshotStore(authority: seedAuthority, rootURL: root)
         let envA = FarmSnapshotFixtures.envelope(namespace: nsA, millis: 1000)
         let envB = FarmSnapshotFixtures.envelope(namespace: nsB, millis: 2000)
-        let sA = seedAuthority.mint(namespace: nsA, generation: 0)!
+        let sA = try seedAuthority.mint(namespace: nsA, generation: 0)!
         await seedStore.activate(session: sA)
         XAssertEqual(await seedStore.commit(envA, capturedSession: sA), .committed)
-        let sB = seedAuthority.mint(namespace: nsB, generation: 0)!
+        let sB = try seedAuthority.mint(namespace: nsB, generation: 0)!
         await seedStore.activate(session: sB)
         XAssertEqual(await seedStore.commit(envB, capturedSession: sB), .committed)
 
@@ -318,7 +318,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         // Seed a cached snapshot before demo exit.
         let env = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 4200)
-        let seed = authority.mint(namespace: namespace, generation: 0)!
+        let seed = try authority.mint(namespace: namespace, generation: 0)!
         await store.activate(session: seed)
         XAssertEqual(await store.commit(env, capturedSession: seed), .committed)
         authority.revoke()

@@ -41,8 +41,8 @@ final class FarmSnapshotStoreTests: XCTestCase {
         _ authority: FarmSnapshotAuthority,
         _ namespace: FarmSnapshotNamespace,
         generation: Int = 0
-    ) async -> FarmSnapshotSession {
-        let session = authority.mint(namespace: namespace, generation: generation)!
+    ) async throws -> FarmSnapshotSession {
+        let session = try authority.mint(namespace: namespace, generation: generation)!
         await store.activate(session: session)
         return session
     }
@@ -55,19 +55,19 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(hydration, .inactive)
     }
 
-    func testHydrateAbsentWhenActiveButNoRecord() async {
+    func testHydrateAbsentWhenActiveButNoRecord() async throws {
         let root = newRoot()
         let (store, authority) = makeStore(root: root)
-        _ = await activate(store, authority, FarmSnapshotFixtures.namespace())
+        _ = try await activate(store, authority, FarmSnapshotFixtures.namespace())
         let hydration = await store.hydrateActive()
         XCTAssertEqual(hydration, .absent)
     }
 
-    func testCommitThenHydrateReturnsSnapshot() async {
+    func testCommitThenHydrateReturnsSnapshot() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let envelope = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1000)
         let result = await store.commit(envelope, capturedSession: session)
@@ -77,11 +77,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(hydration, .snapshot(envelope))
     }
 
-    func testPresentEmptyIsDistinctFromAbsent() async {
+    func testPresentEmptyIsDistinctFromAbsent() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         // Commit a present-but-empty farm.
         let empty = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 500, printers: [])
@@ -96,11 +96,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
 
     // MARK: Monotonic guard
 
-    func testCommitOlderIsPreserved() async {
+    func testCommitOlderIsPreserved() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let newer = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000)
         XAssertEqual(await store.commit(newer, capturedSession: session), .committed)
@@ -110,11 +110,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .snapshot(newer))
     }
 
-    func testCommitEqualTimestampIsPreserved() async {
+    func testCommitEqualTimestampIsPreserved() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let first = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets(), isPendingReady: false)])
         XAssertEqual(await store.commit(first, capturedSession: session), .committed)
@@ -124,18 +124,18 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .snapshot(first))
     }
 
-    func testMonotonicOrderingSurvivesStoreAndAuthorityRecreation() async {
+    func testMonotonicOrderingSurvivesStoreAndAuthorityRecreation() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
 
         let (store1, authority1) = makeStore(root: root)
-        let session1 = await activate(store1, authority1, namespace)
+        let session1 = try await activate(store1, authority1, namespace)
         let committed = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 100_900)
         XAssertEqual(await store1.commit(committed, capturedSession: session1), .committed)
 
         // Recreate store + authority on the same disk (models a process relaunch).
         let (store2, authority2) = makeStore(root: root)
-        let session2 = await activate(store2, authority2, namespace)
+        let session2 = try await activate(store2, authority2, namespace)
         let stale = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 100_500)
         XAssertEqual(await store2.commit(stale, capturedSession: session2), .notNewer(cleanupFailed: false))
         XAssertEqual(await store2.hydrateActive(), .snapshot(committed))
@@ -147,11 +147,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
 
     // MARK: Schema + namespace + integrity
 
-    func testCommitUnsupportedSchemaRejectedBeforeWrite() async {
+    func testCommitUnsupportedSchemaRejectedBeforeWrite() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let bad = FarmSnapshotEnvelope(
             schemaVersion: FarmSnapshotEnvelope.currentSchemaVersion + 5,
@@ -165,21 +165,21 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .absent)
     }
 
-    func testCommitNamespaceMismatchRejected() async {
+    func testCommitNamespaceMismatchRejected() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let other = FarmSnapshotFixtures.envelope(namespace: FarmSnapshotFixtures.namespace(), millis: 1000)
         XAssertEqual(await store.commit(other, capturedSession: session), .namespaceMismatch)
     }
 
-    func testCommitOverCorruptExistingFailsClosed() async {
+    func testCommitOverCorruptExistingFailsClosed() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         // Seed a corrupt live record.
         let live = liveURL(root: root, namespace)
@@ -193,12 +193,12 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(try? Data(contentsOf: live), corruptBytes)
     }
 
-    func testCommitReadErrorFailsClosed() async {
+    func testCommitReadErrorFailsClosed() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, fileIO: io)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         io.failReadDataSync = false
         // Make the early async read throw.
@@ -213,7 +213,7 @@ final class FarmSnapshotStoreTests: XCTestCase {
             func moveIfContentEquals(from: URL, to: URL, expected: Data) throws -> Bool { false }
         }
         let (throwStore, throwAuth) = makeStore(root: root, fileIO: ThrowingReadIO())
-        let throwSession = await activate(throwStore, throwAuth, namespace)
+        let throwSession = try await activate(throwStore, throwAuth, namespace)
         let envelope = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1)
         XAssertEqual(await throwStore.commit(envelope, capturedSession: throwSession), .integrityFailure(cleanupFailed: false))
         _ = (store, session)
@@ -221,12 +221,12 @@ final class FarmSnapshotStoreTests: XCTestCase {
 
     // MARK: Persistence faults preserve prior bytes
 
-    func testWriteCandidateFailurePreservesOldEnvelope() async {
+    func testWriteCandidateFailurePreservesOldEnvelope() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, fileIO: io)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let prior = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
@@ -241,12 +241,12 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .snapshot(prior))
     }
 
-    func testPromoteFailurePreservesOldEnvelopeAndLeavesNoLiveCandidate() async {
+    func testPromoteFailurePreservesOldEnvelopeAndLeavesNoLiveCandidate() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, fileIO: io)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let prior = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1000)
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
@@ -261,13 +261,13 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .snapshot(prior))
     }
 
-    func testFirstWritePromoteFailureLeavesAbsent() async {
+    func testFirstWritePromoteFailureLeavesAbsent() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         io.failPromote = true
         let (store, authority) = makeStore(root: root, fileIO: io)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         let attempt = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000)
         if case .persistenceFailure = await store.commit(attempt, capturedSession: session) {
@@ -280,11 +280,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
 
     // MARK: Quarantine / recovery
 
-    func testHydrateQuarantinesCorruptRecordThenValidCommitSurvives() async {
+    func testHydrateQuarantinesCorruptRecordThenValidCommitSurvives() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         // Seed corrupt live bytes.
         let live = liveURL(root: root, namespace)
@@ -302,11 +302,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .snapshot(envelope))
     }
 
-    func testHydrateUnknownSchemaQuarantined() async {
+    func testHydrateUnknownSchemaQuarantined() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        _ = await activate(store, authority, namespace)
+        _ = try await activate(store, authority, namespace)
 
         let live = liveURL(root: root, namespace)
         try? FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -321,14 +321,14 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XAssertEqual(await store.hydrateActive(), .recovered)
     }
 
-    func testCompareFalseDoesNotReportRecoveredAndKeepsNewer() async {
+    func testCompareFalseDoesNotReportRecoveredAndKeepsNewer() async throws {
         // A move that sees changed bytes (a newer valid commit) must not remove
         // them and must not claim recovery.
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, fileIO: io)
-        _ = await activate(store, authority, namespace)
+        _ = try await activate(store, authority, namespace)
 
         // Seed corrupt bytes, but overwrite the live file with a VALID newer record
         // during the createDirectory barrier so compare-and-move sees changed bytes.
@@ -355,11 +355,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
 
     // MARK: Purge
 
-    func testPurgeRemovesBaseQuarantineAndTempAndBlocksResurrection() async {
+    func testPurgeRemovesBaseQuarantineAndTempAndBlocksResurrection() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
         XAssertEqual(await store.commit(FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1000), capturedSession: session), .committed)
 
         // Plant a stray temp + a quarantine artifact.
@@ -374,35 +374,35 @@ final class FarmSnapshotStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: quarantineDir.path))
 
         // Tombstoned: activation cannot resurrect the namespace.
-        XCTAssertNil(authority.mint(namespace: namespace, generation: 1))
+        XCTAssertNil(try authority.mint(namespace: namespace, generation: 1))
     }
 
-    func testPurgeIsolatesOtherServers() async {
+    func testPurgeIsolatesOtherServers() async throws {
         let root = newRoot()
         let nsA = FarmSnapshotFixtures.namespace()
         let nsB = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
 
-        let sessionA = await activate(store, authority, nsA)
+        let sessionA = try await activate(store, authority, nsA)
         XAssertEqual(await store.commit(FarmSnapshotFixtures.envelope(namespace: nsA, millis: 1), capturedSession: sessionA), .committed)
-        let sessionB = await activate(store, authority, nsB)
+        let sessionB = try await activate(store, authority, nsB)
         XAssertEqual(await store.commit(FarmSnapshotFixtures.envelope(namespace: nsB, millis: 1), capturedSession: sessionB), .committed)
 
         XAssertEqual(await store.purge(serverID: nsA.serverID), .purged)
 
         // B is untouched and still hydrates.
-        let sessionB2 = await activate(store, authority, nsB)
+        let sessionB2 = try await activate(store, authority, nsB)
         if case .snapshot = await store.hydrateActive() {} else { XCTFail("B should survive A purge") }
         _ = sessionB2
     }
 
-    func testPurgeSurfacesRemovalFailure() async {
+    func testPurgeSurfacesRemovalFailure() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         io.failRemove = true
         let (store, authority) = makeStore(root: root, fileIO: io)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
         _ = session
 
         if case .failed(let count) = await store.purge(serverID: namespace.serverID) {
@@ -416,11 +416,11 @@ final class FarmSnapshotStoreTests: XCTestCase {
 
     // MARK: Real FileManager atomicity + exact counts
 
-    func testRealFileManagerReplacementAlwaysYieldsValidJSON() async {
+    func testRealFileManagerReplacementAlwaysYieldsValidJSON() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
         let live = liveURL(root: root, namespace)
 
         for index in 1...25 {
@@ -432,12 +432,12 @@ final class FarmSnapshotStoreTests: XCTestCase {
         }
     }
 
-    func testExactCountsForFreshCommitIntoAbsentNamespace() async {
+    func testExactCountsForFreshCommitIntoAbsentNamespace() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let io = ControlledFarmSnapshotFileIO()
         let (store, authority) = makeStore(root: root, fileIO: io)
-        let session = await activate(store, authority, namespace)
+        let session = try await activate(store, authority, namespace)
 
         XAssertEqual(await store.commit(FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1), capturedSession: session), .committed)
         // One async existence read, one sync durable read, one write, one promote.
