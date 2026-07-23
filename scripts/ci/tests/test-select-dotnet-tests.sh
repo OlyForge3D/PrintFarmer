@@ -100,6 +100,69 @@ assert_app_migration_drift() {
   assert_not_contains "no slicer sql mig" "$mig" '"name":"SlicerSqlServer"' || return 1
 }
 
+# assert_full_mig_matrix_shape <label> <mig_json>
+#
+# For a full-safe selection, `mig_matrix` MUST contain exactly the
+# four canonical context/provider entries — AppPg, AppSqlServer,
+# SlicerPg, SlicerSqlServer — each appearing once, with no extras.
+# This helper counts every `"name":"<expected>"` substring
+# occurrence in the JSON output and rejects any count other than 1
+# per expected entry AND any total-count other than 4 (which would
+# indicate a stray or duplicated leg).
+#
+# R14 added this after Hicks flagged that the trusted-push and
+# workflow_dispatch cases only asserted `full_matrix=true` and
+# nothing about the shape of `mig_matrix`. A regression that
+# dropped one of the four entries (e.g. missing SlicerSqlServer)
+# would still pass the `full_matrix=true` assertion while silently
+# leaving one provider/context pair unchecked in every full-safe
+# CI run — including trusted pushes to `main`/`development`, where
+# nothing is supposed to merge untested.
+#
+# Uses awk with `index()` to count occurrences of each substring;
+# no regex, no bash 4 associative arrays (Bash 3.2 compatible).
+assert_full_mig_matrix_shape() {
+  local label="$1" mig="$2"
+  local expected n total
+  for expected in AppPg AppSqlServer SlicerPg SlicerSqlServer; do
+    n="$(printf '%s' "$mig" | awk -v needle="\"name\":\"${expected}\"" '
+      BEGIN { c = 0 }
+      {
+        s = $0
+        while ((p = index(s, needle)) > 0) {
+          c++
+          s = substr(s, p + length(needle))
+        }
+      }
+      END { print c+0 }
+    ')"
+    if [[ "$n" != "1" ]]; then
+      printf '  %s: expected exactly one "%s" entry in mig_matrix, found %s\n' \
+        "$label" "$expected" "$n" >&2
+      printf '    mig_matrix: %q\n' "$mig" >&2
+      return 1
+    fi
+  done
+  total="$(printf '%s' "$mig" | awk '
+    BEGIN { c = 0 }
+    {
+      s = $0
+      while ((p = index(s, "\"name\":")) > 0) {
+        c++
+        s = substr(s, p + 7)
+      }
+    }
+    END { print c+0 }
+  ')"
+  if [[ "$total" != "4" ]]; then
+    printf '  %s: expected exactly 4 name entries in mig_matrix, found %s\n' \
+      "$label" "$total" >&2
+    printf '    mig_matrix: %q\n' "$mig" >&2
+    return 1
+  fi
+  return 0
+}
+
 # run_case <name> <function>
 run_case() {
   local name="$1" fn="$2"
@@ -502,6 +565,15 @@ case_push_to_development_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  # R14: a trusted push to `development` runs the full safe matrix,
+  # and the migration-drift matrix must cover ALL four canonical
+  # context/provider pairs exactly once — no duplicates, no gaps.
+  # Nothing merges to development untested, so a dropped SlicerPg or
+  # duplicated AppPg would silently weaken the gate.
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "true" || return 1
+  local mig
+  mig="$(get_output "$out" mig_matrix)"
+  assert_full_mig_matrix_shape "trusted push to development" "$mig" || return 1
 }
 
 case_push_to_main_full_safe() {
@@ -548,6 +620,16 @@ case_workflow_dispatch_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  # R14: manual workflow_dispatch runs the full safe matrix, and
+  # the migration-drift matrix must contain ALL four canonical
+  # context/provider pairs exactly once. A regression that dropped
+  # or duplicated an entry from `emit_full_safe`'s enumeration of
+  # `ALL_MIG_ENTRIES` would silently weaken the gate for every
+  # manual re-run of the workflow (a common oncall / release path).
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "true" || return 1
+  local mig
+  mig="$(get_output "$out" mig_matrix)"
+  assert_full_mig_matrix_shape "workflow_dispatch full-safe" "$mig" || return 1
 }
 
 case_force_full_safe_from_caller() {
@@ -964,16 +1046,80 @@ extract_drift_step_block() {
 # `  <job>:` at 2-space indent, up to the next sibling job or the next
 # top-level key). Strips trailing CRs so a Windows-checkout worktree
 # compares byte-for-byte with a Linux-style checkout. Extracted so both
-# the migration-drift shape gate and the R12 adversarial mutation tests
-# can share one job-block reader instead of redefining it locally.
+# the migration-drift shape gate and the R12/R13/R14 adversarial mutation
+# tests can share one job-block reader instead of redefining it locally.
+#
+# R14 broadens the sibling-job terminator from the identifier-only regex
+# `/^  [A-Za-z_][A-Za-z0-9_-]*:/` — which only matched unquoted keys —
+# to any exactly-two-space non-comment content line. Quoted job keys
+# (`  "shadow":`, `  'shadow':`) and keys with pre-colon whitespace
+# (`  shadow :`) all match the broader terminator, so a shadow job
+# appended in ANY of those spellings will terminate block extraction
+# right at its own header and never leak its body into the real job's
+# block. Comments (`  # ...`) and blank lines continue to be part of
+# the block body (workflow files legitimately embed both). The
+# terminator only fires on 2-space indent because deeper indents are
+# job-internal content, and 0-space is the outer `jobs:`-sibling case
+# already covered by `/^[^ ]/`.
 extract_job_block() {
   local workflow="$1" job="$2"
   awk -v marker="  ${job}:" '
     { sub(/\r$/, "") }
     $0 == marker { inside = 1; next }
-    inside && (/^[^ ]/ || /^  [A-Za-z_][A-Za-z0-9_-]*:/) { exit }
+    inside && /^[^ ]/ { exit }
+    inside && /^  [^ #]/ { exit }
     inside { print }
   ' "$workflow"
+}
+
+# _count_yaml_key_at <text> <indent_spaces> <key>
+#
+# Emit (to stdout) the count of lines in <text> that carry the yaml
+# key <key> at exactly <indent_spaces> leading spaces, ACROSS every
+# spelling GitHub Actions' yaml parser accepts as the same key:
+#
+#   * unquoted:      `<indent><key>:`
+#   * double-quoted: `<indent>"<key>":`
+#   * single-quoted: `<indent>'<key>':`
+#
+# In all three forms, arbitrary POSIX whitespace between the closing
+# key token and the `:` is legal yaml and is counted here (e.g.
+# `<indent><key> :`, `<indent><key>   :`). Trailing CRs on <text> are
+# stripped so a Windows-checkout worktree returns the same count as
+# a Linux-style checkout.
+#
+# Written so `_check_drift_step_shape` can count every alternate
+# spelling of a singleton key (migration-drift, strategy, matrix,
+# fail-fast, if, continue-on-error) and reject any count other than
+# the expected one. R13's `grep -Ec '^      matrix:'` and equivalent
+# checks only counted the unquoted spelling — a hostile rewrite that
+# used `      "matrix":` alongside the canonical unquoted `matrix:`
+# would leave the R13 count at 1 (canonical) and the grep-qxF exact-
+# line assertion would still tick green because the canonical line
+# was still present, while the quoted duplicate silently overrode it
+# in the yaml parser's view. R14 uses this helper for every singleton
+# invariant so no spelling can bypass the count.
+#
+# Bash 3.2 / POSIX awk only; no bash regex or process substitution.
+_count_yaml_key_at() {
+  local text="$1" ind="$2" key="$3"
+  local prefix
+  prefix="$(printf '%*s' "$ind" '')"
+  # Assemble the three regex alternates as awk vars so the awk program
+  # body itself stays single-quoted and free of shell substitution.
+  # `key` values used by callers (migration-drift, strategy, matrix,
+  # fail-fast, continue-on-error, if) contain only letters and `-`;
+  # `-` is literal outside character classes in POSIX ERE so no
+  # additional escaping is needed. Any future key with regex specials
+  # (`.`, `*`, `+`, `[`, `(`, `\`) would need escaping added here.
+  printf '%s\n' "$text" | awk \
+    -v pat_u="^${prefix}${key}[[:space:]]*:" \
+    -v pat_d="^${prefix}\"${key}\"[[:space:]]*:" \
+    -v pat_s="^${prefix}'${key}'[[:space:]]*:" '
+    { sub(/\r$/, "") }
+    $0 ~ pat_u || $0 ~ pat_d || $0 ~ pat_s { n++ }
+    END { print n+0 }
+  '
 }
 
 # _check_drift_step_shape <workflow>
@@ -1031,21 +1177,37 @@ extract_job_block() {
 _check_drift_step_shape() {
   local workflow="$1"
 
-  # R13: Exactly one `  migration-drift:` job header. `extract_job_block`
-  # has first-match semantics — a duplicate job header would let a
-  # shadow job impersonate the real one under the summary gate's
-  # `needs.migration-drift.result` read, while this shape guard
-  # inspected only the first block. Count via CRLF-tolerant awk before
-  # any single-block extraction so the count is unambiguous.
-  local job_header_count
-  job_header_count="$(awk '
-    { sub(/\r$/, "") }
-    $0 == "  migration-drift:" { n++ }
-    END { print n+0 }
-  ' "$workflow")"
+  # R13/R14: Exactly one migration-drift job header at 2-space indent.
+  # `extract_job_block` has first-match semantics — a duplicate job
+  # header would let a shadow job impersonate the real one under the
+  # summary gate's `needs.migration-drift.result` read, while this
+  # shape guard inspected only the first block. R14 counts every yaml
+  # spelling (unquoted / double-quoted / single-quoted, with optional
+  # whitespace before the colon) so a shadow header written as
+  # `  "migration-drift":` or `  'migration-drift' :` cannot slip past
+  # the R13 exact-string count.
+  #
+  # `workflow_body` is CR-normalised so downstream `grep -qxF`
+  # canonical-line checks compare byte-for-byte identically on a
+  # Windows-checkout worktree (where ci.yml may have CRLF endings)
+  # and a Linux-style checkout. `_count_yaml_key_at` strips CRs
+  # internally, but the canonical `grep -qxF` calls used to pin the
+  # unquoted spelling do not — so we normalise once, up-front.
+  local workflow_body job_header_count
+  workflow_body="$(awk '{ sub(/\r$/, ""); print }' "$workflow")"
+  job_header_count="$(_count_yaml_key_at "$workflow_body" 2 migration-drift)"
   if [[ "$job_header_count" != "1" ]]; then
     printf '  expected exactly one migration-drift job header, found %s\n' \
       "$job_header_count" >&2
+    return 1
+  fi
+  # R14: the surviving header must be the canonical unquoted form so a
+  # single-spelling swap (e.g. replacing `  migration-drift:` with
+  # `  "migration-drift":`) cannot pass the count-of-1 check by simply
+  # substituting one spelling for another.
+  if ! printf '%s\n' "$workflow_body" | grep -qxF "  migration-drift:"; then
+    printf '  migration-drift job header must be the canonical unquoted form\n' >&2
+    printf '    expected line: %q\n' "  migration-drift:" >&2
     return 1
   fi
 
@@ -1065,18 +1227,67 @@ _check_drift_step_shape() {
   fi
 
   # Job-level keys sit at 4-space indent under `  migration-drift:`.
-  # `continue-on-error:` at that indent applies to the whole job.
-  if printf '%s\n' "$job_block" | grep -Eq '^    continue-on-error:'; then
-    printf '  migration-drift job must not set job-level continue-on-error\n' >&2
+  # `continue-on-error:` at that indent applies to the whole job:
+  # GitHub Actions treats it as "step failures do not fail the job",
+  # so the summary gate's `needs.migration-drift.result` would tick
+  # success even when the drift step exited non-zero. R14 counts
+  # across every yaml spelling so `    "continue-on-error":` or
+  # `    'continue-on-error' :` cannot slip past the R13 unquoted-
+  # only `grep -Eq '^    continue-on-error:'` check.
+  local job_coe_count
+  job_coe_count="$(_count_yaml_key_at "$job_block" 4 continue-on-error)"
+  if [[ "$job_coe_count" != "0" ]]; then
+    printf '  migration-drift job must not set job-level continue-on-error (found %s)\n' \
+      "$job_coe_count" >&2
     return 1
   fi
 
-  # R13: Exactly one strategy.matrix line at 6-space indent. Both
+  # R14: Exactly one job-level `if:` at 4-space indent, and its
+  # canonical value must match the selection expression. Any other
+  # value (`if: false`, a different expression) would either skip
+  # the job unconditionally or run it under unexpected gating. R14
+  # extends the R13 canonical-line check with a spelling-aware count
+  # so `    "if":` cannot appear alongside the unquoted canonical.
+  local job_if_count
+  job_if_count="$(_count_yaml_key_at "$job_block" 4 if)"
+  if [[ "$job_if_count" != "1" ]]; then
+    printf '  migration-drift job must have exactly one job-level if clause, found %s\n' \
+      "$job_if_count" >&2
+    return 1
+  fi
+  local expected_if="    if: \${{ needs.select.outputs.want_mig_drift == 'true' }}"
+  if ! printf '%s\n' "$job_block" | grep -qxF "$expected_if"; then
+    printf '  migration-drift job missing expected selection if clause\n' >&2
+    printf '    expected line: %q\n' "$expected_if" >&2
+    return 1
+  fi
+
+  # R14: Exactly one `    strategy:` block at 4-space indent, across
+  # every yaml spelling. A duplicate strategy block (e.g. an appended
+  # `    "strategy":` that overrides the first via yaml merge semantics
+  # in some parsers) is rejected by the count; a single-spelling swap
+  # is rejected by the canonical-line check below.
+  local strategy_count
+  strategy_count="$(_count_yaml_key_at "$job_block" 4 strategy)"
+  if [[ "$strategy_count" != "1" ]]; then
+    printf '  migration-drift job must have exactly one strategy block, found %s\n' \
+      "$strategy_count" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$job_block" | grep -qxF "    strategy:"; then
+    printf '  migration-drift job strategy key must be the canonical unquoted form\n' >&2
+    printf '    expected line: %q\n' "    strategy:" >&2
+    return 1
+  fi
+
+  # R13/R14: Exactly one strategy.matrix line at 6-space indent. Both
   # inline (`      matrix: ${{ ... }}`) and block (`      matrix:` on
   # its own line followed by `        include:` etc.) forms produce
-  # one line starting `^      matrix:`. Count that; require 1.
+  # one line matching `^      matrix:`. R14 additionally counts every
+  # yaml spelling so a duplicate `      "matrix":` line alongside the
+  # canonical unquoted key cannot slip past the R13 grep-only counter.
   local matrix_lines
-  matrix_lines="$(printf '%s\n' "$job_block" | grep -Ec '^      matrix:' || true)"
+  matrix_lines="$(_count_yaml_key_at "$job_block" 6 matrix)"
   if [[ "$matrix_lines" != "1" ]]; then
     printf '  migration-drift job must have exactly one strategy.matrix line, found %s\n' \
       "$matrix_lines" >&2
@@ -1087,7 +1298,9 @@ _check_drift_step_shape() {
   # swaps this for an inline hard-coded `{include: [{...}]}` fails the
   # exact-line match; a mutant that switches to block-scalar (`matrix:`
   # alone on a line) also fails because the block-header line is
-  # `      matrix:` without the `${{ fromJson ... }}` suffix.
+  # `      matrix:` without the `${{ fromJson ... }}` suffix; a mutant
+  # that uses a quoted key `      "matrix": ${{ ... }}` fails because
+  # the canonical unquoted line is absent.
   local expected_matrix="      matrix: \${{ fromJson(needs.select.outputs.mig_matrix) }}"
   if ! printf '%s\n' "$job_block" | grep -qxF "$expected_matrix"; then
     printf '  migration-drift job strategy.matrix must be exactly the selector-driven fromJson(needs.select.outputs.mig_matrix) form\n' >&2
@@ -1095,24 +1308,26 @@ _check_drift_step_shape() {
     return 1
   fi
 
-  # R13: pin `fail-fast: false`. Default is true, which would cancel
-  # sibling matrix legs on the first failure and hide drift on the
-  # cancelled legs.
+  # R13/R14: pin `fail-fast: false` and reject duplicates. Default is
+  # true, which would cancel sibling matrix legs on the first failure
+  # and hide drift on the cancelled legs. R14 counts every spelling
+  # so an appended `      fail-fast: true` alongside the canonical
+  # `      fail-fast: false` (yaml's last-wins semantics would let the
+  # true win in some parsers) is rejected on count, not on canonical
+  # presence.
+  local fail_fast_count
+  fail_fast_count="$(_count_yaml_key_at "$job_block" 6 fail-fast)"
+  if [[ "$fail_fast_count" != "1" ]]; then
+    # shellcheck disable=SC2016  # backticks are literal in the message
+    printf '  migration-drift job strategy.fail-fast must have exactly one entry (verbatim `fail-fast: false`), found %s\n' \
+      "$fail_fast_count" >&2
+    return 1
+  fi
   local expected_fail_fast="      fail-fast: false"
   if ! printf '%s\n' "$job_block" | grep -qxF "$expected_fail_fast"; then
     # shellcheck disable=SC2016  # backticks are literal in the message
     printf '  migration-drift job strategy.fail-fast must be false (verbatim `fail-fast: false` at strategy-child indent)\n' >&2
     printf '    expected line: %q\n' "$expected_fail_fast" >&2
-    return 1
-  fi
-
-  # Preserve the expected selection `if:` — anything else (`if: false`,
-  # a different expression) would either skip the job unconditionally
-  # or run it under unexpected gating.
-  local expected_if="    if: \${{ needs.select.outputs.want_mig_drift == 'true' }}"
-  if ! printf '%s\n' "$job_block" | grep -qxF "$expected_if"; then
-    printf '  migration-drift job missing expected selection if clause\n' >&2
-    printf '    expected line: %q\n' "$expected_if" >&2
     return 1
   fi
 
@@ -1524,9 +1739,9 @@ _copy_real_workflow_for_mutation() {
 #
 # Apply <awk_program> in place to <file>. Uses a `.tmp` sibling as
 # intermediate storage and atomically `mv`s it into place on awk
-# success. On awk failure the `.tmp` is removed and awk's exit status
-# is returned to the caller — so a failure never leaks the tmp file
-# even if the caller neglects to install a cleanup trap.
+# success. On awk failure the `.tmp` is removed and awk's real exit
+# status is returned to the caller — so a failure never leaks the
+# tmp file even if the caller neglects to install a cleanup trap.
 #
 # Bishop cleanup (R13): the R12 mutation cases used the pattern
 # `awk … > "$mutant.tmp" && mv "$mutant.tmp" "$mutant"`. On awk failure
@@ -1535,11 +1750,22 @@ _copy_real_workflow_for_mutation() {
 # tmp behind. Every subsequent mutation from the same test run would
 # collide on the deterministic-suffix path. `_mutate` centralises the
 # cleanup so the pattern is bug-free at every call site.
+#
+# Hicks cleanup (R14): the R13 implementation captured awk's rc
+# INSIDE `if ! awk …; then local rc=$?; …`. Inside the `then` branch
+# of a negated pipeline, `$?` is 0 (the negation's own result), not
+# awk's exit code — so the tmp cleanup path always `return 0`'d and
+# the guard reported success on awk failure. R14 runs awk directly,
+# captures `$?` on the very next line before ANY other command (so
+# no intermediate command clobbers it), and branches on the captured
+# value. Coverage: `case_mutate_helper_propagates_awk_failure`.
 _mutate() {
   local file="$1" awk_prog="$2"
   local tmp="${file}.tmp"
-  if ! awk "$awk_prog" "$file" > "$tmp"; then
-    local rc=$?
+  local rc
+  awk "$awk_prog" "$file" > "$tmp"
+  rc=$?
+  if (( rc != 0 )); then
     rm -f -- "$tmp"
     return "$rc"
   fi
@@ -1831,6 +2057,251 @@ case_drift_shape_rejects_duplicate_migration_drift_job() {
     "expected exactly one migration-drift job header, found 2" || return 1
 }
 
+# R14 mutation: append `      "matrix": {include: [{...}]}` as a
+# second yaml-level matrix key at 6-space strategy-child indent,
+# ALONGSIDE the canonical unquoted `      matrix: ${{ ... }}`. Under
+# R13's `grep -Ec '^      matrix:'` counter, the quoted spelling did
+# not increment the count so the mutation slipped past the count
+# invariant, and the canonical `grep -qxF` line assertion still
+# passed because the unquoted canonical line was unchanged. Yaml
+# parsers that resolve duplicate keys with last-wins semantics
+# (including several used by third-party actions runners) would
+# then execute the hand-picked single-entry quoted matrix and skip
+# three of the four EF pairs — a fail-open the R14 spelling-aware
+# `_count_yaml_key_at` closes by counting all three yaml spellings
+# together and rejecting any count other than 1.
+case_drift_shape_rejects_quoted_duplicate_matrix() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Inject the shadow quoted-key matrix line immediately after the
+  # canonical selector-driven line. Both lines live at 6-space indent
+  # inside the strategy block; the injected line's value is a hand-
+  # picked inline single-entry matrix that would (under last-wins
+  # yaml semantics) override the four-way sibling coverage.
+  # shellcheck disable=SC2016  # $0 is awk field ref, not shell param
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    $0 == "      matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}" && !inserted {
+      print "      \"matrix\": {include: [{name: \"AppPg\", label: \"App/Pg\", project: \"migrations/Farm.Migrations.PostgreSQL\", context: \"AppDbContext\", provider: \"postgres\"}]}\r"
+      inserted = 1
+    }
+  ' || return 1
+
+  _assert_shape_guard_rejects "quoted duplicate matrix" "$mutant" \
+    "exactly one strategy.matrix line, found 2" || return 1
+}
+
+# R14 mutation: append `      fail-fast: true` as a second yaml key
+# at 6-space strategy-child indent, ALONGSIDE the canonical
+# `      fail-fast: false`. Under R13 the guard used only a canonical
+# `grep -qxF "      fail-fast: false"` presence check with no count
+# invariant, so appending a duplicate `fail-fast: true` left the
+# canonical line untouched (grep still matched) while yaml last-wins
+# semantics would have GitHub Actions read the second entry as the
+# effective value, restoring the fail-fast:true behaviour the R13
+# invariant was written to prevent. R14 counts every spelling of
+# `fail-fast` at strategy-child indent and rejects any count other
+# than 1, so duplicate keys of any spelling combination fail closed.
+case_drift_shape_rejects_duplicate_fail_fast_true() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Inject the shadow `fail-fast: true` immediately after the
+  # canonical `fail-fast: false` line, at the same indent, so both
+  # lines sit inside the same strategy block.
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    $0 == "      fail-fast: false" && !inserted {
+      print "      fail-fast: true\r"
+      inserted = 1
+    }
+  ' || return 1
+
+  _assert_shape_guard_rejects "duplicate fail-fast true" "$mutant" \
+    "fail-fast must have exactly one entry" || return 1
+}
+
+# R14 mutation: inject `    "continue-on-error": true` at job level
+# (4-space indent). Under R13 the guard used `grep -Eq
+# '^    continue-on-error:'` which only matched the unquoted spelling
+# and let the double-quoted variant slip past; the underlying yaml
+# semantics are identical — GitHub Actions treats a job-level
+# continue-on-error of any spelling as "step failures do not fail
+# the job", so the summary gate's `needs.migration-drift.result`
+# would tick success even when the drift step exited non-zero. R14's
+# `_count_yaml_key_at` counts all three yaml spellings; the zero-
+# tolerance invariant rejects any count > 0 with a specific
+# diagnostic.
+case_drift_shape_rejects_quoted_job_continue_on_error() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Insert the quoted job-level `continue-on-error: true` immediately
+  # after the migration-drift job's `name:` line at 4-space indent.
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    inside && !inserted && /^    name:/ {
+      print "    \"continue-on-error\": true\r"
+      inserted = 1
+    }
+    $0 == "  migration-drift:" { inside = 1 }
+  ' || return 1
+
+  _assert_shape_guard_rejects "quoted job-level continue-on-error" "$mutant" \
+    "must not set job-level continue-on-error" || return 1
+}
+
+# R14 mutation: append a second `    strategy:` key at 4-space
+# job-indent, giving the migration-drift job two strategy blocks.
+# The R13 guard had no `strategy` count invariant — it only checked
+# strategy.matrix and strategy.fail-fast children, which came from
+# the FIRST strategy block extracted by the yaml parser. A second
+# strategy block appended after the first would (under yaml last-
+# wins) override the first with whatever fail-fast/matrix children
+# it declared, and R13 would silently pass. R14 counts every yaml
+# spelling of `strategy` at 4-space indent and rejects any count
+# other than 1.
+case_drift_shape_rejects_duplicate_strategy() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Inject the shadow strategy header immediately after the migration-
+  # drift `runs-on:` line at 4-space indent; deliberately empty (no
+  # children) so the mutation surface stays surgical — the guard must
+  # reject on the duplicate KEY count alone, regardless of children.
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    inside && !inserted && /^    runs-on:/ {
+      print "    strategy:\r"
+      inserted = 1
+    }
+    $0 == "  migration-drift:" { inside = 1 }
+  ' || return 1
+
+  _assert_shape_guard_rejects "duplicate strategy block" "$mutant" \
+    "exactly one strategy block, found 2" || return 1
+}
+
+# R14 mutation: replace the canonical unquoted `    strategy:` with
+# the double-quoted spelling `    "strategy":`. Under R13 there was
+# no strategy invariant at all, so a strategy-key spelling swap was
+# never checked. Under R14, the spelling-aware count is still 1
+# (double-quoted spelling counts), but the canonical-form assertion
+# fails: R14 requires the surviving spelling to be the unquoted
+# canonical form so a reviewer skimming the diff cannot be misled
+# by a quoted-key rewrite (which yaml parsers accept but reviewers
+# rarely audit for equivalence).
+case_drift_shape_rejects_quoted_strategy() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # shellcheck disable=SC2016  # $0 is awk field ref, not shell param
+  _mutate "$mutant" '
+    { sub(/\r$/, "") }
+    $0 == "    strategy:" {
+      print "    \"strategy\":\r"
+      next
+    }
+    { print $0 "\r" }
+  ' || return 1
+
+  _assert_shape_guard_rejects "quoted strategy key" "$mutant" \
+    "strategy key must be the canonical unquoted form" || return 1
+}
+
+# R14 mutation: append `  "migration-drift":` shadow job header
+# using the double-quoted spelling. Under R13's exact-string count
+# (`$0 == "  migration-drift:"`), the quoted spelling did not
+# increment the counter and the shadow job would take over the
+# summary gate's `needs.migration-drift.result` read — a bypass
+# shape the R14 `_count_yaml_key_at` closes by counting all three
+# yaml spellings at 2-space job indent together. The shadow body
+# is a minimal inert `if: false` skeleton, same as the R13 duplicate
+# case, so the mutation stays surgical.
+case_drift_shape_rejects_quoted_shadow_migration_drift_job() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Append a second (double-quoted) `  "migration-drift":` header +
+  # minimal body at the end of the file.
+  if ! {
+    cat "$mutant"
+    printf '\n  "migration-drift":\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: "echo shadow"\n'
+  } > "${mutant}.tmp"; then
+    rm -f -- "${mutant}.tmp"
+    return 1
+  fi
+  mv -- "${mutant}.tmp" "$mutant"
+
+  _assert_shape_guard_rejects "quoted shadow migration-drift job header" "$mutant" \
+    "expected exactly one migration-drift job header, found 2" || return 1
+}
+
+# R14 focused test: `_mutate` must propagate awk's real exit status
+# on failure. The R13 implementation captured `$?` INSIDE the
+# `then` branch of `if ! awk …; then rc=$?; …`, at which point `$?`
+# is 0 (the negation's own result), not awk's exit code — so on
+# awk failure `_mutate` reported success with rc=0 while leaving the
+# original file untouched, causing downstream `_assert_shape_guard_
+# rejects` calls to test against an unmutated workflow (whose shape
+# guard rightly PASSES) and report false positives for the mutation
+# case. R14 runs awk directly, captures `$?` on the next line, and
+# branches on the captured value. This test exercises that path by
+# passing an awk program with a hard syntax error and asserting:
+#   (a) `_mutate` returns non-zero,
+#   (b) the target file is byte-identical to its pre-mutation content,
+#   (c) the `.tmp` sibling is cleaned up on failure.
+case_mutate_helper_propagates_awk_failure() {
+  local target
+  target="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$target' '${target}.tmp'" RETURN
+  printf 'canonical content\n' > "$target"
+
+  # Awk program with a hard syntax error — no valid interpretation.
+  # Every awk implementation (gawk, mawk, BSD awk) exits non-zero
+  # when it cannot parse the program at all.
+  local rc=0
+  _mutate "$target" 'BEGIN { !!! not valid awk !!! }' 2>/dev/null || rc=$?
+  if (( rc == 0 )); then
+    printf '  _mutate returned success on awk syntax error\n' >&2
+    return 1
+  fi
+
+  # Original file must be byte-identical to its pre-mutation content.
+  local content
+  content="$(cat "$target")"
+  if [[ "$content" != "canonical content" ]]; then
+    printf '  _mutate mutated file despite awk failure\n' >&2
+    printf '    expected: %q\n' "canonical content" >&2
+    printf '    actual:   %q\n' "$content" >&2
+    return 1
+  fi
+
+  # The `.tmp` sibling must be cleaned up on failure — a leaked tmp
+  # would collide with the next _mutate call on the same file path
+  # and (silently) short-circuit the rewrite.
+  if [[ -e "${target}.tmp" ]]; then
+    printf '  _mutate left tmp file behind on awk failure: %s.tmp\n' "$target" >&2
+    return 1
+  fi
+
+  return 0
+}
+
 
 # =============================================================================
 # Runner
@@ -1899,6 +2370,13 @@ TESTS=(
   case_drift_shape_rejects_block_style_matrix
   case_drift_shape_rejects_fail_fast_true
   case_drift_shape_rejects_duplicate_migration_drift_job
+  case_drift_shape_rejects_quoted_duplicate_matrix
+  case_drift_shape_rejects_duplicate_fail_fast_true
+  case_drift_shape_rejects_quoted_job_continue_on_error
+  case_drift_shape_rejects_duplicate_strategy
+  case_drift_shape_rejects_quoted_strategy
+  case_drift_shape_rejects_quoted_shadow_migration_drift_job
+  case_mutate_helper_propagates_awk_failure
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'
