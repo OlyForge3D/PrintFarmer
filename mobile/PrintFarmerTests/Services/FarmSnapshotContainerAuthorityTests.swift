@@ -397,7 +397,84 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
                        "superseded B switch must never build B services")
     }
 
-    // MARK: H2 (Bishop) — auth-token CAS at snapshot publication
+    // MARK: H1 — production observer enabled: suspended real switch superseded
+
+    func testProductionObserverSuspendedRealSupersededByDemoNeverRebuildsReal() async throws {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        let userA = UUID(), userB = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        owners.setOwner(userID: userB, serverID: b.id)
+        try reg.setActive(id: a.id)
+
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
+        // PRODUCTION observer enabled — the switch is driven by the real registry
+        // observation, not a test-only direct call.
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: true,
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners,
+            signalRServiceFactory: recorder.factory
+        )
+
+        // Registry-observed switch to B parks at the outgoing (A) service teardown.
+        try reg.setActive(id: b.id)
+        await recorder.firstDisconnectBarrier.waitUntilArrived()
+
+        // Demo supersedes the suspended real switch (records .demo + advances epoch).
+        container.switchToDemo()
+        recorder.firstDisconnectBarrier.release()
+        await container.awaitActiveServerSettled()
+
+        // The resumed B switch must neither build nor bind B, and must not undo demo.
+        let demoSession = await store.currentSession()
+        XCTAssertNil(demoSession, "demo revoke leaves no live real session")
+        XCTAssertFalse(recorder.createdBaseURLs.contains { $0.host == "b.example.com" },
+                       "superseded B switch must never build B services")
+        XCTAssertNil(container.apiClient, "demo composition (nil apiClient) is preserved, not undone")
+    }
+
+    func testProductionObserverSuspendedSwitchSupersededByNoActiveServer() async throws {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        let userA = UUID(), userB = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        owners.setOwner(userID: userB, serverID: b.id)
+        try reg.setActive(id: a.id)
+
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: true,
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners,
+            signalRServiceFactory: recorder.factory
+        )
+
+        // Observed switch to B parks at the A-service teardown.
+        try reg.setActive(id: b.id)
+        await recorder.firstDisconnectBarrier.waitUntilArrived()
+
+        // Registry transitions to NO active server (logout / no-active equivalent). The
+        // suspended B switch is superseded; B must never build or bind.
+        try reg.setActive(id: nil)
+        recorder.firstDisconnectBarrier.release()
+        await container.awaitActiveServerSettled()
+
+        let session = await store.currentSession()
+        XCTAssertNil(session, "no-active-server target leaves no live session")
+        XCTAssertFalse(recorder.createdBaseURLs.contains { $0.host == "b.example.com" },
+                       "superseded B switch must never build B services")
+    }
+
+
 
     func testActivationBindsWhenAuthTokenStaysCurrent() async throws {
         let (container, store, a, userA) = try makeSingleServerContainer(tombstonedDummy: false)

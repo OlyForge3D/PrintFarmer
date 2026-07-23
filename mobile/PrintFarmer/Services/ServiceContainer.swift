@@ -54,6 +54,34 @@ final class ServiceContainer: @unchecked Sendable {
     /// when the worker later observes it, so a suspended switch is invalidated the
     /// instant a newer intent arrives.
     @ObservationIgnored private let transitionEpoch = ActiveServerGeneration()
+    /// The immutable desired composition target (H1). Set SYNCHRONOUSLY at every
+    /// intent change together with a transition-epoch advance. The reconciliation
+    /// worker reconciles ONLY this captured target and NEVER re-reads the registry to
+    /// infer intent after a suspension — so a suspended real switch can never resume
+    /// and undo a newer demo/logout intent.
+    @ObservationIgnored private var desiredTarget: DesiredTarget = .none
+
+    /// An immutable snapshot of the intended composition. `.server` carries the
+    /// captured server so the worker never re-derives it from the mutable registry.
+    enum DesiredTarget {
+        case none        // logged out / no active server
+        case demo        // demo composition (applied synchronously; worker never rebuilds real)
+        case server(RegisteredServer)
+    }
+
+    /// Record a new desired target and advance the transition epoch synchronously,
+    /// WITHOUT scheduling the worker (used by paths that apply the composition
+    /// synchronously themselves, e.g. demo/real toggles).
+    private func recordTarget(_ target: DesiredTarget) {
+        transitionEpoch.advance()
+        desiredTarget = target
+    }
+
+    /// Record a new desired target and schedule the reconciliation worker to apply it.
+    private func requestTarget(_ target: DesiredTarget) {
+        recordTarget(target)
+        scheduleActiveServerSwitch()
+    }
 
     // MARK: Farm snapshot lifecycle authority (issue #816)
     /// Shared synchronous authority for origin-pinned snapshot sessions. A
@@ -215,9 +243,11 @@ final class ServiceContainer: @unchecked Sendable {
 
     /// Replaces all services with demo implementations at runtime.
     func switchToDemo() {
-        // H1: advance the transition epoch synchronously so any pending/suspended
-        // real switch is invalidated and cannot publish after demo takes over.
-        transitionEpoch.advance()
+        // H1: record the demo desired target + advance the transition epoch
+        // synchronously, so any suspended real switch is invalidated and the worker
+        // reconciles `.demo` (a no-op that never rebuilds real) instead of re-reading
+        // the registry and undoing demo.
+        recordTarget(.demo)
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
@@ -253,11 +283,11 @@ final class ServiceContainer: @unchecked Sendable {
 
     /// Replaces all services with real implementations backed by the active or given base URL.
     func switchToReal(baseURL: URL? = nil) {
-        // H1: advance the transition epoch synchronously (intent change).
-        transitionEpoch.advance()
+        let server = serverRegistry?.activeServer
+        // H1: record the real/none desired target + advance the epoch synchronously.
+        recordTarget(server.map { .server($0) } ?? .none)
         // Revoke synchronously before the composition changes.
         farmSnapshotAuthority.revoke()
-        let server = serverRegistry?.activeServer
         let resolvedURL = server?.baseURL
             ?? baseURL
             ?? APIClient.savedBaseURL()
@@ -275,8 +305,10 @@ final class ServiceContainer: @unchecked Sendable {
 
     func switchToServer(_ server: RegisteredServer) async {
         guard activeServerID != server.id else { return }
-        transitionEpoch.advance() // intent change
-        await switchToActiveServer(server, epoch: transitionEpoch.current)
+        // H1: request the server target and let the single reconciliation worker apply
+        // it; await the worker so callers observe the settled switch.
+        requestTarget(.server(server))
+        await activeServerSwitchTask?.value
     }
 
     // MARK: - Farm snapshot lifecycle authority (issue #816)
@@ -289,6 +321,12 @@ final class ServiceContainer: @unchecked Sendable {
     func activateFarmSnapshotForActiveServer(authToken: Int? = nil) async {
         await activeServerSwitchTask?.value
         await bindSnapshotToActiveServer(authToken: authToken)
+    }
+
+    /// Await any in-flight active-server reconciliation so callers observe the settled
+    /// composition. Public API (a caller may legitimately wait for a switch to settle).
+    func awaitActiveServerSettled() async {
+        await activeServerSwitchTask?.value
     }
 
     /// Capture the current session, then conditionally deactivate ONLY that captured
@@ -364,12 +402,21 @@ final class ServiceContainer: @unchecked Sendable {
             _ = serverRegistry.activeServerID
             _ = serverRegistry.servers
         } onChange: { [weak self] in
-            // H1: advance the transition epoch SYNCHRONOUSLY at the intent change,
-            // on the mutating (MainActor) thread, before any worker observes it.
+            // Reserve an ordering slot SYNCHRONOUSLY on the mutating (MainActor) thread
+            // so this notification is ordered against any concurrent explicit intent.
             transitionEpoch.advance()
+            let stamp = transitionEpoch.current
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Re-register for the next change (reads the new registry state).
                 self.observeActiveServer()
+                // Apply this observation's intent ONLY if no NEWER intent (a later
+                // explicit demo/logout, or a newer registry change) has superseded it
+                // (H1: a late/out-of-order observer notification cannot overwrite a
+                // newer explicit intent). The registry read here TRANSLATES state into
+                // a captured target; the worker itself never re-reads the registry.
+                guard self.transitionEpoch.isCurrent(stamp) else { return }
+                self.desiredTarget = serverRegistry.activeServer.map { .server($0) } ?? .none
                 self.scheduleActiveServerSwitch()
             }
         }
@@ -385,15 +432,21 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     private func runActiveServerSwitchLoop() async {
-        guard let serverRegistry else { return }
-
         while true {
-            // Capture the intent epoch for THIS processing pass.
+            // Capture the intent epoch AND the immutable desired target for THIS pass.
+            // The worker reconciles ONLY the captured target and never re-reads the
+            // registry to infer intent after a suspension (H1).
             let epoch = transitionEpoch.current
-            if let server = serverRegistry.activeServer {
-                await switchToActiveServer(server, epoch: epoch)
-            } else {
+            let target = desiredTarget
+            switch target {
+            case .demo:
+                // Demo is applied synchronously by `switchToDemo`; the worker never
+                // rebuilds real services while demo is the desired target (no undo).
+                break
+            case .none:
                 await switchToNoActiveServer(epoch: epoch)
+            case .server(let server):
+                await switchToActiveServer(server, epoch: epoch)
             }
             // Re-process only if the target intent changed during the pass.
             if transitionEpoch.isCurrent(epoch) { break }
@@ -406,10 +459,14 @@ final class ServiceContainer: @unchecked Sendable {
         let outgoingSession = farmSnapshotAuthority.currentSession()
         await outgoingSignalR.disconnect()
         guard transitionEpoch.isCurrent(epoch) else {
-            // Superseded during disconnect: install a fresh (disconnected) signalR so
-            // the reconciliation loop's next pass does not re-tear-down the outgoing
-            // one — but publish NO target state (H1: an older switch never rebuilds).
-            replaceSignalRAfterSupersededSwitch()
+            // Superseded during disconnect. If NOBODY replaced the outgoing service we
+            // just disconnected (identity match), install a fresh one so the next pass
+            // does not re-tear-down a dead service. If a newer intent (e.g. demo)
+            // already swapped `signalRService`, leave it untouched — an older switch
+            // never rebuilds or clobbers newer state (H1).
+            if signalRService === outgoingSignalR {
+                replaceSignalRAfterSupersededSwitch()
+            }
             return
         }
 
@@ -465,7 +522,9 @@ final class ServiceContainer: @unchecked Sendable {
         let outgoingSession = farmSnapshotAuthority.currentSession()
         await outgoingSignalR.disconnect()
         guard transitionEpoch.isCurrent(epoch) else {
-            replaceSignalRAfterSupersededSwitch()
+            if signalRService === outgoingSignalR {
+                replaceSignalRAfterSupersededSwitch()
+            }
             return
         }
         if let outgoingSession {
