@@ -3515,9 +3515,9 @@ final class PredictiveViewModelTests: XCTestCase {
             recommendedAction: "Schedule maintenance immediately"
         )
         mockPredictiveService.alertsToReturn = [alert]
-        
+
         await viewModel.loadAlerts(printerId: testPrinterId)
-        
+
         XCTAssertEqual(viewModel.alerts.count, 1)
         XCTAssertEqual(viewModel.alerts.first?.alertType, "maintenance_overdue")
         XCTAssertEqual(viewModel.alerts.first?.severity, "warning")
@@ -3526,7 +3526,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertTrue(mockPredictiveService.getActiveAlertsCalled)
         XCTAssertEqual(mockPredictiveService.getActiveAlertsCalledWithPrinterId, testPrinterId)
     }
-    
+
     func testLoadAlertsHandlesError() async {
         viewModel.alerts = [
             PredictiveAlert(
@@ -3538,9 +3538,9 @@ final class PredictiveViewModelTests: XCTestCase {
         ]
         viewModel.error = "prior-predictive-alerts-error-sentinel"
         mockPredictiveService.errorToThrow = TestError.generic
-        
+
         await viewModel.loadAlerts(printerId: testPrinterId)
-        
+
         // loadAlerts() is a secondary load: it logs via `logger.warning`
         // and does not populate `viewModel.error` so a background alerts hiccup
         // never blocks the primary prediction UI or clears prior alerts.
@@ -3553,9 +3553,9 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.error, "prior-predictive-alerts-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
-    
+
     // MARK: - Load Forecasts
-    
+
     func testLoadForecastsPopulatesData() async {
         let forecast = MaintenanceForecast(
             printerId: testPrinterId,
@@ -4937,7 +4937,7 @@ private actor AsyncGate {
 }
         }
     }
- 
+
     /// Waiter analogue of `awaitObserverAndHold`.
     func awaitWaiterAndHold(
         _ token: WaiterToken,
