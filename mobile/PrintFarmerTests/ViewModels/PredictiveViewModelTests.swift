@@ -1730,6 +1730,318 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.observerParkAckQueueTotal, 0)
     }
 
+    // MARK: - Hicks H3: two-phase pre-park ACK ticket proofs
+    //
+    // These tests use the actor-synchronous `enterObserverParkAck` /
+    // `enterWaiterParkAck` API. Unlike `async let`-based pre-park ACK
+    // (whose queue-insertion ordering cannot be proven), the ticket API
+    // returns AFTER the caller has been queued (or an immediate terminal
+    // classification is available), so a snapshot taken between the
+    // enter call and the parking task's spawn provides deterministic
+    // proof that `observerParkAckTicketCount == N` BEFORE the parking
+    // task can run.
+
+    /// Hicks H3: two callers register park-ACK tickets BEFORE the
+    /// parking task is spawned. Snapshot proves both tickets active
+    /// (queueTotal + ticket count observable pre-spawn). After the
+    /// parking task actually parks, both tickets resolve exactly
+    /// `.parked` and every active per-token map returns to zero.
+    func testAsyncGateH3ParkAckTicketsQueuedBeforeSpawn_observer() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+
+        // Phase 1: register two tickets synchronously on the actor.
+        // These enter calls return AFTER the tickets have been recorded
+        // in `observerParkAckTicketToToken`, so any subsequent snapshot
+        // observes ticketCount==2 with certainty.
+        let e1 = await gate.enterObserverParkAck(token)
+        let e2 = await gate.enterObserverParkAck(token)
+        guard case .queued(let t1) = e1, case .queued(let t2) = e2 else {
+            XCTFail("both enter calls must return .queued for an unparked, active token")
+            await gate.close()
+            return
+        }
+        XCTAssertNotEqual(t1, t2, "tickets must be unique per-caller UUIDs")
+
+        // Pre-spawn snapshot proves queue-insertion happened BEFORE any
+        // parking task can run.
+        let preSpawn = await gate.snapshot()
+        XCTAssertEqual(preSpawn.observerParkAckTicketCount, 2,
+                       "both tickets must be queued BEFORE any parking task is spawned")
+        XCTAssertEqual(preSpawn.parkedObserverCount, 0,
+                       "no continuation has parked yet")
+
+        // Phase 2: spawn the parking task and await both tickets.
+        let park = Task { await gate.awaitObserver(token) }
+        let (r1, r2) = await (gate.awaitObserverParkAckTicket(t1),
+                              gate.awaitObserverParkAckTicket(t2))
+        XCTAssertEqual(r1, .parked, "ticket 1 resolves to .parked")
+        XCTAssertEqual(r2, .parked, "ticket 2 resolves to .parked")
+
+        // Signal → parked continuation resumes exactly once.
+        _ = await gate.registerWaiter()
+        await park.value
+
+        // H2 safety close: unconditional close before final assertions
+        // so any residual state surfaces as an assertion, not a hang.
+        await gate.close()
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerParkAckTicketCount, 0,
+                       "all tickets pruned after resolution")
+        XCTAssertEqual(final.observerParkAckQueueTotal, 0)
+        XCTAssertEqual(final.parkedObserverCount, 0)
+    }
+
+    /// Waiter analogue of the observer H3 pre-park ticket test.
+    func testAsyncGateH3ParkAckTicketsQueuedBeforeSpawn_waiter() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+
+        let e1 = await gate.enterWaiterParkAck(token)
+        let e2 = await gate.enterWaiterParkAck(token)
+        guard case .queued(let t1) = e1, case .queued(let t2) = e2 else {
+            XCTFail("both enter calls must return .queued for an unparked, active token")
+            await gate.close()
+            return
+        }
+        XCTAssertNotEqual(t1, t2)
+
+        let preSpawn = await gate.snapshot()
+        XCTAssertEqual(preSpawn.waiterParkAckTicketCount, 2,
+                       "both waiter tickets queued BEFORE spawn")
+        XCTAssertEqual(preSpawn.parkedWaiterCount, 0)
+
+        let park = Task { await gate.awaitWaiter(token) }
+        let (r1, r2) = await (gate.awaitWaiterParkAckTicket(t1),
+                              gate.awaitWaiterParkAckTicket(t2))
+        XCTAssertEqual(r1, .parked)
+        XCTAssertEqual(r2, .parked)
+
+        await gate.open()
+        await park.value
+
+        await gate.close()
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.waiterParkAckTicketCount, 0)
+        XCTAssertEqual(final.waiterParkAckQueueTotal, 0)
+        XCTAssertEqual(final.parkedWaiterCount, 0)
+    }
+
+    /// Hicks H3: `enterObserverParkAck` on an already-closed gate
+    /// returns `.immediate(.closedOrConsumed)` without allocating a
+    /// ticket. No queue growth.
+    func testAsyncGateH3EnterParkAckAfterCloseIsClosedOrConsumed_observer() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+        await gate.close()
+        let env = await gate.enterObserverParkAck(token)
+        if case .immediate(let r) = env {
+            // After close, the token has typically been fated as
+            // `.closedBeforePark`; either terminal classification is
+            // bounded/immediate.
+            XCTAssertTrue(r == .closedOrConsumed || r == .terminal(.closedBeforePark),
+                          "post-close enter must return immediate terminal classification; got \(r)")
+        } else {
+            XCTFail("post-close enterObserverParkAck must not allocate a ticket")
+        }
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerParkAckTicketCount, 0,
+                       "no tickets allocated post-close")
+    }
+
+    /// Hicks H3: an active ticket resolved by `close()` before the
+    /// parking task ever runs returns `.closedOrConsumed` (or the
+    /// bounded terminal `.terminal(.closedBeforePark)` when close's
+    /// seal-flush wins the race). Never hangs.
+    func testAsyncGateH3ParkAckTicketDrainedByClose_observer() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+        let env = await gate.enterObserverParkAck(token)
+        guard case .queued(let ticket) = env else {
+            XCTFail("expected .queued for active token")
+            await gate.close()
+            return
+        }
+        // Snapshot proves ticket queued.
+        let mid = await gate.snapshot()
+        XCTAssertEqual(mid.observerParkAckTicketCount, 1)
+
+        async let r: AsyncGate.ParkAckResult = gate.awaitObserverParkAckTicket(ticket)
+        await gate.close()
+        let outcome = await r
+        XCTAssertTrue(outcome == .closedOrConsumed
+                        || outcome == .terminal(.closedBeforePark),
+                      "close-before-park must resolve ticket boundedly; got \(outcome)")
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerParkAckTicketCount, 0,
+                       "ticket pruned after resolution")
+    }
+
+    /// Hicks H3: awaiting a fabricated (never-issued) park-ACK ticket
+    /// returns `.closedOrConsumed` immediately. No queue growth.
+    func testAsyncGateH3ParkAckTicketFabricatedIsClosedOrConsumed_observer() async {
+        let gate = AsyncGate()
+        let fake = UUID()
+        let r = await gate.awaitObserverParkAckTicket(fake)
+        XCTAssertEqual(r, .closedOrConsumed,
+                       "unknown/fabricated ticket must resolve boundedly")
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerParkAckTicketCount, 0)
+        await gate.close()
+    }
+
+    /// Waiter analogue of the fabricated-ticket test.
+    func testAsyncGateH3ParkAckTicketFabricatedIsClosedOrConsumed_waiter() async {
+        let gate = AsyncGate()
+        let fake = UUID()
+        let r = await gate.awaitWaiterParkAckTicket(fake)
+        XCTAssertEqual(r, .closedOrConsumed)
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.waiterParkAckTicketCount, 0)
+        await gate.close()
+    }
+
+    // MARK: - Hicks H1: exact per-attempt cancellation receipts
+    //
+    // These tests use the labeled `awaitObserver(_, attempt:)` /
+    // `awaitWaiter(_, attempt:)` overloads to attach a caller-owned
+    // UUID `attempt` identifier to each await invocation, then verify
+    // via `awaitObserverCancelReceipt(_ attemptID)` that:
+    //   - the DUPLICATE attempt's cancellation is processed as
+    //     `.processedIgnoredMismatch` (bounded no-op, not cross-owned),
+    //   - the ORIGINAL attempt receives `.finishedBeforeProcessing`
+    //     (natural completion via signal/open — no cancel touched it).
+
+    /// Hicks H1: duplicate-cancel exact receipts for observer. The
+    /// duplicate attempt's cancellation processing is proven to be an
+    /// exact per-attempt no-op; the original attempt is proven to be
+    /// untouched by any cancel dispatch.
+    func testAsyncGateH1ExactCancelReceipt_observer() async {
+        let gate = AsyncGate()
+        let barrier = AsyncGate()
+        let token = await gate.registerObserver()
+        let origAttempt = UUID()
+        let dupAttempt = UUID()
+
+        let original = Task { await gate.awaitObserver(token, attempt: origAttempt) }
+        await gate.waitForObserverParked(token)
+
+        let barrierToken = await barrier.registerWaiter()
+        let dup = Task {
+            await barrier.awaitWaiter(barrierToken)
+            await gate.awaitObserver(token, attempt: dupAttempt)
+        }
+        await barrier.waitForWaiterParked(barrierToken)
+        dup.cancel()
+        await dup.value
+        await gate.waitForObserverCancelCount(atLeast: 1)
+
+        // Exact per-attempt receipt: the duplicate's cancel was
+        // processed with a mismatched awaitID → ignoredMismatch.
+        let dupReceipt = await gate.awaitObserverCancelReceipt(dupAttempt)
+        XCTAssertEqual(dupReceipt, .processedIgnoredMismatch,
+                       "duplicate cancel receipt must be .processedIgnoredMismatch (bounded no-op)")
+
+        // Signal → original resumes naturally.
+        _ = await gate.registerWaiter()
+        await original.value
+
+        // Original attempt saw no cancel processing → finishedBeforeProcessing.
+        let origReceipt = await gate.awaitObserverCancelReceipt(origAttempt)
+        XCTAssertEqual(origReceipt, .finishedBeforeProcessing,
+                       "original attempt receipt must be .finishedBeforeProcessing (untouched by any cancel)")
+
+        // H2 safety close on both gates so any residual receipt state
+        // surfaces as an assertion, not a hang.
+        await gate.close()
+        await barrier.close()
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.observerReceiptStoredCount, 0,
+                       "receipt stored map pruned after consumption / close")
+        XCTAssertEqual(final.observerReceiptWaiterQueueTotal, 0,
+                       "no dangling receipt waiters")
+    }
+
+    /// Waiter analogue of the H1 exact receipt test.
+    func testAsyncGateH1ExactCancelReceipt_waiter() async {
+        let gate = AsyncGate()
+        let barrier = AsyncGate()
+        let token = await gate.registerWaiter()
+        let origAttempt = UUID()
+        let dupAttempt = UUID()
+
+        let original = Task { await gate.awaitWaiter(token, attempt: origAttempt) }
+        await gate.waitForWaiterParked(token)
+
+        let barrierToken = await barrier.registerWaiter()
+        let dup = Task {
+            await barrier.awaitWaiter(barrierToken)
+            await gate.awaitWaiter(token, attempt: dupAttempt)
+        }
+        await barrier.waitForWaiterParked(barrierToken)
+        dup.cancel()
+        await dup.value
+        await gate.waitForWaiterCancelCount(atLeast: 1)
+
+        let dupReceipt = await gate.awaitWaiterCancelReceipt(dupAttempt)
+        XCTAssertEqual(dupReceipt, .processedIgnoredMismatch)
+
+        await gate.open()
+        await original.value
+
+        let origReceipt = await gate.awaitWaiterCancelReceipt(origAttempt)
+        XCTAssertEqual(origReceipt, .finishedBeforeProcessing)
+
+        await gate.close()
+        await barrier.close()
+
+        let final = await gate.snapshot()
+        XCTAssertEqual(final.waiterReceiptStoredCount, 0)
+        XCTAssertEqual(final.waiterReceiptWaiterQueueTotal, 0)
+    }
+
+    /// Hicks H1: `awaitObserverCancelReceipt` called after `close()`
+    /// with no stored outcome resolves as `.closedBeforeProcessing`
+    /// immediately (bounded).
+    func testAsyncGateH1CancelReceiptAfterCloseIsClosedBeforeProcessing_observer() async {
+        let gate = AsyncGate()
+        await gate.close()
+        let r = await gate.awaitObserverCancelReceipt(UUID())
+        XCTAssertEqual(r, .closedBeforeProcessing)
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerReceiptStoredCount, 0)
+        XCTAssertEqual(snap.observerReceiptWaiterQueueTotal, 0)
+    }
+
+    /// Waiter analogue.
+    func testAsyncGateH1CancelReceiptAfterCloseIsClosedBeforeProcessing_waiter() async {
+        let gate = AsyncGate()
+        await gate.close()
+        let r = await gate.awaitWaiterCancelReceipt(UUID())
+        XCTAssertEqual(r, .closedBeforeProcessing)
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.waiterReceiptStoredCount, 0)
+        XCTAssertEqual(snap.waiterReceiptWaiterQueueTotal, 0)
+    }
+
+    /// Hicks H1: `awaitObserverCancelReceipt` for an attemptID that
+    /// was never used returns `.finishedBeforeProcessing` on an open
+    /// gate (no stored outcome, no in-flight parked entry).
+    func testAsyncGateH1CancelReceiptUnknownAttemptOnOpenGateIsFinished_observer() async {
+        let gate = AsyncGate()
+        let r = await gate.awaitObserverCancelReceipt(UUID())
+        XCTAssertEqual(r, .finishedBeforeProcessing,
+                       "unknown attemptID on open gate → finishedBeforeProcessing (bounded)")
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerReceiptStoredCount, 0)
+        XCTAssertEqual(snap.observerReceiptWaiterQueueTotal, 0)
+        await gate.close()
+    }
+
     // MARK: - Hicks B: bounded post-close state
 
     /// Bishop F1: high-count repeated post-close register/await/ACK proves
@@ -2481,6 +2793,49 @@ private actor AsyncGate {
         case openedImmediate        // awaitWaiter branch: opened-since-register drain-in-await
     }
 
+    /// Hicks H1 addendum: exact per-attempt cancellation receipt. Each
+    /// await attempt owns a UUID (see `makeAwaitID`); when its onCancel
+    /// dispatches to `cancelObserver(id:, awaitID:)`, or when the await
+    /// body completes normally, or when `close()` drains the receipt
+    /// waiters, exactly one of these outcomes is delivered for THAT
+    /// attempt. This lets tests prove which attempt received a matched
+    /// vs mismatched cancel without aggregate aliasing.
+    enum ObserverCancelReceipt: Sendable, Hashable {
+        case processedMatched              // cancelObserver drained THIS awaitID's parked continuation
+        case processedIgnoredMismatch      // cancelObserver ran but this awaitID was not parked (or another awaitID was)
+        case finishedBeforeProcessing      // awaitObserver body completed with no cancel firing
+        case closedBeforeProcessing        // close() drained the receipt waiter before any cancel outcome
+    }
+
+    /// Waiter analogue of `ObserverCancelReceipt`.
+    enum WaiterCancelReceipt: Sendable, Hashable {
+        case processedMatched
+        case processedIgnoredMismatch
+        case finishedBeforeProcessing
+        case closedBeforeProcessing
+    }
+
+    /// Hicks H3 addendum: two-phase park-ACK envelope. `enterX`
+    /// synchronously returns `.immediate(result)` for any token that
+    /// cannot enter the queue (already parked / already fated /
+    /// unknown / registered-against-closed-gate). It returns
+    /// `.queued(ticket)` iff a fresh ticket was reserved on an
+    /// active-registered token. Callers then await the ticket via
+    /// `awaitObserverParkAckTicket(_:)` to observe the eventual
+    /// `parked` / `terminal(_)` / `closedOrConsumed` outcome. The
+    /// two-phase split proves the caller was queued BEFORE any parking
+    /// task was launched.
+    enum ObserverParkAckEnvelope: Sendable {
+        case immediate(ParkAckResult)
+        case queued(UUID)
+    }
+
+    /// Waiter analogue of `ObserverParkAckEnvelope`.
+    enum WaiterParkAckEnvelope: Sendable {
+        case immediate(ParkAckResult)
+        case queued(UUID)
+    }
+
     /// Snapshot of gate state. All prior fields preserved for existing
     /// tests; new fields (fates, reason counts, edge counters) expose
     /// deterministic evidence for cancel/duplicate/unknown handling.
@@ -2532,15 +2887,30 @@ private actor AsyncGate {
         let waiterParkAckQueueTotal: Int
         let observerCancelCountAckQueueTotal: Int
         let waiterCancelCountAckQueueTotal: Int
+
+        // Hicks H1 addendum: exact per-attempt cancellation receipt queues.
+        // `Stored` holds outcomes delivered before their consumer awaited
+        // (active-only; pruned on consume). `Waiters` holds consumers
+        // waiting for a receipt (drained on delivery or close).
+        let observerReceiptStoredCount: Int
+        let waiterReceiptStoredCount: Int
+        let observerReceiptWaiterQueueTotal: Int
+        let waiterReceiptWaiterQueueTotal: Int
+
+        // Hicks H3 addendum: pre-park ACK tickets outstanding — reserved
+        // via `enterX...ParkAck` but not yet resolved (park/terminal/close).
+        let observerParkAckTicketCount: Int
+        let waiterParkAckTicketCount: Int
     }
 
     // MARK: State
     private var nextID: UInt64 = 1
-    private var nextAwaitID: UInt64 = 1
-    private var parkedObservers: [UInt64: (awaitID: UInt64, c: CheckedContinuation<Void, Never>)] = [:]
+    // Hicks H5 / addendum: non-reusing per-await identity. UUID guarantees
+    // owner/receipt maps cannot alias a prior/wrapped attempt.
+    private var parkedObservers: [UInt64: (awaitID: UUID, c: CheckedContinuation<Void, Never>)] = [:]
     private var completedObservers: Set<UInt64> = []
     private var observerOrder: [UInt64] = []
-    private var parkedWaiters: [UInt64: (awaitID: UInt64, c: CheckedContinuation<Void, Never>)] = [:]
+    private var parkedWaiters: [UInt64: (awaitID: UUID, c: CheckedContinuation<Void, Never>)] = [:]
     private var completedWaiters: Set<UInt64> = []
     private var waiterOrder: [UInt64] = []
     private var pendingEntrySignals: Int = 0
@@ -2566,6 +2936,31 @@ private actor AsyncGate {
     // without inference. Queue only for active-registered tokens.
     private var observerParkAcks: [UInt64: [CheckedContinuation<ParkAckResult, Never>]] = [:]
     private var waiterParkAcks: [UInt64: [CheckedContinuation<ParkAckResult, Never>]] = [:]
+
+    // Hicks H3 addendum: two-phase pre-park ACK. `enterObserverParkAck`
+    // synchronously reserves a ticket iff the token is active-registered
+    // (not yet parked/fated). `awaitObserverParkAckTicket` awaits that
+    // reservation to resolve. This proves callers were queued BEFORE the
+    // parking task ran, which `async let waitForObserverParked(...)` can
+    // never guarantee (its actor-entry order is scheduler-dependent).
+    // Tickets are actively pruned when the reservation resolves (via
+    // flushObserverParkAcks or the await taking the immediate branch)
+    // and cleared on close.
+    private var observerParkAckTicketToToken: [UUID: UInt64] = [:]
+    private var waiterParkAckTicketToToken: [UUID: UInt64] = [:]
+
+    // Hicks H1 addendum: exact per-attempt cancellation receipts. Each
+    // await attempt owns a UUID; when its onCancel dispatches to
+    // cancelX(id:, awaitID:), one of `processedMatched`,
+    // `processedIgnoredMismatch`, or (in the closed-drain edge)
+    // `closedBeforeProcessing` is delivered exactly once for THAT
+    // attempt. If the await body completes without cancel firing,
+    // `finishedBeforeProcessing` is delivered. Storage is active-only:
+    // resumed waiters flush; stored outcomes are consumed on await.
+    private var observerReceiptStored: [UUID: ObserverCancelReceipt] = [:]
+    private var observerReceiptWaiters: [UUID: [CheckedContinuation<ObserverCancelReceipt, Never>]] = [:]
+    private var waiterReceiptStored: [UUID: WaiterCancelReceipt] = [:]
+    private var waiterReceiptWaiters: [UUID: [CheckedContinuation<WaiterCancelReceipt, Never>]] = [:]
 
     // Hicks B: post-close registration bounded aggregate counters.
     // Post-close registerX does NOT insert per-token maps.
@@ -2624,7 +3019,16 @@ private actor AsyncGate {
     /// Hicks C: every `c.resume()` bumps `observerResumeCounts[site]`
     /// once — actual-resume counters, distinct from fate seals.
     func awaitObserver(_ token: ObserverToken) async {
-        let awaitID = makeAwaitID()
+        await awaitObserver(token, attempt: makeAwaitID())
+    }
+
+    /// Hicks H1 addendum: labeled overload that exposes the per-attempt
+    /// UUID to the caller so tests can later query
+    /// `awaitObserverCancelReceipt(_:)` for the exact outcome of THIS
+    /// attempt's cancel handling. Semantics identical to the unlabeled
+    /// form; the awaitID identifies the invocation for cancellation
+    /// ownership + receipt delivery.
+    func awaitObserver(_ token: ObserverToken, attempt awaitID: UUID) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
                 // (1) Before-park latch present → consume it and
@@ -2650,25 +3054,17 @@ private actor AsyncGate {
                 // (3) Currently registered (in observerOrder).
                 if observerOrder.contains(token.id) {
                     if closed {
-                        // Registered before close, being drained now.
-                        // Aggregate-only seal (Bishop F1): no per-token
-                        // state kept.
                         observerOrder.removeAll { $0 == token.id }
                         sealObserverOutcome(id: token.id, reason: .closedBeforePark)
                         observerResumeCounts[.closedImmediate, default: 0] += 1
                         c.resume()
                         return
                     }
-                    // Normal park. Tag with this invocation's awaitID
-                    // so ONLY this invocation's cancellation can drain it.
                     parkedObservers[token.id] = (awaitID: awaitID, c: c)
                     flushObserverParkAcks(id: token.id, result: .parked)
                     return
                 }
-                // (4) Not active. Distinguish fabricated (never issued)
-                //     from previously-issued-and-consumed (or post-close
-                //     registered). Both are bounded no-ops but labeled
-                //     for evidence.
+                // (4) Not active.
                 if token.id >= nextID {
                     observerUnknownAwaitCount += 1
                     observerResumeCounts[.unknownToken, default: 0] += 1
@@ -2678,6 +3074,11 @@ private actor AsyncGate {
                 }
                 c.resume()
             }
+            // Hicks H1 addendum: natural completion delivers no receipt
+            // eagerly; `awaitObserverCancelReceipt` resolves lazily to
+            // `.finishedBeforeProcessing` when no in-flight parked entry
+            // remains for this awaitID and no cancel-processing outcome
+            // was stored. This keeps snapshot state bounded / active-only.
         } onCancel: {
             Task { await self.cancelObserver(id: token.id, awaitID: awaitID) }
         }
@@ -2693,11 +3094,15 @@ private actor AsyncGate {
     /// Hicks D: bumps `observerCancelInvocationCount` and flushes any
     /// ACKs waiting for a specific cancel-invocation threshold, so
     /// tests can structurally await a cancel dispatch without polling.
-    private func cancelObserver(id: UInt64, awaitID: UInt64) {
+    private func cancelObserver(id: UInt64, awaitID: UUID) {
         observerCancelInvocationCount += 1
         flushObserverCancelCountAcks()
         guard let entry = parkedObservers[id], entry.awaitID == awaitID else {
             observerCancelIgnoredCount += 1
+            // Hicks H1 addendum: deliver an exact per-attempt cancellation
+            // receipt so tests can prove the mismatch was processed as
+            // ignored (not aliased with a matched cancel or a close-drain).
+            deliverObserverReceipt(awaitID, .processedIgnoredMismatch)
             return
         }
         parkedObservers.removeValue(forKey: id)
@@ -2707,6 +3112,8 @@ private actor AsyncGate {
         sealObserverOutcome(id: id, reason: .cancelledWhileParked)
         observerResumeCounts[.parkedResumedByCancel, default: 0] += 1
         entry.c.resume()
+        // Hicks H1 addendum: matched cancel drained THIS awaitID.
+        deliverObserverReceipt(awaitID, .processedMatched)
     }
 
     /// Convenience: single-shot observer registration + await.
@@ -2780,7 +3187,11 @@ private actor AsyncGate {
     /// unknown/fated cancels cannot cross-own the ORIGINAL parked entry.
     /// Hicks C: per-site resume counters at every `c.resume()`.
     func awaitWaiter(_ token: WaiterToken) async {
-        let awaitID = makeAwaitID()
+        await awaitWaiter(token, attempt: makeAwaitID())
+    }
+
+    /// Hicks H1 addendum: labeled overload exposing the per-attempt UUID.
+    func awaitWaiter(_ token: WaiterToken, attempt awaitID: UUID) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
                 if completedWaiters.remove(token.id) != nil {
@@ -2823,6 +3234,8 @@ private actor AsyncGate {
                 }
                 c.resume()
             }
+            // Hicks H1 addendum: natural completion delivers no receipt
+            // eagerly; `awaitWaiterCancelReceipt` resolves lazily.
         } onCancel: {
             Task { await self.cancelWaiter(id: token.id, awaitID: awaitID) }
         }
@@ -2832,11 +3245,12 @@ private actor AsyncGate {
     /// continuation is currently parked AND the parked entry's
     /// `awaitID` matches this invocation's `awaitID`. Bounded no-op
     /// otherwise — cannot cross-own another invocation's continuation.
-    private func cancelWaiter(id: UInt64, awaitID: UInt64) {
+    private func cancelWaiter(id: UInt64, awaitID: UUID) {
         waiterCancelInvocationCount += 1
         flushWaiterCancelCountAcks()
         guard let entry = parkedWaiters[id], entry.awaitID == awaitID else {
             waiterCancelIgnoredCount += 1
+            deliverWaiterReceipt(awaitID, .processedIgnoredMismatch)
             return
         }
         parkedWaiters.removeValue(forKey: id)
@@ -2844,6 +3258,7 @@ private actor AsyncGate {
         sealWaiterOutcome(id: id, reason: .cancelledWhileParked)
         waiterResumeCounts[.parkedResumedByCancel, default: 0] += 1
         entry.c.resume()
+        deliverWaiterReceipt(awaitID, .processedMatched)
     }
 
     /// Convenience: single-shot waiter registration + await.
@@ -2912,6 +3327,162 @@ private actor AsyncGate {
         }
     }
 
+    // MARK: Hicks H1 addendum — exact per-attempt cancellation receipts
+
+    /// Deliver a receipt for a specific await attempt. Exactly-once:
+    /// if a receipt has already been stored or a waiter already
+    /// resumed, this call is a no-op. Waiters resume immediately;
+    /// otherwise the outcome is stored for a later `awaitReceipt`.
+    private func deliverObserverReceipt(_ awaitID: UUID, _ receipt: ObserverCancelReceipt) {
+        // If a waiter is already queued, resume it and DO NOT store.
+        if let cs = observerReceiptWaiters.removeValue(forKey: awaitID) {
+            for c in cs { c.resume(returning: receipt) }
+            return
+        }
+        // If an outcome was already stored, keep the first (exactly-once).
+        if observerReceiptStored[awaitID] != nil { return }
+        observerReceiptStored[awaitID] = receipt
+    }
+
+    /// Waiter analogue of `deliverObserverReceipt`.
+    private func deliverWaiterReceipt(_ awaitID: UUID, _ receipt: WaiterCancelReceipt) {
+        if let cs = waiterReceiptWaiters.removeValue(forKey: awaitID) {
+            for c in cs { c.resume(returning: receipt) }
+            return
+        }
+        if waiterReceiptStored[awaitID] != nil { return }
+        waiterReceiptStored[awaitID] = receipt
+    }
+
+    /// Hicks H1 addendum: await the exact cancellation receipt for a
+    /// specific observer await attempt. Consumes any stored outcome
+    /// (active-only pruning). If the outcome has not yet been
+    /// delivered and the gate is already closed, immediately returns
+    /// `.closedBeforeProcessing`. If neither a stored outcome nor an
+    /// in-flight parked entry exists (i.e., the attempt completed
+    /// naturally with no cancel processing), immediately returns
+    /// `.finishedBeforeProcessing`. Otherwise queues one waiter that
+    /// resumes exactly once when the outcome is delivered (via
+    /// cancelObserver) or when `close()` drains receipt queues.
+    func awaitObserverCancelReceipt(_ awaitID: UUID) async -> ObserverCancelReceipt {
+        if let r = observerReceiptStored.removeValue(forKey: awaitID) { return r }
+        if closed { return .closedBeforeProcessing }
+        // Check for in-flight parked entry with this awaitID. If none,
+        // the await already completed and no cancel processed →
+        // finishedBeforeProcessing (bounded, immediate, active-only).
+        let inFlight = parkedObservers.values.contains(where: { $0.awaitID == awaitID })
+        if !inFlight { return .finishedBeforeProcessing }
+        return await withCheckedContinuation { c in
+            observerReceiptWaiters[awaitID, default: []].append(c)
+        }
+    }
+
+    /// Waiter analogue of `awaitObserverCancelReceipt`.
+    func awaitWaiterCancelReceipt(_ awaitID: UUID) async -> WaiterCancelReceipt {
+        if let r = waiterReceiptStored.removeValue(forKey: awaitID) { return r }
+        if closed { return .closedBeforeProcessing }
+        let inFlight = parkedWaiters.values.contains(where: { $0.awaitID == awaitID })
+        if !inFlight { return .finishedBeforeProcessing }
+        return await withCheckedContinuation { c in
+            waiterReceiptWaiters[awaitID, default: []].append(c)
+        }
+    }
+
+    // MARK: Hicks H3 addendum — two-phase pre-park ACK tickets
+
+    /// Synchronously reserve a park-ACK ticket for an active-registered
+    /// observer token. Returns `.immediate(result)` if the token is
+    /// already in a resolved state (parked / fated / unknown /
+    /// closed-or-consumed); otherwise returns `.queued(ticketID)` and
+    /// records the ticket → tokenID mapping so the caller can await it.
+    /// Because this method executes SYNCHRONOUSLY on the actor, calling
+    /// it twice before spawning any parking task GUARANTEES both
+    /// callers were queued before parking could occur.
+    func enterObserverParkAck(_ token: ObserverToken) -> ObserverParkAckEnvelope {
+        if parkedObservers[token.id] != nil { return .immediate(.parked) }
+        if let reason = observerFates[token.id] { return .immediate(.terminal(reason)) }
+        if observerOrder.contains(token.id) {
+            if closed { return .immediate(.closedOrConsumed) }
+            let ticket = UUID()
+            observerParkAckTicketToToken[ticket] = token.id
+            return .queued(ticket)
+        }
+        if token.id >= nextID { return .immediate(.unknown) }
+        return .immediate(.closedOrConsumed)
+    }
+
+    /// Await the outcome of a previously reserved observer park-ACK
+    /// ticket. Bounded: if the token has already resolved (parked /
+    /// fated) or the gate is closed, returns the terminal classification
+    /// immediately and prunes the ticket. Otherwise queues a
+    /// continuation on the token's `observerParkAcks` list; when the
+    /// token parks or fates or `close()` drains, all queued
+    /// continuations resume exactly once.
+    func awaitObserverParkAckTicket(_ ticket: UUID) async -> ParkAckResult {
+        guard let tokenID = observerParkAckTicketToToken[ticket] else {
+            // Unknown ticket — either fabricated or already consumed.
+            return .closedOrConsumed
+        }
+        if parkedObservers[tokenID] != nil {
+            observerParkAckTicketToToken.removeValue(forKey: ticket)
+            return .parked
+        }
+        if let reason = observerFates[tokenID] {
+            observerParkAckTicketToToken.removeValue(forKey: ticket)
+            return .terminal(reason)
+        }
+        if !observerOrder.contains(tokenID) || closed {
+            observerParkAckTicketToToken.removeValue(forKey: ticket)
+            return .closedOrConsumed
+        }
+        // Queue continuation. `flushObserverParkAcks` and `close()` both
+        // drain observerParkAcks — the ticket entry is pruned when the
+        // continuation is resumed via `pruneObserverParkAckTicket`.
+        let result: ParkAckResult = await withCheckedContinuation { c in
+            observerParkAcks[tokenID, default: []].append(c)
+        }
+        observerParkAckTicketToToken.removeValue(forKey: ticket)
+        return result
+    }
+
+    /// Waiter analogue of `enterObserverParkAck`.
+    func enterWaiterParkAck(_ token: WaiterToken) -> WaiterParkAckEnvelope {
+        if parkedWaiters[token.id] != nil { return .immediate(.parked) }
+        if let reason = waiterFates[token.id] { return .immediate(.terminal(reason)) }
+        if waiterOrder.contains(token.id) {
+            if closed { return .immediate(.closedOrConsumed) }
+            let ticket = UUID()
+            waiterParkAckTicketToToken[ticket] = token.id
+            return .queued(ticket)
+        }
+        if token.id >= nextID { return .immediate(.unknown) }
+        return .immediate(.closedOrConsumed)
+    }
+
+    /// Waiter analogue of `awaitObserverParkAckTicket`.
+    func awaitWaiterParkAckTicket(_ ticket: UUID) async -> ParkAckResult {
+        guard let tokenID = waiterParkAckTicketToToken[ticket] else {
+            return .closedOrConsumed
+        }
+        if parkedWaiters[tokenID] != nil {
+            waiterParkAckTicketToToken.removeValue(forKey: ticket)
+            return .parked
+        }
+        if let reason = waiterFates[tokenID] {
+            waiterParkAckTicketToToken.removeValue(forKey: ticket)
+            return .terminal(reason)
+        }
+        if !waiterOrder.contains(tokenID) || closed {
+            waiterParkAckTicketToToken.removeValue(forKey: ticket)
+            return .closedOrConsumed
+        }
+        let result: ParkAckResult = await withCheckedContinuation { c in
+            waiterParkAcks[tokenID, default: []].append(c)
+        }
+        waiterParkAckTicketToToken.removeValue(forKey: ticket)
+        return result
+    }
+
     // MARK: Hicks D — hold-inside-cancellation-handler helpers
 
     /// Test-only helper that parks an observer continuation the same way
@@ -2929,7 +3500,17 @@ private actor AsyncGate {
         holdGate: AsyncGate,
         holdToken: WaiterToken
     ) async {
-        let awaitID = makeAwaitID()
+        await awaitObserverAndHold(token, attempt: makeAwaitID(), holdGate: holdGate, holdToken: holdToken)
+    }
+
+    /// Hicks H1 addendum: labeled overload for AndHold variant exposing
+    /// the per-attempt UUID, so tests can query the exact receipt.
+    func awaitObserverAndHold(
+        _ token: ObserverToken,
+        attempt awaitID: UUID,
+        holdGate: AsyncGate,
+        holdToken: WaiterToken
+    ) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
                 if completedObservers.remove(token.id) != nil {
@@ -2969,18 +3550,29 @@ private actor AsyncGate {
             // so mismatched late cancels can be observed while the
             // handler is still installed.
             await holdGate.awaitWaiter(holdToken)
+            // Hicks H1 addendum: natural completion delivers no receipt
+            // eagerly; `awaitObserverCancelReceipt` resolves lazily.
         } onCancel: {
             Task { await self.cancelObserver(id: token.id, awaitID: awaitID) }
         }
     }
-
+ 
     /// Waiter analogue of `awaitObserverAndHold`.
     func awaitWaiterAndHold(
         _ token: WaiterToken,
         holdGate: AsyncGate,
         holdToken: WaiterToken
     ) async {
-        let awaitID = makeAwaitID()
+        await awaitWaiterAndHold(token, attempt: makeAwaitID(), holdGate: holdGate, holdToken: holdToken)
+    }
+
+    /// Hicks H1 addendum: labeled overload for waiter AndHold variant.
+    func awaitWaiterAndHold(
+        _ token: WaiterToken,
+        attempt awaitID: UUID,
+        holdGate: AsyncGate,
+        holdToken: WaiterToken
+    ) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
                 if completedWaiters.remove(token.id) != nil {
@@ -3024,6 +3616,8 @@ private actor AsyncGate {
                 c.resume()
             }
             await holdGate.awaitWaiter(holdToken)
+            // Hicks H1 addendum: natural completion delivers no receipt
+            // eagerly; `awaitWaiterCancelReceipt` resolves lazily.
         } onCancel: {
             Task { await self.cancelWaiter(id: token.id, awaitID: awaitID) }
         }
@@ -3117,6 +3711,26 @@ private actor AsyncGate {
         let wCcs = waiterCancelCountAcks
         waiterCancelCountAcks.removeAll()
         for (_, cs) in wCcs { for c in cs { c.resume() } }
+
+        // Hicks H1 addendum: drain per-attempt cancellation-receipt
+        // waiters with `.closedBeforeProcessing`. Any stored outcomes
+        // for attempts that never had their receipt consumed are
+        // discarded (active-only pruning; a subsequent await returns
+        // `.closedBeforeProcessing` via the closed-guard).
+        let obsRw = observerReceiptWaiters
+        observerReceiptWaiters.removeAll()
+        for (_, cs) in obsRw { for c in cs { c.resume(returning: .closedBeforeProcessing) } }
+        observerReceiptStored.removeAll()
+        let wRw = waiterReceiptWaiters
+        waiterReceiptWaiters.removeAll()
+        for (_, cs) in wRw { for c in cs { c.resume(returning: .closedBeforeProcessing) } }
+        waiterReceiptStored.removeAll()
+
+        // Hicks H3 addendum: pre-park ACK tickets are cleared. Any
+        // subsequent `awaitObserverParkAckTicket` for a cleared ticket
+        // returns `.closedOrConsumed` via the unknown-ticket guard.
+        observerParkAckTicketToToken.removeAll()
+        waiterParkAckTicketToToken.removeAll()
     }
 
     // MARK: Introspection (test-only)
@@ -3151,7 +3765,13 @@ private actor AsyncGate {
             observerParkAckQueueTotal: observerParkAcks.values.reduce(0) { $0 + $1.count },
             waiterParkAckQueueTotal: waiterParkAcks.values.reduce(0) { $0 + $1.count },
             observerCancelCountAckQueueTotal: observerCancelCountAcks.values.reduce(0) { $0 + $1.count },
-            waiterCancelCountAckQueueTotal: waiterCancelCountAcks.values.reduce(0) { $0 + $1.count }
+            waiterCancelCountAckQueueTotal: waiterCancelCountAcks.values.reduce(0) { $0 + $1.count },
+            observerReceiptStoredCount: observerReceiptStored.count,
+            waiterReceiptStoredCount: waiterReceiptStored.count,
+            observerReceiptWaiterQueueTotal: observerReceiptWaiters.values.reduce(0) { $0 + $1.count },
+            waiterReceiptWaiterQueueTotal: waiterReceiptWaiters.values.reduce(0) { $0 + $1.count },
+            observerParkAckTicketCount: observerParkAckTicketToToken.count,
+            waiterParkAckTicketCount: waiterParkAckTicketToToken.count
         )
     }
 
@@ -3178,9 +3798,8 @@ private actor AsyncGate {
     /// state. Prevents a duplicate/unknown/fated await whose Task is
     /// cancelled from cross-owning and draining the ORIGINAL parked
     /// continuation for the same token id.
-    private func makeAwaitID() -> UInt64 {
-        defer { nextAwaitID &+= 1 }
-        return nextAwaitID
+    private func makeAwaitID() -> UUID {
+        return UUID()
     }
 
     /// Bishop F1: aggregate-only outcome accounting. Bumps
