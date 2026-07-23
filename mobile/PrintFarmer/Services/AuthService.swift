@@ -223,6 +223,21 @@ actor AuthService: AuthServiceProtocol {
                 epoch: authEpoch, token: operation.value
             )
         }
+        // J: when the snapshot's serverID is unset (legacy `.unspecified`
+        // callers or tests that bypass login and never call
+        // applySessionIfCurrent), fall back to the registry's currently-active
+        // server for local cleanup. Fenced callers always populate the
+        // snapshot's serverID atomically via applySessionIfCurrent, so this
+        // fallback is only taken by legacy paths that were never subject to
+        // the epoch-fenced atomicity guarantee.
+        let cleanupServerID: UUID?
+        if let snapshotServerID = snapshot?.serverID {
+            cleanupServerID = snapshotServerID
+        } else if operation == .unspecified, snapshot != nil {
+            cleanupServerID = await activeServer()?.id
+        } else {
+            cleanupServerID = nil
+        }
         // Network uses the snapshot's captured bearer/baseURL. A superseded
         // logout has a nil snapshot and skips the network entirely (better
         // than sending /logout under T2's session).
@@ -234,7 +249,7 @@ actor AuthService: AuthServiceProtocol {
         // operation. Local cleanup targets the SNAPSHOT'S serverID — a
         // registry switch cannot redirect it.
         fencedMutation(operation) {
-            if let serverID = snapshot?.serverID {
+            if let serverID = cleanupServerID {
                 credentialsStore.clear(serverId: serverID)
                 // Explicit logout clears the persisted owner identity for this server.
                 snapshotOwnerStore.clearOwner(serverID: serverID)
@@ -254,49 +269,21 @@ actor AuthService: AuthServiceProtocol {
 
     /// Attempt to restore a previous session from Keychain.
     ///
-    /// J (issue #816 reject, Hicks): identity is verified on an ephemeral,
-    /// bearer-loaded client BEFORE publishing the shared apiClient session or
-    /// the snapshot owner. On any operation-fenced destination failure, the
-    /// prior published destinations are rolled back via compare-and-clear so a
-    /// supersession leaves credentials/apiClient/owner UNCHANGED at every
-    /// await boundary.
+    /// J (issue #816 reject, Hicks): apiClient session is applied via CAS FIRST
+    /// (matching legacy transient-offline continuity: a transient /me failure
+    /// preserves creds AND leaves the apiClient bearer applied for the next
+    /// online retry), but every operation-fenced destination that follows uses
+    /// compare-and-clear rollback so a supersession detected after publication
+    /// leaves credentials/apiClient/owner UNCHANGED. Only a definitive auth
+    /// rejection clears creds/owner/apiClient.
     func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
         guard let server = await activeServer() else { return .noSession }
         migrateLegacyCredentialsIfAllowed(to: server)
         guard let credentials = credentialsStore.load(serverId: server.id) else { return .noSession }
 
-        // J: verify identity on an EPHEMERAL client first — the shared apiClient
-        // is not repointed until the verified user is in hand and every prior
-        // step is committed.
-        let verifyClient = await apiClient.unauthenticatedClient(baseURL: server.baseURL)
-        await verifyClient.setAccessToken(credentials.accessToken)
-        let verifiedUser: UserDTO
-        do {
-            verifiedUser = try await verifyClient.get("/api/auth/me")
-        } catch {
-            // H2/J: a stale restore's late 401 must not clear a newer login's
-            // credentials/owner/session — fence the definitive-rejection clears on the
-            // operation. No shared destination was published for this restore.
-            if isDefinitiveAuthRejection(error) {
-                fencedMutation(operation) {
-                    credentialsStore.clear(serverId: server.id)
-                    snapshotOwnerStore.clearOwner(serverID: server.id)
-                }
-            }
-            return .noSession
-        }
-
-        guard isCurrentOperation(operation) else { return .superseded }
-
-        // Publication phase (symmetric with login).
-        // Step 1: owner (fenced, synchronous). Credentials were persisted at
-        // login time; restore does not re-save them.
-        let published = fencedMutation(operation) {
-            snapshotOwnerStore.setOwner(userID: verifiedUser.id, serverID: server.id)
-        }
-        guard published else { return .superseded }
-
-        // Step 2: apiClient session (CAS with stable serverID).
+        // H2/J: apply the shared session via a destination CAS with atomic serverID
+        // so a restore superseded by a newer login/logout cannot clobber the newer
+        // session. Legacy unspecified callers keep the unconditional behavior.
         if operation == .unspecified {
             await apiClient.updateBaseURL(server.baseURL)
             await apiClient.setAccessToken(credentials.accessToken)
@@ -305,15 +292,61 @@ actor AuthService: AuthServiceProtocol {
                 baseURL: server.baseURL, accessToken: credentials.accessToken, serverID: server.id,
                 epoch: authEpoch, token: operation.value
             )
-            guard applied else {
-                // Rollback owner (compare-and-clear — a newer T2 login's owner
-                // is preserved because its user id differs from verifiedUser.id).
-                snapshotOwnerStore.clearOwnerIfMatches(serverID: server.id, expectedUserID: verifiedUser.id)
-                return .superseded
-            }
+            guard applied else { return .superseded }
         }
         await registerTokenExpiryChecker(for: server)
-        return .restored(verifiedUser)
+
+        do {
+            let user: UserDTO = try await apiClient.get("/api/auth/me")
+            // J (issue #816 reject, Hicks): if a logout / newer op superseded this
+            // restore mid-flight (isCurrentOperation false OR the fenced owner write
+            // fails), roll back the apiClient session we published — compare-and-clear
+            // so a newer T2 login's session is preserved (different bearer/token).
+            guard isCurrentOperation(operation) else {
+                if operation != .unspecified {
+                    await apiClient.clearSessionIfMatches(
+                        expectedAccessToken: credentials.accessToken,
+                        expectedAuthSessionToken: operation.value
+                    )
+                }
+                return .superseded
+            }
+            let published = fencedMutation(operation) {
+                snapshotOwnerStore.setOwner(userID: user.id, serverID: server.id)
+            }
+            guard published else {
+                if operation != .unspecified {
+                    await apiClient.clearSessionIfMatches(
+                        expectedAccessToken: credentials.accessToken,
+                        expectedAuthSessionToken: operation.value
+                    )
+                }
+                return .superseded
+            }
+            return .restored(user)
+        } catch {
+            // H2/J: a stale restore's late 401 must not clear a newer login's
+            // credentials/owner/session — fence the definitive-rejection clears on the
+            // operation, and CAS the APIClient clear. Transient errors do NOT clear
+            // (offline continuity).
+            if isDefinitiveAuthRejection(error) {
+                fencedMutation(operation) {
+                    credentialsStore.clear(serverId: server.id)
+                    snapshotOwnerStore.clearOwner(serverID: server.id)
+                }
+                if isCurrentOperation(operation) {
+                    if operation == .unspecified {
+                        await apiClient.setAccessToken(nil)
+                    } else {
+                        _ = await apiClient.applySessionIfCurrent(
+                            baseURL: nil, accessToken: nil, serverID: nil,
+                            epoch: authEpoch, token: operation.value
+                        )
+                    }
+                }
+            }
+            return .noSession
+        }
     }
 
     func currentUser() async throws -> UserDTO {
