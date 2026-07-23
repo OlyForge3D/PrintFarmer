@@ -217,8 +217,9 @@ load_changed_files() {
 #                     concrete plugins, so both test projects are affected).
 #   backend_plugin  — every other src/backends/** path (concrete plugin
 #                     projects: Moonraker, PrusaLink, OctoPrint, Sdcp,
-#                     FlashForge, TestEmulator). Only Farm.Web.Api.Tests
-#                     directly ProjectReferences these.
+#                     FlashForge, TestEmulator). Farm.Web.Api.Tests and
+#                     Farm.Web.IntegrationTests both exercise the assembled
+#                     Farm.Web.Api graph that references these.
 #   slicer          — src/slicer/**, src/Slicers/**, src/worker-shared/**
 #   orca_worker     — src/orcaslicer-worker/**
 #   discovery       — src/discovery/**, src/printer-discovery/**
@@ -573,9 +574,10 @@ main() {
   fi
   if (( has_backend )); then
     # Concrete backend plugins (Moonraker/PrusaLink/OctoPrint/Sdcp/FlashForge/
-    # TestEmulator) are direct ProjectReferences of Farm.Web.Api.Tests only.
-    # They are NOT referenced by Farm.Slicer.Module or Farm.Slicer.Module.Tests.
-    test_names+=("Farm.Web.Api.Tests")
+    # TestEmulator) are referenced by Farm.Web.Api. IntegrationTests targets the
+    # assembled API, so run it alongside Api.Tests; they are NOT referenced by
+    # Farm.Slicer.Module or Farm.Slicer.Module.Tests.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
     net_test_bucket_hit=1
   fi
   if (( has_backend_core )); then
@@ -597,15 +599,17 @@ main() {
     net_test_bucket_hit=1
   fi
   if (( has_mig_app )); then
-    # Api.Tests references migrations directly.
-    test_names+=("Farm.Web.Api.Tests")
+    # Api.Tests and IntegrationTests cover the assembled API graph that includes
+    # the App migration projects.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
     mig_names+=("AppPg" "AppSqlServer")
     want_mig_drift="true"
     net_test_bucket_hit=1
   fi
   if (( has_mig_slcr )); then
-    # Slicer.Module.Tests transitively via slicer/*.
-    test_names+=("Farm.Slicer.Module.Tests")
+    # Farm.Web.Api references slicer migrations directly, IntegrationTests
+    # targets the assembled API, and Slicer.Module.Tests covers the slicer graph.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
     mig_names+=("SlicerPg" "SlicerSqlServer")
     want_mig_drift="true"
     net_test_bucket_hit=1

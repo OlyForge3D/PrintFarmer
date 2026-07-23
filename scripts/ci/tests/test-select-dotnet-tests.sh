@@ -308,6 +308,8 @@ case_backend_plugin_change() {
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
   # Backends do not appear as a direct ProjectReference of Slicer.Module.Tests.
   assert_not_contains "matrix slicer absent" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"
@@ -329,6 +331,7 @@ case_backend_plugin_change_flashforge() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_not_contains "matrix slicer absent" "$matrix" "Farm.Slicer.Module.Tests" || return 1
 }
 
@@ -477,6 +480,10 @@ case_migration_app_change() {
     select_run >/dev/null 2>&1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
   assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "true" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_not_contains "no slicer test" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "mig app pg" "$mig" "AppPg" || return 1
   assert_contains "mig app sql" "$mig" "AppSqlServer" || return 1
@@ -489,7 +496,13 @@ case_migration_slicer_change() {
   EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
   assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "true" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "mig slicer pg" "$mig" "SlicerPg" || return 1
   assert_contains "mig slicer sql" "$mig" "SlicerSqlServer" || return 1
@@ -1003,11 +1016,20 @@ case_workflow_test_job_passes_integration_property() {
     return 1
   fi
   assert_contains "matrix run flag env" "$body" 'RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}' || return 1
-  assert_contains "restore integration property" "$body" 'dotnet restore "./$MATRIX_PROJECT" "${integration_args[@]}"' || return 1
-  assert_contains "build integration property" "$body" 'dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore "${integration_args[@]}"' || return 1
+  assert_contains "restore integration property" "$body" 'dotnet restore "./$MATRIX_PROJECT" ${integration_args[@]+"${integration_args[@]}"}' || return 1
+  assert_contains "build integration property" "$body" 'dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore ${integration_args[@]+"${integration_args[@]}"}' || return 1
   assert_contains "test integration property" "$body" 'dotnet test "./$MATRIX_PROJECT" -c Debug --no-build \' || return 1
-  assert_contains "test includes integration args" "$body" '"${integration_args[@]}" \' || return 1
+  assert_contains "test includes integration args" "$body" '${integration_args[@]+"${integration_args[@]}"} \' || return 1
   assert_contains "integration msbuild property" "$body" 'integration_args+=("-p:RunIntegrationTests=true")' || return 1
+  local unsafe
+  unsafe="$(printf '%s\n' "$body" \
+    | grep -nF '"${integration_args[@]}"' \
+    | grep -vF '${integration_args[@]+"${integration_args[@]}"}' \
+    || true)"
+  if [[ -n "$unsafe" ]]; then
+    printf '  dotnet-test has unguarded integration_args expansions:\n%s\n' "$unsafe" >&2
+    return 1
+  fi
 }
 
 
