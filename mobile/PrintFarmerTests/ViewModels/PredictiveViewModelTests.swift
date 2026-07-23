@@ -23,6 +23,36 @@ final class PredictiveViewModelTests: XCTestCase {
         super.tearDown()
     }
 
+    private func boundedOutcome(
+        _ attempt: ObserverAwaitAttempt,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> ObserverAwaitAttempt.Outcome? {
+        attempt.rescueCancellationOutcomeIfNeeded()
+        XCTAssertEqual(
+            attempt.rescuePublicationCountForTest,
+            0,
+            "normal observer publication was missing",
+            file: file,
+            line: line)
+        return attempt.bufferedOutcomeForTest
+    }
+
+    private func boundedOutcome(
+        _ attempt: WaiterAwaitAttempt,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> WaiterAwaitAttempt.Outcome? {
+        attempt.rescueCancellationOutcomeIfNeeded()
+        XCTAssertEqual(
+            attempt.rescuePublicationCountForTest,
+            0,
+            "normal waiter publication was missing",
+            file: file,
+            line: line)
+        return attempt.bufferedOutcomeForTest
+    }
+
     /// Removed: the previous `isBoundedParkAckResult` helper returned
     /// `true` for every `ParkAckResult` case, making all assertions
     /// tautological. Reviewer finding #5 requires per-test exact expected
@@ -564,7 +594,7 @@ final class PredictiveViewModelTests: XCTestCase {
     /// awaited `waitForWaiterCancelCount(atLeast: 1)` BEFORE `close()`
     /// to prove cancel processing actually ran. That pre-close wait
     /// would deadlock if cancel processing were removed entirely (no
-    /// cancel Task ever bumps the counter; nothing rescues the ACK
+    /// cancellation processing ever bumps the counter; nothing rescues the ACK
     /// before close is even reached).
     ///
     /// This revision uses the per-attempt buffered outcome as the
@@ -596,11 +626,15 @@ final class PredictiveViewModelTests: XCTestCase {
         // via .closedWhileParked and body's natural path publishes
         // .finishedBeforeProcessing (caught by outcome guard below).
         await gate.close()
+        attempt.rescueSuspension()
         await task.value
 
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("cancel path produced no outcome")
+            return
+        }
         guard case .cancelled(let r) = outcome else {
-            XCTFail("cancel path must publish outcome; got \(outcome) (regression: cancel Task never fired — receipt would be .finishedBeforeProcessing)")
+            XCTFail("cancel path must publish outcome; got \(outcome)")
             return
         }
         // Every receipt classification is exact / non-hanging.
@@ -651,7 +685,7 @@ final class PredictiveViewModelTests: XCTestCase {
         // wrongly rejected → .processedIgnoredMismatch + close-side
         // drain would silently pass without this correlation) from
         // legitimate CancelBefore races. hopFingerprintForTest is
-        // nil only if the cancel Task never dispatched — which the
+        // nil only if cancellation never published — which the
         // receipt existence already rules out.
         guard let hop = attempt.hopFingerprintForTest else {
             XCTFail("cancel receipt present but no hop fingerprint recorded — harness regression")
@@ -668,7 +702,10 @@ final class PredictiveViewModelTests: XCTestCase {
                            ".processedMatched: no ignore-path bump")
             // Ripley Finding 4: at hop time, parked entry MUST have
             // existed AND matched this attempt's awaitID exactly.
-            XCTAssertTrue(hop.parkedEntryExisted && hop.awaitIDMatched,
+            let independentlyMatched = hop.parkedAwaitID == hop.requestedAwaitID
+            XCTAssertEqual(hop.requestedAwaitID, attempt.id)
+            XCTAssertEqual(hop.parkedEntryExisted, hop.parkedAwaitID != nil)
+            XCTAssertTrue(hop.parkedEntryExisted && independentlyMatched,
                           ".processedMatched requires hopFingerprint(parked=true, matched=true); got \(hop)")
             XCTAssertFalse(hop.closedAtHop,
                           ".processedMatched requires gate open at hop; got closedAtHop=true")
@@ -688,7 +725,10 @@ final class PredictiveViewModelTests: XCTestCase {
             // existed OR one existed with a DIFFERENT awaitID. If a
             // parked entry existed AND matched, the matcher wrongly
             // classified it as mismatch — broken-matcher regression.
-            XCTAssertFalse(hop.awaitIDMatched,
+            let independentlyMatched = hop.parkedAwaitID == hop.requestedAwaitID
+            XCTAssertEqual(hop.requestedAwaitID, attempt.id)
+            XCTAssertEqual(hop.parkedEntryExisted, hop.parkedAwaitID != nil)
+            XCTAssertFalse(independentlyMatched,
                           ".processedIgnoredMismatch requires hopFingerprint(awaitIDMatched=false); a true value here is broken-matcher regression (matched entry classified as mismatch). Fingerprint: \(hop)")
             XCTAssertFalse(hop.closedAtHop,
                           ".processedIgnoredMismatch requires gate open at hop (close would produce .closedBeforeProcessing); got closedAtHop=true")
@@ -760,29 +800,37 @@ final class PredictiveViewModelTests: XCTestCase {
         // wait. Every await below is bounded by close-drain.
         await obsGate.close()
         await waitGate.close()
+        observerAttempt.rescueSuspension()
+        waiterAttempt.rescueSuspension()
         await observerTask.value
         await waiterTask.value
 
-        let observerOutcome = await observerAttempt.outcome()
-        let waiterOutcome = await waiterAttempt.outcome()
+        guard let observerOutcome = boundedOutcome(observerAttempt) else {
+            XCTFail("observer cancel path produced no outcome")
+            return
+        }
+        guard let waiterOutcome = boundedOutcome(waiterAttempt) else {
+            XCTFail("waiter cancel path produced no outcome")
+            return
+        }
 
         guard case .cancelled(let observerR) = observerOutcome else {
-            XCTFail("observer cancel must publish outcome; got \(observerOutcome) (regression: cancel Task never fired)")
+            XCTFail("observer cancel must publish outcome; got \(observerOutcome)")
             return
         }
         guard case .cancelled(let waiterR) = waiterOutcome else {
-            XCTFail("waiter cancel must publish outcome; got \(waiterOutcome) (regression: cancel Task never fired)")
+            XCTFail("waiter cancel must publish outcome; got \(waiterOutcome)")
             return
         }
 
         // Both sides parked BEFORE cancel (proven by .parked ACK above),
         // so the receipt is bounded to two matched-drain outcomes:
-        //   .processedMatched — cancel Task drained the parked entry
+        //   .processedMatched — cancellation drained the parked entry
         //   .closedBeforeProcessing — close raced ahead, drained parked
-        //     via .closedWhileParked, cancel Task saw closed
+        //     via .closedWhileParked, cancellation observed closed
         // .processedIgnoredMismatch is IMPOSSIBLE here because parked
         // was proven before cancel dispatched (parkedX[id] was non-nil
-        // at cancel-Task hop time OR close had removed it via matched-
+        // at cancellation classification time OR close had removed it via matched-
         // drain, in which case receipt is .closedBeforeProcessing).
         XCTAssertTrue(observerR == .processedMatched || observerR == .closedBeforeProcessing,
                       "observer receipt (parked pre-cancel): must be .processedMatched or .closedBeforeProcessing; got \(observerR)")
@@ -833,7 +881,9 @@ final class PredictiveViewModelTests: XCTestCase {
                            "observer .processedMatched: fate sealed exactly .cancelledWhileParked")
             XCTAssertEqual(obsSnap.observerCancelIgnoredCount, 0,
                            "observer matched cancel — ignored count stays zero")
-            XCTAssertTrue(obsHop.awaitIDMatched && obsHop.parkedEntryExisted && !obsHop.closedAtHop,
+            let independentlyMatched = obsHop.parkedAwaitID == obsHop.requestedAwaitID
+            XCTAssertEqual(obsHop.requestedAwaitID, observerAttempt.id)
+            XCTAssertTrue(independentlyMatched && obsHop.parkedEntryExisted && !obsHop.closedAtHop,
                           "observer .processedMatched requires hopFingerprint(parked=true, matched=true, closed=false); got \(obsHop)")
         } else {
             XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
@@ -854,7 +904,9 @@ final class PredictiveViewModelTests: XCTestCase {
                            "waiter .processedMatched: fate sealed exactly .cancelledWhileParked")
             XCTAssertEqual(waitSnap.waiterCancelIgnoredCount, 0,
                            "waiter matched cancel — ignored count stays zero")
-            XCTAssertTrue(watHop.awaitIDMatched && watHop.parkedEntryExisted && !watHop.closedAtHop,
+            let independentlyMatched = watHop.parkedAwaitID == watHop.requestedAwaitID
+            XCTAssertEqual(watHop.requestedAwaitID, waiterAttempt.id)
+            XCTAssertTrue(independentlyMatched && watHop.parkedEntryExisted && !watHop.closedAtHop,
                           "waiter .processedMatched requires hopFingerprint(parked=true, matched=true, closed=false); got \(watHop)")
         } else {
             XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1,
@@ -946,37 +998,29 @@ final class PredictiveViewModelTests: XCTestCase {
     /// Open/cancel race — cancel mailboxed BEFORE open. Ordering forced
     /// by first parking the awaiter synchronously through the actor
     /// (register + Task { awaitWaiter } + immediate cancel), then
-    /// requesting `open()` on the actor after the cancel Task has already
+    /// requesting `open()` after cancellation has already
     /// been queued. cancelWaiter drains via parkedX; open runs later on
     /// an already-empty queue.
     func testAsyncGateCancelBeforeOpen_bothCleanState() async {
         let gate = AsyncGate()
         let waiterToken = await gate.registerWaiter()
-        let waiterTask = Task { await gate.awaitWaiter(waiterToken) }
-
-        // Cancel first — schedules cancelWaiter Task on the actor mailbox
-        // AFTER awaitWaiter's park (park runs synchronously in the
-        // current actor turn).
-        waiterTask.cancel()
-        // H3: bounded actor ACK — block until cancelWaiter has dispatched
-        // (drains the parked id as .cancelledWhileParked). Never strands on
-        // the Task's own completion; close() also drains this ACK queue.
-        await gate.waitForWaiterCancelCount(atLeast: 1)
-
-        // Then open — waiterOrder is already empty because cancelWaiter
-        // drained the id; open finds nothing to drain.
+        let attempt = WaiterAwaitAttempt()
+        attempt.prepareCancellationForTest()
+        await gate.awaitWaiter(waiterToken, attempt: attempt)
         await gate.open()
+        await gate.close()
 
-        // Pre-close intended-state proof (bounded snapshot read).
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("cancel-before-open produced no outcome")
+            return
+        }
+        XCTAssertEqual(outcome, .cancelled(.processedMatched))
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
         XCTAssertEqual(snap.waiterOrder, [])
         XCTAssertEqual(snap.completedWaiterCount, 0,
                        "cancel-then-open must not leave any completedWaiters latched")
         XCTAssertTrue(snap.opened)
-        // Unconditional teardown, THEN drain the cancelled task.
-        await gate.close()
-        await waiterTask.value
     }
 
     /// Open/cancel race — open mailboxed BEFORE cancel. Ordering forced
@@ -1497,100 +1541,37 @@ final class PredictiveViewModelTests: XCTestCase {
                        "aggregate count must not grow from a late no-op cancel")
     }
 
-    // MARK: - Vasquez remediation: duplicate-await cancellation must not
-    // cross-own the original parked continuation (per-invocation awaitID).
+    // MARK: Duplicate cancellation cannot cross-own
 
-    /// OBSERVER: original await parks and is structurally acknowledged.
-    /// A duplicate observer await runs from a Task that is DETERMINISTICALLY
-    /// already-cancelled when it enters `awaitObserver` (guaranteed by a
-    /// separate barrier gate — no scheduler race). The duplicate hits the
-    /// `parkedObservers[id] != nil` branch and is rejected; its onCancel
-    /// spawns `cancelObserver(id: token.id, awaitID: <dupAwaitID>)`. The
-    /// awaitID mismatch check in `cancelObserver` MUST short-circuit as a
-    /// bounded no-op (`observerCancelIgnoredCount += 1`), leaving the
-    /// original parked continuation intact with NO fate sealed. A later
-    /// signal then resumes the original exactly once as `.signaledWhileParked`.
-    ///
-    /// Regression proof: without the awaitID tuple, `cancelObserver` would
-    /// find `parkedObservers[id]` and drain the ORIGINAL — sealing fate
-    /// `.cancelledWhileParked` and resuming the wrong continuation.
+    /// A preclaimed duplicate cancellation enters only after the original is
+    /// parked. Raw requested/parked IDs prove mismatch independently; the
+    /// intentional signal happens after the duplicate actor call returns.
     func testAsyncGateDuplicateAwaitCancelDoesNotCrossOwnOriginalObserver() async {
-        // Ripley Finding 5 redesign (Hicks HIGH): the prior version
-        // used `await gate.waitForObserverCancelCount(atLeast: 1)`
-        // BEFORE close() to prove the cancel dispatch had run before
-        // the mid snapshot. That pre-close wait is exactly the
-        // pattern Hicks bans for D-standard tests: it hangs under
-        // "cancel Task never launched" / "state-transition-without-
-        // task" mutations (cancel count stays 0; rescue requires
-        // close, but we intended to snapshot BEFORE close).
-        //
-        // Redesign under the bounded-D standard:
-        //   - No pre-close waitForXCancelCount.
-        //   - Unconditional teardown BEFORE any latch peek.
-        //   - Synchronous peek of dupAttempt.bufferedOutcomeForTest;
-        //     nil → XCTFail (loud mutation detection).
-        //   - Correlate observed receipt with hopFingerprintForTest
-        //     (Ripley Finding 4) to prove cross-own isolation
-        //     structurally: at hop time, parked entry must have
-        //     existed for the ORIGINAL, and the matcher MUST have
-        //     rejected on awaitID mismatch (awaitIDMatched=false).
-        //   - Preserved contracts: exact cross-owning awaitID
-        //     isolation (assertions on parkedResumedByCancel==0 and
-        //     cancelledWhileParked==0), mismatched duplicate receipt
-        //     narrowed by fingerprint, original attempt natural
-        //     completion via signal, no cross-cancellation.
-        //
-        // Wait-for graph (acyclic; every suspension has independent
-        // releaser that does not depend on the cancel-latch edge):
-        //   parent.waitForObserverParked -> primary park OR close-drain
-        //   parent.barrier.waitForWaiterParked -> barrier park OR close-drain
-        //   parent.registerWaiter        -> bounded actor call (signal)
-        //   parent.gate.close            -> bounded actor call
-        //   parent.barrier.close         -> bounded actor call
-        //   parent.original.value        -> signal-drain OR gate-close-drain
-        //   parent.dup.value             -> body exit via barrier-close OR normal
-        //   parent.bufferedOutcomeForTest — synchronous peek
-        //   parent.snapshot              -> bounded actor call
         let gate = AsyncGate()
-        let barrier = AsyncGate()
         let token = await gate.registerObserver()
         let origAttempt = ObserverAwaitAttempt()
         let dupAttempt = ObserverAwaitAttempt()
 
-        // Original parks and is confirmed parked before any duplicate runs.
         let original = Task { await gate.awaitObserver(token, attempt: origAttempt) }
         await gate.waitForObserverParked(token)
 
-        // Duplicate parks in the BARRIER first, gets cancelled while parked
-        // there, and then enters `gate.awaitObserver` in an already-cancelled
-        // state. No Task.yield/sleep — the parking + cancellation ordering
-        // is proven by `waitForWaiterParked` on the barrier.
-        let barrierToken = await barrier.registerWaiter()
-        let dup = Task {
-            await barrier.awaitWaiter(barrierToken)   // parks; cancelled here
-            await gate.awaitObserver(token, attempt: dupAttempt)   // enters cancelled
-        }
-        await barrier.waitForWaiterParked(barrierToken)
-        dup.cancel()
+        // The duplicate cancellation is claimed before entry. Its own
+        // suspension is therefore independently released even if branch-2
+        // publication is removed. The direct actor call completes the
+        // duplicate branch before the intentional signal.
+        dupAttempt.prepareCancellationForTest()
+        await gate.awaitObserver(token, attempt: dupAttempt)
+        _ = await gate.registerWaiter()
 
-        // Ordering: teardown chain is fully bounded, but signal MUST
-        // fire AFTER dup body has run through its branch-2 duplicate
-        // path (else signal would drain original's parked continuation
-        // BEFORE dup enters, and dup would hit branch 4/5 not branch 2,
-        // invalidating the cross-own test).
-        // `await dup.value` bounds body exit — body block completes
-        // AFTER hitting branch 2 + resuming duplicate + returning from
-        // withCheckedContinuation + running mark. So dup.value implies
-        // dup already hit branch 2. barrier.close is bounded and
-        // releases dup's inner barrier.awaitWaiter cancel dispatch.
-        // gate.close then drains any cancel Task queued to gate;
-        // dupAttempt.outcome() is bounded by close-drain.
-        await barrier.close()
-        await dup.value
-        _ = await gate.registerWaiter()   // signal original (safe: dup already hit branch 2)
+        // Wait-for graph: gate.close and origAttempt.rescueSuspension run
+        // before original.value; receipt inspection is nonblocking.
         await gate.close()
+        origAttempt.rescueSuspension()
         await original.value
-        let dupOutcome = await dupAttempt.outcome()
+        guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
+            XCTFail("duplicate cancellation did not publish")
+            return
+        }
         guard case .cancelled(let dupR) = dupOutcome else {
             XCTFail("duplicate must publish a cancel receipt, got \(dupOutcome)")
             return
@@ -1606,15 +1587,14 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTFail("cancel receipt present but no hop fingerprint — harness regression")
             return
         }
-        XCTAssertFalse(hop.awaitIDMatched,
-            "matcher must reject dup's awaitID against original's (structurally disjoint UUIDs); got matched=true — broken-matcher regression")
-        if hop.closedAtHop {
-            XCTAssertEqual(dupR, .closedBeforeProcessing,
-                "closedAtHop=true → receipt must be .closedBeforeProcessing; got \(dupR)")
-        } else {
-            XCTAssertEqual(dupR, .processedIgnoredMismatch,
-                "closedAtHop=false + mismatched awaitID → receipt must be .processedIgnoredMismatch; got \(dupR)")
-        }
+        let independentlyMatched = hop.parkedAwaitID == hop.requestedAwaitID
+        XCTAssertEqual(hop.requestedAwaitID, dupAttempt.id)
+        XCTAssertEqual(hop.parkedAwaitID, origAttempt.id)
+        XCTAssertTrue(hop.parkedEntryExisted)
+        XCTAssertFalse(hop.closedAtHop)
+        XCTAssertFalse(independentlyMatched,
+                       "raw requested and parked identities must be disjoint")
+        XCTAssertEqual(dupR, .processedIgnoredMismatch)
 
         // Consolidated post-teardown structural proof.
         let final = await gate.snapshot()
@@ -1647,19 +1627,12 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(origOutcome, .finishedBeforeProcessing,
                        "original attempt: natural completion via signal")
         XCTAssertEqual(origAttempt.stateForTest, .completedNaturally,
-                       "state machine committed natural path — no cancel Task was launched for original")
+                       "state machine committed the original natural path")
     }
 
-    /// WAITER analogue: identical structure, mirrored types. Original
-    /// waiter parks; duplicate barrier-gated + already-cancelled at entry
-    /// hits the `parkedWaiters[id] != nil` branch, its cancel fires with
-    /// mismatched awaitID → `waiterCancelIgnoredCount += 1`. Original
-    /// stays parked and later resumes via `open()` as `.openedWhileParked`.
-    ///
-    /// Ripley Finding 5 redesign — see observer variant for full rationale.
+    /// Waiter analogue of the direct raw-identity cross-own proof.
     func testAsyncGateDuplicateAwaitCancelDoesNotCrossOwnOriginalWaiter() async {
         let gate = AsyncGate()
-        let barrier = AsyncGate()
         let token = await gate.registerWaiter()
         let origAttempt = WaiterAwaitAttempt()
         let dupAttempt = WaiterAwaitAttempt()
@@ -1667,23 +1640,17 @@ final class PredictiveViewModelTests: XCTestCase {
         let original = Task { await gate.awaitWaiter(token, attempt: origAttempt) }
         await gate.waitForWaiterParked(token)
 
-        let barrierToken = await barrier.registerWaiter()
-        let dup = Task {
-            await barrier.awaitWaiter(barrierToken)
-            await gate.awaitWaiter(token, attempt: dupAttempt)
-        }
-        await barrier.waitForWaiterParked(barrierToken)
-        dup.cancel()
+        dupAttempt.prepareCancellationForTest()
+        await gate.awaitWaiter(token, attempt: dupAttempt)
+        await gate.open()
 
-        // Ordering (see observer variant for full rationale): open
-        // MUST fire AFTER dup body has run through branch-2. `await
-        // dup.value` implies dup already hit branch 2.
-        await barrier.close()
-        await dup.value
-        await gate.open()          // open original (safe: dup already hit branch 2)
         await gate.close()
+        origAttempt.rescueSuspension()
         await original.value
-        let dupOutcome = await dupAttempt.outcome()
+        guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
+            XCTFail("duplicate cancellation did not publish")
+            return
+        }
         guard case .cancelled(let dupR) = dupOutcome else {
             XCTFail("duplicate must publish a cancel receipt, got \(dupOutcome)")
             return
@@ -1692,15 +1659,13 @@ final class PredictiveViewModelTests: XCTestCase {
             XCTFail("cancel receipt present but no hop fingerprint — harness regression")
             return
         }
-        XCTAssertFalse(hop.awaitIDMatched,
-            "matcher must reject dup's awaitID against original's (structurally disjoint UUIDs); got matched=true — broken-matcher regression")
-        if hop.closedAtHop {
-            XCTAssertEqual(dupR, .closedBeforeProcessing,
-                "closedAtHop=true → receipt must be .closedBeforeProcessing; got \(dupR)")
-        } else {
-            XCTAssertEqual(dupR, .processedIgnoredMismatch,
-                "closedAtHop=false + mismatched awaitID → receipt must be .processedIgnoredMismatch; got \(dupR)")
-        }
+        let independentlyMatched = hop.parkedAwaitID == hop.requestedAwaitID
+        XCTAssertEqual(hop.requestedAwaitID, dupAttempt.id)
+        XCTAssertEqual(hop.parkedAwaitID, origAttempt.id)
+        XCTAssertTrue(hop.parkedEntryExisted)
+        XCTAssertFalse(hop.closedAtHop)
+        XCTAssertFalse(independentlyMatched)
+        XCTAssertEqual(dupR, .processedIgnoredMismatch)
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
@@ -1903,16 +1868,11 @@ final class PredictiveViewModelTests: XCTestCase {
     func testAsyncGateCancelWinsThenOpenIsBoundedNoOp() async {
         let gate = AsyncGate()
         let token = await gate.registerWaiter()
-        let task = Task { await gate.awaitWaiter(token) }
-        await gate.waitForWaiterParked(token)   // proof: parked
-
-        task.cancel()                            // schedules cancelWaiter
-        // Bounded actor ACK: cancelWaiter dispatched and sealed
-        // .cancelledWhileParked synchronously within the actor call. Proves
-        // the fate WITHOUT awaiting the stranding-capable task.value; close()
-        // also drains this ACK queue so it cannot hang teardown.
-        await gate.waitForWaiterCancelCount(atLeast: 1)
-        await gate.open()                        // no work to do
+        let attempt = WaiterAwaitAttempt()
+        attempt.prepareCancellationForTest()
+        await gate.awaitWaiter(token, attempt: attempt)
+        await gate.open()
+        await gate.close()
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
@@ -1921,9 +1881,7 @@ final class PredictiveViewModelTests: XCTestCase {
                        "open after cancel must not relatch a cancelled id")
         XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked] ?? 0, 1)
         XCTAssertTrue(snap.opened)
-        // Unconditional teardown, then drain the cancelled task.
-        await gate.close()
-        await task.value                         // bounded post-close
+        XCTAssertEqual(boundedOutcome(attempt), .cancelled(.processedMatched))
     }
 
     /// Close-with-actually-parked continuations for BOTH token types.
@@ -2197,7 +2155,7 @@ final class PredictiveViewModelTests: XCTestCase {
         // Enter ticket AFTER parked-proof. `enterObserverParkAck` runs
         // synchronously on the actor: its `parkedObservers[token.id] != nil`
         // branch calls `ticket.resolve(.parked)` and returns without
-        // inserting into `observerActiveParkAckTickets`.
+        // inserting into the active ticket registry.
         let ticket = await gate.enterObserverParkAck(token)
 
         // Reviewer finding E (Hicks, MEDIUM): capture the sync-resolution
@@ -2297,7 +2255,7 @@ final class PredictiveViewModelTests: XCTestCase {
     /// Hicks R2: two callers register park-ACK ticket objects BEFORE
     /// the parking task is spawned. Because `enterObserverParkAck`
     /// runs synchronously on the actor, both tickets are recorded in
-    /// `observerActiveParkAckTickets[token.id]` before returning; a
+    /// the observer ticket registry before returning; a
     /// snapshot taken pre-spawn proves `observerParkAckTicketCount==2`.
     /// After the parking task actually parks, both tickets resolve
     /// `.parked` exactly once and every per-token map returns to zero.
@@ -2518,236 +2476,88 @@ final class PredictiveViewModelTests: XCTestCase {
                        "all \(iterations) waiter park/open cycles ran")
     }
 
-    // MARK: Hicks H1 — attempt publication race (atomic outcome latch)
+    // MARK: H1 natural-publication causality
 
-    /// Reviewer finding #1 (HIGH): the prior version used
-    /// `awaitObserver` (no hold) and awaited `attempt.outcome()`
-    /// AFTER signal to prove natural publication. That await could
-    /// hang indefinitely if publication regressed, and the late
-    /// `task.cancel()` fired AFTER the outer withTaskCancellationHandler
-    /// scope had already torn down — so cancellation was NOT proven
-    /// to arrive while the handler was live.
-    ///
-    /// This revision uses the new `awaitObserverAndHoldAfterPublish`
-    /// helper which:
-    ///   1. Parks the primary continuation
-    ///   2. On resume, IMMEDIATELY publishes natural completion via
-    ///      `attempt.markCompletedNaturallyIfActive()` +
-    ///      `resolveOutcome(.finishedBeforeProcessing)` (synchronous)
-    ///   3. Then parks inside `holdGate.awaitWaiter(holdToken)`
-    /// The outer cancellation handler stays installed throughout.
-    ///
-    /// Test flow (deterministic, failure-safe):
-    ///   1. Pre-register `holdAck` ticket on holdGate BEFORE task spawn
-    ///   2. Spawn task using the new helper
-    ///   3. Prove primary parked via `waitForObserverParked`
-    ///   4. `signal()` → primary continuation resumes → body publishes
-    ///      natural THEN parks in hold
-    ///   5. Snapshot: primary `signaledWhileParked` == 1, parked == 0
-    ///   6. Watchdog Task: awaits `task.value` and (only if that returns)
-    ///      closes holdGate — a REGRESSION where body never reaches hold
-    ///      causes task to return early, watchdog fires, holdAck resolves
-    ///      `.closedOrConsumed`, and the arrival assertion fails LOUDLY
-    ///      instead of hanging.
-    ///   7. `await holdAck.value()` — bounded: either `.parked` (body
-    ///      entered hold; publication committed) or `.closedOrConsumed`
-    ///      (regression detected).
-    ///   8. Read `attempt.stateForTest`/`bufferedOutcomeForTest`
-    ///      SYNCHRONOUSLY under lock — publication is proven to have
-    ///      committed BEFORE the hold-park by construction.
-    ///   9. `task.cancel()` — outer onCancel fires while handler is
-    ///      live in hold. Primary state gate rejects
-    ///      (`beginCancellationIfActive()` returns false because state
-    ///      is `.completedNaturally`); NO primary cancel Task is launched.
-    ///  10. Open + close holdGate to release the body; `await task.value`
-    ///      is bounded by that drain.
-    ///  11. Assertions: primary `observerCancelInvocationCount == 0`
-    ///      (definitive proof the state gate blocked the late cancel);
-    ///      outcome remains exactly `.finishedBeforeProcessing`.
+    /// Signal resumes the observer, the child publishes its natural outcome,
+    /// emits an acknowledgement, and self-cancels in that exact order while
+    /// its handler is live. Close plus caller-owned suspension rescue precede
+    /// the only join, so missing publication terminates with a nil/ack failure.
     func testAsyncGateH1AttemptNaturalWinsOverLateCancel_observer() async {
-        // Ripley Finding 1 redesign (Hicks HIGH): the prior version used
-        // a `holdAck` ticket + watchdog pair to prove body arrival at
-        // hold-await BEFORE parent awaited teardown. Under the exact
-        // mutation Hicks called out — suppressing ticket resolution
-        // inside `flushWaiterParkAcks` — that structure formed a
-        // wait-for cycle: child parked on holdGate, parent awaiting
-        // `holdAck.value`, watchdog awaiting `task.value`; parent
-        // never opened holdGate; deadlock.
-        //
-        // This revision removes the holdAck arrival oracle entirely.
-        // Hold release is UNCONDITIONALLY reachable BEFORE any
-        // suspension on ticket/attempt/child — a straight-line
-        // teardown chain. Primary-close is included in the same chain
-        // so a signal-regression that leaves the primary continuation
-        // parked at `withCheckedContinuation` is also released
-        // (drained via `.closedWhileParked`). `task.value` is bounded
-        // by hold-release AND/OR primary-close-drain, so it always
-        // returns without depending on the arrival oracle.
-        //
-        // Preservation contract:
-        //   - Synchronous buffered natural-outcome inspection via
-        //     `attempt.bufferedOutcomeForTest` (nil peek = loud fail).
-        //   - Cancellation while handler live: `task.cancel()` fires
-        //     BEFORE the teardown chain touches holdGate.open. Body
-        //     is either inside hold-await or racing to enter it; in
-        //     both cases the outer `withTaskCancellationHandler`
-        //     block is still executing, so onCancel is delivered
-        //     while the handler is installed.
-        //   - Exact natural-wins semantics: after teardown, the
-        //     buffered outcome MUST be `.finishedBeforeProcessing`
-        //     AND `observerCancelInvocationCount` MUST be exactly
-        //     zero. A cancel-wins race yields `.cancelled(_)` and
-        //     a non-zero invocation count — both assertions fire.
-        //   - Bounded failure if outcome/ticket publication regresses:
-        //     nil peek → guard XCTFails; no infinite wait.
-        //
-        // Wait-for graph (acyclic; every suspension has an independent
-        // releaser that does not await the edge being rescued):
-        //   parent.waitForObserverParked <- primary park OR gate.close drain
-        //   parent.snapshot              <- bounded actor call
-        //   parent.holdGate.open         <- bounded actor call
-        //   parent.holdGate.close        <- bounded actor call
-        //   parent.gate.close            <- bounded actor call
-        //   parent.task.value            <- hold-release AND/OR
-        //                                   primary-close-drain
-        //   parent.snapshot              <- bounded actor call
-        //   parent.bufferedOutcomeForTest — synchronous peek, no
-        //     suspension; nil → loud XCTFail
         let gate = AsyncGate()
-        let holdGate = AsyncGate()
-        let holdToken = await holdGate.registerWaiter()
         let token = await gate.registerObserver()
         let attempt = ObserverAwaitAttempt()
+        let publicationAck = NaturalPublicationAck()
 
         let task = Task {
-            await gate.awaitObserverAndHoldAfterPublish(
-                token, attempt: attempt,
-                holdGate: holdGate, holdToken: holdToken)
+            await gate.awaitObserverPublishThenSelfCancel(
+                token,
+                attempt: attempt,
+                acknowledgement: publicationAck)
         }
-        _ = await gate.waitForObserverParked(token)
-
-        // Signal resumes the parked continuation naturally. Body's
-        // synchronous post-resume code runs mark → resolveOutcome →
-        // enters hold-await. mark → resolveOutcome are NSLock ops
-        // (~100ns each); the cancel Task's actor hop below takes
-        // orders of magnitude longer (µs), so mark reliably commits
-        // state to `.completedNaturally` before begin observes it.
+        let parkAck = await gate.waitForObserverParked(token)
+        XCTAssertEqual(parkAck, .parked)
         await gate.signal()
 
-        // Gate-side proof primary continuation resumed (bounded).
-        let mid = await gate.snapshot()
-        XCTAssertEqual(mid.observerFateCounts[.signaledWhileParked] ?? 0, 1,
-                       "signal resumed the parked observer (gate-side proof)")
-        XCTAssertEqual(mid.parkedObserverCount, 0)
-
-        // Late cancel WHILE handler is live. `task.cancel()`
-        // synchronously invokes onCancel: `beginCancellationIfActive`
-        // reads state under NSLock. If mark already committed
-        // `.completedNaturally`, begin returns false → NO primary
-        // cancel Task launched. Otherwise (cancel-wins race, caught
-        // by outcome assertion below), begin returns true → cancel
-        // Task launched → outcome eventually `.cancelled(...)`.
-        task.cancel()
-
-        // Unconditional teardown — no dependency on ticket, attempt,
-        // or child body. Each release is a bounded actor call.
-        //   holdGate.open  → releases body if it reached hold-await;
-        //                    latches openedBeforePark otherwise so
-        //                    the imminent awaitWaiter takes the
-        //                    openedImmediate branch.
-        //   holdGate.close → drains any residual hold state.
-        //   gate.close     → drains any stuck primary continuation
-        //                    (rescue for a signal-regression that
-        //                    left primary parked at withCheckedContinuation).
-        // task.value is bounded by the union of these releases.
-        await holdGate.open()
-        await holdGate.close()
+        // Wait-for graph: gate.close or attempt.rescueSuspension releases
+        // the primary continuation; both run before task.value. Outcome and
+        // acknowledgement are inspected synchronously after the bounded join.
         await gate.close()
+        attempt.rescueSuspension()
         await task.value
 
-        // Synchronous peek — no suspension. nil means neither
-        // publisher fired: either the resolveOutcome-regression path
-        // (mark committed, resolveOutcome no-op, begin blocked → no
-        // publisher) or a more exotic double-regression. Loud fail.
         guard let outcome = attempt.bufferedOutcomeForTest else {
-            XCTFail("no publisher fired; resolveOutcome regressed (state stuck at .completedNaturally with no publisher, or double-regression)")
+            XCTFail("natural publication was suppressed")
             return
         }
-        XCTAssertEqual(outcome, .finishedBeforeProcessing,
-                       "state gate must reject late cancel and preserve natural outcome; got \(outcome) (cancel-wins race indicates the state gate did not block begin)")
-
-        // Definitive proof the state gate blocked the late cancel:
-        // NO primary cancel Task was ever dispatched, so
-        // observerCancelInvocationCount stays exactly zero. A
-        // regression that lets begin succeed (state gate removed
-        // OR mark did not commit before cancel) would increment
-        // this counter — assertion fires loudly.
+        XCTAssertEqual(outcome, .finishedBeforeProcessing)
+        XCTAssertEqual(publicationAck.publicationCountForTest, 1,
+                       "acknowledgement is emitted only after natural outcome publication")
+        XCTAssertEqual(attempt.cancelHandlerInvocationCountForTest, 1,
+                       "self-cancel ran while the handler was installed")
+        XCTAssertEqual(attempt.normalPublicationCountForTest, 1)
+        XCTAssertEqual(attempt.rescuePublicationCountForTest, 0)
         let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerFateCounts[.signaledWhileParked] ?? 0, 1)
         XCTAssertEqual(snap.observerCancelInvocationCount, 0,
-                       "state gate must reject late cancel: no primary cancel Task launched")
+                       "natural publication causally preceded self-cancellation")
     }
 
-    /// Waiter analogue of the natural-wins-over-late-cancel proof.
-    /// Uses `awaitWaiterAndHoldAfterPublish` + open() to resume the
-    /// parked waiter; same holdAck-free straight-line teardown as
-    /// the observer variant. See there for full rationale.
+    /// Waiter analogue of the causal publish-acknowledge-self-cancel proof.
     func testAsyncGateH1AttemptNaturalWinsOverLateCancel_waiter() async {
-        // Ripley Finding 1 waiter analogue — see observer variant for
-        // full rationale. Removes the holdAck arrival oracle to break
-        // the wait-for cycle under Hicks's `flushWaiterParkAcks`
-        // suppression mutation. Straight-line teardown ensures every
-        // suspension has an independent unconditional releaser.
         let gate = AsyncGate()
-        let holdGate = AsyncGate()
-        let holdToken = await holdGate.registerWaiter()
         let token = await gate.registerWaiter()
         let attempt = WaiterAwaitAttempt()
+        let publicationAck = NaturalPublicationAck()
 
         let task = Task {
-            await gate.awaitWaiterAndHoldAfterPublish(
-                token, attempt: attempt,
-                holdGate: holdGate, holdToken: holdToken)
+            await gate.awaitWaiterPublishThenSelfCancel(
+                token,
+                attempt: attempt,
+                acknowledgement: publicationAck)
         }
-        _ = await gate.waitForWaiterParked(token)
-
-        // Open resumes the parked waiter naturally. Body's post-resume
-        // path runs mark → resolveOutcome (~100ns each) then enters
-        // hold-await; cancel Task's actor hop is orders of magnitude
-        // slower, so mark reliably commits state before begin observes.
+        let parkAck = await gate.waitForWaiterParked(token)
+        XCTAssertEqual(parkAck, .parked)
         await gate.open()
 
-        let mid = await gate.snapshot()
-        XCTAssertEqual(mid.waiterFateCounts[.openedWhileParked] ?? 0, 1,
-                       "open resumed the parked waiter (gate-side proof)")
-        XCTAssertEqual(mid.parkedWaiterCount, 0)
-
-        // Late cancel while handler is still installed (body is in
-        // hold-await or racing there; outer withTaskCancellationHandler
-        // block has not yet returned).
-        task.cancel()
-
-        // Unconditional teardown — hold release is reachable BEFORE any
-        // wait on ticket/attempt/child. Primary-close rescues a
-        // signal-regression that left primary parked. `task.value` is
-        // bounded by the union of hold-release AND primary-close-drain.
-        await holdGate.open()
-        await holdGate.close()
+        // Wait-for graph mirrors the observer path: close and the caller-owned
+        // suspension rescue both precede the only join.
         await gate.close()
+        attempt.rescueSuspension()
         await task.value
 
-        // Synchronous peek — no suspension. nil = resolveOutcome
-        // regression path (mark committed, resolveOutcome no-op,
-        // begin blocked → no publisher); loud fail via guard.
         guard let outcome = attempt.bufferedOutcomeForTest else {
-            XCTFail("no publisher fired; resolveOutcome regressed (state stuck at .completedNaturally with no publisher, or double-regression)")
+            XCTFail("natural publication was suppressed")
             return
         }
-        XCTAssertEqual(outcome, .finishedBeforeProcessing,
-                       "waiter state gate must reject late cancel and preserve natural outcome; got \(outcome) (cancel-wins race indicates begin was not blocked)")
-
+        XCTAssertEqual(outcome, .finishedBeforeProcessing)
+        XCTAssertEqual(publicationAck.publicationCountForTest, 1)
+        XCTAssertEqual(attempt.cancelHandlerInvocationCountForTest, 1)
+        XCTAssertEqual(attempt.normalPublicationCountForTest, 1)
+        XCTAssertEqual(attempt.rescuePublicationCountForTest, 0)
         let snap = await gate.snapshot()
+        XCTAssertEqual(snap.waiterFateCounts[.openedWhileParked] ?? 0, 1)
         XCTAssertEqual(snap.waiterCancelInvocationCount, 0,
-                       "state gate must reject late cancel: no waiter cancel Task launched")
+                       "natural publication causally preceded self-cancellation")
     }
 
     /// Hicks H1: opposite race — parked observer is cancelled FIRST.
@@ -2766,9 +2576,13 @@ final class PredictiveViewModelTests: XCTestCase {
         // Hicks H3: close UNCONDITIONALLY before awaiting task.value or
         // attempt.outcome(). Both are then bounded by close-drain.
         await gate.close()
+        attempt.rescueSuspension()
         await task.value
 
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("observer cancel path produced no outcome")
+            return
+        }
         // Cancel-first path yields exactly `.processedMatched`; if the
         // close-drain wins the actor race the outcome is
         // `.closedBeforeProcessing`. Both are exact non-hang receipts.
@@ -2789,9 +2603,13 @@ final class PredictiveViewModelTests: XCTestCase {
 
         // Hicks H3: close UNCONDITIONALLY before awaiting task.value.
         await gate.close()
+        attempt.rescueSuspension()
         await task.value
 
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("waiter cancel path produced no outcome")
+            return
+        }
         XCTAssertTrue(outcome == .cancelled(.processedMatched)
                       || outcome == .cancelled(.closedBeforeProcessing),
                       "cancel path publishes exact receipt; got \(outcome)")
@@ -2800,8 +2618,7 @@ final class PredictiveViewModelTests: XCTestCase {
     // MARK: Hicks H2 — weak ticket boxes stay bounded on enter+drop
 
     /// Reviewer finding B (Hicks, MEDIUM): the prior H2 tests proved
-    /// exact-zero via `pruneAllDroppedTicketBoxesForTest()` — a
-    /// test-only manual cleanup method. That does not tie removal to
+    /// exact-zero via a test-only manual cleanup method. That does not tie removal to
     /// NORMAL ticket lifecycle: after the final iteration's ticket
     /// deinit, a dead `[tokenID: WeakBox(nil)]` bucket can remain
     /// indefinitely because nothing in the normal path compacts it.
@@ -2810,7 +2627,7 @@ final class PredictiveViewModelTests: XCTestCase {
     /// gate event: parking the token via `awaitObserver` synchronously
     /// (actor-serialized) invokes
     /// `flushObserverParkAcks(id: token.id, result: .parked)`, which
-    /// REMOVES the token's entry from `observerActiveParkAckTickets`
+    /// removes the token's entry from the ticket registry
     /// atomically — including any dead-but-not-yet-compacted weak
     /// boxes from the enter+drop loop. No manual prune, no
     /// `snapshot()` (which itself compacts), no `close()` before the
@@ -2864,7 +2681,7 @@ final class PredictiveViewModelTests: XCTestCase {
         // NATURAL TICKET LIFECYCLE: parking the observer invokes
         // `flushObserverParkAcks(id: token.id, result: .parked)` inside
         // `awaitObserver` branch (3), which
-        // `observerActiveParkAckTickets.removeValue(forKey: id)` — the
+        // removes the observer registry bucket — the
         // whole bucket vanishes, dead weak-boxes included. No manual
         // prune, no snapshot, no close.
         let attempt = ObserverAwaitAttempt()
@@ -2918,7 +2735,7 @@ final class PredictiveViewModelTests: XCTestCase {
         // NATURAL TICKET LIFECYCLE: parking the waiter invokes
         // `flushWaiterParkAcks(id: token.id, result: .parked)` inside
         // `awaitWaiter`'s parking branch, removing the whole
-        // `waiterActiveParkAckTickets[id]` bucket atomically.
+        // waiter registry bucket atomically.
         let attempt = WaiterAwaitAttempt()
         let parkTask = Task { await gate.awaitWaiter(token, attempt: attempt) }
         let ack = await gate.waitForWaiterParked(token)
@@ -2936,96 +2753,55 @@ final class PredictiveViewModelTests: XCTestCase {
         await parkTask.value
     }
 
-    // MARK: Ripley Finding 2 — distinct-token weak ticket auto-cleanup
-    //
-    // The two `testAsyncGateH2TicketEnterDropStaysBounded_*` tests
-    // above prove that repeated enter+drop on a SINGLE token followed
-    // by parking THAT token returns raw backing storage to zero via the
-    // park-triggered `flushXParkAcks(id:, .parked)` bucket removal.
-    //
-    // Hicks (Ripley Finding 2, MEDIUM): that proof does not cover N
-    // DISTINCT unparked tokens because flush is per-token and each
-    // distinct token has its own bucket. Without an automatic
-    // identity-preserving lifecycle removal path, dead weak-boxes for
-    // each distinct token would accumulate one-per-token and only be
-    // reclaimable via `pruneAllDroppedTicketBoxesForTest()`,
-    // `snapshot()` compaction, or `close()`.
-    //
-    // The harness now registers a deinit-driven cleanup Task per
-    // ticket (see `ObserverParkAckTicket.deinit` +
-    // `AsyncGate.observerTicketCleanupFromDeinit`) that removes the
-    // exact box for the ticket's `identity` from
-    // `observerActiveParkAckTickets[tokenID]` when the caller drops
-    // the ticket without ever consuming it. A gate-side
-    // `waitForNoPendingObserverTicketCleanups()` barrier suspends until
-    // the LAST such cleanup Task's actor call completes.
-    //
-    // Deterministic sequence — no sleeps, Task.yield, polling, timeouts,
-    // manual prune, close, snapshot, or per-token park:
-    //   1. Register N distinct tokens (each with a fresh id).
-    //   2. Enter+drop one ticket per token inside an `@inline(never)`
-    //      helper so ARC deterministically releases every ticket at
-    //      helper return.
-    //   3. Await `gate.waitForNoPendingObserverTicketCleanups()`.
-    //      Resolves exactly when every deinit-launched cleanup Task's
-    //      actor call has run — barrier semantics.
-    //   4. Read raw box/key counts DIRECTLY (via debugRaw*). Both
-    //      MUST be exactly zero.
-    //   5. Read pending-cleanup identity count directly (debugPending*).
-    //      MUST be exactly zero.
-    //   6. Bounded teardown via close() (not part of the exact-zero
-    //      proof; barrier already passed).
+    // MARK: Distinct-token synchronous ticket cleanup
 
-    /// Ripley Finding 2: N distinct observer tokens, one enter+drop
-    /// each, no per-token park. Auto-cleanup + barrier prove raw
-    /// storage exactly zero without snapshot/close/manual prune.
+    /// N distinct unparked tokens drop one ticket each. ARC cleanup removes
+    /// every exact identity synchronously and records its reason before any
+    /// snapshot, close, park, or manual cleanup can affect the result.
     func testAsyncGateH2DistinctTokenEnterDropAutoCleansBounded_observer() async {
         let gate = AsyncGate()
         let iterations = 100
-        // Pre-register N distinct tokens. Tokens are value-typed
-        // ObserverToken(id:), no ticket lifetime coupled here.
         var tokens: [AsyncGate.ObserverToken] = []
         tokens.reserveCapacity(iterations)
         for _ in 0..<iterations {
             tokens.append(await gate.registerObserver())
         }
 
+        var cleanupEvidence: [TicketCleanupEvidence] = []
+        cleanupEvidence.reserveCapacity(iterations)
         @inline(never)
         func enterAndDropOncePerToken() async {
             for t in tokens {
                 let ticket = await gate.enterObserverParkAck(t)
-                _ = ticket
-                // ticket goes out of scope at loop-body end — deinit
-                // fires synchronously here (last strong ref released).
+                cleanupEvidence.append(ticket.cleanupEvidence)
             }
         }
         await enterAndDropOncePerToken()
 
-        // Deterministic barrier: suspends until every deinit-launched
-        // cleanup Task's actor call has completed. Rescued by close()
-        // via the standard drain path if any regression prevents
-        // completion, so this cannot hang.
-        await gate.waitForNoPendingObserverTicketCleanups()
-
-        // Direct raw-storage reads — NOT via snapshot() (which would
-        // compact-as-side-effect and mask a lifecycle-removal
-        // regression), NOT via close (deferred to teardown below),
-        // NOT via pruneAllDroppedTicketBoxesForTest (would trivially
-        // satisfy the assertion regardless of auto-cleanup working).
+        // ARC deinit removes identities synchronously. These reads happen
+        // before snapshot, park, prune, or close.
         let rawBoxes = await gate.debugRawObserverParkAckBoxCount()
         let rawKeys = await gate.debugRawObserverParkAckKeyCount()
-        XCTAssertEqual(rawBoxes, 0,
-            "N distinct-token auto-cleanup must leave raw box count exactly zero; got \(rawBoxes)")
-        XCTAssertEqual(rawKeys, 0,
-            "N distinct-token auto-cleanup must leave raw key count exactly zero; got \(rawKeys)")
+        XCTAssertEqual(rawBoxes, 0)
+        XCTAssertEqual(rawKeys, 0)
+        let automaticCleanupCount = await gate.debugObserverAutomaticTicketCleanupCount()
+        XCTAssertEqual(automaticCleanupCount, iterations)
+        XCTAssertTrue(cleanupEvidence.allSatisfy {
+            $0.resultForTest == .removedAutomatically
+        }, "every distinct ticket must record automatic deinit cleanup")
 
-        // Pending-identity set direct read: proves the actor-side
-        // pending-cleanup bookkeeping is fully drained.
-        let pending = await gate.debugPendingObserverTicketCleanupCount()
-        XCTAssertEqual(pending, 0,
-            "pending-cleanup identity set must be empty after barrier; got \(pending)")
+        // Owner lifetime: the ticket callback is weak. Releasing the actor
+        // before the ticket yields ownerReleased and cannot retain or crash it.
+        var ephemeralGate: AsyncGate? = AsyncGate()
+        let ephemeralToken = await ephemeralGate!.registerObserver()
+        var orphan: ObserverParkAckTicket? = await ephemeralGate!.enterObserverParkAck(ephemeralToken)
+        let orphanEvidence = orphan!.cleanupEvidence
+        weak let weakGate = ephemeralGate
+        ephemeralGate = nil
+        XCTAssertNil(weakGate)
+        orphan = nil
+        XCTAssertEqual(orphanEvidence.resultForTest, .ownerReleased)
 
-        // Bounded teardown (not part of the exact-zero proof).
         await gate.close()
     }
 
@@ -3039,27 +2815,26 @@ final class PredictiveViewModelTests: XCTestCase {
             tokens.append(await gate.registerWaiter())
         }
 
+        var cleanupEvidence: [TicketCleanupEvidence] = []
+        cleanupEvidence.reserveCapacity(iterations)
         @inline(never)
         func enterAndDropOncePerToken() async {
             for t in tokens {
                 let ticket = await gate.enterWaiterParkAck(t)
-                _ = ticket
+                cleanupEvidence.append(ticket.cleanupEvidence)
             }
         }
         await enterAndDropOncePerToken()
 
-        await gate.waitForNoPendingWaiterTicketCleanups()
-
         let rawBoxes = await gate.debugRawWaiterParkAckBoxCount()
         let rawKeys = await gate.debugRawWaiterParkAckKeyCount()
-        XCTAssertEqual(rawBoxes, 0,
-            "N distinct-token auto-cleanup must leave raw box count exactly zero; got \(rawBoxes)")
-        XCTAssertEqual(rawKeys, 0,
-            "N distinct-token auto-cleanup must leave raw key count exactly zero; got \(rawKeys)")
-
-        let pending = await gate.debugPendingWaiterTicketCleanupCount()
-        XCTAssertEqual(pending, 0,
-            "pending-cleanup identity set must be empty after barrier; got \(pending)")
+        XCTAssertEqual(rawBoxes, 0)
+        XCTAssertEqual(rawKeys, 0)
+        let automaticCleanupCount = await gate.debugWaiterAutomaticTicketCleanupCount()
+        XCTAssertEqual(automaticCleanupCount, iterations)
+        XCTAssertTrue(cleanupEvidence.allSatisfy {
+            $0.resultForTest == .removedAutomatically
+        })
 
         await gate.close()
     }
@@ -3073,54 +2848,191 @@ final class PredictiveViewModelTests: XCTestCase {
     func testAsyncGateH2ResolvedTicketDeinitDoesNotDoubleDecrement_observer() async {
         let gate = AsyncGate()
         let token = await gate.registerObserver()
-
-        // Enter one ticket (active branch → pending identity registered).
-        // Then park the token so flushObserverParkAcks removes the box
-        // AND removes the identityHint from the pending set AND calls
-        // resolve(_) on the ticket (which clears its cleanup callback).
+        var oldIdentity: UUID!
+        var oldEvidence: TicketCleanupEvidence!
         do {
-            let ticket = await gate.enterObserverParkAck(token)
-            let parkAttempt = ObserverAwaitAttempt()
-            let parkTask = Task { await gate.awaitObserver(token, attempt: parkAttempt) }
-            _ = await gate.waitForObserverParked(token)
-            // Ticket is now resolved by flush (result == .parked) AND
-            // removed from actor storage. Its cleanup callback was
-            // cleared by resolve(_).
-            XCTAssertTrue(ticket.isResolved, "flush must resolve ticket at park time")
-            // Drop ticket at scope exit → deinit fires but must NOT
-            // launch a cleanup Task (callback was cleared by resolve).
-            _ = ticket
-            await gate.close()
-            await parkTask.value
+            let old = await gate.enterObserverParkAck(token)
+            oldIdentity = old.identity
+            oldEvidence = old.cleanupEvidence
         }
+        XCTAssertEqual(oldEvidence.resultForTest, .removedAutomatically)
 
-        // After scope exit + close, the barrier must resolve immediately.
-        // If deinit double-decremented, pending count could underflow /
-        // barrier could deadlock. Neither happens under correct impl.
-        await gate.waitForNoPendingObserverTicketCleanups()
-        let pending = await gate.debugPendingObserverTicketCleanupCount()
-        XCTAssertEqual(pending, 0,
-            "resolve()-then-deinit must not corrupt pending-identity accounting; got \(pending)")
+        var newer: ObserverParkAckTicket? = await gate.enterObserverParkAck(token)
+        let newerIdentity = newer!.identity
+        let newerEvidence = newer!.cleanupEvidence
+        let boxesBeforeStaleCleanup = await gate.debugRawObserverParkAckBoxCount()
+        let staleCleanup = await gate.debugObserverTicketCleanup(
+            tokenID: token.id,
+            identity: oldIdentity)
+        let wrongCleanup = await gate.debugObserverTicketCleanup(
+            tokenID: token.id,
+            identity: UUID())
+        let boxesAfterStaleCleanup = await gate.debugRawObserverParkAckBoxCount()
+        XCTAssertEqual(boxesBeforeStaleCleanup, 1)
+        XCTAssertEqual(staleCleanup, .staleIdentity)
+        XCTAssertEqual(wrongCleanup, .staleIdentity)
+        XCTAssertEqual(boxesAfterStaleCleanup, 1,
+                       "stale and wrong identities cannot remove the newer ticket")
+        XCTAssertNotEqual(oldIdentity, newerIdentity)
+
+        let parkAttempt = ObserverAwaitAttempt()
+        let parkTask = Task { await gate.awaitObserver(token, attempt: parkAttempt) }
+        let parkAck = await gate.waitForObserverParked(token)
+        XCTAssertEqual(parkAck, .parked)
+        XCTAssertTrue(newer!.isResolved)
+        let newerValue = await newer!.value()
+        XCTAssertEqual(newerValue, .parked)
+        newer = nil
+        XCTAssertEqual(newerEvidence.resultForTest, .resolvedByGate,
+                       "resolve suppresses the later deinit callback")
+        let automaticCleanupCount = await gate.debugObserverAutomaticTicketCleanupCount()
+        XCTAssertEqual(automaticCleanupCount, 1,
+                       "resolved ticket deinit must not double-clean")
+
+        await gate.close()
+        parkAttempt.rescueSuspension()
+        await parkTask.value
     }
 
     /// Waiter analogue.
     func testAsyncGateH2ResolvedTicketDeinitDoesNotDoubleDecrement_waiter() async {
         let gate = AsyncGate()
         let token = await gate.registerWaiter()
+        var oldIdentity: UUID!
+        var oldEvidence: TicketCleanupEvidence!
         do {
-            let ticket = await gate.enterWaiterParkAck(token)
-            let parkAttempt = WaiterAwaitAttempt()
-            let parkTask = Task { await gate.awaitWaiter(token, attempt: parkAttempt) }
-            _ = await gate.waitForWaiterParked(token)
-            XCTAssertTrue(ticket.isResolved, "flush must resolve ticket at park time")
-            _ = ticket
-            await gate.close()
-            await parkTask.value
+            let old = await gate.enterWaiterParkAck(token)
+            oldIdentity = old.identity
+            oldEvidence = old.cleanupEvidence
         }
-        await gate.waitForNoPendingWaiterTicketCleanups()
-        let pending = await gate.debugPendingWaiterTicketCleanupCount()
-        XCTAssertEqual(pending, 0,
-            "resolve()-then-deinit must not corrupt pending-identity accounting; got \(pending)")
+        XCTAssertEqual(oldEvidence.resultForTest, .removedAutomatically)
+
+        var newer: WaiterParkAckTicket? = await gate.enterWaiterParkAck(token)
+        let newerIdentity = newer!.identity
+        let newerEvidence = newer!.cleanupEvidence
+        let staleCleanup = await gate.debugWaiterTicketCleanup(
+            tokenID: token.id,
+            identity: oldIdentity)
+        let wrongCleanup = await gate.debugWaiterTicketCleanup(
+            tokenID: token.id,
+            identity: UUID())
+        let boxesAfterStaleCleanup = await gate.debugRawWaiterParkAckBoxCount()
+        XCTAssertEqual(staleCleanup, .staleIdentity)
+        XCTAssertEqual(wrongCleanup, .staleIdentity)
+        XCTAssertEqual(boxesAfterStaleCleanup, 1)
+        XCTAssertNotEqual(oldIdentity, newerIdentity)
+
+        let parkAttempt = WaiterAwaitAttempt()
+        let parkTask = Task { await gate.awaitWaiter(token, attempt: parkAttempt) }
+        let parkAck = await gate.waitForWaiterParked(token)
+        XCTAssertEqual(parkAck, .parked)
+        XCTAssertTrue(newer!.isResolved)
+        let newerValue = await newer!.value()
+        XCTAssertEqual(newerValue, .parked)
+        newer = nil
+        XCTAssertEqual(newerEvidence.resultForTest, .resolvedByGate)
+        let automaticCleanupCount = await gate.debugWaiterAutomaticTicketCleanupCount()
+        XCTAssertEqual(automaticCleanupCount, 1)
+
+        await gate.close()
+        parkAttempt.rescueSuspension()
+        await parkTask.value
+    }
+
+    func testAsyncGateObserverAttemptSupportsMultiplePreResolutionConsumers() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+        let attempt = ObserverAwaitAttempt()
+        let firstConsumer = attempt.subscribeForOutcome()
+        let secondConsumer = attempt.subscribeForOutcome()
+        let first = Task { await firstConsumer.value() }
+        let second = Task { await secondConsumer.value() }
+
+        attempt.prepareCancellationForTest()
+        await gate.awaitObserver(token, attempt: attempt)
+
+        // Wait-for graph: close and both caller-owned consumer rescues run
+        // before either consumer task is joined.
+        await gate.close()
+        firstConsumer.rescue(.cancelled(.closedBeforeProcessing))
+        secondConsumer.rescue(.cancelled(.closedBeforeProcessing))
+        let firstOutcome = await first.value
+        let secondOutcome = await second.value
+
+        XCTAssertEqual(firstOutcome, .cancelled(.processedMatched))
+        XCTAssertEqual(secondOutcome, firstOutcome)
+        XCTAssertEqual(firstConsumer.rescueCountForTest, 0)
+        XCTAssertEqual(secondConsumer.rescueCountForTest, 0)
+        XCTAssertEqual(attempt.normalPublicationCountForTest, 1)
+    }
+
+    func testAsyncGateWaiterAttemptSupportsMultiplePreResolutionConsumers() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        let attempt = WaiterAwaitAttempt()
+        let firstConsumer = attempt.subscribeForOutcome()
+        let secondConsumer = attempt.subscribeForOutcome()
+        let first = Task { await firstConsumer.value() }
+        let second = Task { await secondConsumer.value() }
+
+        attempt.prepareCancellationForTest()
+        await gate.awaitWaiter(token, attempt: attempt)
+
+        await gate.close()
+        firstConsumer.rescue(.cancelled(.closedBeforeProcessing))
+        secondConsumer.rescue(.cancelled(.closedBeforeProcessing))
+        let firstOutcome = await first.value
+        let secondOutcome = await second.value
+
+        XCTAssertEqual(firstOutcome, .cancelled(.processedMatched))
+        XCTAssertEqual(secondOutcome, firstOutcome)
+        XCTAssertEqual(firstConsumer.rescueCountForTest, 0)
+        XCTAssertEqual(secondConsumer.rescueCountForTest, 0)
+        XCTAssertEqual(attempt.normalPublicationCountForTest, 1)
+    }
+
+    func testAsyncGateObserverTicketSupportsMultiplePreResolutionConsumers() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+        let ticket = await gate.enterObserverParkAck(token)
+        let firstConsumer = ticket.subscribeForValue()
+        let secondConsumer = ticket.subscribeForValue()
+        let first = Task { await firstConsumer.value() }
+        let second = Task { await secondConsumer.value() }
+
+        await gate.close()
+        firstConsumer.rescue(.closedOrConsumed)
+        secondConsumer.rescue(.closedOrConsumed)
+        let firstValue = await first.value
+        let secondValue = await second.value
+
+        XCTAssertEqual(firstValue, secondValue)
+        XCTAssertTrue(firstValue == .closedOrConsumed
+                      || firstValue == .terminal(.closedBeforePark))
+        XCTAssertEqual(firstConsumer.rescueCountForTest, 0)
+        XCTAssertEqual(secondConsumer.rescueCountForTest, 0)
+    }
+
+    func testAsyncGateWaiterTicketSupportsMultiplePreResolutionConsumers() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        let ticket = await gate.enterWaiterParkAck(token)
+        let firstConsumer = ticket.subscribeForValue()
+        let secondConsumer = ticket.subscribeForValue()
+        let first = Task { await firstConsumer.value() }
+        let second = Task { await secondConsumer.value() }
+
+        await gate.close()
+        firstConsumer.rescue(.closedOrConsumed)
+        secondConsumer.rescue(.closedOrConsumed)
+        let firstValue = await first.value
+        let secondValue = await second.value
+
+        XCTAssertEqual(firstValue, secondValue)
+        XCTAssertTrue(firstValue == .closedOrConsumed
+                      || firstValue == .terminal(.closedBeforePark))
+        XCTAssertEqual(firstConsumer.rescueCountForTest, 0)
+        XCTAssertEqual(secondConsumer.rescueCountForTest, 0)
     }
 
     /// Hicks R4: ticket-never-awaited also drained by close(). Enter
@@ -3232,7 +3144,6 @@ final class PredictiveViewModelTests: XCTestCase {
     /// after natural completion.
     func testAsyncGateR1ExactCancelReceipt_observer() async {
         let gate = AsyncGate()
-        let barrier = AsyncGate()
         let token = await gate.registerObserver()
         let origAttempt = ObserverAwaitAttempt()
         let dupAttempt = ObserverAwaitAttempt()
@@ -3240,55 +3151,34 @@ final class PredictiveViewModelTests: XCTestCase {
         let original = Task { await gate.awaitObserver(token, attempt: origAttempt) }
         _ = await gate.waitForObserverParked(token)
 
-        let barrierToken = await barrier.registerWaiter()
-        let dup = Task {
-            await barrier.awaitWaiter(barrierToken)
-            await gate.awaitObserver(token, attempt: dupAttempt)
-        }
-        _ = await barrier.waitForWaiterParked(barrierToken)
-        dup.cancel()
-        // Bounded actor ACK: the duplicate's cancelObserver dispatched on
-        // `gate` (mismatched awaitID → bounded no-op). Proves the dispatch
-        // BEFORE the mid snapshot without awaiting the stranding-capable
-        // dup.value; close() also drains this ACK queue.
-        await gate.waitForObserverCancelCount(atLeast: 1)
-
-        // Signal → original resumes naturally. Actor-synchronous state
-        // proof of the intended signal-resume BEFORE any cleanup.
+        dupAttempt.prepareCancellationForTest()
+        await gate.awaitObserver(token, attempt: dupAttempt)
         _ = await gate.registerWaiter()
-        let midSnap = await gate.snapshot()
-        XCTAssertEqual(midSnap.observerResumeCounts[.parkedResumedBySignal] ?? 0, 1,
-                       "signal drained the parked original exactly once")
-        XCTAssertEqual(midSnap.observerCancelIgnoredCount, 1)
-        XCTAssertEqual(midSnap.observerCancelInvocationCount, 1)
-
-        // H3 safety: unconditional close of BOTH gates before awaiting
-        // original.value + origAttempt.outcome(). If any regression
-        // stopped original from finishing naturally, close drains via
-        // .closedWhileParked and the awaits remain bounded.
         await gate.close()
-        await barrier.close()
+        origAttempt.rescueSuspension()
         await original.value
 
-        // Deferred stranding awaits, after unconditional teardown of both
-        // gates: the duplicate attempt's exact receipt (sealed at the cancel
-        // dispatch proven above) and the dup task drain.
-        await dup.value
-        // R1 authoritative receipt via buffered outcome() API — the
-        // sole per-attempt receipt path. outcome() is guaranteed to
-        // resolve because the cancel-Task publishes exactly once.
-        let dupOutcome = await dupAttempt.outcome()
+        guard let dupOutcome = boundedOutcome(dupAttempt) else {
+            XCTFail("duplicate observer cancellation produced no outcome")
+            return
+        }
         XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
                        "duplicate cancel receipt: bounded no-op via mismatched awaitID")
 
         // Original attempt was never cancelled — completed naturally.
         // outcome() is buffered and one-shot, so this is bounded.
-        let origOutcome = await origAttempt.outcome()
+        guard let origOutcome = boundedOutcome(origAttempt) else {
+            XCTFail("original observer natural path produced no outcome")
+            return
+        }
         XCTAssertEqual(origOutcome, .finishedBeforeProcessing,
                        "original attempt: natural completion via signal")
         XCTAssertEqual(origAttempt.stateForTest, .completedNaturally)
 
         let final = await gate.snapshot()
+        XCTAssertEqual(final.observerCancelInvocationCount, 1)
+        XCTAssertEqual(final.observerCancelIgnoredCount, 1)
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedBySignal] ?? 0, 1)
         XCTAssertEqual(final.observerResumeCounts[.parkedResumedByClose] ?? 0, 0,
                        "close must not have rescued original — signal already resumed it")
     }
@@ -3296,7 +3186,6 @@ final class PredictiveViewModelTests: XCTestCase {
     /// Waiter analogue of the R1 exact receipt test.
     func testAsyncGateR1ExactCancelReceipt_waiter() async {
         let gate = AsyncGate()
-        let barrier = AsyncGate()
         let token = await gate.registerWaiter()
         let origAttempt = WaiterAwaitAttempt()
         let dupAttempt = WaiterAwaitAttempt()
@@ -3304,42 +3193,31 @@ final class PredictiveViewModelTests: XCTestCase {
         let original = Task { await gate.awaitWaiter(token, attempt: origAttempt) }
         _ = await gate.waitForWaiterParked(token)
 
-        let barrierToken = await barrier.registerWaiter()
-        let dup = Task {
-            await barrier.awaitWaiter(barrierToken)
-            await gate.awaitWaiter(token, attempt: dupAttempt)
-        }
-        _ = await barrier.waitForWaiterParked(barrierToken)
-        dup.cancel()
-        // Bounded actor ACK: the duplicate's cancelWaiter dispatched on `gate`
-        // (mismatched awaitID → bounded no-op). Proves dispatch before the mid
-        // snapshot without awaiting the stranding-capable dup.value.
-        await gate.waitForWaiterCancelCount(atLeast: 1)
-
+        dupAttempt.prepareCancellationForTest()
+        await gate.awaitWaiter(token, attempt: dupAttempt)
         await gate.open()
-
-        // H3 safety: unconditional close BEFORE `await original.value`
-        // + origAttempt.outcome() — a regressed open path fails an
-        // assertion instead of hanging.
-        let midSnap = await gate.snapshot()
-        XCTAssertEqual(midSnap.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1)
-        XCTAssertEqual(midSnap.waiterCancelIgnoredCount, 1)
-
         await gate.close()
-        await barrier.close()
+        origAttempt.rescueSuspension()
         await original.value
 
-        // Deferred stranding awaits after unconditional teardown of both gates.
-        await dup.value
-        let dupOutcome = await dupAttempt.outcome()
+        guard let dupOutcome = boundedOutcome(dupAttempt) else {
+            XCTFail("duplicate waiter cancellation produced no outcome")
+            return
+        }
         XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch))
 
-        let origOutcome = await origAttempt.outcome()
+        guard let origOutcome = boundedOutcome(origAttempt) else {
+            XCTFail("original waiter natural path produced no outcome")
+            return
+        }
         XCTAssertEqual(origOutcome, .finishedBeforeProcessing)
         XCTAssertEqual(origAttempt.stateForTest, .completedNaturally)
 
         let final = await gate.snapshot()
-        _ = final
+        XCTAssertEqual(final.waiterCancelInvocationCount, 1)
+        XCTAssertEqual(final.waiterCancelIgnoredCount, 1)
+        XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1)
+        XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0)
     }
 
     /// Hicks R1: matched-cancel receipt. Original attempt is cancelled
@@ -3350,30 +3228,19 @@ final class PredictiveViewModelTests: XCTestCase {
         let token = await gate.registerObserver()
         let attempt = ObserverAwaitAttempt()
 
-        let t = Task { await gate.awaitObserver(token, attempt: attempt) }
-        _ = await gate.waitForObserverParked(token)
-
-        // Cancel the ONLY task on the ONLY attempt — matched.
-        t.cancel()
-        // Bounded actor ACK: matched cancelObserver dispatched, sealing this
-        // attempt .cancelledWhileParked and resolving its .processedMatched
-        // receipt. Proves the dispatch before the snapshot without awaiting
-        // the stranding-capable t.value.
-        await gate.waitForObserverCancelCount(atLeast: 1)
-
-        let midSnap = await gate.snapshot()
-        XCTAssertEqual(midSnap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1)
-        XCTAssertEqual(midSnap.observerCancelInvocationCount, 1)
-
+        attempt.prepareCancellationForTest()
+        await gate.awaitObserver(token, attempt: attempt)
         await gate.close()
-        await t.value
 
-        // Buffered outcome() delivers the definitive per-attempt receipt
-        // (sealed at the cancel dispatch above; close cannot alter it).
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("matched observer cancellation produced no outcome")
+            return
+        }
         XCTAssertEqual(outcome, .cancelled(.processedMatched),
                        "matched cancel drains THIS attempt's parked continuation")
-        _ = await gate.snapshot()
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1)
+        XCTAssertEqual(snap.observerCancelInvocationCount, 1)
     }
 
     /// Waiter analogue.
@@ -3382,24 +3249,18 @@ final class PredictiveViewModelTests: XCTestCase {
         let token = await gate.registerWaiter()
         let attempt = WaiterAwaitAttempt()
 
-        let t = Task { await gate.awaitWaiter(token, attempt: attempt) }
-        _ = await gate.waitForWaiterParked(token)
-
-        t.cancel()
-        // Bounded actor ACK: matched cancelWaiter dispatched, sealing this
-        // attempt and resolving its .processedMatched receipt. Proves dispatch
-        // before the snapshot without awaiting the stranding-capable t.value.
-        await gate.waitForWaiterCancelCount(atLeast: 1)
-
-        let midSnap = await gate.snapshot()
-        XCTAssertEqual(midSnap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1)
-
+        attempt.prepareCancellationForTest()
+        await gate.awaitWaiter(token, attempt: attempt)
         await gate.close()
-        await t.value
 
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("matched waiter cancellation produced no outcome")
+            return
+        }
         XCTAssertEqual(outcome, .cancelled(.processedMatched))
-        _ = await gate.snapshot()
+        let snap = await gate.snapshot()
+        XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1)
+        XCTAssertEqual(snap.waiterCancelInvocationCount, 1)
     }
 
     // MARK: - Hicks R4 + Vasquez: no-consumer cancel receipt proofs
@@ -3414,22 +3275,11 @@ final class PredictiveViewModelTests: XCTestCase {
     func testAsyncGateR4NoConsumerCancelReceiptLeavesGateZero_observer() async {
         let gate = AsyncGate()
         let iterations = 100
-        var tasks: [Task<Void, Never>] = []
-        for i in 0..<iterations {
+        for _ in 0..<iterations {
             let token = await gate.registerObserver()
             let attempt = ObserverAwaitAttempt()
-            let t = Task { await gate.awaitObserver(token, attempt: attempt) }
-            _ = await gate.waitForObserverParked(token)
-            t.cancel()
-            // Bounded actor ACK: prove THIS iteration's matched cancelObserver
-            // dispatched (bumping the invocation counter and sealing
-            // .parkedResumedByCancel) before proceeding, without awaiting the
-            // stranding-capable t.value.
-            await gate.waitForObserverCancelCount(atLeast: i + 1)
-            // Do NOT await attempt's receipt — drop attempt. Defer t.value to
-            // after the single unconditional close below.
-            tasks.append(t)
-            _ = attempt   // silence unused
+            attempt.prepareCancellationForTest()
+            await gate.awaitObserver(token, attempt: attempt)
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed, "gate remains open — pre-close boundedness proof")
@@ -3438,35 +3288,24 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.observerCancelInvocationCount, iterations,
                        "aggregate cancel-invocation counter is the only growth")
         XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByCancel] ?? 0, iterations)
-        // Unconditional teardown, then drain all cancelled tasks.
         await gate.close()
-        for t in tasks { await t.value }
     }
 
     /// Waiter analogue of the no-consumer cancel-receipt boundedness proof.
     func testAsyncGateR4NoConsumerCancelReceiptLeavesGateZero_waiter() async {
         let gate = AsyncGate()
         let iterations = 100
-        var tasks: [Task<Void, Never>] = []
-        for i in 0..<iterations {
+        for _ in 0..<iterations {
             let token = await gate.registerWaiter()
             let attempt = WaiterAwaitAttempt()
-            let t = Task { await gate.awaitWaiter(token, attempt: attempt) }
-            _ = await gate.waitForWaiterParked(token)
-            t.cancel()
-            // Bounded actor ACK: prove THIS iteration's matched cancelWaiter
-            // dispatched before proceeding, without awaiting the stranding t.value.
-            await gate.waitForWaiterCancelCount(atLeast: i + 1)
-            tasks.append(t)
-            _ = attempt
+            attempt.prepareCancellationForTest()
+            await gate.awaitWaiter(token, attempt: attempt)
         }
         let snap = await gate.snapshot()
         XCTAssertFalse(snap.closed)
         XCTAssertEqual(snap.waiterCancelInvocationCount, iterations)
         XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, iterations)
-        // Unconditional teardown, then drain all cancelled tasks.
         await gate.close()
-        for t in tasks { await t.value }
     }
 
     // MARK: - Bishop remediation: causal close-first cancellation receipt
@@ -3541,7 +3380,7 @@ final class PredictiveViewModelTests: XCTestCase {
         //
         // The EXACT outcome asserted below is the definitive proof that
         // (a) onCancel fired (handler was installed at cancel time), AND
-        // (b) the cancel Task saw `closed == true` (close-first ordering
+        // (b) cancellation observed `closed == true` (close-first ordering
         // held), because `.cancelled(.closedBeforeProcessing)` is the
         // ONLY outcome publishable under both conditions:
         //   • If handler wasn't live → onCancel wouldn't fire →
@@ -3573,18 +3412,21 @@ final class PredictiveViewModelTests: XCTestCase {
         //     bounded by hold open above).
         await holdGate.open()
         await holdGate.close()
+        attempt.rescueSuspension()
         await task.value
 
         // Buffered outcome delivers the authoritative per-attempt
-        // receipt. The cancel Task publishes exactly once via
-        // `attempt.resolveOutcome(.cancelled(receipt))`; the natural
+        // receipt. Structured cancellation publishes exactly once; the natural
         // completion path finds state == `.cancellationInitiated` and
         // does NOT publish. So exactly one publisher fires, and by
         // the close-first ordering contract MUST be
         // `.cancelled(.closedBeforeProcessing)`. `outcome()` is NOT
-        // cyclic — the cancel Task runs to completion (nothing blocks
+        // cyclic — cancellation classification runs to completion (nothing blocks
         // it) and doesn't wait on outcome.
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("close-first observer cancellation produced no outcome")
+            return
+        }
         XCTAssertEqual(outcome, .cancelled(.closedBeforeProcessing),
                        "close-first ordering MUST yield exact .cancelled(.closedBeforeProcessing) (no OR)")
 
@@ -3631,9 +3473,13 @@ final class PredictiveViewModelTests: XCTestCase {
         // Unconditional teardown — independently reachable.
         await holdGate.open()
         await holdGate.close()
+        attempt.rescueSuspension()
         await task.value
 
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("close-first waiter cancellation produced no outcome")
+            return
+        }
         XCTAssertEqual(outcome, .cancelled(.closedBeforeProcessing),
                        "close-first ordering MUST yield exact .cancelled(.closedBeforeProcessing) (no OR)")
 
@@ -3664,9 +3510,13 @@ final class PredictiveViewModelTests: XCTestCase {
 
         t.cancel()
         await gate.close()
+        attempt.rescueSuspension()
         await t.value
 
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("observer cancel/close race produced no outcome")
+            return
+        }
         guard case .cancelled(let r) = outcome else {
             XCTFail("either-order: outcome must be .cancelled — cancel was initiated; got \(outcome)")
             return
@@ -3689,9 +3539,13 @@ final class PredictiveViewModelTests: XCTestCase {
 
         t.cancel()
         await gate.close()
+        attempt.rescueSuspension()
         await t.value
 
-        let outcome = await attempt.outcome()
+        guard let outcome = boundedOutcome(attempt) else {
+            XCTFail("waiter cancel/close race produced no outcome")
+            return
+        }
         guard case .cancelled(let r) = outcome else {
             XCTFail("either-order (waiter): outcome must be .cancelled; got \(outcome)")
             return
@@ -3880,9 +3734,8 @@ final class PredictiveViewModelTests: XCTestCase {
     ///   4. Original continuation still parked; can then be resumed.
     func testAsyncGateStructuralLateCancelObserverIsBoundedNoOp() async {
         // Ripley Finding 3 (Hicks HIGH) — the prior version awaited
-        // `dupAttempt.outcome()`. Under Hicks's mutation "cancel Task
-        // launch removed" (begin succeeds → state ==
-        // .cancellationInitiated, but no cancel Task is dispatched),
+        // `dupAttempt.outcome()`. Under a missing-publication mutation
+        // (begin succeeds and state becomes `.cancellationInitiated`),
         // no publisher ever fires and the outcome() await hangs.
         // Similarly under "complete onCancel removal", state stays
         // .active, natural publish path completes (via body reaching
@@ -3923,10 +3776,7 @@ final class PredictiveViewModelTests: XCTestCase {
         //   parent.original.value         -> signal-resume OR gate-close drain
         //   parent.bufferedOutcomeForTest — synchronous peek
         let gate = AsyncGate()
-        let holdGate = AsyncGate()
-        let holdToken = await holdGate.registerWaiter()
 
-        // Park original with attempt.
         let token = await gate.registerObserver()
         let origAttempt = ObserverAwaitAttempt()
         let dupAttempt = ObserverAwaitAttempt()
@@ -3937,40 +3787,20 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(baseline.parkedObserverCount, 1)
         XCTAssertNil(baseline.observerFates[token.id])
 
-        // Duplicate held inside its cancellation handler scope.
-        let duplicate = Task {
-            await gate.awaitObserverAndHold(token, attempt: dupAttempt,
-                                             holdGate: holdGate, holdToken: holdToken)
-        }
-
-        // Cancel duplicate. Cancellation is latched at the Task level;
-        // whether body has entered `withTaskCancellationHandler` yet or
-        // not, onCancel is guaranteed to fire.
-        duplicate.cancel()
-
-        // Independent bounded teardown BEFORE any wait on latches:
-        //   holdGate.close   -> releases body from hold-await
-        //   duplicate.value  -> bounded by hold-close drain
-        //   gate.close       -> drains cancelCountAcks (rescues any
-        //                       pending waitForObserverCancelCount);
-        //                       drains original's parked continuation
-        //                       (defensive; signal below would drain
-        //                       first in correct case).
-        //   original.value   -> bounded by close-drain OR signal
-        await holdGate.close()
-        await duplicate.value
-
-        // Signal original BEFORE closing gate so, in the correct path,
-        // original resumes via signal (not close-rescue), preserving
-        // the resume-site assertions below.
+        dupAttempt.prepareCancellationForTest()
+        await gate.awaitObserver(token, attempt: dupAttempt)
         _ = await gate.registerWaiter()
+
+        // Wait-for graph: close and the caller-owned original suspension
+        // rescue both run before the only child join.
         await gate.close()
+        origAttempt.rescueSuspension()
         await original.value
 
         // SYNCHRONOUS peek: nil = complete-onCancel-removal or
         // state-transition-without-task mutation (no publisher).
         guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
-            XCTFail("dupAttempt.bufferedOutcomeForTest is nil — complete-onCancel-removal or state-transition-without-task mutation (no cancel Task published)")
+            XCTFail("duplicate cancellation published no outcome")
             return
         }
         // Correlate outcome with hop fingerprint (Ripley Finding 4):
@@ -3982,11 +3812,11 @@ final class PredictiveViewModelTests: XCTestCase {
             return
         }
         if let hop = dupAttempt.hopFingerprintForTest {
-            // In this test dup's awaitID is a freshly-minted UUID
-            // distinct from original's; any parked entry it observes
-            // must be original's, i.e. awaitIDMatched MUST be false.
-            XCTAssertFalse(hop.awaitIDMatched,
-                "cancel-hop matched dup's awaitID against original's — matcher regression (dup and original have disjoint UUIDs by construction)")
+            let independentlyMatched = hop.parkedAwaitID == hop.requestedAwaitID
+            XCTAssertEqual(hop.requestedAwaitID, dupAttempt.id)
+            XCTAssertEqual(hop.parkedAwaitID, origAttempt.id)
+            XCTAssertTrue(hop.parkedEntryExisted)
+            XCTAssertFalse(independentlyMatched)
             if hop.closedAtHop {
                 XCTAssertEqual(dupR, .closedBeforeProcessing,
                     "closedAtHop=true → receipt must be .closedBeforeProcessing; got \(dupR)")
@@ -3999,7 +3829,7 @@ final class PredictiveViewModelTests: XCTestCase {
             // resolveOutcome) but did not record hop fingerprint.
             // This would indicate the harness modification regressed;
             // fail loudly.
-            XCTFail("cancel Task published a receipt but did not record hop fingerprint — harness regression")
+            XCTFail("cancellation published a receipt without raw hop evidence")
         }
 
         // Consolidated post-teardown structural proof.
@@ -4037,8 +3867,6 @@ final class PredictiveViewModelTests: XCTestCase {
         // Ripley Finding 3 waiter analogue — see observer variant for
         // full rationale.
         let gate = AsyncGate()
-        let holdGate = AsyncGate()
-        let holdToken = await holdGate.registerWaiter()
 
         let token = await gate.registerWaiter()
         let origAttempt = WaiterAwaitAttempt()
@@ -4046,26 +3874,16 @@ final class PredictiveViewModelTests: XCTestCase {
         let original = Task { await gate.awaitWaiter(token, attempt: origAttempt) }
         _ = await gate.waitForWaiterParked(token)
 
-        let duplicate = Task {
-            await gate.awaitWaiterAndHold(token, attempt: dupAttempt,
-                                          holdGate: holdGate, holdToken: holdToken)
-        }
-
-        duplicate.cancel()
-
-        // Independent bounded teardown before any latch wait.
-        await holdGate.close()
-        await duplicate.value
-
-        // Open original (intended resume) BEFORE closing gate so
-        // resume-site assertions hold.
+        dupAttempt.prepareCancellationForTest()
+        await gate.awaitWaiter(token, attempt: dupAttempt)
         await gate.open()
         await gate.close()
+        origAttempt.rescueSuspension()
         await original.value
 
         // SYNCHRONOUS peek — see observer variant for full rationale.
         guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
-            XCTFail("dupAttempt.bufferedOutcomeForTest is nil — complete-onCancel-removal or state-transition-without-task mutation (no cancel Task published)")
+            XCTFail("duplicate cancellation published no outcome")
             return
         }
         guard case .cancelled(let dupR) = dupOutcome else {
@@ -4073,8 +3891,11 @@ final class PredictiveViewModelTests: XCTestCase {
             return
         }
         if let hop = dupAttempt.hopFingerprintForTest {
-            XCTAssertFalse(hop.awaitIDMatched,
-                "cancel-hop matched dup's awaitID against original's — matcher regression (disjoint UUIDs by construction)")
+            let independentlyMatched = hop.parkedAwaitID == hop.requestedAwaitID
+            XCTAssertEqual(hop.requestedAwaitID, dupAttempt.id)
+            XCTAssertEqual(hop.parkedAwaitID, origAttempt.id)
+            XCTAssertTrue(hop.parkedEntryExisted)
+            XCTAssertFalse(independentlyMatched)
             if hop.closedAtHop {
                 XCTAssertEqual(dupR, .closedBeforeProcessing,
                     "closedAtHop=true → receipt must be .closedBeforeProcessing; got \(dupR)")
@@ -4083,7 +3904,7 @@ final class PredictiveViewModelTests: XCTestCase {
                     "closedAtHop=false + mismatched awaitID → receipt must be .processedIgnoredMismatch; got \(dupR)")
             }
         } else {
-            XCTFail("cancel Task published a receipt but did not record hop fingerprint — harness regression")
+            XCTFail("cancellation published a receipt without raw hop evidence")
         }
 
         let final = await gate.snapshot()
@@ -4578,7 +4399,7 @@ final class PredictiveViewModelTests: XCTestCase {
 }
 
 /// Cancellation-aware, tokenized suspension gate used to hold a request in
-/// flight across a real suspension point (never `Task.sleep`/yield). Every
+/// flight across a structural suspension point. Every
 /// pending continuation — waiters (parked in `wait()`) and entry observers
 /// (parked in `waitForEntry()`) — is tracked by a monotonic token so that
 /// `open()`, `close()` (teardown), and per-task cancellation each remove
@@ -4608,173 +4429,314 @@ final class PredictiveViewModelTests: XCTestCase {
 ///     helper regression.
 // MARK: - Hicks R1/R2 addendum: caller-owned attempt + ticket objects
 //
-// R1: `AwaitAttempt` replaces the gate-level lazy receipt cache. Each
-// await invocation constructs one and passes it in; onCancel atomically
-// commits the attempt to `.cancellationInitiated` via `beginCancellationIfActive`
-// and (if it wins) launches a `Task<Receipt, Never>` that hops to the actor
-// and publishes the exact receipt to the attempt's buffered outcome latch.
-// The gate itself stores no per-attempt result map; `cancelX(id:, awaitID:)`
-// simply RETURNS the receipt as its function value. Tests await
-// `attempt.outcome()` to observe the exact per-attempt outcome — it is the
-// sole per-attempt receipt API.
+// R1: `AwaitAttempt` owns the suspension and outcome subscribers. onCancel
+// atomically claims cancellation and releases only that attempt's suspension;
+// the resumed actor-isolated body computes and publishes the exact receipt
+// before returning. No cancel task or gate-side receipt map exists.
 //
-// R2: `ParkAckTicket` replaces the gate-level ticket-to-token/result map.
-// `enterXParkAck` returns a caller-owned ticket object (already-resolved
-// for terminal classifications, buffered-resolvable for active tokens).
-// The actor stores only weak-ish references (in `observerActiveParkAckTickets`
-// keyed by token id) — resolved and removed at park/fate/close. Callers
-// consume via `ticket.value()` which returns the buffered result even if
-// resolution beat the consumer.
+// R2: caller-owned tickets live in identity-keyed registries. Ticket deinit
+// removes its identity synchronously; park/fate/close takes tickets out of
+// the registry before resolving every subscriber.
 
-/// R1: caller-owned per-attempt cancellation context for observer awaits.
-///
-/// Hicks H1 (Vasquez remediation): the attempt now owns an ATOMIC
-/// lifecycle state machine plus a one-shot buffered outcome latch.
-/// Only one publisher wins:
-///
-///   - `.active` -> `.cancellationInitiated` — under lock, in onCancel,
-///     BEFORE any Task is launched. If this transition fails (state was
-///     already `.completedNaturally`), onCancel dispatches nothing.
-///   - `.active` -> `.completedNaturally` — under lock, on the natural
-///     completion path, only if state is still `.active`. If this
-///     transition fails (state was already `.cancellationInitiated`),
-///     the natural completion path does not publish; the cancel Task
-///     is the sole publisher.
-///
-/// The buffered outcome latch is the authoritative per-attempt receipt.
-/// Consumers await `attempt.outcome()` for the exact result — the sole
-/// per-attempt receipt API. The legacy `cancelTask` accessor is not
-/// exposed; using `outcome()` avoids the install-window race that a
-/// direct Task-handle read would create.
+private final class BufferedConsumer<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Value?
+    private var continuation: CheckedContinuation<Value, Never>?
+    private var rescueCount = 0
+
+    func resolve(_ value: Value) {
+        var continuationToResume: CheckedContinuation<Value, Never>?
+        lock.lock()
+        if result == nil {
+            result = value
+            continuationToResume = continuation
+            continuation = nil
+        }
+        lock.unlock()
+        continuationToResume?.resume(returning: value)
+    }
+
+    func rescue(_ value: Value) {
+        var continuationToResume: CheckedContinuation<Value, Never>?
+        lock.lock()
+        if result == nil {
+            result = value
+            rescueCount += 1
+            continuationToResume = continuation
+            continuation = nil
+        }
+        lock.unlock()
+        continuationToResume?.resume(returning: value)
+    }
+
+    func value() async -> Value {
+        await withCheckedContinuation { c in
+            var immediate: Value?
+            lock.lock()
+            if let result {
+                immediate = result
+            } else {
+                precondition(continuation == nil, "a buffered consumer supports exactly one waiter")
+                continuation = c
+            }
+            lock.unlock()
+            if let immediate {
+                c.resume(returning: immediate)
+            }
+        }
+    }
+
+    var rescueCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return rescueCount
+    }
+}
+
+private final class NaturalPublicationAck: @unchecked Sendable {
+    private let lock = NSLock()
+    private var publicationCount = 0
+
+    func publish() {
+        lock.lock()
+        publicationCount += 1
+        lock.unlock()
+    }
+
+    var publicationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return publicationCount
+    }
+}
+
+private enum TicketCleanupResult: Sendable, Equatable {
+    case removedAutomatically
+    case resolvedByGate
+    case staleIdentity
+    case ownerReleased
+}
+
+private final class TicketCleanupEvidence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: TicketCleanupResult?
+
+    func resolve(_ value: TicketCleanupResult) {
+        lock.lock()
+        if result == nil {
+            result = value
+        }
+        lock.unlock()
+    }
+
+    var resultForTest: TicketCleanupResult? {
+        lock.lock(); defer { lock.unlock() }
+        return result
+    }
+}
+
+/// Caller-owned observer await lifecycle. Cancellation only claims state and
+/// releases this attempt's own suspension. The resumed actor-isolated body
+/// performs cancellation and publishes the exact receipt before it returns,
+/// so no unstructured cancel task or task handle exists.
 final class ObserverAwaitAttempt: @unchecked Sendable {
-    let id: UUID
+    let id = UUID()
 
-    /// Terminal outcome kinds. `finishedBeforeProcessing` = the await
-    /// returned naturally without cancellation. `cancelled(receipt)` =
-    /// cancellation was dispatched and the actor returned an exact
-    /// per-attempt cancel receipt.
     fileprivate enum Outcome: Sendable, Equatable {
         case finishedBeforeProcessing
         case cancelled(AsyncGate.ObserverCancelReceipt)
     }
 
-    /// Lifecycle state. Monotonic — only `.active` transitions.
     fileprivate enum State { case active, cancellationInitiated, completedNaturally }
 
-    /// Ripley Finding 4: exact per-attempt cancel-Task hop fingerprint.
-    /// Recorded synchronously inside `cancelObserver` on the actor turn
-    /// when the cancel Task hops in. Distinguishes broken-matcher
-    /// regressions (where a parked entry with matching awaitID exists
-    /// yet cancelObserver returns `.processedIgnoredMismatch`) from
-    /// legitimate race outcomes (park never happened yet, or gate
-    /// already closed). `awaitIDMatched == true` implies the receipt
-    /// MUST be `.processedMatched`; anything else is a matcher bug.
     struct HopFingerprint: Sendable, Hashable {
-        let awaitIDMatched: Bool
+        let requestedAwaitID: UUID
+        let parkedAwaitID: UUID?
         let parkedEntryExisted: Bool
         let closedAtHop: Bool
     }
 
     private let lock = NSLock()
-    private var _state: State = .active
-    private var _outcome: Outcome?
-    private var _outcomeCont: CheckedContinuation<Outcome, Never>?
-    private var _hopFingerprint: HopFingerprint?
+    private var state: State = .active
+    private var outcomeValue: Outcome?
+    private var outcomeConsumers: [BufferedConsumer<Outcome>] = []
+    private var suspension: CheckedContinuation<Void, Never>?
+    private var suspensionReleased = false
+    private var hopFingerprint: HopFingerprint?
+    private var cancelHandlerInvocationCount = 0
+    private var normalPublicationCount = 0
+    private var rescuePublicationCount = 0
 
-    init() { self.id = UUID() }
-
-    /// Atomically transition `.active` -> `.cancellationInitiated`.
-    /// Returns `true` iff the caller now owns cancellation dispatch.
-    /// Returns `false` if natural completion has already published;
-    /// the caller MUST NOT launch a cancel Task in that case.
-    fileprivate func beginCancellationIfActive() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard _state == .active else { return false }
-        _state = .cancellationInitiated
-        return true
-    }
-
-    /// Atomically transition `.active` -> `.completedNaturally`.
-    /// Returns `true` iff the natural completion path owns publication.
-    /// Returns `false` if cancellation was already initiated; the
-    /// cancel Task is the sole publisher.
-    fileprivate func markCompletedNaturallyIfActive() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard _state == .active else { return false }
-        _state = .completedNaturally
-        return true
-    }
-
-    /// Exactly-once publisher. Called by whichever path won the state
-    /// race. Buffers the outcome and resumes any queued `outcome()` caller.
-    fileprivate func resolveOutcome(_ o: Outcome) {
-        var cont: CheckedContinuation<Outcome, Never>?
+    fileprivate func installSuspension(_ continuation: CheckedContinuation<Void, Never>) {
+        var resumeImmediately = false
         lock.lock()
-        if _outcome == nil {
-            _outcome = o
-            cont = _outcomeCont
-            _outcomeCont = nil
+        precondition(suspension == nil, "an await attempt supports one suspension")
+        if suspensionReleased {
+            resumeImmediately = true
+        } else {
+            suspension = continuation
         }
         lock.unlock()
-        cont?.resume(returning: o)
-    }
-
-    /// Authoritative per-attempt receipt. Returns the buffered outcome
-    /// immediately if resolved, else queues one continuation that the
-    /// publisher resumes. Coordinator remediation: this is the ONLY
-    /// authoritative per-attempt receipt API. The legacy `cancelTask`
-    /// accessor was removed because it had an install-window race with
-    /// the Task's own body; `outcome()` does not.
-    fileprivate func outcome() async -> Outcome {
-        return await withCheckedContinuation { c in
-            var immediate: Outcome?
-            lock.lock()
-            if let o = _outcome { immediate = o } else { _outcomeCont = c }
-            lock.unlock()
-            if let o = immediate { c.resume(returning: o) }
+        if resumeImmediately {
+            continuation.resume()
         }
     }
 
-    /// True iff the state gate published natural completion.
+    @discardableResult
+    fileprivate func rescueSuspension() -> Bool {
+        var continuationToResume: CheckedContinuation<Void, Never>?
+        lock.lock()
+        if !suspensionReleased {
+            suspensionReleased = true
+            continuationToResume = suspension
+            suspension = nil
+        }
+        lock.unlock()
+        continuationToResume?.resume()
+        return continuationToResume != nil
+    }
+
+    fileprivate func beginCancellationIfActive() -> Bool {
+        lock.lock()
+        cancelHandlerInvocationCount += 1
+        guard state == .active else {
+            lock.unlock()
+            return false
+        }
+        state = .cancellationInitiated
+        lock.unlock()
+        rescueSuspension()
+        return true
+    }
+
+    fileprivate func prepareCancellationForTest() {
+        _ = beginCancellationIfActive()
+    }
+
+    @discardableResult
+    fileprivate func publishNaturalIfActive() -> Bool {
+        var consumers: [BufferedConsumer<Outcome>] = []
+        lock.lock()
+        guard state == .active, outcomeValue == nil else {
+            lock.unlock()
+            return false
+        }
+        state = .completedNaturally
+        outcomeValue = .finishedBeforeProcessing
+        normalPublicationCount += 1
+        consumers = outcomeConsumers
+        outcomeConsumers.removeAll()
+        lock.unlock()
+        for consumer in consumers {
+            consumer.resolve(.finishedBeforeProcessing)
+        }
+        return true
+    }
+
+    fileprivate func resolveCancellation(_ receipt: AsyncGate.ObserverCancelReceipt) {
+        let outcome = Outcome.cancelled(receipt)
+        var consumers: [BufferedConsumer<Outcome>] = []
+        lock.lock()
+        if outcomeValue == nil {
+            outcomeValue = outcome
+            normalPublicationCount += 1
+            consumers = outcomeConsumers
+            outcomeConsumers.removeAll()
+        }
+        lock.unlock()
+        for consumer in consumers {
+            consumer.resolve(outcome)
+        }
+    }
+
+    fileprivate func rescueCancellationOutcomeIfNeeded(
+        _ receipt: AsyncGate.ObserverCancelReceipt = .closedBeforeProcessing
+    ) {
+        let outcome = Outcome.cancelled(receipt)
+        var consumers: [BufferedConsumer<Outcome>] = []
+        lock.lock()
+        if state == .cancellationInitiated, outcomeValue == nil {
+            outcomeValue = outcome
+            rescuePublicationCount += 1
+            consumers = outcomeConsumers
+            outcomeConsumers.removeAll()
+        }
+        lock.unlock()
+        for consumer in consumers {
+            consumer.resolve(outcome)
+        }
+    }
+
+    fileprivate func subscribeForOutcome() -> BufferedConsumer<Outcome> {
+        let consumer = BufferedConsumer<Outcome>()
+        var immediate: Outcome?
+        lock.lock()
+        if let outcomeValue {
+            immediate = outcomeValue
+        } else {
+            outcomeConsumers.append(consumer)
+        }
+        lock.unlock()
+        if let immediate {
+            consumer.resolve(immediate)
+        }
+        return consumer
+    }
+
+    fileprivate func outcome() async -> Outcome {
+        await subscribeForOutcome().value()
+    }
+
+    fileprivate var cancellationWasInitiated: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return state == .cancellationInitiated
+    }
+
     fileprivate var completedNaturally: Bool {
         lock.lock(); defer { lock.unlock() }
-        return _state == .completedNaturally
+        return state == .completedNaturally
     }
 
-    /// Diagnostic: peek current state (for H1 publication-race tests).
     fileprivate var stateForTest: State {
         lock.lock(); defer { lock.unlock() }
-        return _state
+        return state
     }
 
-    /// Diagnostic: peek buffered outcome without consuming.
     fileprivate var bufferedOutcomeForTest: Outcome? {
         lock.lock(); defer { lock.unlock() }
-        return _outcome
+        return outcomeValue
     }
 
-    /// Ripley Finding 4: record cancel-Task hop fingerprint. Called
-    /// synchronously by `cancelObserver` on the actor turn when the
-    /// cancel Task hops in, BEFORE returning the receipt. Exactly-once
-    /// per attempt: a second recording is silently ignored.
-    fileprivate func recordHopFingerprint(_ fp: HopFingerprint) {
+    fileprivate var cancelHandlerInvocationCountForTest: Int {
         lock.lock(); defer { lock.unlock() }
-        if _hopFingerprint == nil { _hopFingerprint = fp }
+        return cancelHandlerInvocationCount
     }
 
-    /// Diagnostic: peek recorded hop fingerprint without consuming.
-    /// `nil` means the cancel Task's actor hop never ran (either
-    /// `onCancel` never fired or `beginCancellationIfActive` was
-    /// blocked by natural publication).
+    fileprivate var normalPublicationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return normalPublicationCount
+    }
+
+    fileprivate var rescuePublicationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return rescuePublicationCount
+    }
+
+    fileprivate func recordHopFingerprint(_ fingerprint: HopFingerprint) {
+        lock.lock()
+        if hopFingerprint == nil {
+            hopFingerprint = fingerprint
+        }
+        lock.unlock()
+    }
+
     var hopFingerprintForTest: HopFingerprint? {
         lock.lock(); defer { lock.unlock() }
-        return _hopFingerprint
+        return hopFingerprint
     }
 }
 
-/// R1 waiter analogue of `ObserverAwaitAttempt`. See there for design.
+/// Waiter analogue of `ObserverAwaitAttempt`.
 final class WaiterAwaitAttempt: @unchecked Sendable {
-    let id: UUID
+    let id = UUID()
 
     fileprivate enum Outcome: Sendable, Equatable {
         case finishedBeforeProcessing
@@ -4783,285 +4745,406 @@ final class WaiterAwaitAttempt: @unchecked Sendable {
 
     fileprivate enum State { case active, cancellationInitiated, completedNaturally }
 
-    /// Ripley Finding 4: exact per-attempt cancel-Task hop fingerprint.
-    /// See `ObserverAwaitAttempt.HopFingerprint` for full rationale.
     struct HopFingerprint: Sendable, Hashable {
-        let awaitIDMatched: Bool
+        let requestedAwaitID: UUID
+        let parkedAwaitID: UUID?
         let parkedEntryExisted: Bool
         let closedAtHop: Bool
     }
 
     private let lock = NSLock()
-    private var _state: State = .active
-    private var _outcome: Outcome?
-    private var _outcomeCont: CheckedContinuation<Outcome, Never>?
-    private var _hopFingerprint: HopFingerprint?
+    private var state: State = .active
+    private var outcomeValue: Outcome?
+    private var outcomeConsumers: [BufferedConsumer<Outcome>] = []
+    private var suspension: CheckedContinuation<Void, Never>?
+    private var suspensionReleased = false
+    private var hopFingerprint: HopFingerprint?
+    private var cancelHandlerInvocationCount = 0
+    private var normalPublicationCount = 0
+    private var rescuePublicationCount = 0
 
-    init() { self.id = UUID() }
-
-    fileprivate func beginCancellationIfActive() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard _state == .active else { return false }
-        _state = .cancellationInitiated
-        return true
-    }
-
-    fileprivate func markCompletedNaturallyIfActive() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard _state == .active else { return false }
-        _state = .completedNaturally
-        return true
-    }
-
-    fileprivate func resolveOutcome(_ o: Outcome) {
-        var cont: CheckedContinuation<Outcome, Never>?
+    fileprivate func installSuspension(_ continuation: CheckedContinuation<Void, Never>) {
+        var resumeImmediately = false
         lock.lock()
-        if _outcome == nil {
-            _outcome = o
-            cont = _outcomeCont
-            _outcomeCont = nil
+        precondition(suspension == nil, "an await attempt supports one suspension")
+        if suspensionReleased {
+            resumeImmediately = true
+        } else {
+            suspension = continuation
         }
         lock.unlock()
-        cont?.resume(returning: o)
+        if resumeImmediately {
+            continuation.resume()
+        }
     }
 
-    /// Authoritative per-attempt receipt. See ObserverAwaitAttempt.
-    fileprivate func outcome() async -> Outcome {
-        return await withCheckedContinuation { c in
-            var immediate: Outcome?
-            lock.lock()
-            if let o = _outcome { immediate = o } else { _outcomeCont = c }
-            lock.unlock()
-            if let o = immediate { c.resume(returning: o) }
+    @discardableResult
+    fileprivate func rescueSuspension() -> Bool {
+        var continuationToResume: CheckedContinuation<Void, Never>?
+        lock.lock()
+        if !suspensionReleased {
+            suspensionReleased = true
+            continuationToResume = suspension
+            suspension = nil
         }
+        lock.unlock()
+        continuationToResume?.resume()
+        return continuationToResume != nil
+    }
+
+    fileprivate func beginCancellationIfActive() -> Bool {
+        lock.lock()
+        cancelHandlerInvocationCount += 1
+        guard state == .active else {
+            lock.unlock()
+            return false
+        }
+        state = .cancellationInitiated
+        lock.unlock()
+        rescueSuspension()
+        return true
+    }
+
+    fileprivate func prepareCancellationForTest() {
+        _ = beginCancellationIfActive()
+    }
+
+    @discardableResult
+    fileprivate func publishNaturalIfActive() -> Bool {
+        var consumers: [BufferedConsumer<Outcome>] = []
+        lock.lock()
+        guard state == .active, outcomeValue == nil else {
+            lock.unlock()
+            return false
+        }
+        state = .completedNaturally
+        outcomeValue = .finishedBeforeProcessing
+        normalPublicationCount += 1
+        consumers = outcomeConsumers
+        outcomeConsumers.removeAll()
+        lock.unlock()
+        for consumer in consumers {
+            consumer.resolve(.finishedBeforeProcessing)
+        }
+        return true
+    }
+
+    fileprivate func resolveCancellation(_ receipt: AsyncGate.WaiterCancelReceipt) {
+        let outcome = Outcome.cancelled(receipt)
+        var consumers: [BufferedConsumer<Outcome>] = []
+        lock.lock()
+        if outcomeValue == nil {
+            outcomeValue = outcome
+            normalPublicationCount += 1
+            consumers = outcomeConsumers
+            outcomeConsumers.removeAll()
+        }
+        lock.unlock()
+        for consumer in consumers {
+            consumer.resolve(outcome)
+        }
+    }
+
+    fileprivate func rescueCancellationOutcomeIfNeeded(
+        _ receipt: AsyncGate.WaiterCancelReceipt = .closedBeforeProcessing
+    ) {
+        let outcome = Outcome.cancelled(receipt)
+        var consumers: [BufferedConsumer<Outcome>] = []
+        lock.lock()
+        if state == .cancellationInitiated, outcomeValue == nil {
+            outcomeValue = outcome
+            rescuePublicationCount += 1
+            consumers = outcomeConsumers
+            outcomeConsumers.removeAll()
+        }
+        lock.unlock()
+        for consumer in consumers {
+            consumer.resolve(outcome)
+        }
+    }
+
+    fileprivate func subscribeForOutcome() -> BufferedConsumer<Outcome> {
+        let consumer = BufferedConsumer<Outcome>()
+        var immediate: Outcome?
+        lock.lock()
+        if let outcomeValue {
+            immediate = outcomeValue
+        } else {
+            outcomeConsumers.append(consumer)
+        }
+        lock.unlock()
+        if let immediate {
+            consumer.resolve(immediate)
+        }
+        return consumer
+    }
+
+    fileprivate func outcome() async -> Outcome {
+        await subscribeForOutcome().value()
+    }
+
+    fileprivate var cancellationWasInitiated: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return state == .cancellationInitiated
     }
 
     fileprivate var completedNaturally: Bool {
         lock.lock(); defer { lock.unlock() }
-        return _state == .completedNaturally
+        return state == .completedNaturally
     }
 
     fileprivate var stateForTest: State {
         lock.lock(); defer { lock.unlock() }
-        return _state
+        return state
     }
 
     fileprivate var bufferedOutcomeForTest: Outcome? {
         lock.lock(); defer { lock.unlock() }
-        return _outcome
+        return outcomeValue
     }
 
-    /// Ripley Finding 4: record cancel-Task hop fingerprint. See
-    /// `ObserverAwaitAttempt.recordHopFingerprint` for full rationale.
-    fileprivate func recordHopFingerprint(_ fp: HopFingerprint) {
+    fileprivate var cancelHandlerInvocationCountForTest: Int {
         lock.lock(); defer { lock.unlock() }
-        if _hopFingerprint == nil { _hopFingerprint = fp }
+        return cancelHandlerInvocationCount
+    }
+
+    fileprivate var normalPublicationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return normalPublicationCount
+    }
+
+    fileprivate var rescuePublicationCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return rescuePublicationCount
+    }
+
+    fileprivate func recordHopFingerprint(_ fingerprint: HopFingerprint) {
+        lock.lock()
+        if hopFingerprint == nil {
+            hopFingerprint = fingerprint
+        }
+        lock.unlock()
     }
 
     var hopFingerprintForTest: HopFingerprint? {
         lock.lock(); defer { lock.unlock() }
-        return _hopFingerprint
+        return hopFingerprint
     }
 }
 
-/// R2: caller-owned one-shot buffered park-ACK ticket. Constructed by
-/// `enterObserverParkAck`; either returned already-resolved (terminal
-/// classification available at enter time) or handed to the actor to be
-/// resolved later at park/fate/close. Exactly-once: subsequent
-/// `resolve(_)` calls are silently ignored. `value()` returns the
-/// buffered result immediately if already resolved, or queues one
-/// continuation that the actor resumes at resolution. Never-awaited
-/// tickets are removed from the gate at resolution and simply dropped
-/// by the caller — no gate storage survives resolution.
-///
-/// Ripley Finding 2 (identity-preserving auto-cleanup): every ticket
-/// carries a non-reusing `identity: UUID` written by the actor into
-/// the corresponding `WeakObserverParkAckTicketBox` at enter time.
-/// When the ticket is dropped WITHOUT ever being resolved (normal
-/// abandonment), its `deinit` fires an actor-hop Task that removes
-/// the specific box for this identity from
-/// `observerActiveParkAckTickets` AND decrements the pending-cleanup
-/// identity set. A gate-side `waitForNoPendingObserverTicketCleanups()`
-/// method suspends until the set is empty — deterministic (waiter is
-/// resumed exactly when the LAST deinit Task's actor call completes),
-/// no polling / sleeps / yields / timeouts. Resolve paths clear the
-/// cleanup callback so already-resolved tickets do NOT double-cleanup.
 final class ObserverParkAckTicket: @unchecked Sendable {
-    /// Ripley Finding 2: stable, non-reusing per-ticket identity.
-    /// Written into the actor-side `WeakObserverParkAckTicketBox.identityHint`
-    /// at enter time so cleanup after deinit can prune the exact box
-    /// even after `weak var ref` has been niled by the runtime.
-    let identity: UUID = UUID()
+    let identity = UUID()
+    fileprivate let cleanupEvidence = TicketCleanupEvidence()
 
     private let lock = NSLock()
-    private var _result: AsyncGate.ParkAckResult?
-    private var _cont: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
-    /// Ripley Finding 2: deinit-driven cleanup closure. Set by
-    /// `enterObserverParkAck` for the active-branch case; cleared by
-    /// `resolve(_)` OR by `deinit` (whichever runs first). Captures
-    /// a `weak` reference to the owning actor so no retain cycle.
-    private var _pendingCleanup: (() -> Void)?
+    private var result: AsyncGate.ParkAckResult?
+    private var consumers: [BufferedConsumer<AsyncGate.ParkAckResult>] = []
+    private var pendingCleanup: (() -> TicketCleanupResult)?
 
-    init() {}
-
-    /// Ripley Finding 2: install the deinit cleanup callback. Called
-    /// synchronously by the actor at enter time for the active branch
-    /// ONLY; terminal-classification tickets are returned already-
-    /// resolved and skip this install.
-    fileprivate func attachDeinitCleanup(_ cleanup: @escaping () -> Void) {
-        lock.lock(); defer { lock.unlock() }
-        // If a resolve raced enter (impossible on a fresh ticket but
-        // defensive), skip install — cleanup would double-decrement.
-        if _result == nil { _pendingCleanup = cleanup }
-    }
-
-    /// Called by the actor at park / fate seal / close. Buffers the
-    /// first outcome and resumes any queued consumer. Ripley Finding 2:
-    /// also clears `_pendingCleanup` so the subsequent `deinit` skips
-    /// the cleanup Task launch — actor already removed this ticket's
-    /// box from storage.
-    fileprivate func resolve(_ r: AsyncGate.ParkAckResult) {
-        var contToResume: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
+    fileprivate func attachDeinitCleanup(_ cleanup: @escaping () -> TicketCleanupResult) {
         lock.lock()
-        if _result == nil {
-            _result = r
-            contToResume = _cont
-            _cont = nil
-            _pendingCleanup = nil
+        if result == nil {
+            pendingCleanup = cleanup
         }
         lock.unlock()
-        contToResume?.resume(returning: r)
     }
 
-    /// Consumer API. Returns the buffered result immediately if already
-    /// resolved, else queues one continuation that the actor resumes.
-    fileprivate func value() async -> AsyncGate.ParkAckResult {
-        return await withCheckedContinuation { c in
-            var immediate: AsyncGate.ParkAckResult?
-            lock.lock()
-            if let r = _result {
-                immediate = r
-            } else {
-                _cont = c
-            }
-            lock.unlock()
-            if let r = immediate { c.resume(returning: r) }
+    fileprivate func resolve(_ value: AsyncGate.ParkAckResult) {
+        var consumersToResolve: [BufferedConsumer<AsyncGate.ParkAckResult>] = []
+        lock.lock()
+        if result == nil {
+            result = value
+            consumersToResolve = consumers
+            consumers.removeAll()
+            pendingCleanup = nil
+        }
+        lock.unlock()
+        cleanupEvidence.resolve(.resolvedByGate)
+        for consumer in consumersToResolve {
+            consumer.resolve(value)
         }
     }
-    /// Peek without consuming — useful for tests that verify a ticket
-    /// was resolved by the actor before the consumer awaited it.
+
+    fileprivate func subscribeForValue() -> BufferedConsumer<AsyncGate.ParkAckResult> {
+        let consumer = BufferedConsumer<AsyncGate.ParkAckResult>()
+        var immediate: AsyncGate.ParkAckResult?
+        lock.lock()
+        if let result {
+            immediate = result
+        } else {
+            consumers.append(consumer)
+        }
+        lock.unlock()
+        if let immediate {
+            consumer.resolve(immediate)
+        }
+        return consumer
+    }
+
+    fileprivate func value() async -> AsyncGate.ParkAckResult {
+        await subscribeForValue().value()
+    }
+
     fileprivate var isResolved: Bool {
         lock.lock(); defer { lock.unlock() }
-        return _result != nil
+        return result != nil
     }
 
-    /// Ripley Finding 2: deinit path. Fires the cleanup callback
-    /// exactly once, and only if `resolve(_)` did not run first. The
-    /// callback captures a weak owner + tokenID + identity and
-    /// launches a `Task { await owner?.observerTicketCleanupFromDeinit(...) }`.
-    /// If owner is gone the Task no-ops (no leak). No self-strong-ref
-    /// captured; no actor-retention cycle.
     deinit {
-        var cleanupToRun: (() -> Void)?
+        var cleanup: (() -> TicketCleanupResult)?
         lock.lock()
-        if _result == nil {
-            cleanupToRun = _pendingCleanup
-            _pendingCleanup = nil
+        if result == nil {
+            cleanup = pendingCleanup
+            pendingCleanup = nil
         }
         lock.unlock()
-        cleanupToRun?()
+        cleanupEvidence.resolve(cleanup?() ?? .ownerReleased)
     }
 }
 
-/// R2 waiter analogue of `ObserverParkAckTicket`.
-///
-/// Ripley Finding 2: waiter analogue of the identity-preserving
-/// deinit-driven auto-cleanup — see observer ticket docs.
 final class WaiterParkAckTicket: @unchecked Sendable {
-    let identity: UUID = UUID()
+    let identity = UUID()
+    fileprivate let cleanupEvidence = TicketCleanupEvidence()
 
     private let lock = NSLock()
-    private var _result: AsyncGate.ParkAckResult?
-    private var _cont: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
-    private var _pendingCleanup: (() -> Void)?
+    private var result: AsyncGate.ParkAckResult?
+    private var consumers: [BufferedConsumer<AsyncGate.ParkAckResult>] = []
+    private var pendingCleanup: (() -> TicketCleanupResult)?
 
-    init() {}
-
-    fileprivate func attachDeinitCleanup(_ cleanup: @escaping () -> Void) {
-        lock.lock(); defer { lock.unlock() }
-        if _result == nil { _pendingCleanup = cleanup }
-    }
-
-    fileprivate func resolve(_ r: AsyncGate.ParkAckResult) {
-        var contToResume: CheckedContinuation<AsyncGate.ParkAckResult, Never>?
+    fileprivate func attachDeinitCleanup(_ cleanup: @escaping () -> TicketCleanupResult) {
         lock.lock()
-        if _result == nil {
-            _result = r
-            contToResume = _cont
-            _cont = nil
-            _pendingCleanup = nil
+        if result == nil {
+            pendingCleanup = cleanup
         }
         lock.unlock()
-        contToResume?.resume(returning: r)
     }
-    fileprivate func value() async -> AsyncGate.ParkAckResult {
-        return await withCheckedContinuation { c in
-            var immediate: AsyncGate.ParkAckResult?
-            lock.lock()
-            if let r = _result {
-                immediate = r
-            } else {
-                _cont = c
-            }
-            lock.unlock()
-            if let r = immediate { c.resume(returning: r) }
+
+    fileprivate func resolve(_ value: AsyncGate.ParkAckResult) {
+        var consumersToResolve: [BufferedConsumer<AsyncGate.ParkAckResult>] = []
+        lock.lock()
+        if result == nil {
+            result = value
+            consumersToResolve = consumers
+            consumers.removeAll()
+            pendingCleanup = nil
+        }
+        lock.unlock()
+        cleanupEvidence.resolve(.resolvedByGate)
+        for consumer in consumersToResolve {
+            consumer.resolve(value)
         }
     }
+
+    fileprivate func subscribeForValue() -> BufferedConsumer<AsyncGate.ParkAckResult> {
+        let consumer = BufferedConsumer<AsyncGate.ParkAckResult>()
+        var immediate: AsyncGate.ParkAckResult?
+        lock.lock()
+        if let result {
+            immediate = result
+        } else {
+            consumers.append(consumer)
+        }
+        lock.unlock()
+        if let immediate {
+            consumer.resolve(immediate)
+        }
+        return consumer
+    }
+
+    fileprivate func value() async -> AsyncGate.ParkAckResult {
+        await subscribeForValue().value()
+    }
+
     fileprivate var isResolved: Bool {
         lock.lock(); defer { lock.unlock() }
-        return _result != nil
+        return result != nil
     }
 
     deinit {
-        var cleanupToRun: (() -> Void)?
+        var cleanup: (() -> TicketCleanupResult)?
         lock.lock()
-        if _result == nil {
-            cleanupToRun = _pendingCleanup
-            _pendingCleanup = nil
+        if result == nil {
+            cleanup = pendingCleanup
+            pendingCleanup = nil
         }
         lock.unlock()
-        cleanupToRun?()
+        cleanupEvidence.resolve(cleanup?() ?? .ownerReleased)
     }
 }
 
-/// Hicks H2: weakly-held box for gate-side ticket storage. When the
-/// caller drops the sole strong reference to an active-unparked ticket
-/// (never awaits it), the box's `ref` becomes nil; the actor compacts
-/// nil boxes on every `enterX`, resolve/flush, and snapshot. Repeated
-/// enter/drop on an active token that never parks therefore stays
-/// bounded — no unbounded array growth. Live tickets remain strongly
-/// held by the caller and are lossless.
-///
-/// Ripley Finding 2: also records the ticket's `identity` so the
-/// deinit-driven cleanup Task can prune the exact box after the runtime
-/// has already niled `ref`. Without `identityHint`, cleanup could not
-/// distinguish this dead box from any other dead box in the same
-/// bucket; identity gives us structural evidence for exact removal.
-private final class WeakObserverParkAckTicketBox {
-    weak var ref: ObserverParkAckTicket?
-    let identityHint: UUID
-    init(_ t: ObserverParkAckTicket) {
-        self.ref = t
-        self.identityHint = t.identity
+private final class WeakTicketBox<Ticket: AnyObject> {
+    weak var ref: Ticket?
+    let identity: UUID
+
+    init(ticket: Ticket, identity: UUID) {
+        ref = ticket
+        self.identity = identity
     }
 }
 
-private final class WeakWaiterParkAckTicketBox {
-    weak var ref: WaiterParkAckTicket?
-    let identityHint: UUID
-    init(_ t: WaiterParkAckTicket) {
-        self.ref = t
-        self.identityHint = t.identity
+/// Ticket backing storage is synchronized independently of the gate actor so
+/// a ticket's `deinit` can remove its exact identity synchronously. Cleanup
+/// never depends on scheduling an actor task, and stale identities cannot
+/// remove a newer ticket for the same token.
+private final class TicketRegistry<Ticket: AnyObject>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [UInt64: [UUID: WeakTicketBox<Ticket>]] = [:]
+    private var automaticRemovalCount = 0
+
+    func insert(_ ticket: Ticket, tokenID: UInt64, identity: UUID) {
+        lock.lock()
+        storage[tokenID, default: [:]][identity] = WeakTicketBox(
+            ticket: ticket,
+            identity: identity)
+        lock.unlock()
+    }
+
+    func removeAutomatically(tokenID: UInt64, identity: UUID) -> TicketCleanupResult {
+        lock.lock()
+        guard var bucket = storage[tokenID], bucket.removeValue(forKey: identity) != nil else {
+            lock.unlock()
+            return .staleIdentity
+        }
+        if bucket.isEmpty {
+            storage.removeValue(forKey: tokenID)
+        } else {
+            storage[tokenID] = bucket
+        }
+        automaticRemovalCount += 1
+        lock.unlock()
+        return .removedAutomatically
+    }
+
+    func take(tokenID: UInt64) -> [Ticket] {
+        lock.lock()
+        let bucket = storage.removeValue(forKey: tokenID) ?? [:]
+        let tickets = bucket.values.compactMap(\.ref)
+        lock.unlock()
+        return tickets
+    }
+
+    func takeAll() -> [Ticket] {
+        lock.lock()
+        let buckets = storage.values
+        storage.removeAll()
+        let tickets = buckets.flatMap { $0.values.compactMap(\.ref) }
+        lock.unlock()
+        return tickets
+    }
+
+    var rawBoxCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return storage.values.reduce(0) { $0 + $1.count }
+    }
+
+    var rawKeyCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return storage.count
+    }
+
+    var automaticRemovalCountForTest: Int {
+        lock.lock(); defer { lock.unlock() }
+        return automaticRemovalCount
     }
 }
 
@@ -5130,10 +5213,9 @@ private actor AsyncGate {
     /// await attempt owns a caller-supplied `AwaitAttempt` context that
     /// carries the awaitID; `cancelObserver`/`cancelWaiter` returns one
     /// of these outcomes as its function value (no gate-side storage).
-    /// The onCancel body atomically commits the attempt to
-    /// `.cancellationInitiated` and launches a cancel Task that publishes
-    /// the receipt to the attempt's buffered outcome latch. Consumers
-    /// await `attempt.outcome()` for the definitive per-attempt outcome.
+    /// onCancel atomically commits `.cancellationInitiated` and releases
+    /// the caller-owned suspension. The resumed actor body publishes the
+    /// exact receipt before returning.
     /// `finishedBeforeProcessing` is emitted by the natural-completion
     /// path when the state gate is still `.active` at body return.
     enum ObserverCancelReceipt: Sendable, Hashable {
@@ -5189,10 +5271,7 @@ private actor AsyncGate {
         let observerResumeCounts: [ObserverResumeSite: Int]
         let waiterResumeCounts: [WaiterResumeSite: Int]
 
-        // Hicks D: number of times `cancelObserver`/`cancelWaiter` has
-        // been dispatched (whether it drained a matched entry or fell
-        // into the bounded-no-op branch). Used by `waitForXCancelCount`
-        // ACK helpers to prove structural ordering.
+        // Number of actor-isolated cancellation classifications.
         let observerCancelInvocationCount: Int
         let waiterCancelInvocationCount: Int
 
@@ -5200,55 +5279,38 @@ private actor AsyncGate {
         // (never grow with post-close activity).
         let observerParkAckQueueTotal: Int
         let waiterParkAckQueueTotal: Int
-        let observerCancelCountAckQueueTotal: Int
-        let waiterCancelCountAckQueueTotal: Int
 
-        // Hicks R1 addendum: gate no longer stores per-attempt cancel
-        // receipts (that state now lives in caller-owned `AwaitAttempt`
-        // objects). These snapshot fields are RETAINED at fixed zero so
-        // long-standing tests reading them continue to compile against
-        // the same field set; they are guaranteed zero because the gate
-        // has no per-attempt storage to grow.
-
-        // Hicks R2 addendum: `observerParkAckTicketCount` /
-        // `waiterParkAckTicketCount` now count ACTIVE park-ACK
-        // tickets (sum of `observerActiveParkAckTickets` array
-        // lengths), i.e. tickets reserved via `enterXParkAck` that
-        // the actor has NOT yet resolved. Resolved tickets are
-        // removed from actor storage immediately, whether or not the
-        // caller has consumed the buffered result.
+        // Active ticket identities and backing token-key counts.
         let observerParkAckTicketCount: Int
         let waiterParkAckTicketCount: Int
-        // Hicks H2 (coordinator criterion 2): backing-storage metrics.
-        // `*BackingKeyCount` reports the number of dictionary keys still
-        // present in `observerActiveParkAckTickets` / `waiterActiveParkAckTickets`
-        // AFTER compaction. Because compaction removes any bucket that becomes
-        // empty (all dead boxes pruned), a value of 0 proves the backing dict
-        // holds NO entries — not merely that live tickets are gone.
-        // Live count == 0 alone could mask a dict entry holding only dead boxes;
-        // key count == 0 rules that out.
         let observerParkAckTicketBackingKeyCount: Int
         let waiterParkAckTicketBackingKeyCount: Int
     }
 
     // MARK: Debug metrics (test-only)
-    // Hicks H2 (coordinator criterion 2): expose RAW backing storage counts
-    // WITHOUT triggering compaction. Callable AFTER `snapshot()` (which does
-    // compact) to prove that even the raw box arrays are empty at that
-    // moment. If snapshot() reports 0 but debugRaw* reports >0, that would
-    // reveal a compaction correctness bug. Both must be 0 to prove the
-    // gate holds no per-ticket state after drop.
     func debugRawObserverParkAckBoxCount() -> Int {
-        observerActiveParkAckTickets.values.reduce(0) { $0 + $1.count }
+        observerTicketRegistry.rawBoxCount
     }
     func debugRawWaiterParkAckBoxCount() -> Int {
-        waiterActiveParkAckTickets.values.reduce(0) { $0 + $1.count }
+        waiterTicketRegistry.rawBoxCount
     }
     func debugRawObserverParkAckKeyCount() -> Int {
-        observerActiveParkAckTickets.count
+        observerTicketRegistry.rawKeyCount
     }
     func debugRawWaiterParkAckKeyCount() -> Int {
-        waiterActiveParkAckTickets.count
+        waiterTicketRegistry.rawKeyCount
+    }
+    func debugObserverAutomaticTicketCleanupCount() -> Int {
+        observerTicketRegistry.automaticRemovalCountForTest
+    }
+    func debugWaiterAutomaticTicketCleanupCount() -> Int {
+        waiterTicketRegistry.automaticRemovalCountForTest
+    }
+    func debugObserverTicketCleanup(tokenID: UInt64, identity: UUID) -> TicketCleanupResult {
+        observerTicketRegistry.removeAutomatically(tokenID: tokenID, identity: identity)
+    }
+    func debugWaiterTicketCleanup(tokenID: UInt64, identity: UUID) -> TicketCleanupResult {
+        waiterTicketRegistry.removeAutomatically(tokenID: tokenID, identity: identity)
     }
 
     // MARK: State
@@ -5264,10 +5326,10 @@ private actor AsyncGate {
     private var nextWaiterID: UInt64 = 1
     // Hicks H5 / addendum: non-reusing per-await identity. UUID guarantees
     // owner/receipt maps cannot alias a prior/wrapped attempt.
-    private var parkedObservers: [UInt64: (awaitID: UUID, c: CheckedContinuation<Void, Never>)] = [:]
+    private var parkedObservers: [UInt64: (awaitID: UUID, attempt: ObserverAwaitAttempt)] = [:]
     private var completedObservers: Set<UInt64> = []
     private var observerOrder: [UInt64] = []
-    private var parkedWaiters: [UInt64: (awaitID: UUID, c: CheckedContinuation<Void, Never>)] = [:]
+    private var parkedWaiters: [UInt64: (awaitID: UUID, attempt: WaiterAwaitAttempt)] = [:]
     private var completedWaiters: Set<UInt64> = []
     private var waiterOrder: [UInt64] = []
     private var pendingEntrySignals: Int = 0
@@ -5294,28 +5356,8 @@ private actor AsyncGate {
     private var observerParkAcks: [UInt64: [CheckedContinuation<ParkAckResult, Never>]] = [:]
     private var waiterParkAcks: [UInt64: [CheckedContinuation<ParkAckResult, Never>]] = [:]
 
-    // Hicks H3 + R2 addendum: two-phase pre-park ACK tickets.
-    // `enterObserverParkAck` synchronously creates an
-    // `ObserverParkAckTicket` object and, for an active-registered
-    // token, appends it into `observerActiveParkAckTickets[id]`.
-    // Because that method executes SYNCHRONOUSLY on the actor,
-    // calling it twice before spawning any parking task GUARANTEES
-    // both tickets were queued before parking could occur. On park /
-    // fate seal / close, the actor calls `ticket.resolve(_)` and
-    // REMOVES the ticket entries from the active-ticket map. Never-
-    // awaited tickets are removed at the same moment; the caller
-    // owns lifetime of the resolved-but-not-consumed ticket object.
-    // No `UUID → tokenID` result-lookup map survives resolution.
-    private var observerActiveParkAckTickets: [UInt64: [WeakObserverParkAckTicketBox]] = [:]
-    private var waiterActiveParkAckTickets: [UInt64: [WeakWaiterParkAckTicketBox]] = [:]
-
-    // Hicks R1 addendum: the gate NO LONGER stores per-attempt
-    // cancellation receipts. Each await attempt carries its own
-    // `AwaitAttempt` context; onCancel synchronously installs the
-    // exact cancel Task handle into that context, and `cancelX`
-    // returns the receipt as its function value (never persists it
-    // etc. are RETAINED (fixed zero) so the Equatable/field-set stays
-    // stable across the redesign.
+    private nonisolated let observerTicketRegistry = TicketRegistry<ObserverParkAckTicket>()
+    private nonisolated let waiterTicketRegistry = TicketRegistry<WaiterParkAckTicket>()
 
     // Hicks B: post-close registration bounded aggregate counters.
     // Post-close registerX does NOT insert per-token maps.
@@ -5327,31 +5369,8 @@ private actor AsyncGate {
     private var observerResumeCounts: [ObserverResumeSite: Int] = [:]
     private var waiterResumeCounts: [WaiterResumeSite: Int] = [:]
 
-    // Hicks D: cancel-invocation counters + bounded ACK queues so tests
-    // can structurally await a specific cancel dispatch without polling.
     private var observerCancelInvocationCount = 0
     private var waiterCancelInvocationCount = 0
-    private var observerCancelCountAcks: [Int: [CheckedContinuation<Void, Never>]] = [:]
-    private var waiterCancelCountAcks: [Int: [CheckedContinuation<Void, Never>]] = [:]
-
-    // Ripley Finding 2: identity-preserving deinit-driven ticket cleanup.
-    //
-    // `pendingXTicketCleanupIdentities` = set of ticket identities that
-    //   are currently registered in actor storage (added by enterX at
-    //   active-branch, removed either by resolve/flush/close paths OR
-    //   by a deinit-launched cleanup Task). While non-empty, at least
-    //   one ticket has active storage the actor must eventually reclaim.
-    //
-    // `pendingXTicketCleanupWaiters` = continuations awaiting an empty
-    //   identity set (drained atomically when the LAST identity leaves).
-    //   Callers await `waitForNoPendingXTicketCleanups()` for a bounded,
-    //   deterministic sync-point AFTER dropping all abandoned tickets:
-    //   the waiter resumes exactly when every deinit-launched cleanup
-    //   Task has completed its actor hop.
-    private var pendingObserverTicketCleanupIdentities: Set<UUID> = []
-    private var pendingWaiterTicketCleanupIdentities: Set<UUID> = []
-    private var pendingObserverTicketCleanupWaiters: [CheckedContinuation<Void, Never>] = []
-    private var pendingWaiterTicketCleanupWaiters: [CheckedContinuation<Void, Never>] = []
 
     // MARK: Observer (entry-side)
 
@@ -5396,18 +5415,14 @@ private actor AsyncGate {
         await awaitObserver(token, attempt: ObserverAwaitAttempt())
     }
 
-    /// Hicks R1: labeled overload that accepts a caller-owned
-    /// `ObserverAwaitAttempt`. onCancel atomically commits the attempt
-    /// via `beginCancellationIfActive` and launches a cancel Task that
-    /// publishes the receipt to the attempt's outcome latch; callers/
-    /// tests obtain the definitive per-attempt receipt by awaiting
-    /// `attempt.outcome()`. On natural completion,
-    /// `attempt.markCompletedNaturallyIfActive()` fires and publishes
-    /// `.finishedBeforeProcessing`; the gate stores NO per-attempt outcome.
+    /// Labeled overload accepting a caller-owned attempt. Cancellation
+    /// releases the attempt suspension; this actor-isolated body publishes
+    /// the exact receipt before returning.
     func awaitObserver(_ token: ObserverToken, attempt: ObserverAwaitAttempt) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
+                attempt.installSuspension(c)
                 // (1) Before-park latch present → consume it and
                 //     prune per-token state atomically. Bishop F1:
                 //     both `completedObservers` and `observerFates`
@@ -5416,7 +5431,7 @@ private actor AsyncGate {
                 if completedObservers.remove(token.id) != nil {
                     observerFates.removeValue(forKey: token.id)
                     observerResumeCounts[.latchConsumed, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 // (2) Same token already has a live parked continuation.
@@ -5425,7 +5440,7 @@ private actor AsyncGate {
                 if parkedObservers[token.id] != nil {
                     observerDuplicateAwaitCount += 1
                     observerResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 // (3) Currently registered (in observerOrder).
@@ -5434,10 +5449,10 @@ private actor AsyncGate {
                         observerOrder.removeAll { $0 == token.id }
                         sealObserverOutcome(id: token.id, reason: .closedBeforePark)
                         observerResumeCounts[.closedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
-                    parkedObservers[token.id] = (awaitID: awaitID, c: c)
+                    parkedObservers[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushObserverParkAcks(id: token.id, result: .parked)
                     return
                 }
@@ -5449,27 +5464,17 @@ private actor AsyncGate {
                     observerDuplicateAwaitCount += 1
                     observerResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                c.resume()
+                attempt.rescueSuspension()
             }
-            // Hicks H1 (Vasquez remediation): natural completion
-            // publishes ONLY if the state gate is still `.active`. If
-            // cancellation was already initiated, the cancel Task is
-            // the sole publisher — the natural completion path silently
-            // yields to it.
-            if attempt.markCompletedNaturallyIfActive() {
-                attempt.resolveOutcome(.finishedBeforeProcessing)
+            if !attempt.publishNaturalIfActive(), attempt.cancellationWasInitiated {
+                let receipt = cancelObserver(
+                    id: token.id,
+                    awaitID: awaitID,
+                    attempt: attempt)
+                attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            // Hicks H1: atomically claim publication BEFORE launching
-            // any Task. If natural completion already published, do
-            // nothing — otherwise a late-arriving cancel Task could
-            // reverse the published outcome.
-            guard attempt.beginCancellationIfActive() else { return }
-            _ = Task<ObserverCancelReceipt, Never> {
-                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID, attempt: attempt)
-                attempt.resolveOutcome(.cancelled(receipt))
-                return receipt
-}
+            _ = attempt.beginCancellationIfActive()
         }
     }
 
@@ -5482,37 +5487,25 @@ private actor AsyncGate {
     ///
     /// Hicks R1: this method now RETURNS the exact per-attempt
     /// `ObserverCancelReceipt` as its function value rather than
-    /// storing it in a gate map. The cancel Task launched by onCancel
-    /// wraps this call and publishes the receipt to the caller-owned
-    /// `AwaitAttempt`'s outcome latch, so tests read the definitive
-    /// per-attempt outcome by awaiting `attempt.outcome()`.
-    ///
-    /// Hicks D: bumps `observerCancelInvocationCount` and flushes any
-    /// ACKs waiting for a specific cancel-invocation threshold, so
-    /// tests can structurally await a cancel dispatch without polling.
+    /// storing it in a gate map. The resumed actor body publishes it to
+    /// the caller-owned attempt.
     ///
     /// Ripley Finding 4: also records the exact per-attempt hop
-    /// fingerprint (parked/matched/closed AT THIS ACTOR TURN) on the
-    /// caller-owned `attempt`. Tests correlate `attempt.hopFingerprintForTest`
-    /// with the returned receipt to catch broken-matcher regressions:
-    /// if `awaitIDMatched == true` the receipt MUST be `.processedMatched`;
-    /// any other receipt is definitive evidence of a matcher bug and
-    /// fails an assertion loudly instead of silently accepting a
-    /// `.processedIgnoredMismatch` + close-side drain fingerprint.
+    /// raw fingerprint (requested identity, parked identity, entry existence,
+    /// and closed state) before matching or mutation.
     private func cancelObserver(id: UInt64, awaitID: UUID, attempt: ObserverAwaitAttempt) -> ObserverCancelReceipt {
         observerCancelInvocationCount += 1
-        flushObserverCancelCountAcks()
         // Ripley Finding 4: record fingerprint BEFORE mutating state,
         // so the fingerprint reflects the state the matcher observed.
         let entry = parkedObservers[id]
         let hopParkedEntryExisted = (entry != nil)
-        let hopAwaitIDMatched = (entry?.awaitID == awaitID)
         attempt.recordHopFingerprint(ObserverAwaitAttempt.HopFingerprint(
-            awaitIDMatched: hopAwaitIDMatched,
+            requestedAwaitID: awaitID,
+            parkedAwaitID: entry?.awaitID,
             parkedEntryExisted: hopParkedEntryExisted,
             closedAtHop: closed))
-        // Hicks R1: close-before-processing race. If the gate closed
-        // while this cancel Task was scheduled, the parked entry (if
+        // Close-before-processing race. If the gate closed
+        // while cancellation was being processed, the parked entry (if
         // any) was already drained by close() with .closedWhileParked.
         // The cancel therefore had NO matching parked entry to drain;
         // report `.closedBeforeProcessing` and take no further action.
@@ -5530,7 +5523,7 @@ private actor AsyncGate {
         // so aggregate-only accounting (no per-token fate stored).
         sealObserverOutcome(id: id, reason: .cancelledWhileParked)
         observerResumeCounts[.parkedResumedByCancel, default: 0] += 1
-        entry.c.resume()
+        entry.attempt.rescueSuspension()
         return .processedMatched
     }
 
@@ -5574,22 +5567,8 @@ private actor AsyncGate {
         if let cs = observerParkAcks.removeValue(forKey: id) {
             for c in cs { c.resume(returning: result) }
         }
-        // Hicks R2/H2: resolve and remove any active park-ACK tickets
-        // for this token. Boxes are weak — dead refs are simply skipped.
-        // The gate retains no per-ticket state after resolution.
-        //
-        // Ripley Finding 2: also remove each box's `identityHint` from
-        // `pendingObserverTicketCleanupIdentities`. This is safe even
-        // if the deinit-launched cleanup Task for that identity is
-        // in-flight: that Task's actor call will see the identity is
-        // no longer in the set and no-op (see
-        // `observerTicketCleanupFromDeinit`).
-        if let ts = observerActiveParkAckTickets.removeValue(forKey: id) {
-            for box in ts {
-                box.ref?.resolve(result)
-                pendingObserverTicketCleanupIdentities.remove(box.identityHint)
-            }
-            fireObserverTicketCleanupWaitersIfEmpty()
+        for ticket in observerTicketRegistry.take(tokenID: id) {
+            ticket.resolve(result)
         }
     }
 
@@ -5632,16 +5611,17 @@ private actor AsyncGate {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
+                attempt.installSuspension(c)
                 if completedWaiters.remove(token.id) != nil {
                     waiterFates.removeValue(forKey: token.id)
                     waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if parkedWaiters[token.id] != nil {
                     waiterDuplicateAwaitCount += 1
                     waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if waiterOrder.contains(token.id) {
@@ -5649,17 +5629,17 @@ private actor AsyncGate {
                         waiterOrder.removeAll { $0 == token.id }
                         sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
                         waiterResumeCounts[.closedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
                     if opened {
                         waiterOrder.removeAll { $0 == token.id }
                         sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
                         waiterResumeCounts[.openedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
-                    parkedWaiters[token.id] = (awaitID: awaitID, c: c)
+                    parkedWaiters[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushWaiterParkAcks(id: token.id, result: .parked)
                     return
                 }
@@ -5670,20 +5650,17 @@ private actor AsyncGate {
                     waiterDuplicateAwaitCount += 1
                     waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                c.resume()
+                attempt.rescueSuspension()
             }
-            // Hicks H1: state-gated natural completion — see observer variant.
-            if attempt.markCompletedNaturallyIfActive() {
-                attempt.resolveOutcome(.finishedBeforeProcessing)
+            if !attempt.publishNaturalIfActive(), attempt.cancellationWasInitiated {
+                let receipt = cancelWaiter(
+                    id: token.id,
+                    awaitID: awaitID,
+                    attempt: attempt)
+                attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            // Hicks H1: atomically claim publication before launching Task.
-            guard attempt.beginCancellationIfActive() else { return }
-            _ = Task<WaiterCancelReceipt, Never> {
-                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID, attempt: attempt)
-                attempt.resolveOutcome(.cancelled(receipt))
-                return receipt
-}
+            _ = attempt.beginCancellationIfActive()
         }
     }
 
@@ -5699,12 +5676,11 @@ private actor AsyncGate {
     /// recording — see `cancelObserver` for full rationale.
     private func cancelWaiter(id: UInt64, awaitID: UUID, attempt: WaiterAwaitAttempt) -> WaiterCancelReceipt {
         waiterCancelInvocationCount += 1
-        flushWaiterCancelCountAcks()
         let entry = parkedWaiters[id]
         let hopParkedEntryExisted = (entry != nil)
-        let hopAwaitIDMatched = (entry?.awaitID == awaitID)
         attempt.recordHopFingerprint(WaiterAwaitAttempt.HopFingerprint(
-            awaitIDMatched: hopAwaitIDMatched,
+            requestedAwaitID: awaitID,
+            parkedAwaitID: entry?.awaitID,
             parkedEntryExisted: hopParkedEntryExisted,
             closedAtHop: closed))
         if closed {
@@ -5719,7 +5695,7 @@ private actor AsyncGate {
         waiterOrder.removeAll { $0 == id }
         sealWaiterOutcome(id: id, reason: .cancelledWhileParked)
         waiterResumeCounts[.parkedResumedByCancel, default: 0] += 1
-        entry.c.resume()
+        entry.attempt.rescueSuspension()
         return .processedMatched
     }
 
@@ -5748,72 +5724,16 @@ private actor AsyncGate {
         if let cs = waiterParkAcks.removeValue(forKey: id) {
             for c in cs { c.resume(returning: result) }
         }
-        // Ripley Finding 2: identity-set decrement mirrors observer variant.
-        if let ts = waiterActiveParkAckTickets.removeValue(forKey: id) {
-            for box in ts {
-                box.ref?.resolve(result)
-                pendingWaiterTicketCleanupIdentities.remove(box.identityHint)
-            }
-            fireWaiterTicketCleanupWaitersIfEmpty()
-        }
-    }
-
-    // MARK: Hicks D — cancel-invocation ACK helpers
-
-    /// Suspend until `observerCancelInvocationCount >= target`. Bounded:
-    /// resolves immediately if already met, otherwise queues one entry
-    /// that is flushed exactly once when the count reaches `target`.
-    /// `close()` drains any still-queued entries to guarantee test
-    /// teardown never hangs.
-    func waitForObserverCancelCount(atLeast target: Int) async {
-        if observerCancelInvocationCount >= target { return }
-        await withCheckedContinuation { c in
-            observerCancelCountAcks[target, default: []].append(c)
-        }
-    }
-
-    /// Waiter analogue of `waitForObserverCancelCount(atLeast:)`.
-    func waitForWaiterCancelCount(atLeast target: Int) async {
-        if waiterCancelInvocationCount >= target { return }
-        await withCheckedContinuation { c in
-            waiterCancelCountAcks[target, default: []].append(c)
-        }
-    }
-
-    private func flushObserverCancelCountAcks() {
-        let met = observerCancelCountAcks.keys.filter { $0 <= observerCancelInvocationCount }
-        for key in met {
-            if let cs = observerCancelCountAcks.removeValue(forKey: key) {
-                for c in cs { c.resume() }
-            }
-        }
-    }
-
-    private func flushWaiterCancelCountAcks() {
-        let met = waiterCancelCountAcks.keys.filter { $0 <= waiterCancelInvocationCount }
-        for key in met {
-            if let cs = waiterCancelCountAcks.removeValue(forKey: key) {
-                for c in cs { c.resume() }
-            }
+        for ticket in waiterTicketRegistry.take(tokenID: id) {
+            ticket.resolve(result)
         }
     }
 
     // MARK: Hicks R2 addendum — buffered park-ACK ticket objects
 
-    /// Hicks R2: synchronously reserve a park-ACK ticket for an
-    /// observer token. Returns an already-resolved ticket for any
-    /// non-active state (already parked / already fated / unknown /
-    /// closed-or-consumed). For an active-registered token, returns
-    /// a pending ticket AFTER inserting it into
-    /// `observerActiveParkAckTickets[token.id]` — because this
-    /// executes SYNCHRONOUSLY on the actor, calling it twice before
-    /// spawning any parking task GUARANTEES both tickets were queued
-    /// before parking could occur. On park/fate seal/close, the
-    /// actor calls `ticket.resolve(_)` and REMOVES the ticket from
-    /// the active map immediately. Callers consume the buffered
-    /// result via `ticket.value()` at any later time; never-awaited
-    /// tickets are simply dropped by the caller after actor
-    /// resolution (no residual gate state).
+    /// Synchronously reserve a park-ACK ticket. Active tickets are inserted
+    /// into the identity registry before return; terminal tickets resolve
+    /// immediately. Park/fate/close removes before resolving.
     func enterObserverParkAck(_ token: ObserverToken) -> ObserverParkAckTicket {
         let ticket = ObserverParkAckTicket()
         if parkedObservers[token.id] != nil {
@@ -5829,22 +5749,13 @@ private actor AsyncGate {
                 ticket.resolve(.closedOrConsumed)
                 return ticket
             }
-            // Hicks H2: compact any dropped-caller boxes for this token
-            // before appending, so repeated enter+drop stays bounded.
-            compactObserverParkAckTickets(id: token.id)
-            observerActiveParkAckTickets[token.id, default: []].append(WeakObserverParkAckTicketBox(ticket))
-            // Ripley Finding 2: register cleanup identity + attach a
-            // deinit callback that hops back into the actor to prune
-            // the specific box for this identity when the caller drops
-            // the ticket without ever consuming it. Weak-self capture
-            // avoids retention cycles; capturing tokenID + identity
-            // by value avoids any actor-side ownership of caller state.
             let identity = ticket.identity
             let tokenID = token.id
-            pendingObserverTicketCleanupIdentities.insert(identity)
-            ticket.attachDeinitCleanup { [weak self] in
-                guard let gate = self else { return }
-                Task { await gate.observerTicketCleanupFromDeinit(tokenID: tokenID, identity: identity) }
+            let registry = observerTicketRegistry
+            registry.insert(ticket, tokenID: tokenID, identity: identity)
+            ticket.attachDeinitCleanup { [weak registry] in
+                registry?.removeAutomatically(tokenID: tokenID, identity: identity)
+                    ?? .ownerReleased
             }
             return ticket
         }
@@ -5872,15 +5783,13 @@ private actor AsyncGate {
                 ticket.resolve(.closedOrConsumed)
                 return ticket
             }
-            compactWaiterParkAckTickets(id: token.id)
-            waiterActiveParkAckTickets[token.id, default: []].append(WeakWaiterParkAckTicketBox(ticket))
-            // Ripley Finding 2: see observer variant for full rationale.
             let identity = ticket.identity
             let tokenID = token.id
-            pendingWaiterTicketCleanupIdentities.insert(identity)
-            ticket.attachDeinitCleanup { [weak self] in
-                guard let gate = self else { return }
-                Task { await gate.waiterTicketCleanupFromDeinit(tokenID: tokenID, identity: identity) }
+            let registry = waiterTicketRegistry
+            registry.insert(ticket, tokenID: tokenID, identity: identity)
+            ticket.attachDeinitCleanup { [weak registry] in
+                registry?.removeAutomatically(tokenID: tokenID, identity: identity)
+                    ?? .ownerReleased
             }
             return ticket
         }
@@ -5892,147 +5801,8 @@ private actor AsyncGate {
         return ticket
     }
 
-    // MARK: Ripley Finding 2 — deinit-driven ticket cleanup
+    // MARK: Hold-inside-cancellation-handler helpers
 
-    /// Ripley Finding 2: deinit-launched cleanup for observer ticket.
-    /// If `identity` is still in the pending set (i.e. no resolve /
-    /// flush / close has already removed this ticket's storage),
-    /// prune the exact box carrying `identityHint == identity` from
-    /// `observerActiveParkAckTickets[tokenID]`, then fire cleanup
-    /// waiters if the pending set is now empty. Idempotent: a stale
-    /// call (identity already removed) is a no-op.
-    func observerTicketCleanupFromDeinit(tokenID: UInt64, identity: UUID) {
-        guard pendingObserverTicketCleanupIdentities.remove(identity) != nil else { return }
-        if var arr = observerActiveParkAckTickets[tokenID] {
-            arr.removeAll { $0.identityHint == identity }
-            if arr.isEmpty {
-                observerActiveParkAckTickets.removeValue(forKey: tokenID)
-            } else {
-                observerActiveParkAckTickets[tokenID] = arr
-            }
-        }
-        fireObserverTicketCleanupWaitersIfEmpty()
-    }
-
-    /// Waiter analogue of `observerTicketCleanupFromDeinit`.
-    func waiterTicketCleanupFromDeinit(tokenID: UInt64, identity: UUID) {
-        guard pendingWaiterTicketCleanupIdentities.remove(identity) != nil else { return }
-        if var arr = waiterActiveParkAckTickets[tokenID] {
-            arr.removeAll { $0.identityHint == identity }
-            if arr.isEmpty {
-                waiterActiveParkAckTickets.removeValue(forKey: tokenID)
-            } else {
-                waiterActiveParkAckTickets[tokenID] = arr
-            }
-        }
-        fireWaiterTicketCleanupWaitersIfEmpty()
-    }
-
-    private func fireObserverTicketCleanupWaitersIfEmpty() {
-        guard pendingObserverTicketCleanupIdentities.isEmpty else { return }
-        let cs = pendingObserverTicketCleanupWaiters
-        pendingObserverTicketCleanupWaiters.removeAll()
-        for c in cs { c.resume() }
-    }
-
-    private func fireWaiterTicketCleanupWaitersIfEmpty() {
-        guard pendingWaiterTicketCleanupIdentities.isEmpty else { return }
-        let cs = pendingWaiterTicketCleanupWaiters
-        pendingWaiterTicketCleanupWaiters.removeAll()
-        for c in cs { c.resume() }
-    }
-
-    /// Ripley Finding 2: deterministic barrier for tests that need to
-    /// prove backing storage returned to zero after N distinct-token
-    /// enter+drop cycles WITHOUT snapshot/close/manual prune/per-token
-    /// park. Suspends until every deinit-launched cleanup Task's actor
-    /// call has completed (identity set is empty). Rescued by close()
-    /// which drains any still-pending identities as part of terminal
-    /// teardown, so this cannot hang across a `close()`.
-    func waitForNoPendingObserverTicketCleanups() async {
-        if pendingObserverTicketCleanupIdentities.isEmpty { return }
-        await withCheckedContinuation { c in
-            pendingObserverTicketCleanupWaiters.append(c)
-        }
-    }
-
-    /// Waiter analogue of `waitForNoPendingObserverTicketCleanups`.
-    func waitForNoPendingWaiterTicketCleanups() async {
-        if pendingWaiterTicketCleanupIdentities.isEmpty { return }
-        await withCheckedContinuation { c in
-            pendingWaiterTicketCleanupWaiters.append(c)
-        }
-    }
-
-    /// Debug (test-only): number of ticket identities still pending
-    /// deinit-cleanup. `0` proves the actor holds no per-ticket
-    /// abandonment state. Non-zero indicates at least one deinit
-    /// Task has not yet completed its actor call OR a live ticket
-    /// remains registered.
-    func debugPendingObserverTicketCleanupCount() -> Int {
-        pendingObserverTicketCleanupIdentities.count
-    }
-    func debugPendingWaiterTicketCleanupCount() -> Int {
-        pendingWaiterTicketCleanupIdentities.count
-    }
-
-    /// Hicks H2: remove weak-boxes whose caller-owned ticket has been
-    /// dropped. Called from `enterX`, snapshot, and close to keep
-    /// active-ticket storage bounded even when callers never park nor
-    /// consume. If the resulting bucket is empty, the map entry is
-    /// removed too.
-    private func compactObserverParkAckTickets(id: UInt64) {
-        guard var arr = observerActiveParkAckTickets[id] else { return }
-        arr.removeAll { $0.ref == nil }
-        if arr.isEmpty {
-            observerActiveParkAckTickets.removeValue(forKey: id)
-        } else {
-            observerActiveParkAckTickets[id] = arr
-        }
-    }
-
-    private func compactWaiterParkAckTickets(id: UInt64) {
-        guard var arr = waiterActiveParkAckTickets[id] else { return }
-        arr.removeAll { $0.ref == nil }
-        if arr.isEmpty {
-            waiterActiveParkAckTickets.removeValue(forKey: id)
-        } else {
-            waiterActiveParkAckTickets[id] = arr
-        }
-    }
-
-    private func compactAllParkAckTickets() {
-        for id in Array(observerActiveParkAckTickets.keys) {
-            compactObserverParkAckTickets(id: id)
-        }
-        for id in Array(waiterActiveParkAckTickets.keys) {
-            compactWaiterParkAckTickets(id: id)
-        }
-    }
-
-    /// Hicks H2 remediation: deterministic dead-box pruning callable
-    /// independently of `snapshot()`. Exists so tests can prove raw
-    /// backing storage returns to exactly zero without relying on the
-    /// implicit compaction side-effect of `snapshot()` (which measured
-    /// AND cleaned in the same call — making a raw==0 assertion after
-    /// snapshot vacuous). One actor hop; no polling, sleeps, or yields.
-    /// Idempotent: successive calls are no-ops on an already-clean map.
-    func pruneAllDroppedTicketBoxesForTest() {
-        compactAllParkAckTickets()
-    }
-
-    // MARK: Hicks D — hold-inside-cancellation-handler helpers
-
-    /// Test-only helper that parks an observer continuation the same way
-    /// as `awaitObserver`, but AFTER the continuation resumes we hold
-    /// this Task INSIDE the `withTaskCancellationHandler` scope by
-    /// awaiting `holdGate.awaitWaiter(holdToken)`. That structurally
-    /// keeps the `onCancel` handler installed after the continuation
-    /// resumed, so a mismatched-awaitID cancel dispatched to this
-    /// token's id can be proven to be a bounded no-op WITHOUT the
-    /// handler having already been torn down.
-    ///
-    /// The extra hold is released when the caller opens `holdGate`.
     func awaitObserverAndHold(
         _ token: ObserverToken,
         holdGate: AsyncGate,
@@ -6051,16 +5821,17 @@ private actor AsyncGate {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
+                attempt.installSuspension(c)
                 if completedObservers.remove(token.id) != nil {
                     observerFates.removeValue(forKey: token.id)
                     observerResumeCounts[.latchConsumed, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if parkedObservers[token.id] != nil {
                     observerDuplicateAwaitCount += 1
                     observerResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if observerOrder.contains(token.id) {
@@ -6068,10 +5839,10 @@ private actor AsyncGate {
                         observerOrder.removeAll { $0 == token.id }
                         sealObserverOutcome(id: token.id, reason: .closedBeforePark)
                         observerResumeCounts[.closedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
-                    parkedObservers[token.id] = (awaitID: awaitID, c: c)
+                    parkedObservers[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushObserverParkAcks(id: token.id, result: .parked)
                     return
                 }
@@ -6082,23 +5853,18 @@ private actor AsyncGate {
                     observerDuplicateAwaitCount += 1
                     observerResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                c.resume()
+                attempt.rescueSuspension()
             }
-            // Structurally hold inside the cancellation handler scope
-            // so mismatched late cancels can be observed while the
-            // handler is still installed.
             await holdGate.awaitWaiter(holdToken)
-            // Hicks H1: state-gated natural completion.
-            if attempt.markCompletedNaturallyIfActive() {
-                attempt.resolveOutcome(.finishedBeforeProcessing)
+            if !attempt.publishNaturalIfActive(), attempt.cancellationWasInitiated {
+                let receipt = cancelObserver(
+                    id: token.id,
+                    awaitID: awaitID,
+                    attempt: attempt)
+                attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            guard attempt.beginCancellationIfActive() else { return }
-            _ = Task<ObserverCancelReceipt, Never> {
-                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID, attempt: attempt)
-                attempt.resolveOutcome(.cancelled(receipt))
-                return receipt
-}
+            _ = attempt.beginCancellationIfActive()
         }
     }
 
@@ -6121,16 +5887,17 @@ private actor AsyncGate {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
+                attempt.installSuspension(c)
                 if completedWaiters.remove(token.id) != nil {
                     waiterFates.removeValue(forKey: token.id)
                     waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if parkedWaiters[token.id] != nil {
                     waiterDuplicateAwaitCount += 1
                     waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if waiterOrder.contains(token.id) {
@@ -6138,17 +5905,17 @@ private actor AsyncGate {
                         waiterOrder.removeAll { $0 == token.id }
                         sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
                         waiterResumeCounts[.closedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
                     if opened {
                         waiterOrder.removeAll { $0 == token.id }
                         sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
                         waiterResumeCounts[.openedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
-                    parkedWaiters[token.id] = (awaitID: awaitID, c: c)
+                    parkedWaiters[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushWaiterParkAcks(id: token.id, result: .parked)
                     return
                 }
@@ -6159,63 +5926,42 @@ private actor AsyncGate {
                     waiterDuplicateAwaitCount += 1
                     waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                c.resume()
+                attempt.rescueSuspension()
             }
             await holdGate.awaitWaiter(holdToken)
-            // Hicks H1: state-gated natural completion.
-            if attempt.markCompletedNaturallyIfActive() {
-                attempt.resolveOutcome(.finishedBeforeProcessing)
+            if !attempt.publishNaturalIfActive(), attempt.cancellationWasInitiated {
+                let receipt = cancelWaiter(
+                    id: token.id,
+                    awaitID: awaitID,
+                    attempt: attempt)
+                attempt.resolveCancellation(receipt)
             }
         } onCancel: {
-            guard attempt.beginCancellationIfActive() else { return }
-            _ = Task<WaiterCancelReceipt, Never> {
-                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID, attempt: attempt)
-                attempt.resolveOutcome(.cancelled(receipt))
-                return receipt
-}
+            _ = attempt.beginCancellationIfActive()
         }
     }
 
-    // MARK: Hicks H1 addendum — publish-natural-BEFORE-hold variants
-    //
-    // These variants let a test PROVE that a late `Task.cancel()` fires
-    // while the outer `withTaskCancellationHandler` scope is still live
-    // AFTER natural completion has already published `.finishedBeforeProcessing`.
-    // Sequence inside the body:
-    //   1. Park primary continuation (identical branches to `awaitObserver`)
-    //   2. On resume, IMMEDIATELY publish natural completion via the
-    //      attempt's monotonic state gate. This synchronously seals the
-    //      buffered outcome to `.finishedBeforeProcessing`.
-    //   3. Then park inside `holdGate.awaitWaiter(holdToken)`. The outer
-    //      cancellation handler remains installed the entire time; a
-    //      `Task.cancel()` at this point invokes the outer onCancel, whose
-    //      `attempt.beginCancellationIfActive()` returns FALSE because
-    //      state is already `.completedNaturally`, so no cancel Task is
-    //      launched — the exact "natural wins over late cancel while
-    //      handler is live" proof.
-    // Contrast with `awaitObserverAndHold` (holds THEN publishes), which
-    // proves the opposite ordering (cancel arrives before natural publish).
+    // MARK: Natural publication causality
 
-    /// Observer variant of publish-natural-BEFORE-hold. See MARK doc above.
-    func awaitObserverAndHoldAfterPublish(
+    func awaitObserverPublishThenSelfCancel(
         _ token: ObserverToken,
         attempt: ObserverAwaitAttempt,
-        holdGate: AsyncGate,
-        holdToken: WaiterToken
+        acknowledgement: NaturalPublicationAck
     ) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
+                attempt.installSuspension(c)
                 if completedObservers.remove(token.id) != nil {
                     observerFates.removeValue(forKey: token.id)
                     observerResumeCounts[.latchConsumed, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if parkedObservers[token.id] != nil {
                     observerDuplicateAwaitCount += 1
                     observerResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if observerOrder.contains(token.id) {
@@ -6223,10 +5969,10 @@ private actor AsyncGate {
                         observerOrder.removeAll { $0 == token.id }
                         sealObserverOutcome(id: token.id, reason: .closedBeforePark)
                         observerResumeCounts[.closedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
-                    parkedObservers[token.id] = (awaitID: awaitID, c: c)
+                    parkedObservers[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushObserverParkAcks(id: token.id, result: .parked)
                     return
                 }
@@ -6237,50 +5983,38 @@ private actor AsyncGate {
                     observerDuplicateAwaitCount += 1
                     observerResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                c.resume()
+                attempt.rescueSuspension()
             }
-            // Hicks H1: publish natural completion FIRST (before hold),
-            // so the state gate transitions to `.completedNaturally`
-            // BEFORE any subsequent Task.cancel() can fire onCancel.
-            if attempt.markCompletedNaturallyIfActive() {
-                attempt.resolveOutcome(.finishedBeforeProcessing)
+            if attempt.publishNaturalIfActive() {
+                acknowledgement.publish()
+                withUnsafeCurrentTask { task in
+                    task?.cancel()
+                }
             }
-            // Now hold inside the same cancellation-handler scope so a
-            // late Task.cancel() is proven to arrive while the outer
-            // handler is still installed.
-            await holdGate.awaitWaiter(holdToken)
         } onCancel: {
-            // Hicks H1: state gate returns FALSE here in the natural-wins
-            // path (already `.completedNaturally`); no cancel Task launched.
-            guard attempt.beginCancellationIfActive() else { return }
-            _ = Task<ObserverCancelReceipt, Never> {
-                let receipt = await self.cancelObserver(id: token.id, awaitID: awaitID, attempt: attempt)
-                attempt.resolveOutcome(.cancelled(receipt))
-                return receipt
-            }
+            _ = attempt.beginCancellationIfActive()
         }
     }
 
-    /// Waiter analogue of `awaitObserverAndHoldAfterPublish`.
-    func awaitWaiterAndHoldAfterPublish(
+    func awaitWaiterPublishThenSelfCancel(
         _ token: WaiterToken,
         attempt: WaiterAwaitAttempt,
-        holdGate: AsyncGate,
-        holdToken: WaiterToken
+        acknowledgement: NaturalPublicationAck
     ) async {
         let awaitID = attempt.id
         await withTaskCancellationHandler {
             await withCheckedContinuation { c in
+                attempt.installSuspension(c)
                 if completedWaiters.remove(token.id) != nil {
                     waiterFates.removeValue(forKey: token.id)
                     waiterResumeCounts[.latchConsumed, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if parkedWaiters[token.id] != nil {
                     waiterDuplicateAwaitCount += 1
                     waiterResumeCounts[.duplicateAfterParked, default: 0] += 1
-                    c.resume()
+                    attempt.rescueSuspension()
                     return
                 }
                 if waiterOrder.contains(token.id) {
@@ -6288,17 +6022,17 @@ private actor AsyncGate {
                         waiterOrder.removeAll { $0 == token.id }
                         sealWaiterOutcome(id: token.id, reason: .closedBeforePark)
                         waiterResumeCounts[.closedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
                     if opened {
                         waiterOrder.removeAll { $0 == token.id }
                         sealWaiterOutcome(id: token.id, reason: .openedBeforePark)
                         waiterResumeCounts[.openedImmediate, default: 0] += 1
-                        c.resume()
+                        attempt.rescueSuspension()
                         return
                     }
-                    parkedWaiters[token.id] = (awaitID: awaitID, c: c)
+                    parkedWaiters[token.id] = (awaitID: awaitID, attempt: attempt)
                     flushWaiterParkAcks(id: token.id, result: .parked)
                     return
                 }
@@ -6309,19 +6043,16 @@ private actor AsyncGate {
                     waiterDuplicateAwaitCount += 1
                     waiterResumeCounts[.duplicateAfterFated, default: 0] += 1
                 }
-                c.resume()
+                attempt.rescueSuspension()
             }
-            if attempt.markCompletedNaturallyIfActive() {
-                attempt.resolveOutcome(.finishedBeforeProcessing)
+            if attempt.publishNaturalIfActive() {
+                acknowledgement.publish()
+                withUnsafeCurrentTask { task in
+                    task?.cancel()
+                }
             }
-            await holdGate.awaitWaiter(holdToken)
         } onCancel: {
-            guard attempt.beginCancellationIfActive() else { return }
-            _ = Task<WaiterCancelReceipt, Never> {
-                let receipt = await self.cancelWaiter(id: token.id, awaitID: awaitID, attempt: attempt)
-                attempt.resolveOutcome(.cancelled(receipt))
-                return receipt
-            }
+            _ = attempt.beginCancellationIfActive()
         }
     }
 
@@ -6340,7 +6071,7 @@ private actor AsyncGate {
             if let entry = parkedWaiters.removeValue(forKey: id) {
                 sealWaiterOutcome(id: id, reason: .openedWhileParked)
                 waiterResumeCounts[.parkedResumedByOpen, default: 0] += 1
-                entry.c.resume()
+                entry.attempt.rescueSuspension()
             } else {
                 latchWaiterBeforePark(id: id, reason: .openedBeforePark)
             }
@@ -6375,7 +6106,7 @@ private actor AsyncGate {
             if let entry = parkedWaiters.removeValue(forKey: id) {
                 sealWaiterOutcome(id: id, reason: .closedWhileParked)
                 waiterResumeCounts[.parkedResumedByClose, default: 0] += 1
-                entry.c.resume()
+                entry.attempt.rescueSuspension()
             } else {
                 sealWaiterOutcome(id: id, reason: .closedBeforePark)
             }
@@ -6386,7 +6117,7 @@ private actor AsyncGate {
             if let entry = parkedObservers.removeValue(forKey: id) {
                 sealObserverOutcome(id: id, reason: .closedWhileParked)
                 observerResumeCounts[.parkedResumedByClose, default: 0] += 1
-                entry.c.resume()
+                entry.attempt.rescueSuspension()
             } else {
                 sealObserverOutcome(id: id, reason: .closedBeforePark)
             }
@@ -6406,69 +6137,25 @@ private actor AsyncGate {
         let wAcks = waiterParkAcks
         waiterParkAcks.removeAll()
         for (_, cs) in wAcks { for c in cs { c.resume(returning: .closedOrConsumed) } }
-        // Hicks D: drain any queued cancel-count ACK waiters.
-        let obsCcs = observerCancelCountAcks
-        observerCancelCountAcks.removeAll()
-        for (_, cs) in obsCcs { for c in cs { c.resume() } }
-        let wCcs = waiterCancelCountAcks
-        waiterCancelCountAcks.removeAll()
-        for (_, cs) in wCcs { for c in cs { c.resume() } }
-
         // Hicks R1 addendum: the gate no longer stores per-attempt
         // cancellation receipts (state lives in caller-owned
-        // `AwaitAttempt` contexts). Any in-flight cancel Task that
-        // races with close() observes `closed == true` in
+        // `AwaitAttempt` contexts). Cancellation that races with close()
+        // observes `closed == true` in
         // `cancelObserver`/`cancelWaiter` and returns
         // `.closedBeforeProcessing`; the caller's `attempt.outcome()`
         // delivers that exact receipt via the buffered outcome latch.
 
-        // Hicks R2 addendum: drain any still-pending park-ACK tickets
-        // with `.closedOrConsumed`. Resolution is exactly-once inside
-        // each ticket; the actor removes the entry from
-        // `observerActiveParkAckTickets`. Callers may still consume
-        // the buffered result via `ticket.value()` — the gate holds
-        // no remaining per-ticket state. Weak boxes: skip dead refs.
-        //
-        // Ripley Finding 2: also drain
-        // `pendingXTicketCleanupIdentities` and fire any still-queued
-        // `waitForNoPendingXTicketCleanups` waiters, so terminal
-        // teardown always releases them (bounded even if some deinit
-        // Task is still in flight — its later actor call will see the
-        // identity gone and no-op).
-        let obsTix = observerActiveParkAckTickets
-        observerActiveParkAckTickets.removeAll()
-        for (_, ts) in obsTix {
-            for box in ts {
-                box.ref?.resolve(.closedOrConsumed)
-                pendingObserverTicketCleanupIdentities.remove(box.identityHint)
-            }
+        for ticket in observerTicketRegistry.takeAll() {
+            ticket.resolve(.closedOrConsumed)
         }
-        let watTix = waiterActiveParkAckTickets
-        waiterActiveParkAckTickets.removeAll()
-        for (_, ts) in watTix {
-            for box in ts {
-                box.ref?.resolve(.closedOrConsumed)
-                pendingWaiterTicketCleanupIdentities.remove(box.identityHint)
-            }
+        for ticket in waiterTicketRegistry.takeAll() {
+            ticket.resolve(.closedOrConsumed)
         }
-        // Final rescue: any pending identities that had NO live box
-        // (deinit Task already niled ref before close ran but hasn't
-        // yet decremented the set) — clear them too, and fire waiters.
-        // The stale deinit Task's later actor call will find identity
-        // gone and no-op. This makes `close()` an unconditional
-        // barrier for `waitForNoPendingXTicketCleanups`.
-        pendingObserverTicketCleanupIdentities.removeAll()
-        pendingWaiterTicketCleanupIdentities.removeAll()
-        fireObserverTicketCleanupWaitersIfEmpty()
-        fireWaiterTicketCleanupWaitersIfEmpty()
     }
 
     // MARK: Introspection (test-only)
 
     func snapshot() -> Snapshot {
-        // Hicks H2: compact dropped-caller ticket boxes so the
-        // reported active-ticket count reflects LIVE tickets only.
-        compactAllParkAckTickets()
         return Snapshot(
             pendingEntrySignals: pendingEntrySignals,
             observerOrder: observerOrder,
@@ -6497,12 +6184,10 @@ private actor AsyncGate {
             waiterCancelInvocationCount: waiterCancelInvocationCount,
             observerParkAckQueueTotal: observerParkAcks.values.reduce(0) { $0 + $1.count },
             waiterParkAckQueueTotal: waiterParkAcks.values.reduce(0) { $0 + $1.count },
-            observerCancelCountAckQueueTotal: observerCancelCountAcks.values.reduce(0) { $0 + $1.count },
-            waiterCancelCountAckQueueTotal: waiterCancelCountAcks.values.reduce(0) { $0 + $1.count },
-            observerParkAckTicketCount: observerActiveParkAckTickets.values.reduce(0) { $0 + $1.count },
-            waiterParkAckTicketCount: waiterActiveParkAckTickets.values.reduce(0) { $0 + $1.count },
-            observerParkAckTicketBackingKeyCount: observerActiveParkAckTickets.count,
-            waiterParkAckTicketBackingKeyCount: waiterActiveParkAckTickets.count
+            observerParkAckTicketCount: observerTicketRegistry.rawBoxCount,
+            waiterParkAckTicketCount: waiterTicketRegistry.rawBoxCount,
+            observerParkAckTicketBackingKeyCount: observerTicketRegistry.rawKeyCount,
+            waiterParkAckTicketBackingKeyCount: waiterTicketRegistry.rawKeyCount
         )
     }
 
@@ -6514,7 +6199,7 @@ private actor AsyncGate {
             if let entry = parkedObservers.removeValue(forKey: id) {
                 sealObserverOutcome(id: id, reason: .signaledWhileParked)
                 observerResumeCounts[.parkedResumedBySignal, default: 0] += 1
-                entry.c.resume()
+                entry.attempt.rescueSuspension()
             } else {
                 latchObserverBeforePark(id: id, reason: .signaledBeforePark)
             }
