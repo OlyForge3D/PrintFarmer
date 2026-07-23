@@ -49,7 +49,18 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
         self.domainIdentifier = domainIdentifier
         self.tombstoneStore = tombstoneStore
         self.durableRecord = durableRecord
-        self.tombstoneCache = tombstoneStore.load()
+        // H (issue #816 reject, Hicks): hydrate the in-memory tombstone cache
+        // from BOTH durable sources at reopen — the UserDefaults tombstone store
+        // AND the file-backed durable record. A tombstone persisted to the file
+        // record must be observable by the fresh coordinator on the next launch
+        // (even when the UserDefaults suite is empty), otherwise a purged server
+        // could be silently re-activated after a crash between the record write
+        // and the UserDefaults write.
+        var seed = tombstoneStore.load()
+        if let durableRecord {
+            seed.formUnion(durableRecord.loadTombstones())
+        }
+        self.tombstoneCache = seed
     }
 
     var domain: String { domainIdentifier }
@@ -180,21 +191,38 @@ final class FarmSnapshotDomainCoordinator: @unchecked Sendable {
         return true
     }
 
-    func tombstone(_ serverID: UUID) {
+    /// H (issue #816 reject, Hicks): tombstone `serverID` durably. Writes to the
+    /// file-backed durable record (verified) BEFORE mutating the UserDefaults
+    /// tombstone store or the in-memory cache, so a durable-write failure surfaces
+    /// as a typed throw with NO advertised tombstone (production callers can
+    /// treat the purge as failed and refuse to remove the server). On success,
+    /// updates the UserDefaults store, the in-memory cache, and clears
+    /// `current` if it matches.
+    func tombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
+        // Durable file record first (throws on verified-read mismatch). If this
+        // throws, nothing observable changes and purge/promotion callers can
+        // refuse to proceed.
+        if let durableRecord {
+            try durableRecord.insertTombstone(serverID)
+        }
         tombstoneCache.insert(serverID)
         tombstoneStore.insert(serverID)
-        durableRecord?.insertTombstone(serverID)
         if current?.serverID == serverID {
             current = nil
         }
     }
 
-    func clearTombstone(_ serverID: UUID) {
+    /// H (issue #816 reject, Hicks): clear a tombstone durably. Durable file
+    /// record write is verified and throwing; failure leaves the tombstone in
+    /// place (fail-closed for the tombstone barrier) and surfaces to the caller.
+    func clearTombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
+        if let durableRecord {
+            try durableRecord.removeTombstone(serverID)
+        }
         tombstoneCache.remove(serverID)
         tombstoneStore.remove(serverID)
-        durableRecord?.removeTombstone(serverID)
     }
 
     func isTombstoned(_ serverID: UUID) -> Bool {
@@ -340,21 +368,40 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         return true
     }
 
-    func insertTombstone(_ serverID: UUID) {
+    /// H (issue #816 reject, Hicks): verified, throwing durable tombstone insert.
+    /// Writes atomically and re-reads to confirm the tombstone is now durably
+    /// present; throws `.persistenceFailure` on a verified-read mismatch or
+    /// underlying I/O failure. Callers MUST NOT report a tombstone as durable
+    /// on failure (purge fails closed).
+    func insertTombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
         var payload = readLocked()
         var set = Set(payload.tombstones)
         set.insert(serverID.uuidString)
         payload.tombstones = Array(set)
-        try? writeLocked(payload)
+        try writeLocked(payload)
+        // Explicit verification: the re-read set MUST include this server ID.
+        // (writeLocked already verifies exact equality; this is a belt-and-braces
+        // check that surfaces any future writeLocked semantics regression.)
+        let verified = readLocked()
+        guard Set(verified.tombstones).contains(serverID.uuidString) else {
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
     }
 
-    func removeTombstone(_ serverID: UUID) {
+    /// H (issue #816 reject, Hicks): verified, throwing durable tombstone
+    /// removal. Symmetric with `insertTombstone` — fails closed if the
+    /// atomic write or verified re-read does not observe the tombstone gone.
+    func removeTombstone(_ serverID: UUID) throws {
         lock.lock(); defer { lock.unlock() }
         var payload = readLocked()
         var set = Set(payload.tombstones)
         set.remove(serverID.uuidString)
         payload.tombstones = Array(set)
-        try? writeLocked(payload)
+        try writeLocked(payload)
+        let verified = readLocked()
+        guard !Set(verified.tombstones).contains(serverID.uuidString) else {
+            throw FarmSnapshotAuthorityError.persistenceFailure
+        }
     }
 }

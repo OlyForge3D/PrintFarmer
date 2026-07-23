@@ -624,7 +624,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         try reg.setActive(id: a.id)
 
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
-        if tombstonedDummy { authority.tombstone(UUID()) }
+        if tombstonedDummy { try authority.tombstone(UUID()) }
         let root = newRoot()
         let store: FarmSnapshotStore = io.map {
             FarmSnapshotStore(authority: authority, fileIO: $0, rootURL: root, ownerStore: owners)

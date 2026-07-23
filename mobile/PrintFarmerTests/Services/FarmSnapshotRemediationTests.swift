@@ -91,7 +91,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let tombstoneStore = FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let ns = FarmSnapshotFixtures.namespace()
         let a1 = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
-        a1.tombstone(ns.serverID)
+        try a1.tombstone(ns.serverID)
         // Recreate the authority on the SAME durable store (models a relaunch).
         let a2 = FarmSnapshotAuthority(tombstoneStore: tombstoneStore)
         XCTAssertTrue(a2.isTombstoned(ns.serverID))

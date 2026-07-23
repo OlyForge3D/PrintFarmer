@@ -92,6 +92,11 @@ final class ServiceContainer: @unchecked Sendable {
     /// Non-secret per-server owner identity. Activation resolves the settled
     /// server's OWN owner from here — never a carried cross-server user id.
     @ObservationIgnored let farmSnapshotOwnerStore: FarmSnapshotOwnerStore
+    /// H (issue #816 reject, Hicks): the CANONICAL file-backed durable authority
+    /// record every production/demo composition wires into the shared
+    /// `FarmSnapshotDomainCoordinator`. Held here so tests and inspection paths
+    /// can observe the exact same record the coordinator uses for durability.
+    @ObservationIgnored let farmSnapshotDurableRecord: FarmSnapshotDurableAuthorityRecord?
     /// Shared monotonic auth-operation epoch fencing late login/restore vs logout (H2).
     @ObservationIgnored let authOperationEpoch = AuthOperationEpoch()
 
@@ -124,9 +129,29 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
 
-        let authority = farmSnapshotAuthority ?? FarmSnapshotAuthority()
+        let authority: FarmSnapshotAuthority
+        let durableRecord: FarmSnapshotDurableAuthorityRecord?
+        if let farmSnapshotAuthority {
+            // Test/injected authority: honor caller-provided wiring exactly and do
+            // not attach a canonical durable record (the injection owns durability).
+            authority = farmSnapshotAuthority
+            durableRecord = nil
+        } else {
+            // H (issue #816 reject, Hicks): production composition wires ONE
+            // canonical file-backed durable authority record rooted at the
+            // snapshot root the store uses, so the shared coordinator sees
+            // durable reserved/adopted high-water AND durable tombstones on
+            // every reopen — a distinct record object constructed from the
+            // same root on the next launch observes the exact same file.
+            let record = FarmSnapshotDurableAuthorityRecord(
+                rootURL: FarmSnapshotStore.defaultRootURL()
+            )
+            durableRecord = record
+            authority = FarmSnapshotAuthority(durableAuthorityRecord: record)
+        }
         let ownerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore(userDefaults: userDefaultsBox.userDefaults)
         self.farmSnapshotAuthority = authority
+        self.farmSnapshotDurableRecord = durableRecord
         self.farmSnapshotOwnerStore = ownerStore
         self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority, ownerStore: ownerStore)
 
@@ -803,8 +828,24 @@ final class ServiceContainer: @unchecked Sendable {
         // Demo composition does not rebuild real services on registry changes, so
         // it does not observe until a real login reattaches the observer.
         self.observesRegistry = false
-        let authority = farmSnapshotAuthority ?? FarmSnapshotAuthority()
+        let authority: FarmSnapshotAuthority
+        let durableRecord: FarmSnapshotDurableAuthorityRecord?
+        if let farmSnapshotAuthority {
+            authority = farmSnapshotAuthority
+            durableRecord = nil
+        } else {
+            // H (issue #816 reject, Hicks): demo composition also wires the
+            // canonical durable record so a demo→real→relaunch sequence
+            // observes the same durable reserved/adopted/tombstone state as
+            // a pure production launch.
+            let record = FarmSnapshotDurableAuthorityRecord(
+                rootURL: FarmSnapshotStore.defaultRootURL()
+            )
+            durableRecord = record
+            authority = FarmSnapshotAuthority(durableAuthorityRecord: record)
+        }
         self.farmSnapshotAuthority = authority
+        self.farmSnapshotDurableRecord = durableRecord
         let demoOwnerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore()
         self.farmSnapshotOwnerStore = demoOwnerStore
         self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority, ownerStore: demoOwnerStore)

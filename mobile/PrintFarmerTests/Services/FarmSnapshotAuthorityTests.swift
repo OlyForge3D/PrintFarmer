@@ -152,7 +152,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     func testTombstonedServerCannotMint()throws {
         let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
         let namespace = FarmSnapshotFixtures.namespace()
-        authority.tombstone(namespace.serverID)
+        try authority.tombstone(namespace.serverID)
 
         XCTAssertNil(try authority.mint(namespace: namespace, generation: 0))
         XCTAssertTrue(authority.isTombstoned(namespace.serverID))
@@ -163,7 +163,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         let namespace = FarmSnapshotFixtures.namespace()
         let session = try authority.mint(namespace: namespace, generation: 0)!
 
-        authority.tombstone(namespace.serverID)
+        try authority.tombstone(namespace.serverID)
         XCTAssertFalse(authority.isCurrent(session))
         XCTAssertNil(authority.currentSession())
     }
@@ -457,7 +457,7 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
         let ns = FarmSnapshotFixtures.namespace(server: serverID)
 
         // B tombstones the server.
-        authB.tombstone(serverID)
+        try authB.tombstone(serverID)
         XCTAssertTrue(authA.isTombstoned(serverID),
                       "A must see B's tombstone immediately (shared coordinator)")
 

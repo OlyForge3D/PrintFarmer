@@ -79,7 +79,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         let task = Task { await store.commit(attempt, capturedSession: session) }
 
         await barrier.waitUntilArrived()
-        authority.tombstone(ns.serverID)
+        try authority.tombstone(ns.serverID)
         barrier.release()
 
         XAssertEqual(await task.value, .superseded)

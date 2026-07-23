@@ -162,14 +162,20 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
 
     /// Tombstone a server durably on the shared coordinator (and revoke it if it is
     /// the current session).
-    func tombstone(_ serverID: UUID) {
-        coordinator.tombstone(serverID)
+    ///
+    /// H (issue #816 reject, Hicks): now throwing. The durable file record write
+    /// is verified; a failure leaves NO in-memory or UserDefaults tombstone
+    /// (fail-closed) and surfaces to the caller so `purge` can return `.failed`.
+    func tombstone(_ serverID: UUID) throws {
+        try coordinator.tombstone(serverID)
     }
 
     /// Clear a server's tombstone on the shared coordinator once its ID lifecycle
     /// is complete.
-    func clearTombstone(_ serverID: UUID) {
-        coordinator.clearTombstone(serverID)
+    ///
+    /// H (issue #816 reject, Hicks): now throwing. Symmetric with `tombstone`.
+    func clearTombstone(_ serverID: UUID) throws {
+        try coordinator.clearTombstone(serverID)
     }
 
     func isTombstoned(_ serverID: UUID) -> Bool {
@@ -540,7 +546,16 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         //    prior crash's residue cannot be mistaken for live state.
         await ensureStartupPreparation()
         // 1. Durable tombstone FIRST — blocks new mints/activation, survives restart.
-        authority.tombstone(serverID)
+        //    H (issue #816 reject, Hicks): the tombstone write is now verified
+        //    and throwing. A verified-durable failure fails the purge closed:
+        //    no on-disk sweep, no purge-success reported, so a caller (registry
+        //    deletion) can refuse to remove the server for which we could not
+        //    guarantee a durable tombstone barrier.
+        do {
+            try authority.tombstone(serverID)
+        } catch {
+            return .failed(failureCount: 1)
+        }
         // 2. Refuse new filesystem leases for this server.
         purging.insert(serverID)
         // 3. Clear the persisted owner mapping so a stale owner cannot re-select it.
