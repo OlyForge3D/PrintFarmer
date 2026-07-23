@@ -982,10 +982,16 @@ extract_job_block() {
 # the supplied workflow file. Returns 0 iff every invariant holds and
 # non-zero (with a diagnostic on stderr) if any of them fails. Written
 # so `case_workflow_migration_drift_restores_before_ef` can call it on
-# the real workflow and the R12 adversarial mutation cases can call it
-# on a mutated copy — the same guard must reject every mutation.
+# the real workflow and the R12/R13 adversarial mutation cases can call
+# it on a mutated copy — the same guard must reject every mutation.
 #
-# Invariants:
+# Invariants (checked in order; return-on-first-failure):
+#   * R13: Exactly one `  migration-drift:` job header at 2-space job
+#     indent. Zero means the job was renamed/deleted; more than one
+#     means a shadow job was added (a bypass shape where the second
+#     job is what the summary gate actually reads, but the first is
+#     what the shape check inspects via `extract_job_block`'s
+#     first-match semantics). CRLF-tolerant awk count.
 #   * Exactly one `- name: Check EF Core migration drift` step in the
 #     whole workflow. Zero means the step was renamed or deleted; more
 #     than one means a duplicate was added (a common bypass shape: a
@@ -996,6 +1002,21 @@ extract_job_block() {
 #     drift check that fails inside would still report the job as
 #     success and the summary gate `check_conditional migration-drift`
 #     would tick green.
+#   * R13: Exactly one `      matrix:` line at 6-space strategy-child
+#     indent, and that line's value is verbatim
+#     `${{ fromJson(needs.select.outputs.mig_matrix) }}`. Blocks any
+#     mutation that swaps the selector-driven matrix for a hard-coded
+#     `{include: [{...}]}` (inline or block-scalar form) — a hostile
+#     rewrite that runs the drift job against a single hand-picked
+#     provider/context pair would leave three of four EF pairs
+#     unchecked while still reporting `migration-drift` as passing.
+#   * R13: `strategy.fail-fast` is pinned to `false`. GitHub's default
+#     for matrix `fail-fast` is `true`, which cancels sibling matrix
+#     legs the moment one leg fails. For drift that is actively
+#     harmful: a build/context error in one leg (e.g. AppPg) would
+#     cancel the sibling legs before they could report their own
+#     drift, and the reviewer would see a single failure that hides
+#     several. Pin `fail-fast: false` verbatim.
 #   * The `migration-drift` job's `if:` clause is the expected
 #     selection expression (`needs.select.outputs.want_mig_drift ==
 #     'true'`) — not something like `if: false` that would skip the
@@ -1009,6 +1030,24 @@ extract_job_block() {
 #     also update the heredoc.
 _check_drift_step_shape() {
   local workflow="$1"
+
+  # R13: Exactly one `  migration-drift:` job header. `extract_job_block`
+  # has first-match semantics — a duplicate job header would let a
+  # shadow job impersonate the real one under the summary gate's
+  # `needs.migration-drift.result` read, while this shape guard
+  # inspected only the first block. Count via CRLF-tolerant awk before
+  # any single-block extraction so the count is unambiguous.
+  local job_header_count
+  job_header_count="$(awk '
+    { sub(/\r$/, "") }
+    $0 == "  migration-drift:" { n++ }
+    END { print n+0 }
+  ' "$workflow")"
+  if [[ "$job_header_count" != "1" ]]; then
+    printf '  expected exactly one migration-drift job header, found %s\n' \
+      "$job_header_count" >&2
+    return 1
+  fi
 
   local drift_step_count
   drift_step_count="$(grep -c '^      - name: Check EF Core migration drift' "$workflow" || true)"
@@ -1029,6 +1068,41 @@ _check_drift_step_shape() {
   # `continue-on-error:` at that indent applies to the whole job.
   if printf '%s\n' "$job_block" | grep -Eq '^    continue-on-error:'; then
     printf '  migration-drift job must not set job-level continue-on-error\n' >&2
+    return 1
+  fi
+
+  # R13: Exactly one strategy.matrix line at 6-space indent. Both
+  # inline (`      matrix: ${{ ... }}`) and block (`      matrix:` on
+  # its own line followed by `        include:` etc.) forms produce
+  # one line starting `^      matrix:`. Count that; require 1.
+  local matrix_lines
+  matrix_lines="$(printf '%s\n' "$job_block" | grep -Ec '^      matrix:' || true)"
+  if [[ "$matrix_lines" != "1" ]]; then
+    printf '  migration-drift job must have exactly one strategy.matrix line, found %s\n' \
+      "$matrix_lines" >&2
+    return 1
+  fi
+
+  # R13: pin the exact selector-driven matrix source. A mutant that
+  # swaps this for an inline hard-coded `{include: [{...}]}` fails the
+  # exact-line match; a mutant that switches to block-scalar (`matrix:`
+  # alone on a line) also fails because the block-header line is
+  # `      matrix:` without the `${{ fromJson ... }}` suffix.
+  local expected_matrix="      matrix: \${{ fromJson(needs.select.outputs.mig_matrix) }}"
+  if ! printf '%s\n' "$job_block" | grep -qxF "$expected_matrix"; then
+    printf '  migration-drift job strategy.matrix must be exactly the selector-driven fromJson(needs.select.outputs.mig_matrix) form\n' >&2
+    printf '    expected line: %q\n' "$expected_matrix" >&2
+    return 1
+  fi
+
+  # R13: pin `fail-fast: false`. Default is true, which would cancel
+  # sibling matrix legs on the first failure and hide drift on the
+  # cancelled legs.
+  local expected_fail_fast="      fail-fast: false"
+  if ! printf '%s\n' "$job_block" | grep -qxF "$expected_fail_fast"; then
+    # shellcheck disable=SC2016  # backticks are literal in the message
+    printf '  migration-drift job strategy.fail-fast must be false (verbatim `fail-fast: false` at strategy-child indent)\n' >&2
+    printf '    expected line: %q\n' "$expected_fail_fast" >&2
     return 1
   fi
 
@@ -1113,48 +1187,23 @@ CANONICAL_DRIFT_STEP_BLOCK
 #     (`EF Core migration drift detected`), which would falsely tell
 #     authors "you have pending model changes" when the tool actually
 #     failed to run.
-#   * the drift step's `run: |` body matches an exact canonical snapshot
-#     of the fail-closed script (set flags, `dotnet ef` invocation,
-#     capture rc, restore set -e, success-only check `[ "$rc" -eq 0 ]`,
-#     one truthful generic error annotation, `exit "$rc"`). This gate
-#     replaces earlier regex-based attempts to prove absence of every
-#     Bash rc==1 shape (`[[ $rc -eq 1 ]]`, `((rc==1))`, `(((rc)==1))`,
-#     `\$(( (rc) == 1 ))`, `1)` case arms, and so on) which Hicks showed
-#     could be bypassed by nested arithmetic and confused by compound
-#     expressions and prose. Any added or changed control-flow line in
-#     the drift step now trips this test until the canonical expected
-#     body is deliberately updated — diagnostic-shape changes therefore
-#     require human review, not regex correctness.
-# The migration-drift matrix job is isolated from `dotnet-build` and must
-# restore its own matrix project before invoking `dotnet ef`, otherwise
-# NETSDK1004 fires because `obj/project.assets.json` doesn't exist. This
-# test reads `.github/workflows/ci.yml`, extracts the `migration-drift:`
-# job, and asserts:
-#   * a "Restore migration project" step exists and references MATRIX_PROJECT
-#   * a "Build migration project" step exists
-#   * that restore step appears BEFORE "Check EF Core migration drift"
-#   * the EF invocation uses `--no-build` (matching restore+build+no-build
-#     ordering, so we do not re-trigger restore inside the EF tool)
-#   * the drift step emits a truthful GENERIC annotation for any non-zero
-#     exit code (`EF Core migration drift check failed`) — because
-#     `dotnet ef` cannot be relied on to return a unique code for real
-#     drift vs. tool / design-time context / provider failures, the check
-#     must not classify rc=1 uniquely as drift.
-#   * the drift step does NOT emit the old rc=1-only annotation
-#     (`EF Core migration drift detected`), which would falsely tell
-#     authors "you have pending model changes" when the tool actually
-#     failed to run.
 #   * the drift step's FULL yaml (working-directory, env, comment,
 #     `run: |` body) matches the canonical snapshot embedded in
 #     `_check_drift_step_shape` byte-for-byte; the enclosing
 #     `migration-drift` job has no job-level `continue-on-error`; the
-#     job carries the expected selection `if:` — all enforced by
-#     `_check_drift_step_shape`. R12 upgraded this gate from a
-#     shell-body-only snapshot to a full-step-yaml snapshot after Hicks
-#     showed the R11 gate was silent about yaml-level bypass keys
+#     job carries the expected selection `if:`; the strategy.matrix is
+#     pinned to `${{ fromJson(needs.select.outputs.mig_matrix) }}` so a
+#     hard-coded single-entry matrix cannot pass; the strategy.fail-fast
+#     is pinned to `false` so drift on one leg cannot cancel another —
+#     all enforced by `_check_drift_step_shape`. R12 upgraded this gate
+#     from a shell-body-only snapshot to a full-step-yaml snapshot after
+#     Hicks showed the R11 gate was silent about yaml-level bypass keys
 #     (`continue-on-error: true`, `if: false`) that would leave the
-#     shell body byte-identical and slip through. See adversarial
-#     mutation tests `case_drift_shape_rejects_*`.
+#     shell body byte-identical and slip through. R13 added the job-
+#     count, strategy.matrix, and strategy.fail-fast invariants after
+#     Hicks flagged that the R12 gate only pinned STEP shape and would
+#     accept a job-level swap to a hard-coded matrix or fail-fast:true.
+#     See adversarial mutation tests `case_drift_shape_rejects_*`.
 case_workflow_migration_drift_restores_before_ef() {
   local workflow="$REPO_ROOT/.github/workflows/ci.yml"
 
@@ -1437,17 +1486,30 @@ EXPECTED_CRLF_STEP_BLOCK
 }
 
 
-# R12 adversarial mutation tests. Each of the following cases takes a
-# copy of the real `.github/workflows/ci.yml`, applies a targeted
-# mutation representing a concrete bypass shape, and asserts that
-# `_check_drift_step_shape` REJECTS the mutant. The shape gate must
-# fail-closed against every one of these — if any mutant slips through,
-# the guard is not doing its job.
+# R12 adversarial mutation tests, extended in R13. Each of the
+# following cases takes a copy of the real `.github/workflows/ci.yml`,
+# applies a targeted mutation representing a concrete bypass shape,
+# and asserts that `_check_drift_step_shape` REJECTS the mutant with
+# the SPECIFIC diagnostic that names the invariant the mutation
+# violates. The shape gate must fail-closed against every one of
+# these — if any mutant slips through, or is rejected for the wrong
+# reason (a different invariant), the guard is not doing its job.
+#
+# R13 adds diagnostic-substring assertions to close a Bishop finding:
+# an R12 mutation could satisfy `!_check_drift_step_shape` for reasons
+# unrelated to the intended violation (e.g., a matrix rewrite that
+# also happened to invalidate the canonical step snapshot would pass
+# the R12 assertion, hiding that the matrix invariant itself is absent
+# from the guard). The R13 assertion pins BOTH the rejection AND the
+# reason.
 #
 # All mutation helpers use awk for surgical rewrites (no sed portability
-# hazards) and write to a temp workflow that the shape check is invoked
-# against. Diagnostic output from the shape check is redirected to
-# /dev/null — a failure here is the expected outcome, not a signal.
+# hazards) via the `_mutate` helper, which writes to a `.tmp` sibling
+# and either atomically `mv`s on awk success or removes the tmp on awk
+# failure. Each case also installs a RETURN trap so the mutant file and
+# any stray `.tmp` sibling are removed on every exit path — including
+# early `return 1` from a failed assertion — which closes a Bishop
+# finding about leaked intermediate files on awk error paths.
 
 # Copy the real workflow to <dst>. Kept as a helper so each adversarial
 # case starts from an unmutated baseline; a real-workflow shape drift
@@ -1458,12 +1520,58 @@ _copy_real_workflow_for_mutation() {
   cp "$REPO_ROOT/.github/workflows/ci.yml" "$dst"
 }
 
-# Assert that `_check_drift_step_shape` returns non-zero on <workflow>.
-# Silences the shape check's own diagnostics (expected failure).
+# _mutate <file> <awk_program>
+#
+# Apply <awk_program> in place to <file>. Uses a `.tmp` sibling as
+# intermediate storage and atomically `mv`s it into place on awk
+# success. On awk failure the `.tmp` is removed and awk's exit status
+# is returned to the caller — so a failure never leaks the tmp file
+# even if the caller neglects to install a cleanup trap.
+#
+# Bishop cleanup (R13): the R12 mutation cases used the pattern
+# `awk … > "$mutant.tmp" && mv "$mutant.tmp" "$mutant"`. On awk failure
+# the shell had already created (empty) `$mutant.tmp` via the `>`
+# redirection, and the `&&` short-circuit skipped the mv, leaving the
+# tmp behind. Every subsequent mutation from the same test run would
+# collide on the deterministic-suffix path. `_mutate` centralises the
+# cleanup so the pattern is bug-free at every call site.
+_mutate() {
+  local file="$1" awk_prog="$2"
+  local tmp="${file}.tmp"
+  if ! awk "$awk_prog" "$file" > "$tmp"; then
+    local rc=$?
+    rm -f -- "$tmp"
+    return "$rc"
+  fi
+  mv -- "$tmp" "$file"
+}
+
+# _assert_shape_guard_rejects <label> <workflow> <expected_diagnostic>
+#
+# Assert that `_check_drift_step_shape` returns non-zero on <workflow>
+# AND that its stderr contains <expected_diagnostic> as a substring.
+# The diagnostic-substring check (R13, Bishop finding) prevents a
+# mutation from silently satisfying a different invariant than the
+# one it was written to exercise: if the guard rejects for the wrong
+# reason we want a loud failure, not a false-green.
 _assert_shape_guard_rejects() {
-  local label="$1" workflow="$2"
-  if _check_drift_step_shape "$workflow" 2>/dev/null; then
+  local label="$1" workflow="$2" expected="$3"
+  local stderr_output rc
+  # Redirect stdout to /dev/null and capture stderr. The composite
+  # substitution `$(cmd 2>&1 >/dev/null)` collects only cmd's stderr
+  # because the redirections apply right-to-left: stdout is copied to
+  # stderr's *original* destination (the pipe fd), then reassigned to
+  # /dev/null. `$?` after the substitution is cmd's exit status.
+  stderr_output="$(_check_drift_step_shape "$workflow" 2>&1 >/dev/null)"
+  rc=$?
+  if (( rc == 0 )); then
     printf '  shape guard failed to reject mutation: %s\n' "$label" >&2
+    return 1
+  fi
+  if [[ "$stderr_output" != *"$expected"* ]]; then
+    printf '  shape guard rejected mutation but with wrong diagnostic: %s\n' "$label" >&2
+    printf '    expected substring: %q\n' "$expected" >&2
+    printf '    actual stderr:      %q\n' "$stderr_output" >&2
     return 1
   fi
   return 0
@@ -1476,19 +1584,19 @@ _assert_shape_guard_rejects() {
 case_drift_shape_rejects_step_continue_on_error() {
   local mutant
   mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
   _copy_real_workflow_for_mutation "$mutant"
-  awk '
+  _mutate "$mutant" '
     { print }
     /^      - name: Check EF Core migration drift\r?$/ && !inserted {
       print "        continue-on-error: true\r"
       inserted = 1
     }
-  ' "$mutant" > "$mutant.tmp" && mv "$mutant.tmp" "$mutant"
+  ' || return 1
 
-  local rc=0
-  _assert_shape_guard_rejects "step-level continue-on-error" "$mutant" || rc=1
-  rm -f -- "$mutant"
-  return "$rc"
+  _assert_shape_guard_rejects "step-level continue-on-error" "$mutant" \
+    "drift step block does not match canonical snapshot" || return 1
 }
 
 # Mutation: inject `        if: false` as a sibling yaml key immediately
@@ -1499,19 +1607,19 @@ case_drift_shape_rejects_step_continue_on_error() {
 case_drift_shape_rejects_step_if() {
   local mutant
   mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
   _copy_real_workflow_for_mutation "$mutant"
-  awk '
+  _mutate "$mutant" '
     { print }
     /^      - name: Check EF Core migration drift\r?$/ && !inserted {
       print "        if: false\r"
       inserted = 1
     }
-  ' "$mutant" > "$mutant.tmp" && mv "$mutant.tmp" "$mutant"
+  ' || return 1
 
-  local rc=0
-  _assert_shape_guard_rejects "step-level if: false" "$mutant" || rc=1
-  rm -f -- "$mutant"
-  return "$rc"
+  _assert_shape_guard_rejects "step-level if: false" "$mutant" \
+    "drift step block does not match canonical snapshot" || return 1
 }
 
 # Mutation: add `    continue-on-error: true` as a job-level key on
@@ -1523,20 +1631,20 @@ case_drift_shape_rejects_step_if() {
 case_drift_shape_rejects_job_continue_on_error() {
   local mutant
   mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
   _copy_real_workflow_for_mutation "$mutant"
-  awk '
+  _mutate "$mutant" '
     { print }
     inside && !inserted && /^    name:/ {
       print "    continue-on-error: true\r"
       inserted = 1
     }
     /^  migration-drift:\r?$/ { inside = 1 }
-  ' "$mutant" > "$mutant.tmp" && mv "$mutant.tmp" "$mutant"
+  ' || return 1
 
-  local rc=0
-  _assert_shape_guard_rejects "job-level continue-on-error" "$mutant" || rc=1
-  rm -f -- "$mutant"
-  return "$rc"
+  _assert_shape_guard_rejects "job-level continue-on-error" "$mutant" \
+    "must not set job-level continue-on-error" || return 1
 }
 
 # Mutation: duplicate the entire drift step. This is a subtle bypass
@@ -1546,27 +1654,26 @@ case_drift_shape_rejects_job_continue_on_error() {
 # gate's exactly-one-step count check must reject any drift step count
 # other than 1.
 case_drift_shape_rejects_duplicate_drift_step() {
-  local mutant tmp
+  local mutant
   mutant="$(mktemp)"
-  tmp="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
   _copy_real_workflow_for_mutation "$mutant"
   # Append a second (byte-identical) `- name: Check EF Core migration
   # drift` header at 6-space indent inside the same steps list. The
   # simplest injection: insert immediately after the real step's
   # `- name:` header. Body doesn't matter for the count check.
-  awk '
+  _mutate "$mutant" '
     { print }
     /^      - name: Check EF Core migration drift\r?$/ && !inserted {
       print "        run: echo shadow\r"
       print "      - name: Check EF Core migration drift\r"
       inserted = 1
     }
-  ' "$mutant" > "$tmp" && mv "$tmp" "$mutant"
+  ' || return 1
 
-  local rc=0
-  _assert_shape_guard_rejects "duplicate drift step" "$mutant" || rc=1
-  rm -f -- "$mutant"
-  return "$rc"
+  _assert_shape_guard_rejects "duplicate drift step" "$mutant" \
+    "expected exactly one Check EF Core migration drift step, found 2" || return 1
 }
 
 # Mutation: reindent the drift step so its `- name:` sits at 8 spaces
@@ -1579,19 +1686,149 @@ case_drift_shape_rejects_duplicate_drift_step() {
 case_drift_shape_rejects_malformed_indentation() {
   local mutant
   mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
   _copy_real_workflow_for_mutation "$mutant"
-  awk '
+  _mutate "$mutant" '
     /^      - name: Check EF Core migration drift\r?$/ {
       # Prepend two extra spaces to shift from 6-space to 8-space.
       sub(/^      /, "        ")
     }
     { print }
-  ' "$mutant" > "$mutant.tmp" && mv "$mutant.tmp" "$mutant"
+  ' || return 1
 
-  local rc=0
-  _assert_shape_guard_rejects "malformed step indentation" "$mutant" || rc=1
-  rm -f -- "$mutant"
-  return "$rc"
+  _assert_shape_guard_rejects "malformed step indentation" "$mutant" \
+    "expected exactly one Check EF Core migration drift step, found 0" || return 1
+}
+
+# R13 mutation: replace the selector-driven strategy.matrix line with a
+# hard-coded inline single-entry matrix. This is the specific bypass
+# Hicks flagged on R12 — the R12 guard pinned STEP shape byte-for-byte
+# but was silent about the JOB-level matrix source, so a mutation that
+# left the step untouched and merely swapped
+# `matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}`
+# for `matrix: {include: [{name: "AppPg", ...}]}` would silently run
+# the drift check against ONE hand-picked provider/context pair while
+# leaving the sibling three EF pairs unchecked. The migration-drift
+# job would still report success, and the summary gate would tick
+# green — a fail-open the R13 matrix invariant closes.
+case_drift_shape_rejects_hardcoded_matrix() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Replace the exact selector-driven matrix line with a hand-picked
+  # single-entry inline flow-style matrix. Fields chosen to look
+  # plausible (`Farm.Migrations.PostgreSQL`, `AppDbContext`, `postgres`).
+  # shellcheck disable=SC2016  # $0 is awk field ref, not shell param
+  _mutate "$mutant" '
+    { sub(/\r$/, "") }
+    $0 == "      matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}" {
+      print "      matrix: {include: [{name: \"AppPg\", label: \"App/Pg\", project: \"migrations/Farm.Migrations.PostgreSQL\", context: \"AppDbContext\", provider: \"postgres\"}]}\r"
+      next
+    }
+    { print $0 "\r" }
+  ' || return 1
+
+  _assert_shape_guard_rejects "hard-coded inline matrix" "$mutant" \
+    "must be exactly the selector-driven fromJson(needs.select.outputs.mig_matrix) form" || return 1
+}
+
+# R13 mutation: replace the selector-driven matrix with a BLOCK-scalar
+# hard-coded matrix. The block form (`matrix:` on its own line then
+# `        include:` indented children) is what a reviewer skimming
+# the diff might read as "just moved formatting around" — but it has
+# the same fail-open semantics as the inline form: the drift job runs
+# against a single hand-picked pair, and sibling EF pairs go
+# unchecked. Block form defeats a lazy exact-line check that only
+# matched the inline form; the R13 guard rejects it via the exact-
+# line pin on `      matrix: ${{ fromJson ... }}` (block form starts
+# with `      matrix:` alone, no ${{ ... }} suffix on the same line).
+case_drift_shape_rejects_block_style_matrix() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # shellcheck disable=SC2016  # $0 is awk field ref, not shell param
+  _mutate "$mutant" '
+    { sub(/\r$/, "") }
+    $0 == "      matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}" {
+      print "      matrix:\r"
+      print "        include:\r"
+      print "          - name: AppPg\r"
+      print "            label: App/Pg\r"
+      print "            project: migrations/Farm.Migrations.PostgreSQL\r"
+      print "            context: AppDbContext\r"
+      print "            provider: postgres\r"
+      next
+    }
+    { print $0 "\r" }
+  ' || return 1
+
+  _assert_shape_guard_rejects "block-style hard-coded matrix" "$mutant" \
+    "must be exactly the selector-driven fromJson(needs.select.outputs.mig_matrix) form" || return 1
+}
+
+# R13 mutation: flip `fail-fast: false` to `fail-fast: true`. The
+# GitHub default for matrix `fail-fast` is true — meaning a failure
+# in one matrix leg cancels sibling legs immediately. For drift that
+# is actively harmful: a design-time context failure in AppPg would
+# cancel AppSqlServer, SlicerPg, and SlicerSqlServer before they
+# reported their own drift. The reviewer sees a single failed leg
+# and a cluster of "cancelled" siblings and cannot tell whether
+# those siblings would have passed or failed — the drift signal from
+# them is lost. Pin `fail-fast: false` verbatim; any mutation trips.
+case_drift_shape_rejects_fail_fast_true() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # shellcheck disable=SC2016  # $0 is awk field ref, not shell param
+  _mutate "$mutant" '
+    { sub(/\r$/, "") }
+    $0 == "      fail-fast: false" {
+      print "      fail-fast: true\r"
+      next
+    }
+    { print $0 "\r" }
+  ' || return 1
+
+  _assert_shape_guard_rejects "fail-fast: true" "$mutant" \
+    "strategy.fail-fast must be false" || return 1
+}
+
+# R13 mutation: duplicate the `  migration-drift:` JOB header itself.
+# `extract_job_block` uses first-match semantics — a duplicate job
+# header would let a shadow `migration-drift:` job (perhaps with
+# `if: false` and no steps) shadow the real one under the summary
+# gate's `needs.migration-drift.result` read, while this shape gate
+# would inspect only the first block. The R13 job-header count guard
+# rejects any count other than 1. The shadow job is appended after
+# the real job's block terminator to keep the mutation surgical.
+case_drift_shape_rejects_duplicate_migration_drift_job() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Append a second `  migration-drift:` header + minimal body at the
+  # end of the file. Content of the shadow job body is irrelevant for
+  # the count check; keeping it minimal and inert avoids collateral
+  # yaml-parse damage in an already-adversarial fixture.
+  if ! {
+    cat "$mutant"
+    printf '\n  migration-drift:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: "echo shadow"\n'
+  } > "${mutant}.tmp"; then
+    rm -f -- "${mutant}.tmp"
+    return 1
+  fi
+  mv -- "${mutant}.tmp" "$mutant"
+
+  _assert_shape_guard_rejects "duplicate migration-drift job header" "$mutant" \
+    "expected exactly one migration-drift job header, found 2" || return 1
 }
 
 
@@ -1658,6 +1895,10 @@ TESTS=(
   case_drift_shape_rejects_job_continue_on_error
   case_drift_shape_rejects_duplicate_drift_step
   case_drift_shape_rejects_malformed_indentation
+  case_drift_shape_rejects_hardcoded_matrix
+  case_drift_shape_rejects_block_style_matrix
+  case_drift_shape_rejects_fail_fast_true
+  case_drift_shape_rejects_duplicate_migration_drift_job
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'
