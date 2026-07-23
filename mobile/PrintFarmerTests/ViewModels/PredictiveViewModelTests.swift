@@ -3773,18 +3773,52 @@ final class PredictiveViewModelTests: XCTestCase {
     ///   3. Release hold, drain the duplicate task cleanly.
     ///   4. Original continuation still parked; can then be resumed.
     func testAsyncGateStructuralLateCancelObserverIsBoundedNoOp() async {
+        // Ripley Finding 3 (Hicks HIGH) — the prior version awaited
+        // `dupAttempt.outcome()`. Under Hicks's mutation "cancel Task
+        // launch removed" (begin succeeds → state ==
+        // .cancellationInitiated, but no cancel Task is dispatched),
+        // no publisher ever fires and the outcome() await hangs.
+        // Similarly under "complete onCancel removal", state stays
+        // .active, natural publish path completes (via body reaching
+        // mark after hold release), and outcome resolves — but the
+        // structural claim would silently succeed with the WRONG
+        // fingerprint. Ripley Finding 4 (broken-matcher) also applies
+        // to this test: use `hopFingerprintForTest` to disambiguate
+        // `.processedIgnoredMismatch` (legitimate) from
+        // `.closedBeforeProcessing` (close raced cancel).
+        //
+        // Redesign:
+        //   - Fire duplicate.cancel().
+        //   - Independent bounded close of BOTH gates (rescues cancel
+        //     Task via cancelCountAcks drain + hold-close drain).
+        //   - Await duplicate.value (bounded by close + drain).
+        //   - SYNCHRONOUSLY peek dupAttempt.bufferedOutcomeForTest.
+        //     nil peek => complete-onCancel-removal or
+        //     state-transition-without-task mutation → XCTFail loudly.
+        //   - Correlate outcome with attempt.hopFingerprintForTest:
+        //     closedAtHop=true  → outcome must be .closedBeforeProcessing
+        //     closedAtHop=false → outcome must be .processedIgnoredMismatch
+        //     (broken-matcher regression: parked entry existed for
+        //     original with different awaitID; the OTHER awaitID being
+        //     matched would be `awaitIDMatched=true` which is impossible
+        //     because dup's awaitID is fresh and cannot equal original's.
+        //     `awaitIDMatched=true` in this test's disjoint-attempts
+        //     scenario is definitive evidence of a matcher bug.)
+        //   - Signal + close + await original (natural completes
+        //     via signal → mark → resolveOutcome; bounded).
+        //   - Peek origAttempt outcome via bufferedOutcomeForTest.
+        //
+        // Wait-for graph (acyclic):
+        //   parent.waitForObserverParked -> primary park OR close-drain
+        //   parent.holdGate.close        -> bounded actor call
+        //   parent.duplicate.value        -> hold-close-drain (bounded)
+        //   parent.gate.close             -> bounded actor call
+        //     (drains cancelCountAcks + primary continuations)
+        //   parent.original.value         -> signal-resume OR gate-close drain
+        //   parent.bufferedOutcomeForTest — synchronous peek
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
-        // Coordinator H3 non-stranding redesign: pre-register buffered
-        // hold-park ACK ticket. Replaces the previous mid-test
-        // `waitForWaiterParked(holdToken)` continuation wait that would
-        // strand indefinitely if the duplicate body regressed and
-        // never reached the holdGate await. The buffered ticket
-        // resolves via holdGate.close() below regardless of whether
-        // the body parked, so the terminal `await holdAck.value` is
-        // guaranteed bounded.
-        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         // Park original with attempt.
         let token = await gate.registerObserver()
@@ -3803,76 +3837,90 @@ final class PredictiveViewModelTests: XCTestCase {
                                              holdGate: holdGate, holdToken: holdToken)
         }
 
-        // Cancel duplicate immediately. Cancellation is latched at
-        // the Task level; whether body has entered
-        // `withTaskCancellationHandler` yet or not, onCancel is
-        // guaranteed to fire (either synchronously if handler active,
-        // or on handler entry if isCancelled==true). The state gate's
-        // `beginCancellationIfActive` therefore transitions before body
-        // returns, and the cancel Task runs and publishes to the
-        // attempt via `resolveOutcome`. This removes the need for the
-        // previous stranding `waitForWaiterParked(holdToken)` proof.
+        // Cancel duplicate. Cancellation is latched at the Task level;
+        // whether body has entered `withTaskCancellationHandler` yet or
+        // not, onCancel is guaranteed to fire.
         duplicate.cancel()
 
-        // R3 safety: unconditional holdGate.close BEFORE any
-        // task/receipt await. If the duplicate body reached
-        // holdGate.awaitWaiter, close drains it via .closedWhileParked;
-        // if it never reached the hold-await, close seals the fate
-        // and the eventual awaitWaiter returns via the closed guard.
-        // Either way body completes and `await duplicate.value` is
-        // bounded.
+        // Independent bounded teardown BEFORE any wait on latches:
+        //   holdGate.close   -> releases body from hold-await
+        //   duplicate.value  -> bounded by hold-close drain
+        //   gate.close       -> drains cancelCountAcks (rescues any
+        //                       pending waitForObserverCancelCount);
+        //                       drains original's parked continuation
+        //                       (defensive; signal below would drain
+        //                       first in correct case).
+        //   original.value   -> bounded by close-drain OR signal
         await holdGate.close()
         await duplicate.value
 
-        // `dupAttempt` outcome via buffered outcome() API — the sole
-        // per-attempt receipt path. Bounded: cancel Task always
-        // resolves via cancelObserver actor call.
-        let dupOutcome = await dupAttempt.outcome()
-        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
-                       "mismatched-awaitID cancel is a bounded no-op (primary not yet closed)")
-
-        // Pre-signal state: original still parked, cancel counters
-        // incremented, no fate on original token, duplicate hit its
-        // branch. This preserves the causal claim previously asserted
-        // via mid-test `midSnap`, now consolidated into one snapshot
-        // taken AFTER duplicate.value.
-        let cancelSnap = await gate.snapshot()
-        XCTAssertEqual(cancelSnap.observerDuplicateAwaitCount, 1,
-                       "duplicate's awaitObserver actor block ran and hit duplicate branch")
-        XCTAssertEqual(cancelSnap.observerResumeCounts[.duplicateAfterParked] ?? 0, 1)
-        XCTAssertEqual(cancelSnap.parkedObserverCount, 1,
-                       "original parked continuation MUST NOT be drained by mismatched cancel")
-        XCTAssertEqual(cancelSnap.observerCancelInvocationCount, 1,
-                       "duplicate's onCancel dispatched cancelObserver exactly once")
-        XCTAssertEqual(cancelSnap.observerCancelIgnoredCount, 1,
-                       "awaitID mismatch → bounded no-op")
-        XCTAssertNil(cancelSnap.observerFates[token.id],
-                     "original fate must not be sealed by mismatched cancel")
-
-        // Signal original.
+        // Signal original BEFORE closing gate so, in the correct path,
+        // original resumes via signal (not close-rescue), preserving
+        // the resume-site assertions below.
         _ = await gate.registerWaiter()
-
-        // R3 safety: close primary BEFORE awaiting original. Signal
-        // above should have drained original; close is defensive.
         await gate.close()
         await original.value
 
-        // Post-hoc non-stranding proof of the hold-park ticket. With
-        // holdGate closed above, the buffered ticket is guaranteed
-        // resolved (either .parked/.terminal from body reaching hold,
-        // or .terminal(.closedBeforePark) if it did not). Awaiting
-        // the value therefore cannot hang — that is the H3 guarantee.
-        _ = await holdAck.value()
+        // SYNCHRONOUS peek: nil = complete-onCancel-removal or
+        // state-transition-without-task mutation (no publisher).
+        guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
+            XCTFail("dupAttempt.bufferedOutcomeForTest is nil — complete-onCancel-removal or state-transition-without-task mutation (no cancel Task published)")
+            return
+        }
+        // Correlate outcome with hop fingerprint (Ripley Finding 4):
+        // matches the exact receipt to the state cancelObserver saw
+        // AT the actor turn — disambiguates legitimate close-race
+        // from broken-matcher regression.
+        guard case .cancelled(let dupR) = dupOutcome else {
+            XCTFail("duplicate must publish a cancel receipt, got \(dupOutcome)")
+            return
+        }
+        if let hop = dupAttempt.hopFingerprintForTest {
+            // In this test dup's awaitID is a freshly-minted UUID
+            // distinct from original's; any parked entry it observes
+            // must be original's, i.e. awaitIDMatched MUST be false.
+            XCTAssertFalse(hop.awaitIDMatched,
+                "cancel-hop matched dup's awaitID against original's — matcher regression (dup and original have disjoint UUIDs by construction)")
+            if hop.closedAtHop {
+                XCTAssertEqual(dupR, .closedBeforeProcessing,
+                    "closedAtHop=true → receipt must be .closedBeforeProcessing; got \(dupR)")
+            } else {
+                XCTAssertEqual(dupR, .processedIgnoredMismatch,
+                    "closedAtHop=false + mismatched awaitID → receipt must be .processedIgnoredMismatch; got \(dupR)")
+            }
+        } else {
+            // Cancel Task hopped (proven by receipt existence via
+            // resolveOutcome) but did not record hop fingerprint.
+            // This would indicate the harness modification regressed;
+            // fail loudly.
+            XCTFail("cancel Task published a receipt but did not record hop fingerprint — harness regression")
+        }
 
+        // Consolidated post-teardown structural proof.
         let final = await gate.snapshot()
+        XCTAssertEqual(final.observerDuplicateAwaitCount, 1,
+                       "duplicate's awaitObserver actor block ran and hit duplicate branch")
+        XCTAssertEqual(final.observerResumeCounts[.duplicateAfterParked] ?? 0, 1)
+        XCTAssertEqual(final.observerCancelInvocationCount, 1,
+                       "duplicate's onCancel dispatched cancelObserver exactly once")
+        XCTAssertEqual(final.observerCancelIgnoredCount, 1,
+                       "awaitID mismatch OR closed-at-hop → bounded no-op")
         XCTAssertEqual(final.parkedObserverCount, 0)
         XCTAssertEqual(final.observerFateCounts[.signaledWhileParked] ?? 0, 1,
-                       "original resumed via signal, not cancel")
+                       "original resumed via signal, not cross-owned cancel")
         XCTAssertEqual(final.observerResumeCounts[.parkedResumedBySignal] ?? 0, 1)
-        XCTAssertEqual(final.observerResumeCounts[.parkedResumedByCancel] ?? 0, 0)
+        XCTAssertEqual(final.observerResumeCounts[.parkedResumedByCancel] ?? 0, 0,
+                       "no cross-owned cancel drained original")
         XCTAssertEqual(final.observerResumeCounts[.parkedResumedByClose] ?? 0, 0,
-                       "R3: signal already resumed original — no close rescue")
-        let origOutcome = await origAttempt.outcome()
+                       "signal drained original before close ran")
+
+        // Original attempt: peek buffered outcome synchronously; nil
+        // would indicate a natural-publish regression (mark or
+        // resolveOutcome broken).
+        guard let origOutcome = origAttempt.bufferedOutcomeForTest else {
+            XCTFail("origAttempt outcome nil — natural completion regression (mark or resolveOutcome broken)")
+            return
+        }
         XCTAssertEqual(origOutcome, .finishedBeforeProcessing,
                        "original attempt: natural completion via signal")
         XCTAssertEqual(origAttempt.stateForTest, .completedNaturally)
@@ -3880,12 +3928,11 @@ final class PredictiveViewModelTests: XCTestCase {
 
     /// Waiter analogue of the observer structural late-cancel proof.
     func testAsyncGateStructuralLateCancelWaiterIsBoundedNoOp() async {
+        // Ripley Finding 3 waiter analogue — see observer variant for
+        // full rationale.
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
-        // Coordinator H3 non-stranding redesign: buffered hold-park
-        // ticket (see observer variant for full rationale).
-        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         let token = await gate.registerWaiter()
         let origAttempt = WaiterAwaitAttempt()
@@ -3898,52 +3945,59 @@ final class PredictiveViewModelTests: XCTestCase {
                                           holdGate: holdGate, holdToken: holdToken)
         }
 
-        // Cancel duplicate; latched cancel guarantees onCancel fires
-        // by handler entry.
         duplicate.cancel()
 
-        // R3 safety: hold close BEFORE any potentially-stranding
-        // await. Drains parked or seals fate; either way duplicate
-        // body completes.
+        // Independent bounded teardown before any latch wait.
         await holdGate.close()
         await duplicate.value
 
-        let dupOutcome = await dupAttempt.outcome()
-        XCTAssertEqual(dupOutcome, .cancelled(.processedIgnoredMismatch),
-                       "mismatched-awaitID cancel is a bounded no-op (primary not yet open/closed)")
-
-        // Consolidated cancelSnap (was midSnap+cancelSnap). Proves
-        // duplicate's actor block ran, cancel-invoke/ignored counters,
-        // and original still parked.
-        let cancelSnap = await gate.snapshot()
-        XCTAssertEqual(cancelSnap.waiterDuplicateAwaitCount, 1,
-                       "duplicate's awaitWaiter actor block ran and hit duplicate branch")
-        XCTAssertEqual(cancelSnap.waiterResumeCounts[.duplicateAfterParked] ?? 0, 1)
-        XCTAssertEqual(cancelSnap.parkedWaiterCount, 1,
-                       "original parked continuation MUST NOT be drained by mismatched cancel")
-        XCTAssertEqual(cancelSnap.waiterCancelInvocationCount, 1)
-        XCTAssertEqual(cancelSnap.waiterCancelIgnoredCount, 1,
-                       "awaitID mismatch → bounded no-op")
-        XCTAssertNil(cancelSnap.waiterFates[token.id])
-
-        // Open original (intended resume).
+        // Open original (intended resume) BEFORE closing gate so
+        // resume-site assertions hold.
         await gate.open()
-
-        // R3 safety: close primary BEFORE awaiting original.
         await gate.close()
         await original.value
 
-        // Post-hoc non-stranding proof of hold ticket resolution.
-        _ = await holdAck.value()
+        // SYNCHRONOUS peek — see observer variant for full rationale.
+        guard let dupOutcome = dupAttempt.bufferedOutcomeForTest else {
+            XCTFail("dupAttempt.bufferedOutcomeForTest is nil — complete-onCancel-removal or state-transition-without-task mutation (no cancel Task published)")
+            return
+        }
+        guard case .cancelled(let dupR) = dupOutcome else {
+            XCTFail("duplicate must publish a cancel receipt, got \(dupOutcome)")
+            return
+        }
+        if let hop = dupAttempt.hopFingerprintForTest {
+            XCTAssertFalse(hop.awaitIDMatched,
+                "cancel-hop matched dup's awaitID against original's — matcher regression (disjoint UUIDs by construction)")
+            if hop.closedAtHop {
+                XCTAssertEqual(dupR, .closedBeforeProcessing,
+                    "closedAtHop=true → receipt must be .closedBeforeProcessing; got \(dupR)")
+            } else {
+                XCTAssertEqual(dupR, .processedIgnoredMismatch,
+                    "closedAtHop=false + mismatched awaitID → receipt must be .processedIgnoredMismatch; got \(dupR)")
+            }
+        } else {
+            XCTFail("cancel Task published a receipt but did not record hop fingerprint — harness regression")
+        }
 
         let final = await gate.snapshot()
+        XCTAssertEqual(final.waiterDuplicateAwaitCount, 1)
+        XCTAssertEqual(final.waiterResumeCounts[.duplicateAfterParked] ?? 0, 1)
+        XCTAssertEqual(final.waiterCancelInvocationCount, 1)
+        XCTAssertEqual(final.waiterCancelIgnoredCount, 1,
+                       "awaitID mismatch OR closed-at-hop → bounded no-op")
         XCTAssertEqual(final.parkedWaiterCount, 0)
-        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1)
+        XCTAssertEqual(final.waiterFateCounts[.openedWhileParked] ?? 0, 1,
+                       "original resumed via open, not cross-owned cancel")
         XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByOpen] ?? 0, 1)
         XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 0)
         XCTAssertEqual(final.waiterResumeCounts[.parkedResumedByClose] ?? 0, 0,
-                       "R3: open already resumed original — no close rescue")
-        let origOutcome = await origAttempt.outcome()
+                       "open drained original before close ran")
+
+        guard let origOutcome = origAttempt.bufferedOutcomeForTest else {
+            XCTFail("origAttempt outcome nil — natural completion regression")
+            return
+        }
         XCTAssertEqual(origOutcome, .finishedBeforeProcessing)
         XCTAssertEqual(origAttempt.stateForTest, .completedNaturally)
     }
