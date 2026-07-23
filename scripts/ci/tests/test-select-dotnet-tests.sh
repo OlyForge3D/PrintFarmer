@@ -503,6 +503,26 @@ case_workflow_printf_formats_are_option_safe() {
   assert_eq "leading-dash printf formats use --" "$unsafe_lines" "" || return 1
 }
 
+case_workflow_restores_migration_project_before_drift_check() {
+  local migration_block ordering
+  migration_block="$(awk '
+    { sub(/\r$/, "") }
+    /^  migration-drift:$/ { capture = 1 }
+    capture { print }
+    /^  dotnet-test:$/ { exit }
+  ' "$WORKFLOW")"
+  assert_contains "migration project restore" "$migration_block" \
+    'dotnet restore "./$MATRIX_PROJECT"' || return 1
+  ordering="$(awk '
+    /dotnet restore "\.\/\$MATRIX_PROJECT"/ { restore = NR }
+    /dotnet ef migrations has-pending-model-changes/ { drift = NR }
+    END {
+      if (restore > 0 && drift > restore) print "restore-before-drift"
+    }
+  ' <<< "$migration_block")"
+  assert_eq "migration restore ordering" "$ordering" "restore-before-drift" || return 1
+}
+
 case_workflow_dispatch_full_safe() {
   local out="$1"
   CHANGED_FILES=""
@@ -704,6 +724,7 @@ TESTS=(
   case_workflow_trusted_push_contract
   case_workflow_has_no_dotnet_format
   case_workflow_printf_formats_are_option_safe
+  case_workflow_restores_migration_project_before_drift_check
   case_workflow_dispatch_full_safe
   case_force_full_safe_from_caller
   case_empty_changes

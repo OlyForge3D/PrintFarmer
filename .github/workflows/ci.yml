@@ -255,6 +255,12 @@ jobs:
           dotnet tool install -g dotnet-ef
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      - name: Restore migration project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: dotnet restore "./$MATRIX_PROJECT"
+
       - name: Check EF Core migration drift
         working-directory: src
         env:
