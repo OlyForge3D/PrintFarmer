@@ -652,32 +652,43 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             signalRServiceFactory: { baseURL, _ in baseURL.host == "b.example.com" ? probe : MockSignalRService() as SignalRServiceProtocol }
         )
 
-        // Failure-safe teardown: release the gate (idempotent) so a throwing assert can
-        // never strand the parked connect.
-        defer { probe.connectGate.release() }
-
         // Start the real switch to B; its signalR reaches connect() and parks there.
         let switchTask = Task { await container.switchToServer(b) }
-        await probe.connectEntered.waitUntilArrived()
 
-        // Supersede on the MainActor. switchToDemo/switchToReal advance the transition
-        // epoch + record the new desired target SYNCHRONOUSLY, so the supersession has
-        // executed BEFORE we release connect (MainActor serialization — no poll/sleep).
-        if enterDemo {
-            container.switchToDemo()
-        } else {
-            try reg.setActive(id: nil)   // no-active target
-            container.switchToReal()     // apply the no-active/real target synchronously
-        }
-        probe.connectGate.release()
-        await switchTask.value
+        // Item 9: install ACTUAL idempotent release + task cancel/drain teardown BEFORE
+        // any throwing statement or assertion. `defer` unblocks the parked connect
+        // immediately (idempotent release); the do/catch drains + cancels the switch
+        // task on any thrown error so a suspended task can never leak. `deinit` rescue
+        // on the barrier is only a secondary safety net, never the primary path.
+        defer { probe.connectGate.release() }
+        do {
+            await probe.connectEntered.waitUntilArrived()
 
-        // The exact displaced incoming B service was disconnected (no orphan receive
-        // loop survives), and it is no longer the container's current service.
-        XCTAssertGreaterThanOrEqual(probe.disconnectCount, 1, "the superseded incoming B signalR must be disconnected")
-        XCTAssertFalse(container.signalRService === probe, "the orphaned service is not the current one")
-        if enterDemo {
-            XCTAssertNil(container.apiClient, "demo composition preserved")
+            // Supersede on the MainActor. switchToDemo/switchToReal advance the transition
+            // epoch + record the new desired target SYNCHRONOUSLY, so the supersession has
+            // executed BEFORE we release connect (MainActor serialization — no poll/sleep).
+            if enterDemo {
+                container.switchToDemo()
+            } else {
+                try reg.setActive(id: nil)   // no-active target
+                container.switchToReal()     // apply the no-active/real target synchronously
+            }
+            probe.connectGate.release()
+            _ = await switchTask.value
+
+            // The exact displaced incoming B service was disconnected (no orphan receive
+            // loop survives), and it is no longer the container's current service.
+            let disconnects = probe.disconnectCount
+            XCTAssertGreaterThanOrEqual(disconnects, 1, "the superseded incoming B signalR must be disconnected")
+            XCTAssertFalse(container.signalRService === probe, "the orphaned service is not the current one")
+            if enterDemo {
+                XCTAssertNil(container.apiClient, "demo composition preserved")
+            }
+        } catch {
+            probe.connectGate.release()   // idempotent: unblock the parked connect
+            switchTask.cancel()
+            _ = await switchTask.value    // drain the suspended switch task before failing
+            throw error
         }
     }
 
