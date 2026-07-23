@@ -126,6 +126,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let session = try await activate(store, authority, ns)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let commitTask = Task { await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000), capturedSession: session) }
 
@@ -196,6 +197,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
         let recorder = CompletionOrderRecorder()
         let writeBarrier = AsyncBarrier()
+        defer { writeBarrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = writeBarrier
 
         let commitTask = Task { () -> FarmSnapshotCommitResult in
@@ -266,6 +268,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
         let recorder = CompletionOrderRecorder()
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let commitTask = Task { () -> FarmSnapshotCommitResult in
             let r = await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session)
@@ -307,6 +310,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         try? Data("{ broken".utf8).write(to: live)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.createDirectoryBarrier = barrier
         let task = Task { await store.hydrateActive() }
         await barrier.waitUntilArrived()
@@ -330,6 +334,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         try? corrupt.write(to: live)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.createDirectoryBarrier = barrier
         let task = Task { await store.hydrateActive() }
         await barrier.waitUntilArrived()
@@ -381,6 +386,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         try? corrupt.write(to: live)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.readDataBarrier = barrier // pause BEFORE the withPromotion move boundary
         let task = Task { await store.hydrateActive() }
         await barrier.waitUntilArrived()
@@ -408,6 +414,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
 
         let recorder = CompletionOrderRecorder()
         let moveBarrier = AsyncBarrier()
+        defer { moveBarrier.close() } // I: unstrand any parked continuation on failure
         io.createDirectoryBarrier = moveBarrier // park recover just before the move (lease held)
 
         let recoverTask = Task { () -> FarmSnapshotHydration in
@@ -458,6 +465,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         // the originally-read bytes) is now false and the destructive move declines.
         let replacement = Data("{ changed-before-move".utf8)
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.createDirectoryBarrier = barrier
         let task = Task { await store.hydrateActive() }
         await barrier.waitUntilArrived()
@@ -510,6 +518,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let live = liveURL(root: root, ns)
         let newer = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.postWriteCandidateBarrier = barrier
         let task = Task { await store.commit(newer, capturedSession: session) }
         await barrier.waitUntilArrived()
@@ -554,6 +563,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let live = liveURL(root: root, ns)
         let newer = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.postWriteCandidateBarrier = barrier
         let task = Task { await store.commit(newer, capturedSession: session) }
         await barrier.waitUntilArrived()
@@ -592,6 +602,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let live = liveURL(root: root, ns)
         let newer = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.postWriteCandidateBarrier = barrier
         let task = Task { await store.commit(newer, capturedSession: session) }
         await barrier.waitUntilArrived()
@@ -656,6 +667,7 @@ final class FarmSnapshotRemediationTests: XCTestCase {
         let session = try await activate(store, authority, ns)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let commitTask = Task { await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1), capturedSession: session) }
         await barrier.waitUntilArrived()

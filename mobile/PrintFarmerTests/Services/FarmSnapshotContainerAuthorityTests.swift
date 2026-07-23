@@ -35,6 +35,15 @@ private final class OrphanProbeSignalR: SignalRServiceProtocol, @unchecked Senda
     var disconnectCount: Int { withLock { disconnects } }
     private func withLock<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
 
+    /// I (issue #816): idempotent teardown that closes both barriers, guaranteeing any
+    /// task suspended in `connect()` or `waitUntilArrived()` resumes even if the test
+    /// aborted before reaching the normal release path. Tests using this probe MUST
+    /// register `defer probe.close()` immediately after construction.
+    func close() {
+        connectEntered.close()
+        connectGate.close()
+    }
+
     var connectionState: SignalRConnectionState { base.connectionState }
 
     func connect() async throws {
@@ -387,6 +396,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
+        defer { recorder.close() } // I: unstrand recorder barriers on failure
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: true,
             farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners,
@@ -429,6 +439,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
+        defer { recorder.close() } // I: unstrand recorder barriers on failure
         // observeRegistry:false isolates the epoch mechanism from registry re-drive:
         // the suspended switch is driven manually via switchToServer.
         let container = ServiceContainer(
@@ -470,6 +481,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
+        defer { recorder.close() } // I: unstrand recorder barriers on failure
         // PRODUCTION observer enabled — the switch is driven by the real registry
         // observation, not a test-only direct call.
         let container = ServiceContainer(
@@ -509,6 +521,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let root = newRoot()
         let store = FarmSnapshotStore(authority: authority, rootURL: root)
         let recorder = SignalRFactoryRecorder(barrierOnFirst: true)
+        defer { recorder.close() } // I: unstrand recorder barriers on failure
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: true,
             farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners,
@@ -561,6 +574,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let token = container.authOperationEpoch.advance()
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.removeItemBarrier = barrier
         let task = Task { await container.activateFarmSnapshotForActiveServer(authToken: token) }
         await barrier.waitUntilArrived()
@@ -582,6 +596,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let token = container.authOperationEpoch.advance()
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.removeItemBarrier = barrier
         let task = Task { await container.activateFarmSnapshotForActiveServer(authToken: token) }
         await barrier.waitUntilArrived() // login's snapshot activation parked in readiness
@@ -644,6 +659,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         creds.save(ServerCredentials(accessToken: "tok-b", expiresAt: nil), serverId: b.id)
 
         let probe = OrphanProbeSignalR()
+        defer { probe.close() } // I: unstrand connect/disconnect barriers on failure
         let container = ServiceContainer(
             serverRegistry: reg, credentialsStore: creds, userDefaultsBox: box(), observeRegistry: false,
             farmSnapshotAuthority: FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!),
@@ -700,6 +716,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         try reg.setActive(id: reg.servers[0].id)
 
         let recorder = SignalRFactoryRecorder(barrierOnFirst: false)
+        defer { recorder.close() } // I: unstrand recorder barriers on failure
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
             farmSnapshotAuthority: FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!),
@@ -711,6 +728,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let realService = recorder.service(forHost: "a.example.com")
         XCTAssertNotNil(realService)
         let disconnected = AsyncBarrier()
+        defer { disconnected.close() } // I: unstrand any parked continuation on failure
         realService?.disconnectHook = { disconnected.signal() }
 
         // Entering demo must disconnect that EXACT displaced real instance, not orphan it.
@@ -735,6 +753,16 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         private let barrierOnFirst: Bool
 
         init(barrierOnFirst: Bool) { self.barrierOnFirst = barrierOnFirst }
+
+        /// I (issue #816): idempotent teardown that closes both class-level barriers,
+        /// guaranteeing any task suspended in `connect()`/`disconnect()` hooks resumes
+        /// even if the test aborted before reaching the normal release path. Tests using
+        /// this recorder MUST register `defer recorder.close()` immediately after
+        /// construction.
+        func close() {
+            firstDisconnectBarrier.close()
+            connectBarrier.close()
+        }
 
         func service(forHost host: String) -> MockSignalRService? {
             lock.lock(); defer { lock.unlock() }

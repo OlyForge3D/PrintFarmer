@@ -80,6 +80,7 @@ final class APIClientAuthSessionTests: XCTestCase {
 
         // Park the expiry checker at a barrier so we can interleave a T2 apply.
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         defer { barrier.release() }
         await client.setTokenExpiryChecker { [weak barrier] in
             await barrier?.arriveAndWait()

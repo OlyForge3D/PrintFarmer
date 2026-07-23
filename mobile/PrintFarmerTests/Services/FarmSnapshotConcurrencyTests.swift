@@ -49,6 +49,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let attempt = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let task = Task { await store.commit(attempt, capturedSession: session) }
@@ -72,6 +73,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         let session = try await activate(store, authority, ns)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let attempt = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let task = Task { await store.commit(attempt, capturedSession: session) }
@@ -95,6 +97,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let attempt = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let task = Task { await store.commit(attempt, capturedSession: session) }
@@ -117,6 +120,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XAssertEqual(await store.commit(prior, capturedSession: session), .committed)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let attempt = FarmSnapshotFixtures.envelope(namespace: ns, millis: 2000)
         let task = Task { await store.commit(attempt, capturedSession: session) }
@@ -145,6 +149,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
 
         // Hold the OLDER commit at its candidate write.
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.writeCandidateBarrier = barrier
         let older = FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000)
         let olderTask = Task { await store.commit(older, capturedSession: session) }
@@ -181,6 +186,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         XAssertEqual(await store.commit(FarmSnapshotFixtures.envelope(namespace: ns, millis: 1000), capturedSession: session), .committed)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.readDataBarrier = barrier
         let task = Task { await store.hydrateActive() }
         await barrier.waitUntilArrived()
@@ -204,6 +210,7 @@ final class FarmSnapshotConcurrencyTests: XCTestCase {
         try? corrupt.write(to: live)
 
         let barrier = AsyncBarrier()
+        defer { barrier.close() } // I: unstrand any parked continuation on failure
         io.createDirectoryBarrier = barrier // fires inside recover(), before the move
         let task = Task { await store.hydrateActive() }
         await barrier.waitUntilArrived()

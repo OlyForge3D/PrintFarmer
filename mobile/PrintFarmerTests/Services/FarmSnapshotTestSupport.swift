@@ -36,6 +36,27 @@ final class AsyncBarrier: @unchecked Sendable {
         waiter?.resume()
     }
 
+    /// I (issue #816): idempotent close that resumes BOTH arrival waiters AND the
+    /// release waiter, so tests can register `defer barrier.close()` /
+    /// `addTeardownBlock { barrier.close() }` and be certain no continuation strands
+    /// on a failed assertion path. Distinct from `release()` (which only signals
+    /// released and does not resume `waitUntilArrived()` observers) and from
+    /// `deinit` (which is only a secondary rescue — cannot be relied on when a
+    /// captured Task retains the barrier). Idempotent: safe to call any number of
+    /// times; a re-close is a no-op.
+    func close() {
+        lock.lock()
+        released = true
+        arrived = true
+        let releaseWaiterNow = releaseWaiter
+        releaseWaiter = nil
+        let arrivals = arrivalWaiters
+        arrivalWaiters = []
+        lock.unlock()
+        releaseWaiterNow?.resume()
+        arrivals.forEach { $0.resume() }
+    }
+
     /// Fire-and-forget arrival signal (no wait for release). Lets a background thread
     /// notify the test it completed without blocking that thread.
     func signal() {
