@@ -90,15 +90,22 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
 
         // Causal order proof: the recovery move must have entered and returned BEFORE
         // any purge-driven removeItem observed on disk. No sleep/yield/poll.
+        // E hardening (Bishop/Hicks): require the remove-entered event UNCONDITIONALLY
+        // with exact counts and the complete ordered sequence — no conditional skip.
         let events = io.eventLog
-        guard let moveEntered = events.firstIndex(of: "move-entered"),
-              let moveReturned = events.firstIndex(of: "move-returned") else {
-            return XCTFail("expected real move entry+return events in \(events)")
+        XCTAssertEqual(io.moveCount, 1, "exactly one compare/move must occur (E: exact)")
+        XCTAssertGreaterThanOrEqual(io.removeCount, 1, "purge must have entered at least one remove (E: exact)")
+        guard let moveEntered = events.firstIndex(of: "move-entered") else {
+            return XCTFail("missing move-entered in \(events)")
         }
-        if let firstRemove = events.firstIndex(of: "remove-entered") {
-            XCTAssertLessThan(moveEntered, firstRemove, "move must precede any purge-driven remove")
-            XCTAssertLessThan(moveReturned, firstRemove, "move must return before any purge-driven remove")
+        guard let moveReturned = events.firstIndex(of: "move-returned") else {
+            return XCTFail("missing move-returned in \(events)")
         }
+        guard let firstRemove = events.firstIndex(of: "remove-entered") else {
+            return XCTFail("missing remove-entered — purge MUST have swept the tombstoned server dir in \(events)")
+        }
+        XCTAssertLessThan(moveEntered, moveReturned, "move-entered must precede move-returned")
+        XCTAssertLessThan(moveReturned, firstRemove, "move must complete before any purge-driven remove")
         XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path),
                        "purge drained after move and swept the server dir")
     }
@@ -138,11 +145,16 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
         let outcome = await task.value
         XCTAssertEqual(outcome, .inactive)
         // Causal proof: the real compare/move primitive was NEVER entered.
-        XCTAssertEqual(io.moveCount, 0, "revoke-first prevents the destructive move entirely")
+        // E hardening (Bishop/Hicks): exact zero move count and exact-bytes preservation.
+        XCTAssertEqual(io.moveCount, 0, "revoke-first prevents the destructive move entirely (E: exact zero)")
         XCTAssertFalse(io.eventLog.contains("move-entered"),
                        "no move-entered event may appear in \(io.eventLog)")
-        // Live bytes are preserved byte-identical.
-        XCTAssertEqual(try? Data(contentsOf: liveURL(root: root, ns)), corrupt)
+        XCTAssertFalse(io.eventLog.contains("move-returned"),
+                       "no move-returned event may appear in \(io.eventLog)")
+        // Live bytes are preserved EXACTLY byte-identical (count + content).
+        let liveBytes = try Data(contentsOf: liveURL(root: root, ns))
+        XCTAssertEqual(liveBytes.count, corrupt.count, "live byte count preserved exactly")
+        XCTAssertEqual(liveBytes, corrupt, "live bytes preserved byte-identical")
     }
 
     // MARK: - E3: compare-false — real primitive returns false when bytes flip
@@ -178,15 +190,18 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
 
         let result = await task.value
         XCTAssertNotEqual(result, .recovered, "compare-false must not report recovery")
-        XCTAssertEqual(io.moveCount, 1, "the real compare/move primitive was reached exactly once")
-        // Real live bytes on disk: exactly the replacement, never torn/partial.
-        XCTAssertEqual(try? Data(contentsOf: liveURL(root: root, ns)), replacement)
-        // Nothing was quarantined (the destructive move declined).
+        // E hardening (Bishop/Hicks): exact counts and exact bytes.
+        XCTAssertEqual(io.moveCount, 1, "the real compare/move primitive was reached exactly once (E: exact)")
+        // Real live bytes on disk: exactly the replacement (count + content), never torn/partial.
+        let liveBytes = try Data(contentsOf: liveURL(root: root, ns))
+        XCTAssertEqual(liveBytes.count, replacement.count, "live byte count equals replacement exactly")
+        XCTAssertEqual(liveBytes, replacement, "live bytes are exactly the replacement")
+        // Nothing was quarantined (the destructive move declined) — exact zero.
         let quarantineDir = root
             .appendingPathComponent("quarantine", isDirectory: true)
             .appendingPathComponent(ns.serverID.uuidString, isDirectory: true)
         let quarantined = (try? FileManager.default.contentsOfDirectory(atPath: quarantineDir.path)) ?? []
-        XCTAssertTrue(quarantined.isEmpty, "compare-false must not quarantine")
+        XCTAssertEqual(quarantined.count, 0, "compare-false must not quarantine — exact zero entries")
         // Event log confirms the primitive was entered and returned.
         XCTAssertTrue(io.eventLog.contains("move-entered"))
         XCTAssertTrue(io.eventLog.contains("move-returned"))
