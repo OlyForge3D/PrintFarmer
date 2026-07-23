@@ -3,6 +3,7 @@ using System.Net;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Slicer.Module.Services;
+using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Startup;
 using Microsoft.AspNetCore.Builder;
@@ -21,14 +22,6 @@ namespace Farm.Web.IntegrationTests;
 // Provides a simple WebApplicationFactory<Program> so tests can run in this environment.
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
-    public CustomWebApplicationFactory()
-    {
-        Environment.SetEnvironmentVariable("ForwardedHeaders__Enabled", "true");
-        Environment.SetEnvironmentVariable("ForwardedHeaders__KnownProxies__0", "127.0.0.1");
-        Environment.SetEnvironmentVariable("ForwardedHeaders__KnownProxies__1", "::1");
-        Environment.SetEnvironmentVariable("ForwardedHeaders__ForwardLimit", "1");
-    }
-
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
         return new CustomWebApplicationFactory();
@@ -56,8 +49,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             });
         });
 
-        _ = builder.ConfigureServices(services =>
+        _ = builder.ConfigureServices((context, services) =>
         {
+            // Minimal-host service registration runs before WebApplicationFactory's
+            // app-configuration callback. Register the production options again here,
+            // after the host-scoped provider above is visible, so no process-global
+            // environment mutation is needed.
+            _ = services.AddPrintFarmerForwardedHeaders(context.Configuration);
+
             // Provide a lightweight test orchestrator so integration tests can run without full worker infrastructure.
             _ = services.AddSingleton<ISlicerOrchestrator, TestSlicerOrchestrator>();
             _ = services.AddSingleton<IStartupFilter, LoopbackConnectionStartupFilter>();

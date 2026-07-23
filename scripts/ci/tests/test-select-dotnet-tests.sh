@@ -156,6 +156,20 @@ case_docs_only() {
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
 }
 
+case_overlapping_documentation_patterns() {
+  local out="$1" path
+  for path in "docs/CI.md" "LICENSE.md"; do
+    : > "$out"
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+      CHANGED_FILES_FROM_Z="" CHANGED_FILES="$path" \
+      select_run >/dev/null 2>&1
+    assert_eq "$path reason" "$(get_output "$out" reason)" "scoped: docs" || return 1
+    assert_eq "$path frontend" "$(get_output "$out" want_frontend)" "false" || return 1
+    assert_eq "$path build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+    assert_eq "$path tests" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  done
+}
+
 case_api_change() {
   local out="$1"
   CHANGED_FILES="src/api/Controllers/PrintersController.cs"
@@ -661,6 +675,7 @@ case_mixed_react_and_dotnet() {
 TESTS=(
   case_react_only
   case_docs_only
+  case_overlapping_documentation_patterns
   case_api_change
   case_infra_change
   case_backend_plugin_change

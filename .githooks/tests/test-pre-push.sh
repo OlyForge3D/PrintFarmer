@@ -133,7 +133,7 @@ setup_repo() {
 
   install_fake_dotnet "$PATH_BIN"
 
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     git init -q -b main
     git config user.email "test@example.com"
     git config user.name  "Test"
@@ -172,7 +172,7 @@ run_hook() {
   local path
   if [[ "$with_dotnet" == "yes" ]]; then
     path="$PATH_BIN:$PATH"
-    ( cd "$REPO"
+    ( cd "$REPO" || exit
       printf '%s' "$stdin_list" \
         | PATH="$path" \
             FAKE_LOG="$FAKE_LOG" \
@@ -203,7 +203,7 @@ run_hook() {
     echo "FATAL per-run: git=$ck1 dotnet=$ck2" >&2
     return 99
   fi
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     printf '%s' "$stdin_list" \
       | env -i \
           PATH="$path" \
@@ -226,7 +226,7 @@ assert_rc() {
 # make_commit <path> <content>
 make_commit() {
   local path="$1" content="$2" msg="$3"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     mkdir -p "$(dirname "$path")"
     printf '%s' "$content" > "$path"
     git add -A
@@ -335,22 +335,16 @@ case_cache_hit_skips_format() {
   local rc=0
   FAKE_FORMAT_RC=0 run_hook yes "$(push_line "$sha1" "$sha0")" >/dev/null 2>&1 || rc=$?
   assert_rc "first push" "$rc" "0" || return 1
-  # Count format invocations after first push.
-  local first_count
-  first_count="$(grep -c '^format ' "$FAKE_LOG" || true)"
   # Second push of the same tree — should hit cache. Simulate by re-running.
   # We flip FAKE_FORMAT_RC to 1 so a re-verify would fail; cache hit must
   # bypass it.
   local rc2=0
   FAKE_FORMAT_RC=1 run_hook yes "$(push_line "$sha1" "$sha0")" >/dev/null 2>&1 || rc2=$?
   assert_rc "second push cache hit" "$rc2" "0" || return 1
-  local second_count
-  second_count="$(grep -c '^format ' "$FAKE_LOG" || true)"
   # Second push should NOT have added a new `format ...` line — only version
   # probes.
-  # The first_count includes exactly one --verify-no-changes invocation.
-  # After the second push, the count of `format ./farm-web.sln --verify-no-changes`
-  # should remain unchanged.
+  # Across both pushes, `format ./farm-web.sln --verify-no-changes` should
+  # appear exactly once.
   local verify_count
   verify_count="$(grep -Ec '^format .*--verify-no-changes' "$FAKE_LOG" || true)"
   if [[ "$verify_count" != "1" ]]; then
@@ -444,7 +438,7 @@ case_missing_sln_fails_closed() {
   # Delete the sln → .cs still changed → hook must reject.
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     rm -f src/farm-web.sln
     printf 'class P { }\n' > src/api/Program.cs
     git add -A
@@ -479,7 +473,7 @@ case_rename_dotnet_to_nondotnet_verified() {
   # a .NET-relevant path change because --no-renames decomposes to add+delete.
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     git mv src/api/Program.cs docs/Program.cs.old
     git commit -q -m "move api to docs"
   )
@@ -492,13 +486,13 @@ case_rename_dotnet_to_nondotnet_verified() {
 case_rename_nondotnet_to_dotnet_verified() {
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     printf 'hello\n' > notes.txt
     git add notes.txt
     git commit -q -m "add notes"
   )
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     mkdir -p src/api
     git mv notes.txt src/api/Notes.cs
     git commit -q -m "promote notes to cs"
@@ -547,7 +541,7 @@ case_format_version_invalidates_cache() {
 case_csproj_change_verified() {
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     mkdir -p src/api
     printf '<Project />\n' > src/api/Farm.Web.Api.csproj
     git add -A
@@ -562,7 +556,7 @@ case_csproj_change_verified() {
 case_editorconfig_change_verified() {
   local sha0 sha1
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     printf 'root = true\n' > src/.editorconfig
     git add -A
     git commit -q -m "add editorconfig"
@@ -676,7 +670,7 @@ case_force_push_range() {
   sha0="$(cd "$REPO" && git rev-parse HEAD)"
   sha1="$(make_commit src/api/Program.cs 'class P { /* branch1 */ }' "branch1")"
   # Reset and create an alternate history.
-  ( cd "$REPO"
+  ( cd "$REPO" || exit
     git reset -q --hard "$sha0"
   )
   sha2="$(make_commit src/api/Program.cs 'class Q { /* branch2 */ }' "branch2")"

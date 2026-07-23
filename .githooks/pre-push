@@ -84,16 +84,14 @@ is_hex64() {
 # Renames are decomposed into old-name delete + new-name add so both sides
 # are classified.
 #
-# Sets DOTNET_RELEVANT=0|1 and CHANGED_N (int) on success. Returns nonzero
-# on any I/O failure — the caller MUST treat that as fail-closed.
+# Sets DOTNET_RELEVANT=0|1 on success. Returns nonzero on any I/O failure —
+# the caller MUST treat that as fail-closed.
 # ---------------------------------------------------------------------------
 DOTNET_RELEVANT=0
-CHANGED_N=0
 
 diff_dotnet_paths_z() {
   local from="$1" to="$2"
   DOTNET_RELEVANT=0
-  CHANGED_N=0
 
   # Two-pipeline strategy: git diff → filter loop. Check PIPESTATUS after.
   local tmp
@@ -107,10 +105,9 @@ diff_dotnet_paths_z() {
   fi
 
   # Read NUL-terminated entries. bash `read -d ''` uses NUL as delimiter.
-  local entry n=0 relevant=0
+  local entry relevant=0
   while IFS= read -r -d '' entry; do
     [[ -z "$entry" ]] && continue
-    n=$((n + 1))
     case "$entry" in
       *.cs|*.csproj|*.sln|*.slnx|*.props|*.targets|\
       .editorconfig|*/.editorconfig|\
@@ -120,9 +117,7 @@ diff_dotnet_paths_z() {
         relevant=1 ;;
     esac
   done < "$tmp"
-
   DOTNET_RELEVANT=$relevant
-  CHANGED_N=$n
   return 0
 }
 
@@ -345,14 +340,14 @@ main() {
   local any_relevant=0
   local -a tips=()
 
-  local local_ref local_sha remote_ref remote_sha
+  local local_ref local_sha _remote_ref remote_sha
   # `read` returns nonzero on EOF-without-newline; accept partial final line so
   # callers that omit the trailing \n (common in tests and some shell shims)
   # still get processed. Reset per iteration so a partial final line at EOF
   # doesn't cause the loop body to re-run on stale values.
   while :; do
-    local_ref="" local_sha="" remote_ref="" remote_sha=""
-    IFS=' ' read -r local_ref local_sha remote_ref remote_sha
+    local_ref="" local_sha="" _remote_ref="" remote_sha=""
+    IFS=' ' read -r local_ref local_sha _remote_ref remote_sha
     local _read_rc=$?
     if [[ -z "$local_ref" ]]; then
       break

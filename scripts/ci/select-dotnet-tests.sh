@@ -231,6 +231,10 @@ load_changed_files() {
 # ---------------------------------------------------------------------------
 classify_path() {
   local p="$1"
+  if [[ "$p" != */* && "$p" == *.md ]]; then
+    printf 'docs' ; return
+  fi
+
   # Reject anything that could be shell-metacharacter-injected before we act.
   # The reason sanitizer will scrub the final string; classifier itself is
   # data-only.
@@ -259,7 +263,7 @@ classify_path() {
       printf 'mobile' ; return ;;
 
     # Documentation and markdown outside src/.
-    docs/*|*.md|LICENSE|LICENSE.md|.gitignore|.gitattributes|.editorconfig)
+    docs/*|LICENSE|.gitignore|.gitattributes|.editorconfig)
       printf 'docs' ; return ;;
 
     # Frontend.
@@ -345,12 +349,12 @@ finish() {
   # Build mig matrix JSON.
   local mig_json='{"include":[]}'
   if (( ${#mig_selected[@]} > 0 )); then
-    local items="" first=1 entry name label project context provider
+    local items="" first=1 entry name label project
     for name in "${mig_selected[@]}"; do
       for entry in "${ALL_MIG_ENTRIES[@]}"; do
         IFS='|' read -r ename elabel eproject econtext eprovider <<< "$entry"
         if [[ "$ename" == "$name" ]]; then
-          label="$elabel" ; project="$eproject" ; context="$econtext" ; provider="$eprovider"
+          label="$elabel" ; project="$eproject"
           if (( first == 0 )); then items+=","; fi
           first=0
           items+='{"name":"'"$ename"'","label":"'"$elabel"'","project":"'"$eproject"'","context":"'"$econtext"'","provider":"'"$eprovider"'"}'
