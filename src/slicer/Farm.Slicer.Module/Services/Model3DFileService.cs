@@ -415,6 +415,86 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         return UploadModelCoreAsync(modelFile, thumbnailFile, userId, clientUploadId, ct);
     }
 
+    /// <inheritdoc />
+    public async Task<Model3DThumbnailUpdateResultDto> ReplaceThumbnailAsync(
+        Guid modelId,
+        IFormFile thumbnailFile,
+        Guid? userId,
+        bool isAdmin,
+        string? ifMatch,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(thumbnailFile);
+
+        Model3D model = await _model3dFiles.GetByIdAsync(modelId, ct)
+            ?? throw new KeyNotFoundException("Model not found");
+
+        if (!isAdmin && (!userId.HasValue || model.UploadedByUserId != userId))
+        {
+            throw new UnauthorizedAccessException("Only the model owner or an administrator can replace its thumbnail");
+        }
+
+        string currentETag = CreateETag(model);
+        if (!MatchesIfMatch(ifMatch, currentETag))
+        {
+            throw new DbUpdateConcurrencyException("The model was modified after the supplied ETag was issued");
+        }
+
+        string thumbnailBaseName = _fileOperations.GenerateThumbnailFileName(modelId, ".png");
+        string thumbnailFileName = $"{Path.GetFileNameWithoutExtension(thumbnailBaseName)}_{Guid.NewGuid():N}.png";
+        string thumbnailFinalPath = Path.Combine(_modelsPath, thumbnailFileName);
+        string thumbnailTempPath = $"{thumbnailFinalPath}.tmp";
+        string? previousThumbnailFileName = model.ThumbnailFileName;
+        string? previousThumbnailPath = previousThumbnailFileName is null
+            ? null
+            : Path.Combine(_modelsPath, previousThumbnailFileName);
+        DateTime previousUpdatedAt = model.UpdatedAt;
+
+        if (!_fileManagementService.IsSafePath(thumbnailFinalPath, _modelsPath)
+            || !_fileManagementService.IsSafePath(thumbnailTempPath, _modelsPath)
+            || (previousThumbnailPath is not null
+                && !_fileManagementService.IsSafePath(previousThumbnailPath, _modelsPath)))
+        {
+            throw new InvalidOperationException("Unsafe thumbnail storage path generated");
+        }
+
+        try
+        {
+            await StageAndValidateClientThumbnailAsync(thumbnailFile, thumbnailTempPath, ct);
+            MoveStagedFile(thumbnailTempPath, thumbnailFinalPath, "thumbnail");
+            model.ThumbnailFileName = thumbnailFileName;
+            DateTime now = DateTime.UtcNow;
+            model.UpdatedAt = now > previousUpdatedAt ? now : previousUpdatedAt.AddMilliseconds(1);
+            await _model3dFiles.UpdateAsync(model, ct);
+            await _model3dFiles.SaveChangesAsync(ct);
+
+            if (previousThumbnailPath is not null
+                && !string.Equals(previousThumbnailPath, thumbnailFinalPath, StringComparison.OrdinalIgnoreCase))
+            {
+                DeleteUploadArtifact(previousThumbnailPath);
+            }
+
+            return new Model3DThumbnailUpdateResultDto
+            {
+                Id = model.Id,
+                ThumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(model.Id),
+                ETag = CreateETag(model)
+            };
+        }
+        catch
+        {
+            model.ThumbnailFileName = previousThumbnailFileName;
+            model.UpdatedAt = previousUpdatedAt;
+            DeleteUploadArtifact(thumbnailFinalPath);
+
+            throw;
+        }
+        finally
+        {
+            DeleteUploadArtifact(thumbnailTempPath);
+        }
+    }
+
     private async Task<Model3DUploadResultDto> UploadModelCoreAsync(
         IFormFile modelFile,
         IFormFile? thumbnailFile,
@@ -757,8 +837,29 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 ? null
                 : _fileOperations.BuildModel3DThumbnailUrl(model.Id),
             WasExisting = wasExisting,
-            ClientUploadId = model.ClientUploadId
+            ClientUploadId = model.ClientUploadId,
+            ETag = CreateETag(model)
         };
+    }
+
+    private static string CreateETag(Model3D model)
+    {
+        byte[] token = model.RowVersion is { Length: > 0 }
+            ? model.RowVersion
+            : BitConverter.GetBytes(model.UpdatedAt.ToUniversalTime().Ticks);
+        return $"\"{Convert.ToHexString(token)}\"";
+    }
+
+    private static bool MatchesIfMatch(string? ifMatch, string currentETag)
+    {
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            return true;
+        }
+
+        return ifMatch
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(candidate => candidate == "*" || string.Equals(candidate, currentETag, StringComparison.Ordinal));
     }
 
     private async Task<string> StreamModelToTempAndHashAsync(
@@ -1104,6 +1205,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             SourceLicense = model.SourceLicense,
             SourceCreator = model.SourceCreator,
             ImportedAt = model.ImportedAt,
+            ETag = CreateETag(model)
         };
     }
 

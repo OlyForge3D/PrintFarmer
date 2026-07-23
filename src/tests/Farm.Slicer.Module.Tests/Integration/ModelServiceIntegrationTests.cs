@@ -538,6 +538,55 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReplaceThumbnailAsync_AfterOwnedUpload_PersistsReplacementAndChangesETag()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        IModel3DFileRepository repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
+        IStoragePathService storagePathService = scope.ServiceProvider.GetRequiredService<IStoragePathService>();
+        Guid userId = Guid.NewGuid();
+        using Image<Rgba32> initialImage = new(8, 8);
+        using MemoryStream initialStream = new();
+        initialImage.SaveAsPng(initialStream);
+        initialStream.Position = 0;
+        FormFile initialThumbnail = new(initialStream, 0, initialStream.Length, "thumbnailFile", "initial.png");
+        Model3DUploadResultDto uploaded = await service.UploadModelAsync(
+            CreateMockFormFile("replace-thumbnail.stl", "replacement-model"),
+            initialThumbnail,
+            userId,
+            clientUploadId: null,
+            CancellationToken.None);
+
+        using Image<Rgba32> replacementImage = new(16, 12);
+        using MemoryStream replacementStream = new();
+        replacementImage.SaveAsPng(replacementStream);
+        byte[] replacementBytes = replacementStream.ToArray();
+        replacementStream.Position = 0;
+        FormFile replacementThumbnail = new(
+            replacementStream,
+            0,
+            replacementStream.Length,
+            "thumbnailFile",
+            "replacement.png");
+
+        Model3DThumbnailUpdateResultDto replaced = await service.ReplaceThumbnailAsync(
+            uploaded.Id,
+            replacementThumbnail,
+            userId,
+            isAdmin: false,
+            uploaded.ETag,
+            CancellationToken.None);
+
+        Model3D model = (await repository.GetByIdAsync(uploaded.Id, CancellationToken.None))!;
+        replaced.ThumbnailUrl.Should().Be($"/api/3d-models/thumbnail/{uploaded.Id}");
+        replaced.ETag.Should().NotBe(uploaded.ETag);
+        File.ReadAllBytes(Path.Combine(
+                storagePathService.GetModelUploadDirectory(),
+                model.ThumbnailFileName!))
+            .Should().Equal(replacementBytes);
+    }
+
+    [Fact]
     public async Task UploadModelAsync_WithSTLFile_Succeeds()
     {
         // Arrange

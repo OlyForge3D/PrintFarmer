@@ -66,6 +66,7 @@ public class SystemCapabilitiesController(
             GcodeUploadEnabled = true,
             ClientThumbnailUploadEnabled = modelFilesEnabled,
             IdempotentModelUploadEnabled = modelFilesEnabled,
+            ModelThumbnailReplacementEnabled = modelFilesEnabled,
             PlatformNote = platformNote,
             OperatorFeatures = _operatorFeatureGate.GetEffectiveFlags(),
         };
