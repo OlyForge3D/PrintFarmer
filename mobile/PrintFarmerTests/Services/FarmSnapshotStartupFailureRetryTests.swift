@@ -193,4 +193,192 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(failing.prepareCallCount, 2,
                                     "retry must re-invoke prepareStartup at least once more")
     }
+
+    // MARK: - D3: switch-before-retry — retry pinned to failed server (ServiceContainer)
+
+    /// D (issue #816 reject): after a preparationFailed, if the user switches the
+    /// active server BEFORE retry, the retry MUST NOT bind the current different
+    /// server. Retry is pinned to the failed server/generation and returns
+    /// `.notApplicable` when either mismatches.
+    func testRetryPinnedToFailedServerRefusesToBindCurrentDifferentServer() async throws {
+        let reg = ServerRegistry(
+            userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!,
+            migrateLegacyServerURL: false)
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let b = try reg.add(displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        try reg.setActive(id: a.id)
+
+        let userA = UUID()
+        let userB = UUID()
+        let owners = FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: trackedSuiteName("own"))!)
+        owners.setOwner(userID: userA, serverID: a.id)
+        owners.setOwner(userID: userB, serverID: b.id)
+
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let root = newRoot()
+        let realStore = FarmSnapshotStore(authority: authority, rootURL: root)
+        let failing = FailingPrepareStore(inner: realStore)
+
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("auth"))!),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: failing,
+            farmSnapshotOwnerStore: owners)
+
+        let token = container.authOperationEpoch.advance()
+        let genAtFail = container.activeServerGeneration
+        let pinnedServerID = a.id
+
+        // 1) First attempt on A fails.
+        let first = await container.activateFarmSnapshotForActiveServer(authToken: token)
+        XCTAssertEqual(first, .preparationFailed)
+        XCTAssertNil(authority.currentSession())
+
+        // 2) User switches to B (arm success too so we can prove the block is
+        //    the pin, not the fault).
+        try reg.setActive(id: b.id)
+        await container.switchToServer(b)
+        failing.armSuccess()
+
+        // 3) Retry PINNED to A: must NOT bind B, even though B has an owner and
+        //    prep would now succeed.
+        let retry = await container.retryFarmSnapshotActivation(
+            authToken: token,
+            expectedServerID: pinnedServerID,
+            expectedGeneration: genAtFail)
+        XCTAssertEqual(retry, .notApplicable,
+                       "retry pinned to A MUST NOT bind current different server B")
+        let session = authority.currentSession()
+        XCTAssertNotEqual(session?.serverID, b.id,
+                          "pinned retry must never bind the switched-to server B")
+    }
+
+    // MARK: - D4: switch-before-retry — VM invalidates pending on server change
+
+    /// D (VM side): after a preparationFailed, if the user switches the active
+    /// server BEFORE retry, `retrySnapshotActivationIfPending()` MUST detect the
+    /// mismatch, drop the stale pending record, and NOT re-invoke activation. The
+    /// pending flag clears and the return is nil.
+    func testViewModelDropsStalePendingWhenServerSwitchesBeforeRetry() async throws {
+        let mockAPIClient = MockAPIClient()
+
+        let reg = ServerRegistry(
+            userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!,
+            migrateLegacyServerURL: false)
+        let a = try reg.add(
+            displayName: "A", baseURL: URL(string: "https://print.example.com")!,
+            makeActiveIfNeeded: true)
+        let b = try reg.add(
+            displayName: "B", baseURL: URL(string: "https://b.example.com")!)
+        try reg.setActive(id: a.id)
+
+        let owners = FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: trackedSuiteName("own"))!)
+
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let root = newRoot()
+        let realStore = FarmSnapshotStore(authority: authority, rootURL: root)
+        let failing = FailingPrepareStore(inner: realStore)
+
+        let services = ServiceContainer(
+            serverRegistry: reg,
+            userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("auth"))!),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: failing,
+            farmSnapshotOwnerStore: owners)
+        services.authService = AuthService(
+            apiClient: mockAPIClient.apiClient,
+            userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("authsvc"))!),
+            migrateLegacyServerURL: false,
+            serverRegistry: reg,
+            snapshotOwnerStore: owners,
+            authEpoch: services.authOperationEpoch)
+        let vm = AuthViewModel(services: services)
+
+        mockAPIClient.stubResponses(["/api/auth/login": (200, TestJSON.authResponseSuccess)])
+        await vm.login(serverURL: "https://print.example.com", username: "admin", password: "pw")
+        XCTAssertTrue(vm.isAuthenticated)
+        XCTAssertTrue(vm.snapshotActivationPending, "activation failed → pending")
+
+        // Switch to B, arm success (so the pin is the block, not the fault).
+        try reg.setActive(id: b.id)
+        await services.switchToServer(b)
+        failing.armSuccess()
+
+        let outcome = await vm.retrySnapshotActivationIfPending()
+        XCTAssertNil(outcome,
+                     "server changed since fail → retry MUST return nil, not bind different server")
+        XCTAssertFalse(vm.snapshotActivationPending,
+                       "stale pending record MUST be dropped on server change")
+        let session = authority.currentSession()
+        XCTAssertNotEqual(session?.serverID, b.id,
+                          "stale-retry MUST NOT publish a session for the switched-to server B")
+    }
+
+    // MARK: - D5: root gate — VM state drives the visible-gate branch
+
+    /// D (UI-gate): the state transitions the RootView switches on are:
+    /// `isAuthenticated && snapshotActivationPending == true` → pending gate;
+    /// `isAuthenticated && !snapshotActivationPending` → ContentView. This test
+    /// asserts those transitions deterministically at the VM layer so the pure
+    /// if/else in RootView cannot silently drop back to a `isAuthenticated`-only
+    /// gate. When the retry succeeds the pending flag clears — the UI will
+    /// re-render into the ContentView branch.
+    func testViewModelPendingFlagGovernsRootGateTransitions() async throws {
+        let mockAPIClient = MockAPIClient()
+
+        let reg = ServerRegistry(
+            userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!,
+            migrateLegacyServerURL: false)
+        let a = try reg.add(
+            displayName: "A", baseURL: URL(string: "https://print.example.com")!,
+            makeActiveIfNeeded: true)
+        try reg.setActive(id: a.id)
+
+        let owners = FarmSnapshotOwnerStore(userDefaults: UserDefaults(suiteName: trackedSuiteName("own"))!)
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let root = newRoot()
+        let realStore = FarmSnapshotStore(authority: authority, rootURL: root)
+        let failing = FailingPrepareStore(inner: realStore)
+
+        let services = ServiceContainer(
+            serverRegistry: reg,
+            userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("auth"))!),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: failing,
+            farmSnapshotOwnerStore: owners)
+        services.authService = AuthService(
+            apiClient: mockAPIClient.apiClient,
+            userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("authsvc"))!),
+            migrateLegacyServerURL: false,
+            serverRegistry: reg,
+            snapshotOwnerStore: owners,
+            authEpoch: services.authOperationEpoch)
+        let vm = AuthViewModel(services: services)
+
+        // Baseline: unauthenticated → neither branch would render the pending gate.
+        XCTAssertFalse(vm.isAuthenticated)
+        XCTAssertFalse(vm.snapshotActivationPending)
+
+        mockAPIClient.stubResponses(["/api/auth/login": (200, TestJSON.authResponseSuccess)])
+        await vm.login(serverURL: "https://print.example.com", username: "admin", password: "pw")
+
+        // Authenticated + pending → the visible retry gate branch fires.
+        XCTAssertTrue(vm.isAuthenticated)
+        XCTAssertTrue(vm.snapshotActivationPending,
+                      "root gate MUST render the pending-retry view (not ContentView) when true")
+
+        // Retry succeeds → pending clears → root gate falls through to ContentView.
+        failing.armSuccess()
+        let outcome = await vm.retrySnapshotActivationIfPending()
+        XCTAssertEqual(outcome, .activated)
+        XCTAssertFalse(vm.snapshotActivationPending,
+                       "root gate MUST return to ContentView once pending clears")
+    }
 }
