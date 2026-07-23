@@ -4219,9 +4219,9 @@ final class PredictiveViewModelTests: XCTestCase {
             ]
         )
         mockPredictiveService.forecastsToReturn = [forecast]
-        
+
         await viewModel.loadForecasts(printerId: testPrinterId)
-        
+
         XCTAssertEqual(viewModel.forecasts.count, 1)
         XCTAssertEqual(viewModel.forecasts.first?.printerId, testPrinterId)
         XCTAssertEqual(viewModel.forecasts.first?.upcomingTasks.count, 1)
@@ -4231,7 +4231,7 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWith, 30)
         XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWithPrinterId, testPrinterId)
     }
-    
+
     func testLoadForecastsHandlesError() async {
         viewModel.forecasts = [
             MaintenanceForecast(
@@ -4242,9 +4242,9 @@ final class PredictiveViewModelTests: XCTestCase {
         ]
         viewModel.error = "prior-predictive-forecasts-error-sentinel"
         mockPredictiveService.errorToThrow = TestError.generic
-        
+
         await viewModel.loadForecasts(printerId: testPrinterId)
-        
+
         // loadForecasts() is a secondary load: it logs via `logger.warning`
         // and preserves prior forecasts without surfacing `viewModel.error`.
         // Seeding a nonnil sentinel proves the secondary path preserves both
@@ -4256,9 +4256,9 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.error, "prior-predictive-forecasts-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
-    
+
     // MARK: - Computed Properties
-    
+
     func testRiskPercentageConvertsTo0To100Scale() {
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
@@ -4269,7 +4269,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         XCTAssertEqual(viewModel.riskPercentage, 0)
-        
+
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: nil,
@@ -4279,7 +4279,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         XCTAssertEqual(viewModel.riskPercentage, 25)
-        
+
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: nil,
@@ -4289,7 +4289,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         XCTAssertEqual(viewModel.riskPercentage, 50)
-        
+
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: nil,
@@ -4299,7 +4299,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         XCTAssertEqual(viewModel.riskPercentage, 75)
-        
+
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: nil,
@@ -4310,13 +4310,13 @@ final class PredictiveViewModelTests: XCTestCase {
         )
         XCTAssertEqual(viewModel.riskPercentage, 100)
     }
-    
+
     func testRiskPercentageReturnsZeroWhenNoPrediction() {
         viewModel.prediction = nil
-        
+
         XCTAssertEqual(viewModel.riskPercentage, 0)
     }
-    
+
     func testRiskLevelReturnsCorrectLevel() {
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
@@ -4327,7 +4327,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         XCTAssertEqual(viewModel.riskLevel, "Low")
-        
+
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: nil,
@@ -4337,7 +4337,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         XCTAssertEqual(viewModel.riskLevel, "Moderate")
-        
+
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: nil,
@@ -4347,7 +4347,7 @@ final class PredictiveViewModelTests: XCTestCase {
             factors: []
         )
         XCTAssertEqual(viewModel.riskLevel, "High")
-        
+
         viewModel.prediction = JobFailurePrediction(
             printerId: testPrinterId,
             material: nil,
@@ -4358,7 +4358,7 @@ final class PredictiveViewModelTests: XCTestCase {
         )
         XCTAssertEqual(viewModel.riskLevel, "Critical")
     }
-    
+
     func testRiskLevelReturnsUnavailableWhenNoPrediction() {
         // Regression guard for #808: nil prediction must NOT map to "Low",
         // which is what allowed transport/decode failures to render as a
@@ -4367,32 +4367,32 @@ final class PredictiveViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.riskLevel, "Unavailable")
     }
-    
+
     // MARK: - Unconfigured Guard
-    
+
     func testPredictFailureDoesNothingWhenUnconfigured() async {
         viewModel = PredictiveViewModel()
-        
+
         await viewModel.predictFailure(printerId: testPrinterId, material: "PLA", duration: 3600)
-        
+
         XCTAssertNil(viewModel.prediction)
         XCTAssertNil(mockPredictiveService.predictJobFailureCalledWith)
     }
-    
+
     func testLoadAlertsDoesNothingWhenUnconfigured() async {
         viewModel = PredictiveViewModel()
-        
+
         await viewModel.loadAlerts(printerId: testPrinterId)
-        
+
         XCTAssertTrue(viewModel.alerts.isEmpty)
         XCTAssertFalse(mockPredictiveService.getActiveAlertsCalled)
     }
-    
+
     func testLoadForecastsDoesNothingWhenUnconfigured() async {
         viewModel = PredictiveViewModel()
-        
+
         await viewModel.loadForecasts(printerId: testPrinterId)
-        
+
         XCTAssertTrue(viewModel.forecasts.isEmpty)
         XCTAssertNil(mockPredictiveService.getMaintenanceForecastCalledWith)
     }
