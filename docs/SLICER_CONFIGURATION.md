@@ -259,6 +259,13 @@ default 5/minute) to resist brute-force and enumeration attempts, and every exch
 (success or failure) is recorded in the authentication audit log. The raw API key, its hash, and
 the issued JWT are never written to logs or audit records.
 
+"Client IP" is `HttpContext.Connection.RemoteIpAddress`. When PrintFarmer runs behind a reverse
+proxy (nginx, Traefik, IIS, etc.) you must enable and configure `ForwardedHeaders` so the framework
+rewrites the connection address from `X-Forwarded-For` — otherwise the rate-limit key will be the
+proxy address (or `unknown`) and every request will collide in the same bucket. `X-Forwarded-For`
+sent directly by an untrusted caller is ignored (see [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) for the
+`ForwardedHeaders` configuration surface).
+
 ### Token Claims and Lifetime
 
 The issued token is a normal JWT signed with the same `Jwt:Key`/`Jwt:Issuer`/`Jwt:Audience`
