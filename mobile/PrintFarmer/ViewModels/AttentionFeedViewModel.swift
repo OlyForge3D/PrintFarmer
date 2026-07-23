@@ -90,17 +90,21 @@ struct AttentionPaginationFailure: Equatable, Identifiable, Sendable {
 
 struct AttentionActionFailure: Equatable, Identifiable, Sendable {
     let id: UUID
-    let itemID: String
+    let fingerprint: AttentionOccurrenceFingerprint
     let action: AttentionAction
     let snoozedUntilUtc: Date?
     let message: String
+
+    var itemID: String { fingerprint.itemID }
 }
 
 struct AttentionActionRefreshPending: Equatable, Identifiable, Sendable {
     let id: UUID
-    let itemID: String
+    let fingerprint: AttentionOccurrenceFingerprint
     let action: AttentionAction
     let message: String?
+
+    var itemID: String { fingerprint.itemID }
 }
 
 enum AttentionItemActionState: Equatable, Sendable {
@@ -117,7 +121,7 @@ enum AttentionMediaState: Equatable, Sendable {
     case unavailable(String)
 }
 
-struct AttentionMediaFingerprint: Hashable, Sendable {
+struct AttentionOccurrenceFingerprint: Hashable, Sendable {
     let itemID: String
     let printerID: UUID
     let occurredAt: Date
@@ -133,6 +137,8 @@ struct AttentionMediaFingerprint: Hashable, Sendable {
     }
 }
 
+typealias AttentionMediaFingerprint = AttentionOccurrenceFingerprint
+
 struct AttentionMediaRequestID: Hashable, Sendable {
     let fingerprint: AttentionMediaFingerprint?
     let generation: UInt64
@@ -142,13 +148,15 @@ struct AttentionMediaRequestID: Hashable, Sendable {
 
 private struct AttentionMutationRefreshRequirement {
     let id: UUID
-    let itemID: String
+    let fingerprint: AttentionOccurrenceFingerprint
     let action: AttentionAction
     let snoozedUntilUtc: Date?
     let requiredAfterRefreshOrdinal: UInt64
     var requiredEventSequence: UInt64
     var awaitingPaginationRefreshOrdinal: UInt64?
     var message: String?
+
+    var itemID: String { fingerprint.itemID }
 }
 
 /// Opaque token issued by the view model to a caller that intends to
@@ -277,7 +285,8 @@ final class AttentionFeedViewModel {
 
     /// Item-scoped mutation state. A request for one item never disables
     /// actions or recovery on another item.
-    private(set) var actionStates: [String: AttentionItemActionState] = [:]
+    private(set) var actionStates:
+        [AttentionOccurrenceFingerprint: AttentionItemActionState] = [:]
 
     /// Failure snapshot state keyed by Attention item identity.
     private(set) var mediaStates: [AttentionMediaFingerprint: AttentionMediaState] = [:]
@@ -297,10 +306,12 @@ final class AttentionFeedViewModel {
     @ObservationIgnored private var printerServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var signalRIdentity: ObjectIdentifier?
     @ObservationIgnored private var actionGeneration: UInt64 = 0
-    @ObservationIgnored private var actionOperationTokens: [String: UUID] = [:]
-    @ObservationIgnored private var deferredMutationInvalidationSequences: [String: UInt64] = [:]
+    @ObservationIgnored private var actionOperationTokens:
+        [AttentionOccurrenceFingerprint: UUID] = [:]
+    @ObservationIgnored private var deferredMutationInvalidationSequences:
+        [AttentionOccurrenceFingerprint: UInt64] = [:]
     @ObservationIgnored private var mutationRefreshRequirements:
-        [String: AttentionMutationRefreshRequirement] = [:]
+        [AttentionOccurrenceFingerprint: AttentionMutationRefreshRequirement] = [:]
     @ObservationIgnored private var refreshRequestOrdinal: UInt64 = 0
     @ObservationIgnored private var currentSnapshotRefreshOrdinal: UInt64?
     @ObservationIgnored private var currentSnapshotCoverSequence: UInt64?
@@ -552,21 +563,25 @@ final class AttentionFeedViewModel {
             eventSeq
         )
 
-        if actionOperationTokens[itemID] != nil {
-            deferredMutationInvalidationSequences[itemID] = max(
-                deferredMutationInvalidationSequences[itemID] ?? 0,
+        if let fingerprint = actionOperationTokens.keys.first(where: {
+            $0.itemID == itemID
+        }) {
+            deferredMutationInvalidationSequences[fingerprint] = max(
+                deferredMutationInvalidationSequences[fingerprint] ?? 0,
                 eventSeq
             )
             return
         }
 
-        if var requirement = mutationRefreshRequirements[itemID] {
+        if let fingerprint = mutationRefreshRequirements.keys.first(where: {
+            $0.itemID == itemID
+        }), var requirement = mutationRefreshRequirements[fingerprint] {
             requirement.requiredEventSequence = max(
                 requirement.requiredEventSequence,
                 eventSeq
             )
             requirement.awaitingPaginationRefreshOrdinal = nil
-            mutationRefreshRequirements[itemID] = requirement
+            mutationRefreshRequirements[fingerprint] = requirement
             publishMutationRefreshState(requirement)
 
             if requirement.message == nil,
@@ -1149,12 +1164,21 @@ final class AttentionFeedViewModel {
     }
 
     func actionState(for itemID: String) -> AttentionItemActionState {
-        actionStates[itemID] ?? .idle
+        if let item = liveItem(id: itemID) {
+            return actionStates[AttentionOccurrenceFingerprint(item: item)]
+                ?? .idle
+        }
+        return actionStates.first(where: { $0.key.itemID == itemID })?.value
+            ?? .idle
     }
 
     @discardableResult
-    func performAction(_ action: AttentionAction, for itemID: String) async -> Bool {
-        guard let item = liveItem(id: itemID),
+    func performAction(
+        _ action: AttentionAction,
+        for fingerprint: AttentionOccurrenceFingerprint
+    ) async -> Bool {
+        guard let item = liveItem(id: fingerprint.itemID),
+              AttentionOccurrenceFingerprint(item: item) == fingerprint,
               let currentAction = Self.supportedActions(in: item)
                 .first(where: { $0.kind == action.kind }) else {
             return false
@@ -1165,7 +1189,7 @@ final class AttentionFeedViewModel {
             : nil
         return await performActionRequest(
             currentAction,
-            itemID: itemID,
+            fingerprint: fingerprint,
             snoozedUntilUtc: snoozedUntilUtc
         )
     }
@@ -1182,16 +1206,21 @@ final class AttentionFeedViewModel {
         guard let item = liveItem(id: failure.itemID) else {
             return false
         }
+        let currentFingerprint = AttentionOccurrenceFingerprint(item: item)
+        guard currentFingerprint == failure.fingerprint else {
+            revokeActionAuthority(for: failure.fingerprint)
+            return false
+        }
         guard Self.supportedActions(in: item).contains(where: {
             $0.kind == failure.action.kind
         }) else {
-            actionStates[failure.itemID] = nil
+            actionStates[failure.fingerprint] = nil
             return false
         }
 
         return await performActionRequest(
             failure.action,
-            itemID: failure.itemID,
+            fingerprint: failure.fingerprint,
             snoozedUntilUtc: failure.snoozedUntilUtc,
             isRetry: true
         )
@@ -1207,7 +1236,7 @@ final class AttentionFeedViewModel {
 
         requirement.message = nil
         requirement.awaitingPaginationRefreshOrdinal = nil
-        mutationRefreshRequirements[requirement.itemID] = requirement
+        mutationRefreshRequirements[requirement.fingerprint] = requirement
         publishMutationRefreshState(requirement)
         return await refresh()
     }
@@ -1215,14 +1244,15 @@ final class AttentionFeedViewModel {
     @discardableResult
     private func performActionRequest(
         _ action: AttentionAction,
-        itemID: String,
+        fingerprint: AttentionOccurrenceFingerprint,
         snoozedUntilUtc: Date?,
         isRetry: Bool = false
     ) async -> Bool {
+        let itemID = fingerprint.itemID
         guard isActive, attentionEnabled, let service = attentionService else {
             return false
         }
-        switch actionState(for: itemID) {
+        switch actionStates[fingerprint] ?? .idle {
         case .inProgress, .refreshPending:
             return false
         case .failed(let failure)
@@ -1235,8 +1265,8 @@ final class AttentionFeedViewModel {
         let token = UUID()
         let capturedActionGeneration = actionGeneration
         let capturedAuthority = authorityEpoch
-        actionOperationTokens[itemID] = token
-        actionStates[itemID] = .inProgress(action.kind)
+        actionOperationTokens[fingerprint] = token
+        actionStates[fingerprint] = .inProgress(action.kind)
 
         do {
             if action.kind == .snooze {
@@ -1255,7 +1285,7 @@ final class AttentionFeedViewModel {
             }
 
             guard matchesActionOperation(
-                itemID: itemID,
+                fingerprint: fingerprint,
                 token: token,
                 generation: capturedActionGeneration,
                 authority: capturedAuthority
@@ -1266,27 +1296,27 @@ final class AttentionFeedViewModel {
             let pendingID = UUID()
             let requirement = AttentionMutationRefreshRequirement(
                 id: pendingID,
-                itemID: itemID,
+                fingerprint: fingerprint,
                 action: action,
                 snoozedUntilUtc: snoozedUntilUtc,
                 requiredAfterRefreshOrdinal: refreshRequestOrdinal,
                 requiredEventSequence: max(
-                    deferredMutationInvalidationSequences[itemID] ?? 0,
+                    deferredMutationInvalidationSequences[fingerprint] ?? 0,
                     itemEventSequenceBox.currentValue(for: itemID)
                 ),
                 awaitingPaginationRefreshOrdinal: nil,
                 message: nil
             )
-            actionOperationTokens[itemID] = nil
-            deferredMutationInvalidationSequences[itemID] = nil
-            mutationRefreshRequirements[itemID] = requirement
+            actionOperationTokens[fingerprint] = nil
+            deferredMutationInvalidationSequences[fingerprint] = nil
+            mutationRefreshRequirements[fingerprint] = requirement
             publishMutationRefreshState(requirement)
 
             _ = await refresh()
             return true
         } catch {
             guard matchesActionOperation(
-                itemID: itemID,
+                fingerprint: fingerprint,
                 token: token,
                 generation: capturedActionGeneration,
                 authority: capturedAuthority
@@ -1294,26 +1324,35 @@ final class AttentionFeedViewModel {
                 return false
             }
 
-            actionOperationTokens[itemID] = nil
+            actionOperationTokens[fingerprint] = nil
             if Self.isCancellation(error) {
-                actionStates[itemID] = liveItem(id: itemID) == nil ? nil : .idle
+                actionStates[fingerprint] =
+                    liveItem(id: itemID) == nil ? nil : .idle
             } else {
                 let message = (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
                 let failure = AttentionActionFailure(
                     id: UUID(),
-                    itemID: itemID,
+                    fingerprint: fingerprint,
                     action: action,
                     snoozedUntilUtc: snoozedUntilUtc,
                     message: message
                 )
                 if let item = liveItem(id: itemID) {
-                    actionStates[itemID] = Self.supportedActions(in: item)
-                        .contains(where: { $0.kind == action.kind })
-                        ? .failed(failure)
-                        : .idle
+                    let currentFingerprint = AttentionOccurrenceFingerprint(
+                        item: item
+                    )
+                    if currentFingerprint != fingerprint {
+                        revokeActionAuthority(for: fingerprint)
+                    } else {
+                        actionStates[fingerprint] =
+                            Self.supportedActions(in: item)
+                                .contains(where: { $0.kind == action.kind })
+                            ? .failed(failure)
+                            : .idle
+                    }
                 } else {
-                    actionStates[itemID] = .failed(failure)
+                    actionStates[fingerprint] = .failed(failure)
                 }
             }
             if actionOperationTokens.isEmpty,
@@ -1614,8 +1653,17 @@ final class AttentionFeedViewModel {
         snapshot?.items.first(where: { $0.id == id })
     }
 
+    private func revokeActionAuthority(
+        for fingerprint: AttentionOccurrenceFingerprint
+    ) {
+        actionOperationTokens[fingerprint] = nil
+        actionStates[fingerprint] = nil
+        deferredMutationInvalidationSequences[fingerprint] = nil
+        mutationRefreshRequirements[fingerprint] = nil
+    }
+
     private func matchesActionOperation(
-        itemID: String,
+        fingerprint: AttentionOccurrenceFingerprint,
         token: UUID,
         generation: UInt64,
         authority: UInt64
@@ -1623,7 +1671,10 @@ final class AttentionFeedViewModel {
         attentionEnabled
             && authorityEpoch == authority
             && actionGeneration == generation
-            && actionOperationTokens[itemID] == token
+            && actionOperationTokens[fingerprint] == token
+            && liveItem(id: fingerprint.itemID).map {
+                AttentionOccurrenceFingerprint(item: $0)
+            }.map { $0 == fingerprint } != false
     }
 
     private func isPendingCoverageDeferredToMutation(_ pending: UInt64) -> Bool {
@@ -1658,20 +1709,26 @@ final class AttentionFeedViewModel {
     private func publishMutationRefreshState(
         _ requirement: AttentionMutationRefreshRequirement
     ) {
-        actionStates[requirement.itemID] = .refreshPending(
+        actionStates[requirement.fingerprint] = .refreshPending(
             AttentionActionRefreshPending(
                 id: requirement.id,
-                itemID: requirement.itemID,
+                fingerprint: requirement.fingerprint,
                 action: requirement.action,
                 message: requirement.message
             )
         )
     }
 
-    private func clearMutationRefreshRequirement(itemID: String) {
-        mutationRefreshRequirements[itemID] = nil
-        deferredMutationInvalidationSequences[itemID] = nil
-        actionStates[itemID] = liveItem(id: itemID) == nil ? nil : .idle
+    private func clearMutationRefreshRequirement(
+        fingerprint: AttentionOccurrenceFingerprint
+    ) {
+        mutationRefreshRequirements[fingerprint] = nil
+        deferredMutationInvalidationSequences[fingerprint] = nil
+        let currentFingerprint = liveItem(id: fingerprint.itemID).map(
+            AttentionOccurrenceFingerprint.init
+        )
+        actionStates[fingerprint] =
+            currentFingerprint == fingerprint ? .idle : nil
     }
 
     private func reconcileMutationRequirementsAfterCanonicalApply(
@@ -1680,31 +1737,32 @@ final class AttentionFeedViewModel {
     ) -> Bool {
         var needsFollowup = false
 
-        for itemID in Array(mutationRefreshRequirements.keys) {
-            guard var requirement = mutationRefreshRequirements[itemID],
+        for fingerprint in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[fingerprint],
                   refreshOrdinal > requirement.requiredAfterRefreshOrdinal else {
                 continue
             }
 
             requirement.requiredEventSequence = max(
                 requirement.requiredEventSequence,
-                itemEventSequenceBox.currentValue(for: itemID)
+                itemEventSequenceBox.currentValue(for: fingerprint.itemID)
             )
             requirement.message = nil
 
             guard coverSequence >= requirement.requiredEventSequence else {
                 requirement.awaitingPaginationRefreshOrdinal = nil
-                mutationRefreshRequirements[itemID] = requirement
+                mutationRefreshRequirements[fingerprint] = requirement
                 publishMutationRefreshState(requirement)
                 needsFollowup = true
                 continue
             }
 
-            if liveItem(id: itemID) != nil || snapshot?.nextCursor == nil {
-                clearMutationRefreshRequirement(itemID: itemID)
+            if liveItem(id: fingerprint.itemID) != nil
+                || snapshot?.nextCursor == nil {
+                clearMutationRefreshRequirement(fingerprint: fingerprint)
             } else {
                 requirement.awaitingPaginationRefreshOrdinal = refreshOrdinal
-                mutationRefreshRequirements[itemID] = requirement
+                mutationRefreshRequirements[fingerprint] = requirement
                 publishMutationRefreshState(requirement)
             }
         }
@@ -1719,18 +1777,18 @@ final class AttentionFeedViewModel {
         let message = (error as? LocalizedError)?.errorDescription
             ?? error.localizedDescription
 
-        for itemID in Array(mutationRefreshRequirements.keys) {
-            guard var requirement = mutationRefreshRequirements[itemID],
+        for fingerprint in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[fingerprint],
                   refreshOrdinal > requirement.requiredAfterRefreshOrdinal else {
                 continue
             }
             requirement.requiredEventSequence = max(
                 requirement.requiredEventSequence,
-                itemEventSequenceBox.currentValue(for: itemID)
+                itemEventSequenceBox.currentValue(for: fingerprint.itemID)
             )
             requirement.awaitingPaginationRefreshOrdinal = nil
             requirement.message = message
-            mutationRefreshRequirements[itemID] = requirement
+            mutationRefreshRequirements[fingerprint] = requirement
             publishMutationRefreshState(requirement)
         }
     }
@@ -1742,26 +1800,27 @@ final class AttentionFeedViewModel {
         }
 
         var needsFollowup = false
-        for itemID in Array(mutationRefreshRequirements.keys) {
-            guard var requirement = mutationRefreshRequirements[itemID],
+        for fingerprint in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[fingerprint],
                   requirement.awaitingPaginationRefreshOrdinal == refreshOrdinal else {
                 continue
             }
 
             requirement.requiredEventSequence = max(
                 requirement.requiredEventSequence,
-                itemEventSequenceBox.currentValue(for: itemID)
+                itemEventSequenceBox.currentValue(for: fingerprint.itemID)
             )
             guard coverSequence >= requirement.requiredEventSequence else {
                 requirement.awaitingPaginationRefreshOrdinal = nil
-                mutationRefreshRequirements[itemID] = requirement
+                mutationRefreshRequirements[fingerprint] = requirement
                 publishMutationRefreshState(requirement)
                 needsFollowup = true
                 continue
             }
 
-            if liveItem(id: itemID) != nil || snapshot?.nextCursor == nil {
-                clearMutationRefreshRequirement(itemID: itemID)
+            if liveItem(id: fingerprint.itemID) != nil
+                || snapshot?.nextCursor == nil {
+                clearMutationRefreshRequirement(fingerprint: fingerprint)
             }
         }
         return needsFollowup
@@ -1784,13 +1843,30 @@ final class AttentionFeedViewModel {
         hasMorePages: Bool,
         replaceMedia: Bool
     ) {
-        let liveIDs = Set(items.map(\.id))
-        let liveItemsByID = Dictionary(
-            uniqueKeysWithValues: items.map { ($0.id, $0) }
+        let liveFingerprintsByID = Dictionary(
+            uniqueKeysWithValues: items.map {
+                ($0.id, AttentionOccurrenceFingerprint(item: $0))
+            }
+        )
+        let liveItemsByFingerprint = Dictionary(
+            uniqueKeysWithValues: items.map {
+                (AttentionOccurrenceFingerprint(item: $0), $0)
+            }
         )
 
+        let ownedFingerprints = Set(actionStates.keys)
+            .union(actionOperationTokens.keys)
+            .union(mutationRefreshRequirements.keys)
+            .union(deferredMutationInvalidationSequences.keys)
+        for fingerprint in ownedFingerprints {
+            if let liveFingerprint = liveFingerprintsByID[fingerprint.itemID],
+               liveFingerprint != fingerprint {
+                revokeActionAuthority(for: fingerprint)
+            }
+        }
+
         actionStates = actionStates.filter { entry in
-            liveIDs.contains(entry.key)
+            liveItemsByFingerprint[entry.key] != nil
                 || actionOperationTokens[entry.key] != nil
                 || mutationRefreshRequirements[entry.key] != nil
                 || (hasMorePages && {
@@ -1799,15 +1875,15 @@ final class AttentionFeedViewModel {
                 }())
         }
 
-        for (itemID, state) in actionStates {
+        for (fingerprint, state) in actionStates {
             guard case .failed(let failure) = state,
-                  let item = liveItemsByID[itemID] else {
+                  let item = liveItemsByFingerprint[fingerprint] else {
                 continue
             }
             if !Self.supportedActions(in: item).contains(where: {
                 $0.kind == failure.action.kind
             }) {
-                actionStates[itemID] = nil
+                actionStates[fingerprint] = nil
             }
         }
 

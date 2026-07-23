@@ -7,10 +7,11 @@ import AppKit
 #endif
 
 struct AttentionPendingAction: Identifiable, Equatable {
-    let itemID: String
+    let fingerprint: AttentionOccurrenceFingerprint
     let action: AttentionAction
     let serverGeneration: Int
 
+    var itemID: String { fingerprint.itemID }
     var id: String { "\(itemID):\(action.kind.rawValue)" }
 }
 
@@ -469,7 +470,7 @@ struct AttentionView: View {
 
     private func handleActionTap(item: AttentionItem, action: AttentionAction) {
         let pending = AttentionPendingAction(
-            itemID: item.id,
+            fingerprint: AttentionOccurrenceFingerprint(item: item),
             action: action,
             serverGeneration: services.activeServerGeneration
         )
@@ -487,7 +488,7 @@ struct AttentionView: View {
             }
             await feedViewModel.performAction(
                 pending.action,
-                for: pending.itemID
+                for: pending.fingerprint
             )
         }
     }

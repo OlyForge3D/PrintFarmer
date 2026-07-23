@@ -957,6 +957,302 @@ final class AttentionInteractionTests: XCTestCase {
         XCTAssertEqual(snoozeCallCount, 2)
     }
 
+    func testSameIDNewOccurrenceClearsOldActionFailure() async throws {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let original = makeAttentionItem(
+            id: "failure:reused-failure",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            actions: [action],
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(60),
+            actions: [action],
+            jobID: jobA
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ],
+            actionSteps: [
+                .failure(.network("Old occurrence failed")),
+            ]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        let oldActionSucceeded = await vm.performAction(
+            action,
+            for: original.id
+        )
+        XCTAssertTrue(initialLoadSucceeded)
+        XCTAssertFalse(oldActionSucceeded)
+        let oldFailure = try actionFailure(vm.actionState(for: original.id))
+
+        let replacementLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementLoadSucceeded)
+        XCTAssertEqual(vm.actionState(for: replacement.id), .idle)
+        let oldRetryAccepted = await vm.retryAction(failureID: oldFailure.id)
+        XCTAssertFalse(oldRetryAccepted)
+        let actionCallCount = await service.actionCallCount
+        XCTAssertEqual(actionCallCount, 1)
+    }
+
+    func testDelayedTapCannotTargetSameIDReplacementOccurrence() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: true
+        )
+        let original = makeAttentionItem(
+            id: "failure:delayed-tap",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            actions: [action],
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(30),
+            actions: [action],
+            jobID: jobA
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+        let tappedFingerprint = AttentionOccurrenceFingerprint(item: original)
+
+        let replacementLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementLoadSucceeded)
+        let delayedTapAccepted = await vm.performAction(
+            action,
+            for: tappedFingerprint
+        )
+        XCTAssertFalse(delayedTapAccepted)
+        let actionCallCount = await service.actionCallCount
+        XCTAssertEqual(actionCallCount, 0)
+        XCTAssertEqual(vm.actionState(for: replacement.id), .idle)
+    }
+
+    func testSameIDNewOccurrenceClearsOldRefreshPendingAuthority() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let original = makeAttentionItem(
+            id: "failure:reused-refresh",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            actions: [action],
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(120),
+            actions: [action],
+            jobID: jobA
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .failure(.network("Old canonical refresh failed")),
+                .value(makeAttentionFeed(items: [replacement])),
+            ],
+            actionSteps: [
+                .value(AttentionActionResult(outcome: "Ok")),
+            ]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        let mutationSucceeded = await vm.performAction(
+            action,
+            for: original.id
+        )
+        XCTAssertTrue(initialLoadSucceeded)
+        XCTAssertTrue(mutationSucceeded)
+        guard case .refreshPending(let oldPending) = vm.actionState(
+            for: original.id
+        ) else {
+            return XCTFail("Original occurrence must hold refresh authority")
+        }
+
+        let replacementLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementLoadSucceeded)
+        XCTAssertEqual(vm.actionState(for: replacement.id), .idle)
+        let oldRefreshRetryAccepted = await vm.retryActionRefresh(
+            pendingID: oldPending.id
+        )
+        XCTAssertFalse(oldRefreshRetryAccepted)
+        let actionCallCount = await service.actionCallCount
+        XCTAssertEqual(actionCallCount, 1)
+    }
+
+    func testLateOldActionSuccessCannotAffectSameIDNewOccurrence() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let original = makeAttentionItem(
+            id: "failure:reused-late-success",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            actions: [action],
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(180),
+            actions: [action],
+            jobID: jobA
+        )
+        let gate = AttentionResultGate<AttentionActionResult>()
+        defer { gate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ],
+            actionSteps: [.gated(gate)]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let oldAction = Task {
+            await vm.performAction(action, for: original.id)
+        }
+        await service.waitForActionCount(1)
+        let replacementLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementLoadSucceeded)
+        XCTAssertEqual(vm.actionState(for: replacement.id), .idle)
+
+        await gate.succeed(AttentionActionResult(outcome: "Ok"))
+        let oldActionSucceeded = await oldAction.value
+        XCTAssertFalse(oldActionSucceeded)
+        XCTAssertEqual(vm.actionState(for: replacement.id), .idle)
+        let actionCallCount = await service.actionCallCount
+        let loadCallCount = await service.loadCallCount
+        XCTAssertEqual(actionCallCount, 1)
+        XCTAssertEqual(loadCallCount, 2)
+    }
+
+    func testLateOldActionFailureCannotAttachToSameIDNewOccurrence() async {
+        let action = AttentionAction(
+            kind: .resume,
+            label: "Resume",
+            requiresConfirmation: false
+        )
+        let original = makeAttentionItem(
+            id: "failure:reused-late-failure",
+            printerID: printerA,
+            occurredAt: fixedNow,
+            actions: [action],
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(240),
+            actions: [action],
+            jobID: jobA
+        )
+        let gate = AttentionResultGate<AttentionActionResult>()
+        defer { gate.cancel() }
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ],
+            actionSteps: [.gated(gate)]
+        )
+        let vm = configuredViewModel(service: service)
+        let initialLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(initialLoadSucceeded)
+
+        let oldAction = Task {
+            await vm.performAction(action, for: original.id)
+        }
+        await service.waitForActionCount(1)
+        let replacementLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementLoadSucceeded)
+
+        await gate.fail(.network("Old occurrence failed late"))
+        let oldActionSucceeded = await oldAction.value
+        XCTAssertFalse(oldActionSucceeded)
+        XCTAssertEqual(vm.actionState(for: replacement.id), .idle)
+        let actionCallCount = await service.actionCallCount
+        XCTAssertEqual(actionCallCount, 1)
+    }
+
+    func testSameIDNewOccurrenceRejectsOldSnoozeRetryPayload() async throws {
+        let action = AttentionAction(
+            kind: .snooze,
+            label: "Snooze",
+            requiresConfirmation: false
+        )
+        let original = makeAttentionItem(
+            id: "runout:reused-snooze",
+            kind: .runout,
+            printerID: printerA,
+            occurredAt: fixedNow,
+            actions: [action],
+            jobID: jobA
+        )
+        let replacement = makeAttentionItem(
+            id: original.id,
+            kind: .runout,
+            printerID: printerA,
+            occurredAt: fixedNow.addingTimeInterval(300),
+            actions: [action],
+            jobID: jobA
+        )
+        let service = ScriptedAttentionService(
+            steps: [
+                .value(makeAttentionFeed(items: [original])),
+                .value(makeAttentionFeed(items: [replacement])),
+            ],
+            snoozeSteps: [
+                .failure(.network("Old snooze failed")),
+            ]
+        )
+        let vm = configuredViewModel(service: service, now: fixedNow)
+        let initialLoadSucceeded = await vm.refresh()
+        let oldSnoozeSucceeded = await vm.performAction(
+            action,
+            for: original.id
+        )
+        XCTAssertTrue(initialLoadSucceeded)
+        XCTAssertFalse(oldSnoozeSucceeded)
+        let oldFailure = try actionFailure(vm.actionState(for: original.id))
+        let oldDeadline = try XCTUnwrap(oldFailure.snoozedUntilUtc)
+
+        let replacementLoadSucceeded = await vm.refresh()
+        XCTAssertTrue(replacementLoadSucceeded)
+        XCTAssertEqual(vm.actionState(for: replacement.id), .idle)
+        let oldRetryAccepted = await vm.retryAction(failureID: oldFailure.id)
+        XCTAssertFalse(oldRetryAccepted)
+        let snoozeCalls = await service.snoozeCalls
+        XCTAssertEqual(snoozeCalls.map(\.snoozedUntilUtc), [oldDeadline])
+    }
+
     func testActionFailureIsItemScopedAndRetryRefreshesOnce() async throws {
         let action = AttentionAction(
             kind: .acknowledge,
@@ -1587,14 +1883,14 @@ final class AttentionInteractionTests: XCTestCase {
         )
         let failure = AttentionActionFailure(
             id: UUID(),
-            itemID: item.id,
+            fingerprint: AttentionOccurrenceFingerprint(item: item),
             action: resume,
             snoozedUntilUtc: nil,
             message: "Printer refused the command"
         )
         let refreshPending = AttentionActionRefreshPending(
             id: UUID(),
-            itemID: item.id,
+            fingerprint: AttentionOccurrenceFingerprint(item: item),
             action: resume,
             message: "Canonical refresh failed"
         )
@@ -1868,5 +2164,20 @@ final class AttentionInteractionTests: XCTestCase {
             try await source.load(printerID: printerID)
         }
         return service
+    }
+}
+
+private extension AttentionFeedViewModel {
+    func performAction(
+        _ action: AttentionAction,
+        for itemID: String
+    ) async -> Bool {
+        guard let item = snapshot?.items.first(where: { $0.id == itemID }) else {
+            return false
+        }
+        return await performAction(
+            action,
+            for: AttentionOccurrenceFingerprint(item: item)
+        )
     }
 }
