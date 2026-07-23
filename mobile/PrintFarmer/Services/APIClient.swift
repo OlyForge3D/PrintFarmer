@@ -526,8 +526,10 @@ actor APIClient {
     /// Post a session-expiry event carrying the originating auth-session identity
     /// `{serverGeneration, authSessionToken}` (A). SUPPRESSED for unauthenticated /
     /// login clients (nil generation or no captured auth session), which must never be
-    /// able to log out an authenticated session.
-    private func postSessionExpired() {
+    /// able to log out an authenticated session. `authSessionToken` is the token the
+    /// FAILING REQUEST was issued under (captured before the network await), never a
+    /// later-applied session's token.
+    private func postSessionExpired(authSessionToken: Int?) {
         guard let generationAtCreation, let authSessionToken else { return }
         NotificationCenter.default.post(
             name: .sessionExpired,
@@ -583,9 +585,10 @@ actor APIClient {
     func getData(_ path: String) async throws -> Data {
         try await checkTokenExpiry()
         let request = try buildRequest(path: path, method: "GET")
+        let requestAuthToken = authSessionToken // A: capture before the network await
         let (data, response) = try await performRequest(request)
         try validateActiveServerGeneration()
-        try validateResponse(response, data: data)
+        try validateResponse(response, data: data, authSessionToken: requestAuthToken)
         return data
     }
 
@@ -690,9 +693,13 @@ actor APIClient {
 
     private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
         try await checkTokenExpiry()
+        // A: capture the auth-session token the request is issued under, BEFORE the
+        // network await, so a concurrent same-server re-login applied during the await
+        // cannot make a 401 for THIS request carry the newer session's token.
+        let requestAuthToken = authSessionToken
         let (data, response) = try await performRequest(request)
         try validateActiveServerGeneration()
-        try validateResponse(response, data: data)
+        try validateResponse(response, data: data, authSessionToken: requestAuthToken)
         
         // Handle empty response body for Optional types (e.g., 204 No Content, 200 with empty body)
         if data.isEmpty {
@@ -729,15 +736,16 @@ actor APIClient {
 
     private func executeVoid(_ request: URLRequest) async throws {
         try await checkTokenExpiry()
+        let requestAuthToken = authSessionToken // A: capture before the network await
         let (data, response) = try await performRequest(request)
         try validateActiveServerGeneration()
-        try validateResponse(response, data: data)
+        try validateResponse(response, data: data, authSessionToken: requestAuthToken)
     }
 
     private func checkTokenExpiry() async throws {
         try validateActiveServerGeneration()
         if let checker = tokenExpiryChecker, await checker() {
-            postSessionExpired()
+            postSessionExpired(authSessionToken: authSessionToken)
             throw NetworkError.unauthorized
         }
     }
@@ -777,7 +785,7 @@ actor APIClient {
         }
     }
 
-    private func validateResponse(_ response: URLResponse, data: Data) throws {
+    private func validateResponse(_ response: URLResponse, data: Data, authSessionToken: Int?) throws {
         guard let http = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
@@ -785,7 +793,7 @@ actor APIClient {
         case 200...299:
             return
         case 401:
-            postSessionExpired()
+            postSessionExpired(authSessionToken: authSessionToken)
             throw NetworkError.unauthorized
         case 403:
             throw NetworkError.forbidden
