@@ -609,6 +609,91 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         XCTAssertNil(container.apiClient, "demo composition (nil apiClient) is preserved")
     }
 
+    // MARK: - H (issue #816 reject, Hicks): production-container durable reopen
+
+    /// H: a full ServiceContainer built by the default production init wires a
+    /// canonical `FarmSnapshotDurableAuthorityRecord` at the snapshot root. A
+    /// second ServiceContainer built by the same init on the same host
+    /// observes the SAME durable file (distinct record OBJECT, same root URL)
+    /// so a reservation persisted by container 1 constrains container 2's
+    /// next reservation — proving the durable record is wired in production,
+    /// not just in tests that inject it.
+    ///
+    /// H (issue #816 reject, Hicks): both records are DISTINCT object
+    /// instances constructed by their respective ServiceContainer's own
+    /// production init — no record object is shared across the reopen
+    /// boundary (which would prove nothing about file-backed durability).
+    func testProductionContainerReopenPersistsDurableHighWaterAcrossDistinctRecords() async throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        // Isolate from any prior test that touched the standard-domain
+        // coordinator (e.g. `.demo(...)` compositions), so container1's
+        // authority actually receives the injected `record1` on first
+        // coordinator creation instead of a cached coordinator that
+        // predates this test.
+        let domain = FarmSnapshotTombstoneStore.standardDomainIdentifier
+        FarmSnapshotDomainCoordinator.releaseCoordinator(forDomain: domain)
+        FarmSnapshotTombstoneStore.releaseCoordinator(forDomain: domain)
+        // Clear any high-water residue previously written to .standard by
+        // other tests using the production defaults — otherwise s1 could
+        // start above 0 and mask a record-not-wired regression.
+        UserDefaults.standard.removeObject(forKey: FarmSnapshotTombstoneStore.reservedHighWaterKey)
+        UserDefaults.standard.removeObject(forKey: FarmSnapshotTombstoneStore.adoptedHighWaterKey)
+        UserDefaults.standard.removeObject(forKey: FarmSnapshotTombstoneStore.key)
+        addTeardownBlock { @MainActor in
+            FarmSnapshotDomainCoordinator.releaseCoordinator(forDomain: domain)
+            FarmSnapshotTombstoneStore.releaseCoordinator(forDomain: domain)
+            UserDefaults.standard.removeObject(forKey: FarmSnapshotTombstoneStore.reservedHighWaterKey)
+            UserDefaults.standard.removeObject(forKey: FarmSnapshotTombstoneStore.adoptedHighWaterKey)
+            UserDefaults.standard.removeObject(forKey: FarmSnapshotTombstoneStore.key)
+        }
+
+        let box1 = box()
+        let reg1 = registry()
+        let record1 = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        let container1 = ServiceContainer(
+            serverRegistry: reg1,
+            userDefaultsBox: box1,
+            observeRegistry: false,
+            farmSnapshotDurableAuthorityRecord: record1
+        )
+        XCTAssertTrue(container1.farmSnapshotDurableRecord === record1,
+                      "production container MUST wire the injected canonical durable record")
+
+        let ns = FarmSnapshotFixtures.namespace()
+        let s1 = try container1.farmSnapshotAuthority.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(s1.token, 0)
+        XCTAssertEqual(record1.loadReservedHighWater(), s1.token,
+                       "record1 MUST observe the mint (durable record IS wired into the coordinator)")
+
+        // Simulate an app relaunch: drop the coordinator+tombstone-store shared
+        // static entries so container2 gets fresh in-memory state; the durable
+        // FILE at `root` is what survives. Container2 gets its OWN record
+        // object at the same path.
+        FarmSnapshotDomainCoordinator.releaseCoordinator(forDomain: domain)
+        FarmSnapshotTombstoneStore.releaseCoordinator(forDomain: domain)
+
+        let box2 = box()
+        let reg2 = registry()
+        let record2 = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        XCTAssertFalse(record1 === record2,
+                       "container2 MUST own a DISTINCT record object (production-restart shape)")
+        let container2 = ServiceContainer(
+            serverRegistry: reg2,
+            userDefaultsBox: box2,
+            observeRegistry: false,
+            farmSnapshotDurableAuthorityRecord: record2
+        )
+        XCTAssertTrue(container2.farmSnapshotDurableRecord === record2)
+        XCTAssertEqual(record2.loadReservedHighWater(), s1.token,
+                       "distinct record object at same path MUST observe s1's durable reservation")
+
+        let s2 = try container2.farmSnapshotAuthority.mint(namespace: ns, generation: 0)!
+        XCTAssertGreaterThan(s2.token, s1.token,
+                             "production-container reopen MUST honor the durable high-water — no rewind")
+    }
+
     /// Builds an `observeRegistry:false` container with one active server (A) whose
     /// owner is persisted. When `tombstonedDummy` is set, a dummy tombstone forces the
     /// startup sweep inside `store.activate` to call `removeItem` (a gate-able await).

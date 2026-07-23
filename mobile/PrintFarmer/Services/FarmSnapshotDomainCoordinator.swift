@@ -313,6 +313,13 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
         )
         let encoded = try JSONEncoder().encode(payload)
         try encoded.write(to: recordURL, options: [.atomic])
+        // H (issue #816 reject, Hicks): test-only injection point BETWEEN the
+        // acknowledged write and the verifying re-read, so an
+        // acknowledged-but-lost persistence event can be deterministically
+        // reproduced (delete the file to simulate loss). The interceptor is a
+        // static test hook: production callers never touch it, and it is nil
+        // in every production composition.
+        Self.testInterceptAfterAtomicWrite?(recordURL)
         // Verify via re-read — if the OS reported success but a crash / partial
         // flush left different bytes, we must surface that as a typed failure.
         let verified = readLocked()
@@ -323,6 +330,14 @@ final class FarmSnapshotDurableAuthorityRecord: @unchecked Sendable {
             throw FarmSnapshotAuthorityError.persistenceFailure
         }
     }
+
+    /// H (issue #816 reject, Hicks): test-only static interceptor invoked
+    /// AFTER the atomic write and BEFORE the verifying re-read of the durable
+    /// file record. Tests set this to inject an acknowledged-but-lost
+    /// persistence event (e.g. delete the file), driving the exact typed
+    /// `.persistenceFailure` throw path deterministically. MUST be nil in
+    /// production; MUST be reset by test teardown.
+    nonisolated(unsafe) static var testInterceptAfterAtomicWrite: (@Sendable (URL) -> Void)?
 
     // MARK: Public API
 

@@ -109,6 +109,14 @@ final class ServiceContainer: @unchecked Sendable {
         farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
         farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
         farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
+        /// H (issue #816 reject, Hicks): injectable canonical durable
+        /// authority record. Tests pass a temp-rooted instance so the
+        /// production-container reopen test can prove distinct record
+        /// objects observe the same file WITHOUT polluting the real
+        /// Application Support directory. When nil AND no explicit
+        /// `farmSnapshotAuthority` is provided, production composition
+        /// synthesises a record rooted at `FarmSnapshotStore.defaultRootURL()`.
+        farmSnapshotDurableAuthorityRecord: FarmSnapshotDurableAuthorityRecord? = nil,
         apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken in
             APIClient(baseURL: baseURL, serverGeneration: generation, accessToken: accessToken, authSessionToken: authSessionToken)
         },
@@ -135,17 +143,18 @@ final class ServiceContainer: @unchecked Sendable {
             // Test/injected authority: honor caller-provided wiring exactly and do
             // not attach a canonical durable record (the injection owns durability).
             authority = farmSnapshotAuthority
-            durableRecord = nil
+            durableRecord = farmSnapshotDurableAuthorityRecord
         } else {
             // H (issue #816 reject, Hicks): production composition wires ONE
-            // canonical file-backed durable authority record rooted at the
-            // snapshot root the store uses, so the shared coordinator sees
-            // durable reserved/adopted high-water AND durable tombstones on
-            // every reopen — a distinct record object constructed from the
-            // same root on the next launch observes the exact same file.
-            let record = FarmSnapshotDurableAuthorityRecord(
-                rootURL: FarmSnapshotStore.defaultRootURL()
-            )
+            // canonical file-backed durable authority record. If the caller
+            // supplied a record (e.g. a tests's temp-rooted instance) use it;
+            // otherwise root at the canonical snapshot root the store uses,
+            // so the shared coordinator sees durable reserved/adopted
+            // high-water AND durable tombstones on every reopen — a distinct
+            // record object constructed from the same root on the next launch
+            // observes the exact same file.
+            let record = farmSnapshotDurableAuthorityRecord
+                ?? FarmSnapshotDurableAuthorityRecord(rootURL: FarmSnapshotStore.defaultRootURL())
             durableRecord = record
             authority = FarmSnapshotAuthority(durableAuthorityRecord: record)
         }

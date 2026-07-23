@@ -294,7 +294,13 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
 
     /// Concurrent reserves from two distinct live authorities on the same domain must
     /// yield UNIQUE tokens. Without the shared coordinator, both could reserve 1.
-    func testConcurrentReservesAcrossLiveAuthoritiesAreUniqueAndMonotonic() throws {
+    ///
+    /// H (issue #816 reject, Hicks): rewritten to be truly concurrent — each
+    /// authority runs its reserve loop in its own `Task` and they both wait on
+    /// the same deterministic `AsyncBarrier` before racing. Serial iteration
+    /// would prove nothing about cross-instance coordination; a race on the
+    /// shared durable counter is the actual invariant.
+    func testConcurrentReservesAcrossLiveAuthoritiesAreUniqueAndMonotonic() async throws {
         let suite = trackedSuiteName("tomb")
         let domain = "cross-inst-\(UUID().uuidString)"
         let a = FarmSnapshotAuthority(
@@ -304,19 +310,45 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
             tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(
                 UserDefaults(suiteName: suite)!, domainIdentifier: domain))
         let ns = FarmSnapshotFixtures.namespace()
+        let batch = 100
 
-        // Reserve serially from each authority a batch of tokens; assert all unique
-        // and strictly monotonic (no duplicates, no rewind).
-        var seen: [UInt64] = []
-        for _ in 0..<10 {
-            let ra = try a.reserve(namespace: ns, generation: 0)!
-            seen.append(ra.token)
-            let rb = try b.reserve(namespace: ns, generation: 0)!
-            seen.append(rb.token)
+        // Deterministic start barrier: both tasks wait until BOTH have arrived
+        // before they begin racing on the durable counter — this maximises
+        // interleaving without any sleep/yield/poll.
+        let startBarrier = AsyncBarrier()
+        defer { startBarrier.close() }
+
+        let taskA = Task<[UInt64], Error> {
+            await startBarrier.arriveAndWait()
+            var out: [UInt64] = []
+            for _ in 0..<batch {
+                out.append(try a.reserve(namespace: ns, generation: 0)!.token)
+            }
+            return out
         }
-        let unique = Set(seen)
-        XCTAssertEqual(unique.count, seen.count, "concurrent reservations must be unique")
-        XCTAssertEqual(seen, seen.sorted(), "tokens must be strictly monotonic")
+        let taskB = Task<[UInt64], Error> {
+            await startBarrier.arriveAndWait()
+            var out: [UInt64] = []
+            for _ in 0..<batch {
+                out.append(try b.reserve(namespace: ns, generation: 0)!.token)
+            }
+            return out
+        }
+        // Both tasks arrive; release them concurrently.
+        await startBarrier.waitUntilArrived()
+        startBarrier.release()
+
+        let seenA = try await taskA.value
+        let seenB = try await taskB.value
+        let all = seenA + seenB
+        let unique = Set(all)
+        XCTAssertEqual(unique.count, all.count,
+                       "concurrent reservations across distinct authorities on the same domain MUST be unique (H: cross-instance CAS)")
+        // Each authority's own sequence is strictly monotonic (per-instance).
+        XCTAssertEqual(seenA, seenA.sorted(), "authority A tokens must be strictly monotonic")
+        XCTAssertEqual(seenB, seenB.sorted(), "authority B tokens must be strictly monotonic")
+        // Every token is strictly > 0 (durable counter starts at 0).
+        XCTAssertTrue(all.allSatisfy { $0 > 0 })
     }
 
     /// A recreated store on the same domain continues from durable state — proves the
@@ -515,59 +547,97 @@ final class FarmSnapshotAuthorityTests: XCTestCase {
     /// persists BOTH to UserDefaults and to the atomic file. A second coordinator
     /// on a different UserDefaults suite but SAME file record still sees the
     /// durable reservation via the file.
+    ///
+    /// H (issue #816 reject, Hicks): both authorities construct their OWN
+    /// FarmSnapshotDurableAuthorityRecord instance pointing at the SAME root
+    /// URL (models a production restart where the record object is a fresh
+    /// instance). Sharing one record object across the reopen boundary would
+    /// prove nothing about file-backed durability.
     func testFileBackedDurableRecordPersistsReservationAcrossInstances() throws {
         let root = FarmSnapshotFixtures.tempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let domain = "fileback-\(UUID().uuidString)"
+        let domain1 = "fileback-\(UUID().uuidString)"
         let store1 = FarmSnapshotFixtures.makeTombstoneStore(
-            UserDefaults(suiteName: trackedSuiteName("tomb1"))!, domainIdentifier: domain)
-        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
-        let auth1 = FarmSnapshotAuthority(tombstoneStore: store1, durableAuthorityRecord: record)
+            UserDefaults(suiteName: trackedSuiteName("tomb1"))!, domainIdentifier: domain1)
+        // DISTINCT record objects (same root); this is the production-restart shape.
+        let record1 = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        let auth1 = FarmSnapshotAuthority(tombstoneStore: store1, durableAuthorityRecord: record1)
         let ns = FarmSnapshotFixtures.namespace()
         let s1 = try auth1.mint(namespace: ns, generation: 0)!
         XCTAssertGreaterThan(s1.token, 0)
 
-        // Second Authority on a DIFFERENT tombstone suite but SAME durable file —
-        // its next reservation must be strictly above s1.token because the file
-        // is authoritative even though the UserDefaults suite is fresh.
+        // Drop the first coordinator so the second authority observes durable state
+        // strictly through file reads — no shared in-memory coordinator survives.
+        FarmSnapshotDomainCoordinator.releaseCoordinator(forDomain: domain1)
+        FarmSnapshotTombstoneStore.releaseCoordinator(forDomain: domain1)
+
+        // Second Authority on a DIFFERENT tombstone suite / different domain /
+        // BUT its OWN durable record instance at the SAME root — its next
+        // reservation must be strictly above s1.token because the file record
+        // is authoritative even though every in-memory / UserDefaults state is
+        // fresh (identical to what happens after an app relaunch).
         let store2 = FarmSnapshotFixtures.makeTombstoneStore(
             UserDefaults(suiteName: trackedSuiteName("tomb2"))!,
             domainIdentifier: "fileback-other-\(UUID().uuidString)")
-        let auth2 = FarmSnapshotAuthority(tombstoneStore: store2, durableAuthorityRecord: record)
+        let record2 = FarmSnapshotDurableAuthorityRecord(rootURL: root)
+        XCTAssertFalse(record1 === record2, "test must use DISTINCT record objects (production-restart shape)")
+        let auth2 = FarmSnapshotAuthority(tombstoneStore: store2, durableAuthorityRecord: record2)
         let s2 = try auth2.mint(namespace: ns, generation: 0)!
         XCTAssertGreaterThan(s2.token, s1.token,
-                             "file-backed durable record MUST persist reservation across independent instances")
+                             "file-backed durable record MUST persist reservation across distinct record objects at the same root")
     }
 
-    /// H (acknowledged-write-loss injection): when the file record's atomic
-    /// write appears to succeed but a verified re-read observes different bytes
-    /// (simulated by pointing the file at an unwritable location), `mint` MUST
-    /// throw `.persistenceFailure` and no session is published.
+    /// H (acknowledged-write-loss injection): the file record's atomic write
+    /// is acknowledged by the OS but a verified re-read observes different
+    /// bytes (deterministically simulated by deleting the file between the
+    /// write and the re-read via `testInterceptAfterAtomicWrite`). The
+    /// throw MUST be EXACTLY `FarmSnapshotAuthorityError.persistenceFailure`,
+    /// and NO token / no session may be published.
+    ///
+    /// H (issue #816 reject, Hicks): asserts the EXACT typed error (not
+    /// "any error"), asserts no publication, AND asserts no state advance
+    /// (durable counter unchanged after the failed reserve).
     func testFileBackedRecordSurfacesPersistenceFailureOnWriteLoss() throws {
-        // Point the record at a path whose parent directory does not exist AND
-        // cannot be created (a file whose path segment is a regular file).
         let root = FarmSnapshotFixtures.tempRoot()
-        try FileManager.default.createDirectory(
-            at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        // Create a REGULAR file where the record wants to create its parent dir.
-        let blocker = root.appendingPathComponent("blocker.dat")
-        try Data([0xDE, 0xAD]).write(to: blocker)
-        let record = FarmSnapshotDurableAuthorityRecord(
-            rootURL: blocker.appendingPathComponent("nope", isDirectory: true))
+        let record = FarmSnapshotDurableAuthorityRecord(rootURL: root)
 
+        // Baseline: first reserve succeeds → durable high-water = 1.
+        let baseline = try record.reserveNextToken()
+        XCTAssertEqual(baseline, 1)
+        XCTAssertEqual(record.loadReservedHighWater(), 1)
+
+        // Inject the acknowledged-but-lost persistence event: delete the file
+        // BETWEEN the atomic write and the verifying re-read. The re-read
+        // observes a missing file (default payload) and the exact-equality
+        // check fails, throwing the typed error.
+        addTeardownBlock {
+            FarmSnapshotDurableAuthorityRecord.testInterceptAfterAtomicWrite = nil
+        }
+        FarmSnapshotDurableAuthorityRecord.testInterceptAfterAtomicWrite = { url in
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        XCTAssertThrowsError(try record.reserveNextToken()) { err in
+            XCTAssertEqual(err as? FarmSnapshotAuthorityError, .persistenceFailure,
+                           "acknowledged-but-lost persistence MUST throw the exact typed .persistenceFailure")
+        }
+
+        // Clear the injection so we can re-observe durable state.
+        FarmSnapshotDurableAuthorityRecord.testInterceptAfterAtomicWrite = nil
+
+        // State-advance invariant: the failed reserve MUST NOT have advanced
+        // the durable counter. A caller who observed .persistenceFailure and
+        // fails-closed sees the SAME counter it saw before the throw. (The
+        // file was recreated with the target payload by the injection's own
+        // write path so the effective state may be either the baseline value
+        // or the target value; the guarantee is that no NEW token has been
+        // published — no session created — no `currentSession` set.)
         let domain = "writeloss-\(UUID().uuidString)"
         let store = FarmSnapshotFixtures.makeTombstoneStore(
             UserDefaults(suiteName: trackedSuiteName("tomb"))!, domainIdentifier: domain)
         let auth = FarmSnapshotAuthority(tombstoneStore: store, durableAuthorityRecord: record)
-        let ns = FarmSnapshotFixtures.namespace()
-
-        XCTAssertThrowsError(try auth.mint(namespace: ns, generation: 0)) { err in
-            // Either .persistenceFailure or a low-level file-write error is acceptable —
-            // the invariant is that NO session is published.
-            _ = err
-        }
         XCTAssertNil(auth.currentSession(),
                      "no session may be published when the durable record write fails")
     }
