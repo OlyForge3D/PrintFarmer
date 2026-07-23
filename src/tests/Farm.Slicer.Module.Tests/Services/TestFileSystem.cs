@@ -16,6 +16,8 @@ public class TestFileSystem : IFileSystem
     private readonly ConcurrentDictionary<string, bool> _dirs = new();
     private readonly ConcurrentDictionary<string, (DateTime Creation, DateTime LastWrite)> _times = new();
 
+    public Exception? MoveFileException { get; set; }
+
     private static string NormalizePath(string path) =>
         path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
 
@@ -35,6 +37,11 @@ public class TestFileSystem : IFileSystem
 
     public void MoveFile(string sourceFileName, string destFileName, bool overwrite = false)
     {
+        if (MoveFileException is not null)
+        {
+            throw MoveFileException;
+        }
+
         string normSrc = NormalizePath(sourceFileName);
         string normDest = NormalizePath(destFileName);
 
