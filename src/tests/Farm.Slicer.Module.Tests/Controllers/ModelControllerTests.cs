@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,19 +66,36 @@ public class ModelControllerTests
     {
         Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
         Model3DUploadResultDto uploadResult = new Model3DUploadResultDto { Id = Guid.NewGuid(), FileName = "model.stl", FileType = "stl" };
-        _ = mockService.Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
+        _ = mockService.Setup(s => s.UploadModelAsync(
+            It.IsAny<IFormFile>(),
+            It.IsAny<IFormFile?>(),
+            It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
         Model3DFilesController controller = CreateController(mockService);
 
         FormFile fakeFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+        FormFile thumbnailFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("png")), 0, 3, "thumbnailFile", "thumbnail.png");
+        using CancellationTokenSource cancellation = new();
 
-        IActionResult result = await controller.UploadModelAsync(fakeFile);
+        IActionResult result = await controller.UploadModelAsync(fakeFile, thumbnailFile, cancellation.Token);
 
         CreatedResult created = Assert.IsType<CreatedResult>(result);
         Model3DUploadResultDto value = Assert.IsType<Model3DUploadResultDto>(created.Value);
         Assert.Equal(uploadResult.Id, value.Id);
 
-        mockService.Verify(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()), Times.Once);
+        mockService.Verify(s => s.UploadModelAsync(fakeFile, thumbnailFile, cancellation.Token), Times.Once);
+    }
+
+    [Fact]
+    public void UploadModelAsync_ConfiguresMultipartLimitForModelAndThumbnail()
+    {
+        MethodInfo method = typeof(Model3DFilesController)
+            .GetMethod(nameof(Model3DFilesController.UploadModelAsync))
+            ?? throw new InvalidOperationException("Upload action was not found");
+        RequestFormLimitsAttribute attribute = Assert.Single(
+            method.GetCustomAttributes<RequestFormLimitsAttribute>());
+
+        Assert.Equal(512_000_000, attribute.MultipartBodyLengthLimit);
     }
 
     [Fact]

@@ -335,7 +335,7 @@ public class UserApiKeysControllerTests
     }
 
     [Fact]
-    public async Task ListApiKeysAsync_ReturnsPurposeScopesAndExpiryState()
+    public async Task ListApiKeysAsync_ForCurrentUser_ReturnsPurposeScopesAndExpiryState()
     {
         ApiKey octoPrintKey = new()
         {
@@ -368,9 +368,48 @@ public class UserApiKeysControllerTests
         list.Single(d => d.Id == expiredDesktopKey.Id).Scopes.Should().Be(ApiKeyScope.ModelRead);
     }
 
+    [Fact]
+    public async Task ListApiKeysAsync_ForDifferentUserAsFarmAdmin_ReturnsOk()
+    {
+        Guid targetUserId = Guid.NewGuid();
+        SetCaller(_userId, "farm_admin");
+
+        IActionResult result = await _controller.ListApiKeysAsync(targetUserId);
+
+        Assert.IsType<OkObjectResult>(result);
+        _repoMock.Verify(r => r.GetByUserIdAsync(targetUserId), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Admin")]
+    [InlineData("Administrator")]
+    public async Task ListApiKeysAsync_ForDifferentUserWithoutCanonicalAdminRole_ReturnsForbid(string? role)
+    {
+        Guid targetUserId = Guid.NewGuid();
+        SetCaller(_userId, role);
+
+        IActionResult result = await _controller.ListApiKeysAsync(targetUserId);
+
+        Assert.IsType<ForbidResult>(result);
+        _repoMock.Verify(r => r.GetByUserIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
     private void SetHashStoredApiKeys(bool enabled)
     {
         _settingsServiceMock.Setup(s => s.Get<OctoPrintSettings>())
             .Returns(new OctoPrintSettings { HashStoredApiKeys = enabled });
+    }
+
+    private void SetCaller(Guid userId, string? role = null)
+    {
+        List<Claim> claims = [new Claim(ClaimTypes.NameIdentifier, userId.ToString())];
+        if (role is not null)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
+        _controller.ControllerContext.HttpContext.User =
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
     }
 }
