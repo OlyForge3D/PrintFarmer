@@ -164,6 +164,89 @@ final class FarmSnapshotMoveOrderTests: XCTestCase {
                        "quarantined file must not exist after purge swept quarantine (E: exact)")
     }
 
+    // MARK: - E1-overlap (Dallas #816, finding H): purge STARTED WHILE move parked
+
+    /// H (issue #816 reject, Hicks + replacement Vasquez): the E1 test above fully
+    /// awaits recovery BEFORE starting purge, which only proves sequential
+    /// execution. This test starts the purge WHILE the recovery move is causally
+    /// parked INSIDE the real production `moveIfContentEquals` (holding its lease),
+    /// so the purge genuinely contends for the same serialization. The lease
+    /// guarantees the purge's destructive `removeItem` sweep CANNOT interleave
+    /// before the move completes — proven by the EXACT complete ordered event log
+    /// `move-entered → move-returned → remove-entered → remove-entered` after both
+    /// tasks finish (any broken serialization would surface a `remove-entered`
+    /// before `move-returned`). Also asserts exact source/destination/expected
+    /// bytes at the move call, exact quarantine bytes before the sweep, exact
+    /// counts, exact ordered sweep identities, and exact final byte disposition.
+    func testPurgeStartedWhileMoveParkedSerializesAfterMove() async throws {
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let io = ControlledFarmSnapshotFileIO()
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let store = FarmSnapshotStore(authority: authority, fileIO: io, rootURL: root)
+        _ = try await activate(store, authority, ns)
+
+        let corrupt = Data("{ broken".utf8)
+        seedCorruptLive(root: root, ns, bytes: corrupt)
+
+        let moveBarrier = AsyncBarrier()
+        addTeardownBlock { moveBarrier.close() } // unconditional teardown before dependent waits
+        io.moveEntryBarrier = moveBarrier
+
+        // Park recovery at the REAL compare-and-move boundary (holding the lease).
+        let recoverTask = Task { await store.hydrateActive() }
+        await moveBarrier.waitUntilArrived()
+        XCTAssertEqual(io.moveCount, 1, "compare/move primitive actually entered (real IO)")
+        XCTAssertEqual(io.eventLog, ["move-entered"], "move is parked mid-primitive — not yet returned")
+        XCTAssertEqual(io.removeCount, 0, "no purge sweep can have happened yet — move holds the lease")
+
+        // Start the purge NOW, while the move is still parked inside production
+        // FileIO. It contends for the same lease and cannot reach its removeItem
+        // sweep until the move drains.
+        let purgeTask = Task { await store.purge(serverID: ns.serverID) }
+
+        // Release the parked move → move completes, drains the lease, and only
+        // THEN can the concurrently-started purge proceed to its sweep.
+        moveBarrier.release()
+
+        let recoverOutcome = await recoverTask.value
+        XCTAssertEqual(recoverOutcome, .recovered, "the compare-and-move recovered the corrupt live file")
+
+        // Exact move record (source/destination/expected/result) at the call.
+        let expectedLive = liveURL(root: root, ns)
+        let expectedQuarantine = quarantineDir(root: root, ns.serverID)
+        XCTAssertEqual(io.moveRecords.count, 1, "exactly one move recorded")
+        let moved = io.moveRecords[0]
+        XCTAssertEqual(moved.from, expectedLive, "move source MUST be the exact live URL")
+        XCTAssertTrue(moved.to.path.hasPrefix(expectedQuarantine.path),
+                      "move destination MUST be under the exact quarantine dir (got \(moved.to.path))")
+        XCTAssertEqual(moved.expected, corrupt, "move expected-bytes MUST equal the seeded corrupt bytes")
+        XCTAssertTrue(moved.result, "move MUST have returned true (recovered)")
+
+        let purgeOutcome = await purgeTask.value
+        XCTAssertEqual(purgeOutcome, .purged, "purge succeeded after the recovery lease drained")
+
+        // The crux: EXACT complete ordered event log. A purge remove that raced
+        // ahead of the move would place `remove-entered` before `move-returned`.
+        XCTAssertEqual(io.eventLog,
+                       ["move-entered", "move-returned", "remove-entered", "remove-entered"],
+                       "purge sweep MUST serialize strictly after the move completes")
+        XCTAssertEqual(io.moveCount, 1, "exactly one compare/move")
+        XCTAssertEqual(io.removeCount, 2, "purge sweeps [serverDir, quarantineDir] — exactly 2 removes")
+        XCTAssertEqual(io.removedURLs,
+                       [serverDir(root: root, ns.serverID), quarantineDir(root: root, ns.serverID)],
+                       "purge MUST removeItem(serverDir) then removeItem(quarantineDir) — exact identities in order")
+
+        // Exact final byte disposition.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: serverDir(root: root, ns.serverID).path),
+                       "server dir swept")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL(root: root, ns).path),
+                       "live file gone after purge")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: moved.to.path),
+                       "quarantined file swept")
+    }
+
     // MARK: - E2: revoke-first — authority lost BEFORE reaching the move boundary
 
     /// Revoke-first: the authority is revoked BEFORE hydration reaches the move
