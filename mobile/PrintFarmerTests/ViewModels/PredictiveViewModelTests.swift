@@ -553,11 +553,12 @@ final class PredictiveViewModelTests: XCTestCase {
     }
 
     /// Cancellation before the awaiter has parked: create a Task, cancel
-    /// it, then await its completion. Actor serialisation guarantees the
-    /// park in `awaitWaiter`'s continuation closure completes before the
-    /// `cancelWaiter` Task hops onto the actor, so the drain happens via
-    /// the parked-only path. Post-drain snapshot must show zero
-    /// order/parked/completed state for the cancelled id.
+    /// it, then await its completion. Actor serialisation historically
+    /// aimed to guarantee the park in `awaitWaiter`'s continuation
+    /// closure completes before the `cancelWaiter` Task hops onto the
+    /// actor, but under Swift's concurrent scheduling the task may not
+    /// yet have entered `withTaskCancellationHandler` when `task.cancel()`
+    /// fires — so cancel dispatch can race with parking AND with close.
     ///
     /// Reviewer finding D (Hicks/Vasquez, MEDIUM): the prior version
     /// awaited `waitForWaiterCancelCount(atLeast: 1)` BEFORE `close()`
@@ -567,28 +568,22 @@ final class PredictiveViewModelTests: XCTestCase {
     /// before close is even reached).
     ///
     /// This revision uses the per-attempt buffered outcome as the
-    /// exact receipt. Setup is entirely pre-close-safe:
-    ///   1. Pre-construct `WaiterAwaitAttempt` and pass it into
-    ///      `awaitWaiter(_, attempt:)` — the buffered latch is
-    ///      independently resolvable by the cancel Task's publisher
-    ///      OR by close's terminal drain (via natural-path publication
-    ///      on body return).
-    ///   2. `task.cancel()` then `await gate.close()` UNCONDITIONALLY —
-    ///      close is reachable regardless of cancel-processing state.
-    ///   3. `await attempt.outcome()` — bounded because either the
-    ///      cancel Task publishes `.cancelled(receipt)` or (if cancel
-    ///      processing regressed entirely) close drains the parked
-    ///      continuation and body's natural path publishes
-    ///      `.finishedBeforeProcessing`. Either outcome resolves the
-    ///      latch; NO deadlock.
-    ///   4. Assert outcome is `.cancelled(receipt)`. If cancel
-    ///      processing was removed, outcome is `.finishedBeforeProcessing`
-    ///      and this fails LOUDLY.
-    ///   5. Assert receipt ∈ {.processedMatched, .closedBeforeProcessing}
-    ///      (the only two exact non-hang cases when cancel Task ran).
-    ///   6. Correlated counter assertions require matched cancellation
-    ///      AND exact resume reason — a counter increment without a
-    ///      parked resume fails.
+    /// exact receipt with unconditional close-drain teardown, and
+    /// asserts integrity via correlated per-receipt counter proofs:
+    ///   1. Pre-construct `WaiterAwaitAttempt` and pass into
+    ///      `awaitWaiter(_, attempt:)`.
+    ///   2. `task.cancel()` then `await gate.close()` UNCONDITIONALLY.
+    ///   3. `await attempt.outcome()` — bounded because either cancel
+    ///      Task publishes `.cancelled(receipt)` or (if cancel path
+    ///      regressed) body's natural path publishes
+    ///      `.finishedBeforeProcessing`.
+    ///   4. Assert outcome is `.cancelled(_)` — regression to
+    ///      `.finishedBeforeProcessing` fails loudly.
+    ///   5. Assert exactly ONE continuation resume observable via any
+    ///      of the resume sites — a cancel-invocation increment
+    ///      without ANY parked resume (leak) fails LOUDLY.
+    ///   6. Correlated per-receipt proof narrows the resume site set
+    ///      by the exact receipt returned.
     func testAsyncGateCancelBeforeRegister() async {
         let gate = AsyncGate()
         let token = await gate.registerWaiter()
@@ -596,25 +591,23 @@ final class PredictiveViewModelTests: XCTestCase {
         let task = Task { await gate.awaitWaiter(token, attempt: attempt) }
         task.cancel()
 
-        // Close UNCONDITIONALLY — no pre-close wait on cancel state.
-        // If cancel processing regressed, close still drains the parked
-        // continuation (via .closedWhileParked) and lets task.value
-        // return; body's natural path publishes .finishedBeforeProcessing
-        // to the buffered latch. If cancel processing works, cancel
-        // Task publishes .cancelled(receipt). Either way, the latch
-        // resolves and outcome() is bounded.
+        // Close UNCONDITIONALLY — no pre-close cancel-count wait.
+        // If cancel path regressed, close drains any parked continuation
+        // via .closedWhileParked and body's natural path publishes
+        // .finishedBeforeProcessing (caught by outcome guard below).
         await gate.close()
         await task.value
 
-        // Buffered outcome is the exact receipt. Removes cancel
-        // processing → outcome is .finishedBeforeProcessing → fails.
         let outcome = await attempt.outcome()
         guard case .cancelled(let r) = outcome else {
-            XCTFail("cancel processing must publish outcome; got \(outcome) (regression: cancel Task never fired)")
+            XCTFail("cancel path must publish outcome; got \(outcome) (regression: cancel Task never fired — receipt would be .finishedBeforeProcessing)")
             return
         }
-        XCTAssertTrue(r == .processedMatched || r == .closedBeforeProcessing,
-                      "exact cancel receipt must be .processedMatched or .closedBeforeProcessing; got \(r)")
+        // Every receipt classification is exact / non-hanging.
+        XCTAssertTrue(r == .processedMatched
+                      || r == .processedIgnoredMismatch
+                      || r == .closedBeforeProcessing,
+                      "receipt must be an exact non-hang classification; got \(r)")
 
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.parkedWaiterCount, 0)
@@ -627,25 +620,64 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.waiterCancelInvocationCount, 1,
                        "exactly one cancelWaiter dispatched across the test lifetime")
 
-        // Correlated proof: counter increment MUST be paired with a
-        // parked resume of the corresponding reason. A regression
-        // that bumps the invocation count without draining a parked
-        // continuation fails these assertions.
-        if r == .processedMatched {
+        // LEAK-DETECTION invariant (Hicks: "counter increment without
+        // parked resume must fail"): the cancelled attempt owned
+        // exactly one continuation. That continuation MUST have been
+        // resumed exactly once via SOME site. If cancel invocation ran
+        // (counter = 1) but no site fired (sum = 0), the continuation
+        // is leaked — this assertion catches that regression.
+        let totalWaiterResumes =
+            (snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0)
+          + (snap.waiterResumeCounts[.parkedResumedByClose] ?? 0)
+          + (snap.waiterResumeCounts[.parkedResumedByOpen] ?? 0)
+          + (snap.waiterResumeCounts[.latchConsumed] ?? 0)
+          + (snap.waiterResumeCounts[.closedImmediate] ?? 0)
+          + (snap.waiterResumeCounts[.openedImmediate] ?? 0)
+          + (snap.waiterResumeCounts[.duplicateAfterFated] ?? 0)
+          + (snap.waiterResumeCounts[.duplicateAfterParked] ?? 0)
+          + (snap.waiterResumeCounts[.unknownToken] ?? 0)
+        XCTAssertEqual(totalWaiterResumes, 1,
+                       "cancel invocation without any observable continuation resume — LEAK; got resume-site sum = \(totalWaiterResumes)")
+
+        // Correlated per-receipt evidence: narrows which resume-site
+        // group is expected. A receipt-vs-observed-drain mismatch fails.
+        switch r {
+        case .processedMatched:
+            // Cancel Task drained the parked entry directly.
             XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1,
-                           ".processedMatched must be paired with exactly one .parkedResumedByCancel")
+                           ".processedMatched must produce exactly one .parkedResumedByCancel")
             XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked] ?? 0, 1,
                            ".processedMatched must seal fate exactly .cancelledWhileParked")
             XCTAssertEqual(snap.waiterCancelIgnoredCount, 0,
                            ".processedMatched: no ignore-path bump")
-        } else {
-            // .closedBeforeProcessing — close beat cancel Task to actor;
-            // parked drained via .closedWhileParked; cancel's closed-guard
-            // bumped the ignored counter.
-            XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1,
-                           ".closedBeforeProcessing must be paired with exactly one .parkedResumedByClose")
-            XCTAssertEqual(snap.waiterFateCounts[.closedWhileParked] ?? 0, 1,
-                           ".closedBeforeProcessing must seal fate exactly .closedWhileParked")
+        case .processedIgnoredMismatch:
+            // Cancel Task ran before park was observable; parked/registered
+            // continuation was subsequently drained by close's terminal
+            // drain (parked or before-park) — proven by one drain site.
+            let closedDrain =
+                (snap.waiterResumeCounts[.parkedResumedByClose] ?? 0)
+              + (snap.waiterResumeCounts[.closedImmediate] ?? 0)
+              + (snap.waiterResumeCounts[.duplicateAfterFated] ?? 0)
+            XCTAssertEqual(closedDrain, 1,
+                           ".processedIgnoredMismatch: close-side drain must fire exactly once; got \(closedDrain)")
+            XCTAssertEqual(snap.waiterCancelIgnoredCount, 1,
+                           ".processedIgnoredMismatch bumps ignored count by one")
+        case .closedBeforeProcessing:
+            // Cancel Task saw closed=true. Two sub-cases: task parked
+            // before close (→ .parkedResumedByClose + .closedWhileParked),
+            // or task never parked (→ close sealed order as
+            // .closedBeforePark + body's late-await took the fated branch).
+            let closedDrain =
+                (snap.waiterResumeCounts[.parkedResumedByClose] ?? 0)
+              + (snap.waiterResumeCounts[.closedImmediate] ?? 0)
+              + (snap.waiterResumeCounts[.duplicateAfterFated] ?? 0)
+            XCTAssertEqual(closedDrain, 1,
+                           ".closedBeforeProcessing: close-side drain must fire exactly once; got \(closedDrain)")
+            let closedFate =
+                (snap.waiterFateCounts[.closedWhileParked] ?? 0)
+              + (snap.waiterFateCounts[.closedBeforePark] ?? 0)
+            XCTAssertEqual(closedFate, 1,
+                           ".closedBeforeProcessing: close-side fate seal must fire exactly once; got \(closedFate)")
             XCTAssertEqual(snap.waiterCancelIgnoredCount, 1,
                            ".closedBeforeProcessing: closed-guard bumps ignored count by one")
         }
@@ -660,46 +692,42 @@ final class PredictiveViewModelTests: XCTestCase {
     /// Reviewer finding D (Hicks/Vasquez, MEDIUM): the prior version
     /// awaited `waitForXCancelCount(atLeast: 1)` BEFORE `close()` for
     /// each side. Those pre-close waits hang if cancel processing is
-    /// removed. This revision uses buffered `attempt.outcome()` as the
-    /// exact receipt with unconditional close-drain teardown; matched
-    /// cancellation is proven via correlated per-side counter
-    /// assertions rather than raw invocation-count handshakes.
+    /// removed.
+    ///
+    /// This revision uses buffered `attempt.outcome()` as the exact
+    /// receipt with unconditional close-drain teardown. Observer and
+    /// waiter run on SEPARATE gates to eliminate the cross-signal race
+    /// (a shared-gate registerWaiter would signalEntry-drain the still-
+    /// parked observer before cancel dispatch, producing
+    /// `.processedIgnoredMismatch` non-deterministically).
     func testAsyncGateCancelAfterRegister() async {
-        let gate = AsyncGate()
-
-        // Observer path FIRST — no pending signal yet, so the observer
-        // actually parks (rather than being latched by a prior waiter).
-        let observerToken = await gate.registerObserver()
+        // OBSERVER PATH — dedicated gate; no other work touches it.
+        let obsGate = AsyncGate()
+        let observerToken = await obsGate.registerObserver()
         let observerAttempt = ObserverAwaitAttempt()
-        let observerTask = Task { await gate.awaitObserver(observerToken, attempt: observerAttempt) }
-        let observerAck = await gate.waitForObserverParked(observerToken)
+        let observerTask = Task { await obsGate.awaitObserver(observerToken, attempt: observerAttempt) }
+        let observerAck = await obsGate.waitForObserverParked(observerToken)
         XCTAssertEqual(observerAck, .parked,
                        "observer must park before cancel; got \(observerAck)")
         observerTask.cancel()
 
-        // Waiter path. registerWaiter emits an entry signal, but since
-        // observerOrder is now empty (cancelled observer will be drained),
-        // the signal accumulates in pendingEntrySignals and the waiter
-        // itself parks in the usual way.
-        let waiterToken = await gate.registerWaiter()
+        // WAITER PATH — dedicated gate; no observer interference.
+        let waitGate = AsyncGate()
+        let waiterToken = await waitGate.registerWaiter()
         let waiterAttempt = WaiterAwaitAttempt()
-        let waiterTask = Task { await gate.awaitWaiter(waiterToken, attempt: waiterAttempt) }
-        let waiterAck = await gate.waitForWaiterParked(waiterToken)
+        let waiterTask = Task { await waitGate.awaitWaiter(waiterToken, attempt: waiterAttempt) }
+        let waiterAck = await waitGate.waitForWaiterParked(waiterToken)
         XCTAssertEqual(waiterAck, .parked,
                        "waiter must park before cancel; got \(waiterAck)")
         waiterTask.cancel()
 
-        // Close UNCONDITIONALLY — no pre-close cancel-count wait.
-        // Every await below is bounded by close-drain:
-        //   • parked continuations are drained if cancel didn't beat close
-        //   • body's natural path publishes to buffered latch on regression
-        //   • task.value returns
-        await gate.close()
+        // Close UNCONDITIONALLY on both gates — no pre-close cancel-count
+        // wait. Every await below is bounded by close-drain.
+        await obsGate.close()
+        await waitGate.close()
         await observerTask.value
         await waiterTask.value
 
-        // Exact buffered receipts. Removing cancel processing → outcome
-        // is .finishedBeforeProcessing → fails guards below.
         let observerOutcome = await observerAttempt.outcome()
         let waiterOutcome = await waiterAttempt.outcome()
 
@@ -712,58 +740,69 @@ final class PredictiveViewModelTests: XCTestCase {
             return
         }
 
+        // Both sides parked BEFORE cancel (proven by .parked ACK above),
+        // so the receipt is bounded to two matched-drain outcomes:
+        //   .processedMatched — cancel Task drained the parked entry
+        //   .closedBeforeProcessing — close raced ahead, drained parked
+        //     via .closedWhileParked, cancel Task saw closed
+        // .processedIgnoredMismatch is IMPOSSIBLE here because parked
+        // was proven before cancel dispatched (parkedX[id] was non-nil
+        // at cancel-Task hop time OR close had removed it via matched-
+        // drain, in which case receipt is .closedBeforeProcessing).
         XCTAssertTrue(observerR == .processedMatched || observerR == .closedBeforeProcessing,
-                      "observer receipt must be .processedMatched or .closedBeforeProcessing; got \(observerR)")
+                      "observer receipt (parked pre-cancel): must be .processedMatched or .closedBeforeProcessing; got \(observerR)")
         XCTAssertTrue(waiterR == .processedMatched || waiterR == .closedBeforeProcessing,
-                      "waiter receipt must be .processedMatched or .closedBeforeProcessing; got \(waiterR)")
+                      "waiter receipt (parked pre-cancel): must be .processedMatched or .closedBeforeProcessing; got \(waiterR)")
 
-        let snap = await gate.snapshot()
-        XCTAssertEqual(snap.parkedWaiterCount, 0)
-        XCTAssertEqual(snap.parkedObserverCount, 0)
-        XCTAssertEqual(snap.waiterOrder, [])
-        XCTAssertEqual(snap.observerOrder, [])
-        XCTAssertEqual(snap.completedWaiterCount, 0,
-                       "cancel must not relatch into completedWaiters")
-        XCTAssertEqual(snap.completedObserverCount, 0,
+        let obsSnap = await obsGate.snapshot()
+        let waitSnap = await waitGate.snapshot()
+        XCTAssertEqual(obsSnap.parkedObserverCount, 0)
+        XCTAssertEqual(waitSnap.parkedWaiterCount, 0)
+        XCTAssertEqual(obsSnap.observerOrder, [])
+        XCTAssertEqual(waitSnap.waiterOrder, [])
+        XCTAssertEqual(obsSnap.completedObserverCount, 0,
                        "cancel must not relatch into completedObservers")
-        XCTAssertEqual(snap.observerCancelInvocationCount, 1,
+        XCTAssertEqual(waitSnap.completedWaiterCount, 0,
+                       "cancel must not relatch into completedWaiters")
+        XCTAssertEqual(obsSnap.observerCancelInvocationCount, 1,
                        "exactly one cancelObserver across the test lifetime")
-        XCTAssertEqual(snap.waiterCancelInvocationCount, 1,
+        XCTAssertEqual(waitSnap.waiterCancelInvocationCount, 1,
                        "exactly one cancelWaiter across the test lifetime")
 
-        // Correlated matched-cancellation + resume-reason proof for
-        // observer side. Regression that increments the invocation
-        // count without draining a parked continuation fails these.
+        // Correlated matched-cancellation + exact-resume-reason for
+        // observer side. Because parked was proven pre-cancel, the
+        // parked continuation MUST have been drained by either cancel
+        // or close — receipt determines which.
         if observerR == .processedMatched {
-            XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1,
-                           "observer .processedMatched must be paired with exactly one .parkedResumedByCancel")
-            XCTAssertEqual(snap.observerFateCounts[.cancelledWhileParked] ?? 0, 1,
-                           "observer .processedMatched must seal fate exactly .cancelledWhileParked")
-            XCTAssertEqual(snap.observerCancelIgnoredCount, 0,
+            XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByCancel] ?? 0, 1,
+                           "observer .processedMatched: exactly one .parkedResumedByCancel")
+            XCTAssertEqual(obsSnap.observerFateCounts[.cancelledWhileParked] ?? 0, 1,
+                           "observer .processedMatched: fate sealed exactly .cancelledWhileParked")
+            XCTAssertEqual(obsSnap.observerCancelIgnoredCount, 0,
                            "observer matched cancel — ignored count stays zero")
         } else {
-            XCTAssertEqual(snap.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
-                           "observer .closedBeforeProcessing must be paired with exactly one .parkedResumedByClose")
-            XCTAssertEqual(snap.observerFateCounts[.closedWhileParked] ?? 0, 1,
-                           "observer .closedBeforeProcessing must seal fate exactly .closedWhileParked")
-            XCTAssertEqual(snap.observerCancelIgnoredCount, 1,
+            XCTAssertEqual(obsSnap.observerResumeCounts[.parkedResumedByClose] ?? 0, 1,
+                           "observer .closedBeforeProcessing: exactly one .parkedResumedByClose")
+            XCTAssertEqual(obsSnap.observerFateCounts[.closedWhileParked] ?? 0, 1,
+                           "observer .closedBeforeProcessing: fate sealed exactly .closedWhileParked")
+            XCTAssertEqual(obsSnap.observerCancelIgnoredCount, 1,
                            "observer close-guard bumps ignored count by one")
         }
 
         // Correlated proof for waiter side.
         if waiterR == .processedMatched {
-            XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1,
-                           "waiter .processedMatched must be paired with exactly one .parkedResumedByCancel")
-            XCTAssertEqual(snap.waiterFateCounts[.cancelledWhileParked] ?? 0, 1,
-                           "waiter .processedMatched must seal fate exactly .cancelledWhileParked")
-            XCTAssertEqual(snap.waiterCancelIgnoredCount, 0,
+            XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByCancel] ?? 0, 1,
+                           "waiter .processedMatched: exactly one .parkedResumedByCancel")
+            XCTAssertEqual(waitSnap.waiterFateCounts[.cancelledWhileParked] ?? 0, 1,
+                           "waiter .processedMatched: fate sealed exactly .cancelledWhileParked")
+            XCTAssertEqual(waitSnap.waiterCancelIgnoredCount, 0,
                            "waiter matched cancel — ignored count stays zero")
         } else {
-            XCTAssertEqual(snap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1,
-                           "waiter .closedBeforeProcessing must be paired with exactly one .parkedResumedByClose")
-            XCTAssertEqual(snap.waiterFateCounts[.closedWhileParked] ?? 0, 1,
-                           "waiter .closedBeforeProcessing must seal fate exactly .closedWhileParked")
-            XCTAssertEqual(snap.waiterCancelIgnoredCount, 1,
+            XCTAssertEqual(waitSnap.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1,
+                           "waiter .closedBeforeProcessing: exactly one .parkedResumedByClose")
+            XCTAssertEqual(waitSnap.waiterFateCounts[.closedWhileParked] ?? 0, 1,
+                           "waiter .closedBeforeProcessing: fate sealed exactly .closedWhileParked")
+            XCTAssertEqual(waitSnap.waiterCancelIgnoredCount, 1,
                            "waiter close-guard bumps ignored count by one")
         }
     }
