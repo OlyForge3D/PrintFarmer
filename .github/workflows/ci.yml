@@ -339,28 +339,48 @@ jobs:
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-        run: dotnet restore "./$MATRIX_PROJECT"
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
+        run: |
+          set -euo pipefail
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
+          dotnet restore "./$MATRIX_PROJECT" "${integration_args[@]}"
 
       - name: Build test project
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-        run: dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
+        run: |
+          set -euo pipefail
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
+          dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore "${integration_args[@]}"
 
       - name: Test
         working-directory: src
         env:
           MATRIX_NAME: ${{ matrix.name }}
           MATRIX_PROJECT: ${{ matrix.project }}
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
         # Category filter matches the legacy CI behavior: skip Docker /
         # DbHeavy categories that need external services. Callers who want
         # those categories run them out-of-band (workflow_dispatch will
         # force the full safe matrix, which still excludes Docker per
         # policy).
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p TestResults
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
           dotnet test "./$MATRIX_PROJECT" -c Debug --no-build \
+            "${integration_args[@]}" \
             --logger "trx;LogFileName=$MATRIX_NAME.trx" \
             --results-directory TestResults \
             --filter "Category!=DbHeavy&Category!=Docker"

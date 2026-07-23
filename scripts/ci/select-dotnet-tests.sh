@@ -48,19 +48,19 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.2.1"
 
 # ---------------------------------------------------------------------------
-# Test projects that live in farm-web.sln. Keep this list in lockstep with
-# `Select-String Tests.csproj` in src/farm-web.sln — the tools/tests suite
-# (assert-tools-in-sln in a future pass) will enforce that any additional
-# `*Tests.csproj` added to the sln is mapped here or classified as
-# "unmapped → full safe".
+# Required CI test projects. The final field opts projects into special MSBuild
+# properties during restore, build, and test. Farm.Web.IntegrationTests
+# intentionally lives outside farm-web.sln and must be invoked directly with
+# RunIntegrationTests=true because its csproj disables test discovery otherwise.
 # ---------------------------------------------------------------------------
-# All test projects visible to `dotnet test farm-web.sln`:
 readonly ALL_TEST_PROJECTS=(
-  "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj"
-  "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj"
+  "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false"
+  "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj|false"
+  "Farm.OrcaSlicer.Worker.Tests|tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj|false"
+  "Farm.Web.IntegrationTests|tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj|true"
 )
 
 # All migration context/provider pairs (matches the ci.yml legacy drift block).
@@ -227,6 +227,8 @@ load_changed_files() {
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
 #   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
+#   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
+#   tests_integration — src/tests/Farm.Web.IntegrationTests/**
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -296,8 +298,10 @@ classify_path() {
     src/settings/*)          printf 'settings' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
-    src/tests/Farm.Web.Api.Tests/*)      printf 'tests_api' ; return ;;
-    src/tests/Farm.Slicer.Module.Tests/*) printf 'tests_slicer' ; return ;;
+    src/tests/Farm.Web.Api.Tests/*)             printf 'tests_api' ; return ;;
+    src/tests/Farm.Slicer.Module.Tests/*)       printf 'tests_slicer' ; return ;;
+    src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
+    src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -333,13 +337,17 @@ finish() {
   # Build test matrix JSON.
   local matrix_json='{"include":[]}'
   if (( ${#test_selected[@]} > 0 )); then
-    local items="" first=1 entry name project
+    local items="" first=1 entry name project run_integration
     for name in "${test_selected[@]}"; do
       # Look up project from ALL_TEST_PROJECTS.
       project=""
+      run_integration="false"
       for entry in "${ALL_TEST_PROJECTS[@]}"; do
-        if [[ "${entry%%|*}" == "$name" ]]; then
-          project="${entry#*|}"
+        local entry_name entry_project entry_integration
+        IFS='|' read -r entry_name entry_project entry_integration <<< "$entry"
+        if [[ "$entry_name" == "$name" ]]; then
+          project="$entry_project"
+          run_integration="$entry_integration"
           break
         fi
       done
@@ -349,7 +357,7 @@ finish() {
       local label="$name"
       if (( first == 0 )); then items+=","; fi
       first=0
-      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$label"'"}'
+      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$label"'","run_integration":"'"$run_integration"'"}'
     done
     matrix_json='{"include":['"$items"']}'
   fi
@@ -376,12 +384,12 @@ finish() {
   if [[ "$want_dotnet_test" == "true" && "$matrix_json" == '{"include":[]}' ]]; then
     reason_raw="internal: empty test selection with want_dotnet_test=true — coercing full safe"
     full_matrix="true"
-    local items="" first=1 entry name project
+    local items="" first=1 entry name project run_integration
     for entry in "${ALL_TEST_PROJECTS[@]}"; do
-      name="${entry%%|*}" ; project="${entry#*|}"
+      IFS='|' read -r name project run_integration <<< "$entry"
       if (( first == 0 )); then items+=","; fi
       first=0
-      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$name"'"}'
+      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$name"'","run_integration":"'"$run_integration"'"}'
     done
     matrix_json='{"include":['"$items"']}'
   fi
@@ -473,7 +481,8 @@ main() {
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0
   local has_mig_app=0 has_mig_slcr=0
-  local has_tests_api=0 has_tests_slicer=0 has_tests_other=0
+  local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
+  local has_tests_integration=0 has_tests_other=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_other=0
 
   local p category
@@ -495,6 +504,8 @@ main() {
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
       tests_slicer)    has_tests_slicer=1 ;;
+      tests_orca)      has_tests_orca=1 ;;
+      tests_integration) has_tests_integration=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -524,15 +535,7 @@ main() {
   if (( has_settings )); then
     emit_full_safe "full-safe: settings abstractions changed"
   fi
-  # orcaslicer-worker is not part of farm-web.sln, but it is referenced by the
-  # workers used by the slicer host. Route to full-safe so nobody assumes the
-  # sln test matrix is comprehensive.
-  if (( has_orca )); then
-    emit_full_safe "full-safe: orcaslicer-worker changed (outside sln)"
-  fi
-  # tests_other = a test project not represented in the sln (e.g.
-  # Farm.Web.IntegrationTests, Farm.OrcaSlicer.Worker.Tests). Do not silently
-  # ignore.
+  # tests_other = a future unmapped test project. Do not silently ignore.
   if (( has_tests_other )); then
     emit_full_safe "full-safe: unmapped test project changed"
   fi
@@ -549,8 +552,10 @@ main() {
   # Any .NET-relevant bucket forces a full solution build to preserve compile
   # coverage across the whole graph.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
+        has_orca ||
         has_mig_app || has_mig_slcr ||
-        has_tests_api || has_tests_slicer || has_tools )); then
+        has_tests_api || has_tests_slicer || has_tests_orca ||
+        has_tests_integration || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -558,7 +563,12 @@ main() {
   local net_test_bucket_hit=0
   if (( has_api || has_infra )); then
     # api / infra sit under both tests. Both are affected.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests")
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_infra )); then
+    # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
+    test_names+=("Farm.OrcaSlicer.Worker.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -574,12 +584,16 @@ main() {
     # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
     # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj).
     # A Core edit must therefore run both test suites.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests")
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
     net_test_bucket_hit=1
   fi
   if (( has_slicer )); then
     # slicer projects are referenced by both test suites.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests")
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_orca )); then
+    test_names+=("Farm.OrcaSlicer.Worker.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_mig_app )); then
@@ -623,6 +637,14 @@ main() {
     test_names+=("Farm.Slicer.Module.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_orca )); then
+    test_names+=("Farm.OrcaSlicer.Worker.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_tests_integration )); then
+    test_names+=("Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
   if (( net_test_bucket_hit )); then
     want_dotnet_test="true"
   fi
@@ -635,10 +657,13 @@ main() {
   if (( has_backend )); then reason+="backend-plugin "; fi
   if (( has_backend_core )); then reason+="backend-core "; fi
   if (( has_slicer )); then reason+="slicer "; fi
+  if (( has_orca )); then reason+="orcaslicer-worker "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
   if (( has_tests_slicer )); then reason+="tests-slicer "; fi
+  if (( has_tests_orca )); then reason+="tests-orca "; fi
+  if (( has_tests_integration )); then reason+="tests-integration "; fi
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi
   if (( has_mobile )); then reason+="mobile "; fi

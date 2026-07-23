@@ -64,17 +64,19 @@ classify.
 | Bucket and exact path selector | Frontend | .NET build | .NET tests | Migration drift | Full-safe |
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
-| `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `AppPg`, `AppSqlServer` | |
-| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `AppPg`, `AppSqlServer` | |
-| `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | | |
+| `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
+| `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | | |
 | `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests` | | |
-| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests` | `SlicerPg`, `SlicerSqlServer` | |
+| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
+| `orca_worker`: `src/orcaslicer-worker/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests` | `AppPg`, `AppSqlServer` | |
 | `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Slicer.Module.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests` | | |
 | `tests_slicer`: `src/tests/Farm.Slicer.Module.Tests/**` | | ✓ | `Farm.Slicer.Module.Tests` | | |
+| `tests_orca`: `src/tests/Farm.OrcaSlicer.Worker.Tests/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
+| `tests_integration`: `src/tests/Farm.Web.IntegrationTests/**` | | ✓ | `Farm.Web.IntegrationTests` | | |
 | `tests_other`: every other `src/tests/**` path | ✓ | ✓ | all | all | ✓ |
-| `orca_worker`: `src/orcaslicer-worker/**` | ✓ | ✓ | all | all | ✓ |
 | `discovery`: `src/discovery/**`, `src/printer-discovery/**` | ✓ | ✓ | all | all | ✓ |
 | `settings`: `src/settings/**` | ✓ | ✓ | all | all | ✓ |
 | `shared_config`: `global.json`, any `*.sln`, `Directory.Build.*`, `Directory.Packages.props`, `NuGet.Config`, `src/.editorconfig` | ✓ | ✓ | all | all | ✓ |
@@ -90,7 +92,7 @@ classify.
 
 ### Full-safe (`full_matrix=1`) triggers
 
-- Any of: `shared_config`, `ci_selector`, `unknown_src`, `discovery`, `settings`, `orca_worker`, `tests_other`, `devcontainer`.
+- Any of: `shared_config`, `ci_selector`, `unknown_src`, `discovery`, `settings`, `tests_other`, `devcontainer`.
 - `workflow_dispatch` event.
 - `push` to `main` or `development`.
 - Caller sets `FORCE_FULL_SAFE=1`.
@@ -100,6 +102,11 @@ classify.
 The workflow intentionally has no `push.paths` filter. Every push to `main` or
 `development` dispatches CI, and the selector forces full-safe before reading
 the changed-path set.
+
+`Farm.Web.IntegrationTests` is invoked as a project-scoped matrix leg, not via
+`farm-web.sln`. The selector emits `run_integration=true` for that leg and the
+workflow passes `-p:RunIntegrationTests=true` during restore, build, and test so
+the project compiles and executes its tests instead of disabling itself.
 
 ### Exclusions
 
@@ -244,9 +251,10 @@ given tree.
 
 ## Extending
 
-- **New test project**: add it to `farm-web.sln`, add a row to `ALL_TEST_PROJECTS`
-  and (as needed) the classification map in `select-dotnet-tests.sh`, then add
-  a matching test case in the selector suite.
+- **New test project**: add a row to `ALL_TEST_PROJECTS` and (as needed) the
+  classification map in `select-dotnet-tests.sh`, then add a matching test case
+  in the selector suite. Add it to `farm-web.sln` when appropriate, but CI also
+  supports required projects that intentionally live outside the solution.
 - **New bucket**: extend `classify_path()` and add a case in the selector suite.
 - **New full-safe trigger**: extend the trigger switch in `main()` of the
   selector and add a case.
