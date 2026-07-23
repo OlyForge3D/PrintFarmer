@@ -17,6 +17,7 @@ import {
   type ApiKeyPurpose,
   type ApiKeyScope,
   type CreateApiKeyRequest,
+  type CreateApiKeyResponse,
 } from '@/services/apiKeysService';
 
 const SCOPE_OPTIONS: { value: ApiKeyScope; label: string; description: string }[] = [
@@ -26,6 +27,42 @@ const SCOPE_OPTIONS: { value: ApiKeyScope; label: string; description: string }[
 ];
 
 const MAX_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
+
+// Static, generic message shown when a create/rotate response is malformed (missing/empty
+// secret or the display metadata needed to render it safely). Deliberately contains no
+// details from the response itself so it can never leak partial secret data.
+const MALFORMED_SECRET_RESPONSE_ERROR = 'The server response was missing required API key data. Please try again.';
+
+/** The one-time secret plus the minimum metadata needed to render/dismiss it. */
+interface RevealedSecret {
+  key: string;
+  id: string;
+}
+
+interface CreateKeyFieldErrors {
+  name?: string;
+  scopes?: string;
+  expiry?: string;
+}
+
+/** Stable identity of whatever triggered the current one-time secret, used to restore focus. */
+type FocusRestoreTarget = { type: 'create' } | { type: 'rotate'; keyId: string };
+
+/**
+ * Validates a create/rotate response and extracts only the one-time secret plus the id
+ * needed to display it. Throws a generic, static error (never echoing response content)
+ * when the secret or required metadata is missing/empty so callers can fail safely without
+ * ever assigning the raw response — or any fragment of it — to component/query state.
+ */
+function extractOneTimeSecret(response: CreateApiKeyResponse): RevealedSecret {
+  if (!response || typeof response.key !== 'string' || response.key.trim() === '') {
+    throw new Error(MALFORMED_SECRET_RESPONSE_ERROR);
+  }
+  if (typeof response.id !== 'string' || response.id.trim() === '') {
+    throw new Error(MALFORMED_SECRET_RESPONSE_ERROR);
+  }
+  return { key: response.key, id: response.id };
+}
 
 interface ApiKeysPageProps {
   embedded?: boolean;
@@ -39,34 +76,82 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
   const [newKeyScopes, setNewKeyScopes] = useState<ApiKeyScope[]>([]);
   const [newKeyExpiresAt, setNewKeyExpiresAt] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createdKey, setCreatedKey] = useState<{ key: string; id: string } | null>(null);
+  const [createdKey, setCreatedKey] = useState<RevealedSecret | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<CreateKeyFieldErrors>({});
   const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({});
+  const [isSecretLocked, setIsSecretLocked] = useState(false);
 
   const userId = user?.id;
 
+  // Single lock covering the entire lifecycle of a secret-generating operation: from the
+  // instant Create/Rotate is invoked, through the mutation's flight, through the one-time
+  // secret being displayed, until it is explicitly dismissed (or the operation errors out).
+  // Held as a plain ref — not just React state — so the create/rotate handlers can enforce
+  // it synchronously and reject programmatic/double-click races regardless of when React
+  // re-renders or when TanStack Query's mutation observers notify subscribers.
+  const secretLockRef = useRef(false);
+
+  const lockSecretOperation = () => {
+    secretLockRef.current = true;
+    setIsSecretLocked(true);
+  };
+
+  const unlockSecretOperation = () => {
+    secretLockRef.current = false;
+    setIsSecretLocked(false);
+  };
+
   // Focus management for the strictly one-time secret panel: move focus to it the instant
   // it appears (so keyboard/screen-reader users are taken straight to the secret and its
-  // aria-live announcement), and restore focus to whatever triggered it (Create/Rotate)
-  // once it is dismissed. The panel never re-appears with the same secret after dismissal.
+  // aria-live announcement), and restore focus once it is dismissed. Restoration re-resolves
+  // the trigger by stable identity (apiKey id / 'create') rather than trusting a possibly
+  // detached document.activeElement, so it stays correct even if the row/button remounts or
+  // the rotated key is removed before Done is pressed. Falls back deterministically — never
+  // leaving focus on <body>.
   const createdKeyPanelRef = useRef<HTMLDivElement | null>(null);
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
-  const focusRestoreRef = useRef<'create' | HTMLElement | null>(null);
+  const pageHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const rotateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const scopesGroupRef = useRef<HTMLFieldSetElement | null>(null);
+  const expiryInputRef = useRef<HTMLInputElement | null>(null);
+  const focusRestoreRef = useRef<FocusRestoreTarget | null>(null);
   const wasCreatedKeyShownRef = useRef(false);
 
   useEffect(() => {
     if (createdKey) {
       wasCreatedKeyShownRef.current = true;
       createdKeyPanelRef.current?.focus();
-    } else if (wasCreatedKeyShownRef.current) {
-      wasCreatedKeyShownRef.current = false;
-      if (focusRestoreRef.current === 'create') {
-        createButtonRef.current?.focus();
-      } else {
-        focusRestoreRef.current?.focus();
-      }
-      focusRestoreRef.current = null;
+      return;
     }
+    if (!wasCreatedKeyShownRef.current) {
+      return;
+    }
+    wasCreatedKeyShownRef.current = false;
+
+    const target = focusRestoreRef.current;
+    focusRestoreRef.current = null;
+
+    const isUsable = (el: HTMLButtonElement | null | undefined): el is HTMLButtonElement =>
+      !!el && document.contains(el) && !el.disabled;
+
+    if (target?.type === 'rotate') {
+      const rotateButton = rotateButtonRefs.current.get(target.keyId);
+      if (isUsable(rotateButton)) {
+        rotateButton.focus();
+        return;
+      }
+    }
+
+    if (isUsable(createButtonRef.current)) {
+      createButtonRef.current?.focus();
+      return;
+    }
+
+    // Deterministic last-resort fallback: the row/control that triggered the secret is gone
+    // (revoked/remounted) and the Create button is unavailable (e.g. the form is open).
+    pageHeadingRef.current?.focus();
   }, [createdKey]);
 
   // Fetch API key settings (whether hashing is enabled)
@@ -87,23 +172,29 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
     enabled: !!userId,
   });
 
-  // Create API key mutation
+  // Create API key mutation. The mutationFn itself validates the one-time secret and moves
+  // it directly into transient component state, then returns void so the raw secret can
+  // never become mutation.state.data — not even briefly — and therefore can never leak into
+  // the React Query mutation cache.
   const createMutation = useMutation({
-    mutationFn: (request: CreateApiKeyRequest) => {
+    mutationFn: async (request: CreateApiKeyRequest) => {
       if (!userId) throw new Error('User ID required');
-      return createApiKey(userId, request);
+      const response = await createApiKey(userId, request);
+      const secret = extractOneTimeSecret(response);
+      setCreatedKey(secret);
     },
-    onSuccess: (data) => {
-      setCreatedKey(data);
+    onSuccess: () => {
       setNewKeyName('');
       setNewKeyPurpose('OctoPrint');
       setNewKeyScopes([]);
       setNewKeyExpiresAt('');
+      setFieldErrors({});
       setShowCreateForm(false);
       setError(null);
       queryClient.invalidateQueries({ queryKey: ['apiKeys', userId] });
     },
     onError: (err) => {
+      unlockSecretOperation();
       setError(err instanceof Error ? err.message : 'Failed to create API key');
     },
   });
@@ -136,43 +227,67 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
     },
   });
 
-  // Rotate API key mutation
+  // Rotate API key mutation. Same secrecy contract as create: the mutationFn validates and
+  // moves the secret into transient state directly, returning void so it never touches the
+  // mutation cache.
   const rotateMutation = useMutation({
-    mutationFn: ({ keyId }: { keyId: string }) => {
+    mutationFn: async ({ keyId }: { keyId: string }) => {
       if (!userId) throw new Error('User ID required');
-      return rotateApiKey(userId, keyId);
+      const response = await rotateApiKey(userId, keyId);
+      const secret = extractOneTimeSecret(response);
+      setCreatedKey(secret);
     },
-    onSuccess: (data) => {
-      setCreatedKey(data);
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['apiKeys', userId] });
     },
     onError: (err) => {
+      unlockSecretOperation();
       setError(err instanceof Error ? err.message : 'Failed to rotate API key');
     },
   });
 
-  const handleCreate = () => {
+  const validateAndFocus = (): boolean => {
+    const errors: CreateKeyFieldErrors = {};
+
     if (!newKeyName.trim()) {
-      setError('API key name is required');
-      return;
+      errors.name = 'Enter a name for this API key.';
     }
     if (newKeyPurpose === 'Desktop' && newKeyScopes.length === 0) {
-      setError('Select at least one scope for a Desktop-purpose API key');
-      return;
+      errors.scopes = 'Select at least one scope for this Desktop-purpose key.';
     }
     if (newKeyExpiresAt) {
       const expiry = new Date(newKeyExpiresAt);
       const now = new Date();
       if (Number.isNaN(expiry.getTime()) || expiry <= now) {
-        setError('API key expiry must be in the future');
-        return;
-      }
-      if (expiry.getTime() > now.getTime() + MAX_KEY_LIFETIME_MS) {
-        setError('API key expiry cannot exceed 365 days from now');
-        return;
+        errors.expiry = 'Choose a date and time in the future.';
+      } else if (expiry.getTime() > now.getTime() + MAX_KEY_LIFETIME_MS) {
+        errors.expiry = 'Choose a date no more than 365 days from now.';
       }
     }
-    focusRestoreRef.current = 'create';
+
+    setFieldErrors(errors);
+
+    // Focus the first invalid field/group, following DOM order (name, then scopes, then
+    // expiry) so combined errors are handled predictably.
+    if (errors.name) {
+      nameInputRef.current?.focus();
+    } else if (errors.scopes) {
+      scopesGroupRef.current?.focus();
+    } else if (errors.expiry) {
+      expiryInputRef.current?.focus();
+    }
+
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleCreate = () => {
+    // Enforced here (not only via disabled UI) so a second programmatic/double-click call
+    // cannot start a create while create/rotate is pending or a secret is on screen.
+    if (secretLockRef.current) return;
+    if (!validateAndFocus()) return;
+
+    lockSecretOperation();
+    focusRestoreRef.current = { type: 'create' };
     createMutation.mutate({
       name: newKeyName.trim(),
       purpose: newKeyPurpose,
@@ -182,7 +297,13 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
   };
 
   const toggleScope = (scope: ApiKeyScope) => {
-    setNewKeyScopes((prev) => (prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope]));
+    setNewKeyScopes((prev) => {
+      const next = prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope];
+      if (next.length > 0) {
+        setFieldErrors((prevErrors) => (prevErrors.scopes ? { ...prevErrors, scopes: undefined } : prevErrors));
+      }
+      return next;
+    });
   };
 
   const handleToggle = (keyId: string) => {
@@ -196,10 +317,20 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
   };
 
   const handleRotate = (keyId: string, keyName: string) => {
-    if (confirm(`Are you sure you want to rotate API key "${keyName}"? The old key will stop working immediately.`)) {
-      focusRestoreRef.current = document.activeElement as HTMLElement | null;
-      rotateMutation.mutate({ keyId });
+    // Enforced here (not only via disabled UI) so rotate cannot start while create/rotate
+    // is pending or a secret is currently on screen.
+    if (secretLockRef.current) return;
+    if (!confirm(`Are you sure you want to rotate API key "${keyName}"? The old key will stop working immediately.`)) {
+      return;
     }
+    lockSecretOperation();
+    focusRestoreRef.current = { type: 'rotate', keyId };
+    rotateMutation.mutate({ keyId });
+  };
+
+  const handleDismissSecret = () => {
+    setCreatedKey(null);
+    unlockSecretOperation();
   };
 
   const handleReveal = async (keyId: string) => {
@@ -259,13 +390,14 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
             className="bg-pf-success/10 border border-pf-success rounded-lg p-4 focus:outline-hidden focus:ring-2 focus:ring-pf-success focus:ring-offset-2 focus:ring-offset-pf-bg-0"
             role="status"
             aria-live="polite"
-            aria-label="One-time API key secret"
+            aria-labelledby="created-key-heading"
+            aria-describedby="created-key-warning created-key-value"
           >
-            <h3 className="font-semibold text-pf-success mb-2">API Key Created Successfully</h3>
-            <p className="text-pf-text-secondary text-sm mb-3">
+            <h3 id="created-key-heading" className="font-semibold text-pf-success mb-2">API Key Created Successfully</h3>
+            <p id="created-key-warning" className="text-pf-text-secondary text-sm mb-3">
               <strong className="text-pf-warning">Important:</strong> Copy this API key now. You won't be able to see it again!
             </p>
-            <div className="bg-pf-bg-2 p-3 rounded-sm border border-pf-border font-mono text-sm break-all">
+            <div id="created-key-value" className="bg-pf-bg-2 p-3 rounded-sm border border-pf-border font-mono text-sm break-all">
               {createdKey.key}
             </div>
             <div className="mt-3 flex gap-2">
@@ -277,7 +409,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => setCreatedKey(null)}
+                onClick={handleDismissSecret}
               >
                 Done
               </Button>
@@ -295,12 +427,20 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
         {/* Create New API Key */}
         <div className="bg-pf-bg-1 rounded-lg p-6 border border-pf-border">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-pf-text-primary">Your API Keys</h2>
+            <h2
+              id="api-keys-heading"
+              ref={pageHeadingRef}
+              tabIndex={-1}
+              className="text-lg font-semibold text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:ring-offset-2 focus:ring-offset-pf-bg-0 rounded-xs"
+            >
+              Your API Keys
+            </h2>
             {!showCreateForm && (
               <Button
                 variant="primary"
                 ref={createButtonRef}
                 onClick={() => setShowCreateForm(true)}
+                disabled={isSecretLocked}
                 iconLeft={<PlusIcon className="w-4 h-4" />}
               >
                 Create New API Key
@@ -312,15 +452,21 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
             <div className="mb-6 p-4 bg-pf-bg-2 rounded-sm border border-pf-border">
               <h3 className="font-semibold text-pf-text-primary mb-3">Create New API Key</h3>
               <div className="space-y-4">
-                <FormField label="Name" htmlFor="apikey-name" required>
+                <FormField label="Name" htmlFor="apikey-name" required error={fieldErrors.name} errorId="apikey-name-error">
                   <Input
                     id="apikey-name"
+                    ref={nameInputRef}
                     type="text"
                     value={newKeyName}
-                    onChange={(e) => setNewKeyName(e.target.value)}
+                    onChange={(e) => {
+                      setNewKeyName(e.target.value);
+                      setFieldErrors((prev) => (prev.name ? { ...prev, name: undefined } : prev));
+                    }}
                     placeholder="Enter a descriptive name (e.g., 'PrusaSlicer Workstation')"
                     maxLength={256}
                     aria-required="true"
+                    aria-invalid={!!fieldErrors.name}
+                    aria-describedby={fieldErrors.name ? 'apikey-name-error' : undefined}
                   />
                 </FormField>
 
@@ -332,6 +478,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                       setNewKeyPurpose(e.target.value as ApiKeyPurpose);
                       setNewKeyScopes([]);
                       setNewKeyExpiresAt('');
+                      setFieldErrors((prev) => ({ ...prev, scopes: undefined, expiry: undefined }));
                     }}
                   >
                     <option value="OctoPrint">OctoPrint (compatible slicer uploads)</option>
@@ -340,11 +487,22 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                 </FormField>
 
                 {newKeyPurpose === 'Desktop' && (
-                  <fieldset className="space-y-2">
+                  <fieldset
+                    ref={scopesGroupRef}
+                    tabIndex={-1}
+                    aria-invalid={!!fieldErrors.scopes}
+                    aria-describedby={fieldErrors.scopes ? 'apikey-scopes-helper apikey-scopes-error' : 'apikey-scopes-helper'}
+                    className="space-y-2 rounded-xs focus:outline-hidden focus:ring-2 focus:ring-pf-error focus:ring-offset-2 focus:ring-offset-pf-bg-0"
+                  >
                     <legend className="text-sm font-medium text-pf-text-primary">
                       Scopes <span className="text-pf-error" aria-hidden="true">*</span>
                     </legend>
-                    <p className="text-xs text-pf-text-muted">At least one scope is required for Desktop-purpose keys.</p>
+                    <p id="apikey-scopes-helper" className="text-xs text-pf-text-muted">At least one scope is required for Desktop-purpose keys.</p>
+                    {fieldErrors.scopes && (
+                      <p id="apikey-scopes-error" role="alert" className="text-xs text-pf-error-text">
+                        {fieldErrors.scopes}
+                      </p>
+                    )}
                     <div className="space-y-2">
                       {SCOPE_OPTIONS.map((scope) => (
                         <Checkbox
@@ -365,12 +523,21 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                   helper={newKeyPurpose === 'Desktop'
                     ? 'Optional. Defaults to 90 days from creation if left blank (max 365 days).'
                     : 'Optional. OctoPrint keys do not expire when this is left blank (max 365 days).'}
+                  helperId="apikey-expiry-helper"
+                  error={fieldErrors.expiry}
+                  errorId="apikey-expiry-error"
                 >
                   <Input
                     id="apikey-expiry"
+                    ref={expiryInputRef}
                     type="datetime-local"
                     value={newKeyExpiresAt}
-                    onChange={(e) => setNewKeyExpiresAt(e.target.value)}
+                    onChange={(e) => {
+                      setNewKeyExpiresAt(e.target.value);
+                      setFieldErrors((prev) => (prev.expiry ? { ...prev, expiry: undefined } : prev));
+                    }}
+                    aria-invalid={!!fieldErrors.expiry}
+                    aria-describedby={fieldErrors.expiry ? 'apikey-expiry-error' : 'apikey-expiry-helper'}
                   />
                 </FormField>
 
@@ -378,7 +545,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                   <Button
                     variant="primary"
                     onClick={handleCreate}
-                    disabled={createMutation.isPending}
+                    disabled={isSecretLocked}
                   >
                     {createMutation.isPending ? 'Creating...' : 'Create'}
                   </Button>
@@ -391,6 +558,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                       setNewKeyScopes([]);
                       setNewKeyExpiresAt('');
                       setError(null);
+                      setFieldErrors({});
                     }}
                   >
                     Cancel
@@ -465,9 +633,16 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                         />
                       )}
                       <Button
+                        ref={(el) => {
+                          if (!el) return;
+                          rotateButtonRefs.current.set(apiKey.id, el);
+                          return () => {
+                            rotateButtonRefs.current.delete(apiKey.id);
+                          };
+                        }}
                         variant="secondary"
                         onClick={() => handleRotate(apiKey.id, apiKey.name)}
-                        disabled={rotateMutation.isPending || apiKey.isExpired}
+                        disabled={isSecretLocked || apiKey.isExpired}
                         iconLeft={<RefreshIcon className="w-4 h-4" />}
                         title={apiKey.isExpired ? 'Expired API keys cannot be rotated' : 'Rotate (generate new key)'}
                         aria-label={`Rotate API key ${apiKey.name}`}
