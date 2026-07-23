@@ -2804,6 +2804,193 @@ final class PredictiveViewModelTests: XCTestCase {
         await parkTask.value
     }
 
+    // MARK: Ripley Finding 2 — distinct-token weak ticket auto-cleanup
+    //
+    // The two `testAsyncGateH2TicketEnterDropStaysBounded_*` tests
+    // above prove that repeated enter+drop on a SINGLE token followed
+    // by parking THAT token returns raw backing storage to zero via the
+    // park-triggered `flushXParkAcks(id:, .parked)` bucket removal.
+    //
+    // Hicks (Ripley Finding 2, MEDIUM): that proof does not cover N
+    // DISTINCT unparked tokens because flush is per-token and each
+    // distinct token has its own bucket. Without an automatic
+    // identity-preserving lifecycle removal path, dead weak-boxes for
+    // each distinct token would accumulate one-per-token and only be
+    // reclaimable via `pruneAllDroppedTicketBoxesForTest()`,
+    // `snapshot()` compaction, or `close()`.
+    //
+    // The harness now registers a deinit-driven cleanup Task per
+    // ticket (see `ObserverParkAckTicket.deinit` +
+    // `AsyncGate.observerTicketCleanupFromDeinit`) that removes the
+    // exact box for the ticket's `identity` from
+    // `observerActiveParkAckTickets[tokenID]` when the caller drops
+    // the ticket without ever consuming it. A gate-side
+    // `waitForNoPendingObserverTicketCleanups()` barrier suspends until
+    // the LAST such cleanup Task's actor call completes.
+    //
+    // Deterministic sequence — no sleeps, Task.yield, polling, timeouts,
+    // manual prune, close, snapshot, or per-token park:
+    //   1. Register N distinct tokens (each with a fresh id).
+    //   2. Enter+drop one ticket per token inside an `@inline(never)`
+    //      helper so ARC deterministically releases every ticket at
+    //      helper return.
+    //   3. Await `gate.waitForNoPendingObserverTicketCleanups()`.
+    //      Resolves exactly when every deinit-launched cleanup Task's
+    //      actor call has run — barrier semantics.
+    //   4. Read raw box/key counts DIRECTLY (via debugRaw*). Both
+    //      MUST be exactly zero.
+    //   5. Read pending-cleanup identity count directly (debugPending*).
+    //      MUST be exactly zero.
+    //   6. Bounded teardown via close() (not part of the exact-zero
+    //      proof; barrier already passed).
+
+    /// Ripley Finding 2: N distinct observer tokens, one enter+drop
+    /// each, no per-token park. Auto-cleanup + barrier prove raw
+    /// storage exactly zero without snapshot/close/manual prune.
+    func testAsyncGateH2DistinctTokenEnterDropAutoCleansBounded_observer() async {
+        let gate = AsyncGate()
+        let iterations = 100
+        // Pre-register N distinct tokens. Tokens are value-typed
+        // ObserverToken(id:), no ticket lifetime coupled here.
+        var tokens: [AsyncGate.ObserverToken] = []
+        tokens.reserveCapacity(iterations)
+        for _ in 0..<iterations {
+            tokens.append(await gate.registerObserver())
+        }
+
+        @inline(never)
+        func enterAndDropOncePerToken() async {
+            for t in tokens {
+                let ticket = await gate.enterObserverParkAck(t)
+                _ = ticket
+                // ticket goes out of scope at loop-body end — deinit
+                // fires synchronously here (last strong ref released).
+            }
+        }
+        await enterAndDropOncePerToken()
+
+        // Deterministic barrier: suspends until every deinit-launched
+        // cleanup Task's actor call has completed. Rescued by close()
+        // via the standard drain path if any regression prevents
+        // completion, so this cannot hang.
+        await gate.waitForNoPendingObserverTicketCleanups()
+
+        // Direct raw-storage reads — NOT via snapshot() (which would
+        // compact-as-side-effect and mask a lifecycle-removal
+        // regression), NOT via close (deferred to teardown below),
+        // NOT via pruneAllDroppedTicketBoxesForTest (would trivially
+        // satisfy the assertion regardless of auto-cleanup working).
+        let rawBoxes = await gate.debugRawObserverParkAckBoxCount()
+        let rawKeys = await gate.debugRawObserverParkAckKeyCount()
+        XCTAssertEqual(rawBoxes, 0,
+            "N distinct-token auto-cleanup must leave raw box count exactly zero; got \(rawBoxes)")
+        XCTAssertEqual(rawKeys, 0,
+            "N distinct-token auto-cleanup must leave raw key count exactly zero; got \(rawKeys)")
+
+        // Pending-identity set direct read: proves the actor-side
+        // pending-cleanup bookkeeping is fully drained.
+        let pending = await gate.debugPendingObserverTicketCleanupCount()
+        XCTAssertEqual(pending, 0,
+            "pending-cleanup identity set must be empty after barrier; got \(pending)")
+
+        // Bounded teardown (not part of the exact-zero proof).
+        await gate.close()
+    }
+
+    /// Waiter analogue of the distinct-token auto-cleanup proof.
+    func testAsyncGateH2DistinctTokenEnterDropAutoCleansBounded_waiter() async {
+        let gate = AsyncGate()
+        let iterations = 100
+        var tokens: [AsyncGate.WaiterToken] = []
+        tokens.reserveCapacity(iterations)
+        for _ in 0..<iterations {
+            tokens.append(await gate.registerWaiter())
+        }
+
+        @inline(never)
+        func enterAndDropOncePerToken() async {
+            for t in tokens {
+                let ticket = await gate.enterWaiterParkAck(t)
+                _ = ticket
+            }
+        }
+        await enterAndDropOncePerToken()
+
+        await gate.waitForNoPendingWaiterTicketCleanups()
+
+        let rawBoxes = await gate.debugRawWaiterParkAckBoxCount()
+        let rawKeys = await gate.debugRawWaiterParkAckKeyCount()
+        XCTAssertEqual(rawBoxes, 0,
+            "N distinct-token auto-cleanup must leave raw box count exactly zero; got \(rawBoxes)")
+        XCTAssertEqual(rawKeys, 0,
+            "N distinct-token auto-cleanup must leave raw key count exactly zero; got \(rawKeys)")
+
+        let pending = await gate.debugPendingWaiterTicketCleanupCount()
+        XCTAssertEqual(pending, 0,
+            "pending-cleanup identity set must be empty after barrier; got \(pending)")
+
+        await gate.close()
+    }
+
+    /// Ripley Finding 2: `resolve(_)` path clears the ticket's deinit
+    /// cleanup so a subsequent deinit does NOT double-decrement the
+    /// pending-identity set. Proves per-identity accounting is
+    /// deinit-order-safe: a ticket the actor resolved (via park-flush)
+    /// then dropped by the caller must not cause the barrier to
+    /// deadlock or fire twice.
+    func testAsyncGateH2ResolvedTicketDeinitDoesNotDoubleDecrement_observer() async {
+        let gate = AsyncGate()
+        let token = await gate.registerObserver()
+
+        // Enter one ticket (active branch → pending identity registered).
+        // Then park the token so flushObserverParkAcks removes the box
+        // AND removes the identityHint from the pending set AND calls
+        // resolve(_) on the ticket (which clears its cleanup callback).
+        do {
+            let ticket = await gate.enterObserverParkAck(token)
+            let parkAttempt = ObserverAwaitAttempt()
+            let parkTask = Task { await gate.awaitObserver(token, attempt: parkAttempt) }
+            _ = await gate.waitForObserverParked(token)
+            // Ticket is now resolved by flush (result == .parked) AND
+            // removed from actor storage. Its cleanup callback was
+            // cleared by resolve(_).
+            XCTAssertTrue(ticket.isResolved, "flush must resolve ticket at park time")
+            // Drop ticket at scope exit → deinit fires but must NOT
+            // launch a cleanup Task (callback was cleared by resolve).
+            _ = ticket
+            await gate.close()
+            await parkTask.value
+        }
+
+        // After scope exit + close, the barrier must resolve immediately.
+        // If deinit double-decremented, pending count could underflow /
+        // barrier could deadlock. Neither happens under correct impl.
+        await gate.waitForNoPendingObserverTicketCleanups()
+        let pending = await gate.debugPendingObserverTicketCleanupCount()
+        XCTAssertEqual(pending, 0,
+            "resolve()-then-deinit must not corrupt pending-identity accounting; got \(pending)")
+    }
+
+    /// Waiter analogue.
+    func testAsyncGateH2ResolvedTicketDeinitDoesNotDoubleDecrement_waiter() async {
+        let gate = AsyncGate()
+        let token = await gate.registerWaiter()
+        do {
+            let ticket = await gate.enterWaiterParkAck(token)
+            let parkAttempt = WaiterAwaitAttempt()
+            let parkTask = Task { await gate.awaitWaiter(token, attempt: parkAttempt) }
+            _ = await gate.waitForWaiterParked(token)
+            XCTAssertTrue(ticket.isResolved, "flush must resolve ticket at park time")
+            _ = ticket
+            await gate.close()
+            await parkTask.value
+        }
+        await gate.waitForNoPendingWaiterTicketCleanups()
+        let pending = await gate.debugPendingWaiterTicketCleanupCount()
+        XCTAssertEqual(pending, 0,
+            "resolve()-then-deinit must not corrupt pending-identity accounting; got \(pending)")
+    }
+
     /// Hicks R4: ticket-never-awaited also drained by close(). Enter
     /// a ticket on an active token, DO NOT consume it, then close.
     /// Actor removes the ticket entry at close-time resolution.
