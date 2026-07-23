@@ -2418,28 +2418,36 @@ final class PredictiveViewModelTests: XCTestCase {
 
     // MARK: Hicks H2 — weak ticket boxes stay bounded on enter+drop
 
-    /// Hicks H2 / Vasquez (b): 100 iterations of enter+drop on an
-    /// active unparked token must leave gate ticket storage EXACTLY
-    /// zero. Callers who never consume the ticket must not grow the
-    /// actor's active-ticket arrays: weak boxes let dropped tickets
-    /// be reclaimed and `compactObserverParkAckTickets` prunes dead
-    /// refs on every subsequent enter, AND `snapshot()` compacts.
+    /// Reviewer finding #2 (MEDIUM): the prior H2 tests called
+    /// compacting `snapshot()` BEFORE `debugRawObserverParkAckBoxCount`,
+    /// so the raw==0 assertion was vacuous — snapshot() itself invokes
+    /// `compactAllParkAckTickets()`, prunes the dead weak boxes, then
+    /// returns. Reading raw counts AFTER the same measurement that
+    /// cleans them measures nothing.
     ///
-    /// Coordinator remediation: the loop is wrapped in a helper
-    /// function so ALL iteration-local `ticket` references are
-    /// released before the outer `snapshot()` call. That triggers
-    /// `compactAllParkAckTickets` (invoked by `snapshot()`) to prune
-    /// every dead weak box, yielding an EXACT zero live count rather
-    /// than the previously-permissive `<= 1`.
+    /// This revision:
+    ///   1. Runs the enter+drop loop unchanged (100 iterations)
+    ///   2. Reads raw box/key counts DIRECTLY, BEFORE any compaction is
+    ///      triggered. These may report >= 0 at this instant (dead-but-
+    ///      not-yet-compacted); we assert only boundedness (<= 1 per
+    ///      side because compaction runs on each intra-loop enter,
+    ///      leaving at most the final iteration's box uncompacted).
+    ///   3. Invokes the new `pruneAllDroppedTicketBoxesForTest()`
+    ///      actor method — deterministic single-hop cleanup that is
+    ///      DISTINCT from snapshot() so the raw==0 measurement is not
+    ///      contaminated by the measurement path.
+    ///   4. Reads raw counts AGAIN, requiring EXACT zero.
+    ///   5. Snapshot afterwards ALSO reports zero (redundant proof;
+    ///      guards against a regression where snapshot() and the
+    ///      prune method diverge).
     func testAsyncGateH2TicketEnterDropStaysBounded_observer() async {
         let gate = AsyncGate()
         let token = await gate.registerObserver()
         let iterations = 100
 
-        // Inner helper: each iteration's ticket is released at loop-
-        // iteration end because it is a fresh `let` and is not
-        // returned. On helper return, the loop scope has ended and
-        // every reference is unequivocally dead.
+        // Inner helper: each iteration's ticket is a fresh `let` that is
+        // released at loop-body-end. On helper return, every reference
+        // is unequivocally dead.
         @inline(never)
         func drainCycles() async {
             for _ in 0..<iterations {
@@ -2449,29 +2457,47 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         await drainCycles()
 
-        // snapshot() calls compactAllParkAckTickets internally, which
-        // prunes every dead WeakObserverParkAckTicketBox now that the
-        // last iteration's `ticket` reference is gone.
+        // Read raw storage BEFORE any compaction call. Because
+        // `enterObserverParkAck` compacts THIS token's key on every
+        // active-branch entry, all iterations 1..N-1 have their boxes
+        // pruned by the time iteration N runs. Only iteration N's
+        // box may remain (dead, uncompacted) after drainCycles ends.
+        let preBoxes = await gate.debugRawObserverParkAckBoxCount()
+        let preKeys = await gate.debugRawObserverParkAckKeyCount()
+        XCTAssertLessThanOrEqual(preBoxes, 1,
+            "intra-loop compaction bounds pre-prune raw box count to <= 1; got \(preBoxes)")
+        XCTAssertLessThanOrEqual(preKeys, 1,
+            "intra-loop compaction bounds pre-prune raw key count to <= 1; got \(preKeys)")
+
+        // Deterministic cleanup DISTINCT from snapshot() — single actor
+        // hop, no polling / yields / sleeps / timeouts.
+        await gate.pruneAllDroppedTicketBoxesForTest()
+
+        // After explicit prune, raw storage must reach EXACT zero.
+        // Reading via debugRaw* directly (not via snapshot's compact-
+        // then-report path) proves the actor's cleanup, not the
+        // measurement, produced the zero.
+        let postBoxes = await gate.debugRawObserverParkAckBoxCount()
+        let postKeys = await gate.debugRawObserverParkAckKeyCount()
+        XCTAssertEqual(postBoxes, 0,
+            "raw backing box count must be EXACTLY zero after explicit prune; got \(postBoxes)")
+        XCTAssertEqual(postKeys, 0,
+            "raw backing key count must be EXACTLY zero after explicit prune; got \(postKeys)")
+
+        // Redundant snapshot proof (guards against snapshot vs prune
+        // divergence). Also proves the live ticket counter that other
+        // tests rely on is zero.
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.observerParkAckTicketCount, 0,
-            "enter+drop across \(iterations) iterations must leave EXACTLY zero live boxes; got \(snap.observerParkAckTicketCount)")
-        // Coordinator criterion 2: backing dict key count must ALSO be zero
-        // (compaction removes empty buckets). This proves no dict entries
-        // remain, not merely no live boxes.
+            "snapshot: enter+drop across \(iterations) iterations must leave EXACTLY zero live boxes; got \(snap.observerParkAckTicketCount)")
         XCTAssertEqual(snap.observerParkAckTicketBackingKeyCount, 0,
-            "backing dict must be empty after compaction; got \(snap.observerParkAckTicketBackingKeyCount)")
-        // And raw box count (post-compaction, uncompacted-since-snapshot)
-        // must be zero: proves no dead boxes lingering.
-        let rawBoxes = await gate.debugRawObserverParkAckBoxCount()
-        let rawKeys = await gate.debugRawObserverParkAckKeyCount()
-        XCTAssertEqual(rawBoxes, 0,
-            "raw backing box count must be zero after compaction; got \(rawBoxes)")
-        XCTAssertEqual(rawKeys, 0,
-            "raw backing key count must be zero after compaction; got \(rawKeys)")
+            "snapshot: backing dict must be empty after prune; got \(snap.observerParkAckTicketBackingKeyCount)")
+
         await gate.close()
     }
 
-    /// Waiter analogue with exact-zero proof.
+    /// Waiter analogue with exact-zero proof. See observer variant for
+    /// the full rationale of the measurement-independent cleanup path.
     func testAsyncGateH2TicketEnterDropStaysBounded_waiter() async {
         let gate = AsyncGate()
         let token = await gate.registerWaiter()
@@ -2486,18 +2512,28 @@ final class PredictiveViewModelTests: XCTestCase {
         }
         await drainCycles()
 
+        let preBoxes = await gate.debugRawWaiterParkAckBoxCount()
+        let preKeys = await gate.debugRawWaiterParkAckKeyCount()
+        XCTAssertLessThanOrEqual(preBoxes, 1,
+            "intra-loop compaction bounds pre-prune raw box count to <= 1; got \(preBoxes)")
+        XCTAssertLessThanOrEqual(preKeys, 1,
+            "intra-loop compaction bounds pre-prune raw key count to <= 1; got \(preKeys)")
+
+        await gate.pruneAllDroppedTicketBoxesForTest()
+
+        let postBoxes = await gate.debugRawWaiterParkAckBoxCount()
+        let postKeys = await gate.debugRawWaiterParkAckKeyCount()
+        XCTAssertEqual(postBoxes, 0,
+            "raw backing box count must be EXACTLY zero after explicit prune; got \(postBoxes)")
+        XCTAssertEqual(postKeys, 0,
+            "raw backing key count must be EXACTLY zero after explicit prune; got \(postKeys)")
+
         let snap = await gate.snapshot()
         XCTAssertEqual(snap.waiterParkAckTicketCount, 0,
-            "enter+drop across \(iterations) iterations must leave EXACTLY zero live boxes; got \(snap.waiterParkAckTicketCount)")
-        // Coordinator criterion 2: backing dict + raw box counts.
+            "snapshot: enter+drop across \(iterations) iterations must leave EXACTLY zero live boxes; got \(snap.waiterParkAckTicketCount)")
         XCTAssertEqual(snap.waiterParkAckTicketBackingKeyCount, 0,
-            "backing dict must be empty after compaction; got \(snap.waiterParkAckTicketBackingKeyCount)")
-        let rawBoxes = await gate.debugRawWaiterParkAckBoxCount()
-        let rawKeys = await gate.debugRawWaiterParkAckKeyCount()
-        XCTAssertEqual(rawBoxes, 0,
-            "raw backing box count must be zero after compaction; got \(rawBoxes)")
-        XCTAssertEqual(rawKeys, 0,
-            "raw backing key count must be zero after compaction; got \(rawKeys)")
+            "snapshot: backing dict must be empty after prune; got \(snap.waiterParkAckTicketBackingKeyCount)")
+
         await gate.close()
     }
 
