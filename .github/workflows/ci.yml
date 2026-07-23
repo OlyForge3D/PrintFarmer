@@ -261,6 +261,23 @@ jobs:
           dotnet tool install -g dotnet-ef
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # Restore + build the specific migration project so its
+      # `obj/project.assets.json` and compiled assemblies exist before
+      # `dotnet ef` reflects over them. Without this step EF fails with
+      # NETSDK1004 because the migration-drift job is isolated from
+      # dotnet-build and never restores the matrix project itself.
+      - name: Restore migration project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: dotnet restore "./$MATRIX_PROJECT"
+
+      - name: Build migration project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore
+
       - name: Check EF Core migration drift
         working-directory: src
         env:
@@ -268,16 +285,38 @@ jobs:
           MATRIX_PROJECT: ${{ matrix.project }}
           MATRIX_CONTEXT: ${{ matrix.context }}
           DB_PROVIDER: ${{ matrix.provider }}
+        # `has-pending-model-changes` exit-code convention (EF Core 8+):
+        #   0 = no pending model changes
+        #   1 = drift (a migration is needed)
+        #   other non-zero = tool/restore/build error
+        # We branch on the exit code so infrastructure failures do NOT
+        # get reported as "pending model changes" (a misleading annotation
+        # that would send authors chasing a migration they don't need).
+        # Both drift and tooling errors still fail the job (fail-closed).
         run: |
-          set -e
+          set -u
           echo "Checking $MATRIX_LABEL for pending EF Core model changes..."
-          if ! dotnet ef migrations has-pending-model-changes \
-              --project "./$MATRIX_PROJECT" \
-              --startup-project "./$MATRIX_PROJECT" \
-              --context "$MATRIX_CONTEXT"; then
-            echo "::error title=EF Core migration drift detected::$MATRIX_LABEL has pending model changes. Add a migration for $MATRIX_CONTEXT using DB_PROVIDER=$DB_PROVIDER."
-            exit 1
-          fi
+          set +e
+          dotnet ef migrations has-pending-model-changes \
+            --project "./$MATRIX_PROJECT" \
+            --startup-project "./$MATRIX_PROJECT" \
+            --context "$MATRIX_CONTEXT" \
+            --no-build
+          rc=$?
+          set -e
+          case "$rc" in
+            0)
+              echo "$MATRIX_LABEL: no pending model changes."
+              ;;
+            1)
+              echo "::error title=EF Core migration drift detected::$MATRIX_LABEL has pending model changes. Add a migration for $MATRIX_CONTEXT using DB_PROVIDER=$DB_PROVIDER."
+              exit 1
+              ;;
+            *)
+              echo "::error title=EF Core migration drift check failed::$MATRIX_LABEL: 'dotnet ef migrations has-pending-model-changes' exited with $rc (tool/restore/build error, NOT a drift signal). Review the log above."
+              exit "$rc"
+              ;;
+          esac
 
   # ---------------------------------------------------------------------------
   # dotnet-test — one matrix leg per affected test project.

@@ -827,6 +827,73 @@ case_workflow_publish_printf_option_safe() {
   fi
 }
 
+# The migration-drift matrix job is isolated from `dotnet-build` and must
+# restore its own matrix project before invoking `dotnet ef`, otherwise
+# NETSDK1004 fires because `obj/project.assets.json` doesn't exist. This test
+# reads `.github/workflows/ci.yml`, extracts the `migration-drift:` job, and
+# asserts:
+#   * a "Restore migration project" step exists and references MATRIX_PROJECT
+#   * that restore step appears BEFORE "Check EF Core migration drift"
+#   * the EF invocation uses `--no-build` (matching restore+build+no-build
+#     ordering, so we do not re-trigger restore inside the EF tool)
+#   * the drift step distinguishes exit code 1 (real drift) from other
+#     non-zero exits (tool/restore/build errors) so infrastructure failures
+#     are not misreported as "pending model changes"
+case_workflow_migration_drift_restores_before_ef() {
+  local workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  extract_job_block() {
+    local job="$1"
+    # Job blocks are indented two spaces under `jobs:`. Terminate at the
+    # next sibling job (another two-space `name:` header) or a top-level
+    # key. Also strip trailing CRs so a CRLF checkout compares byte-for-
+    # byte against a Linux-style checkout (same reason as the event-block
+    # extractor above).
+    awk -v marker="  ${job}:" '
+      { sub(/\r$/, "") }
+      $0 == marker { inside = 1; next }
+      inside && (/^[^ ]/ || /^  [A-Za-z_][A-Za-z0-9_-]*:/) { exit }
+      inside { print }
+    ' "$workflow"
+  }
+
+  local block
+  block="$(extract_job_block migration-drift)"
+  if [[ -z "$block" ]]; then
+    printf '  migration-drift job block not found in %s\n' "$workflow" >&2
+    return 1
+  fi
+
+  assert_contains "restore step present" "$block" \
+    'name: Restore migration project' || return 1
+  assert_contains "restore uses MATRIX_PROJECT" "$block" \
+    'dotnet restore "./$MATRIX_PROJECT"' || return 1
+  assert_contains "build step present" "$block" \
+    'name: Build migration project' || return 1
+  assert_contains "ef step uses --no-build" "$block" \
+    '--no-build' || return 1
+  assert_contains "drift step distinguishes tool errors" "$block" \
+    'EF Core migration drift check failed' || return 1
+  assert_contains "drift step keeps drift annotation" "$block" \
+    'EF Core migration drift detected' || return 1
+
+  # Order check: "Restore migration project" must precede "Check EF Core
+  # migration drift". Line numbers within the extracted block are enough
+  # for a deterministic ordering assertion.
+  local restore_line ef_line
+  restore_line="$(printf '%s\n' "$block" | grep -n 'name: Restore migration project' | head -n1 | cut -d: -f1)"
+  ef_line="$(printf '%s\n' "$block" | grep -n 'name: Check EF Core migration drift' | head -n1 | cut -d: -f1)"
+  if [[ -z "$restore_line" || -z "$ef_line" ]]; then
+    printf '  could not locate ordering markers (restore=%q ef=%q)\n' \
+      "$restore_line" "$ef_line" >&2
+    return 1
+  fi
+  if (( restore_line >= ef_line )); then
+    printf '  restore step must precede EF drift step (restore=%d ef=%d)\n' \
+      "$restore_line" "$ef_line" >&2
+    return 1
+  fi
+}
+
 # =============================================================================
 # Runner
 # =============================================================================
@@ -880,6 +947,7 @@ TESTS=(
   case_selector_finish_tolerates_empty_args
   case_extract_event_block_crlf_tolerant
   case_workflow_publish_printf_option_safe
+  case_workflow_migration_drift_restores_before_ef
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'
