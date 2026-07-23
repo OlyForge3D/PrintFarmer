@@ -22,3 +22,14 @@ PrintFarmer is a .NET 10 and React 19 application for 3D-printer farm management
 - The #842 PostgreSQL and SQL Server slicer migrations remain correctly ordered
   after the corrected parent; both provider drift checks report no pending
   model changes.
+- PR #856 released against exact stabilized #854 parent
+  `96c9df199482535500f24fa3692e75e789190561` with no conflicts. That parent
+  contains development commit `9407a7dff7b95550a65b4508649a174f2fdbbf1b`
+  and #850 commit `2d0225ee4fcbf4172551c0db4013dcdd3be88201`.
+- Final pre-commit validation passed format verification, a strict full build
+  with zero warnings/errors, all four EF migration drift checks, 3,325 .NET
+  tests, React lint/build and 2,615 tests, plus direct HTTP/HTTPS slicer routing
+  assertions. Deployment harness execution is environment-blocked by Windows
+  CRLF checkout of unchanged `container-versions.conf` and unavailable Docker
+  Compose; the focused MySQL probe reproduces the unchanged unsupported-provider
+  error from the exact parent.
