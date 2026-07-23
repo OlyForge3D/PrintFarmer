@@ -185,6 +185,64 @@ api:
 - Allows selective network access
 - Works cross-platform (Linux, macOS, Windows)
 
+### Reverse Proxy / Forwarded Headers
+
+PrintFarmer treats `HttpContext.Connection.RemoteIpAddress` as the source of truth for
+per-client policies (auth rate limits, audit logs). By default the API **ignores** the
+`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` headers, because trusting them
+unconditionally would let any caller spoof the client IP and bypass per-IP rate limits
+(see security issue #862).
+
+When you deploy behind a reverse proxy (nginx, Traefik, IIS, Cloudflare Tunnel, an Azure
+Application Gateway, etc.) enable the framework's forwarded-headers middleware and
+**explicitly declare the proxy** as trusted so the connection address is rewritten from the
+header before rate limiting and authentication run.
+
+`appsettings.json` / environment variable surface:
+
+```json
+{
+  "ForwardedHeaders": {
+    "Enabled": true,
+    "KnownProxies": ["10.0.0.5"],
+    "KnownNetworks": ["10.0.0.0/24"],
+    "ForwardLimit": 1
+  }
+}
+```
+
+Environment variables (Docker / systemd) use double-underscore separators and `__N` for
+list indices:
+
+```bash
+ForwardedHeaders__Enabled=true
+ForwardedHeaders__KnownProxies__0=10.0.0.5
+ForwardedHeaders__KnownNetworks__0=10.0.0.0/24
+ForwardedHeaders__ForwardLimit=1
+```
+
+Rules:
+
+- Leaving `Enabled=false` (the default) is safe when nothing sits between clients and the
+  API — the TCP peer address is used directly.
+- Setting `Enabled=true` **clears** the framework's implicit loopback trust — you must
+  declare every trusted proxy or CIDR explicitly. Enabled without any trusted proxy will
+  log a warning at startup and continue to ignore `X-Forwarded-For` for all connections.
+- `KnownProxies` accepts individual IPv4 or IPv6 addresses; `KnownNetworks` accepts CIDR
+  ranges parsed via `System.Net.IPNetwork`.
+- `ForwardLimit` (default `1`) caps how many chained proxies are honored. Increase only
+  when a documented multi-hop proxy chain is in place.
+
+Verifying trust wiring:
+
+```bash
+# From an untrusted host - X-Forwarded-For must NOT change the rate-limit key
+curl -H "X-Forwarded-For: 1.2.3.4" -X POST https://your-host/api/auth/login
+
+# The API's authentication audit log should record the caller's real TCP address,
+# not 1.2.3.4. Rate limit counters increment on the real address.
+```
+
 ## Offline Deployment
 
 For deployments without internet access:
