@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
@@ -8,6 +9,7 @@ using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -202,21 +204,152 @@ public class ModelUploadStreamingTests
             path => path.Contains(".tmp", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task UploadModelAsync_WithClientUploadId_ReturnsOriginalUploadOnRetry()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid clientUploadId = Guid.NewGuid();
+        UploadFixture fixture = CreateFixture();
+
+        Model3DUploadResultDto initial = await fixture.Service.UploadModelAsync(
+            CreateFormFile("idempotent-model", "model.stl"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+        Model3DUploadResultDto retry = await fixture.Service.UploadModelAsync(
+            CreateFormFile("idempotent-model", "model.stl"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+
+        Assert.False(initial.WasExisting);
+        Assert.True(retry.WasExisting);
+        Assert.Equal(initial.Id, retry.Id);
+        Assert.Equal(clientUploadId, retry.ClientUploadId);
+        Assert.Equal(userId, fixture.AddedModel?.UploadedByUserId);
+        fixture.Repository.Verify(repository => repository.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WhenClientUploadIdPayloadDiffers_RejectsReuse()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid clientUploadId = Guid.NewGuid();
+        UploadFixture fixture = CreateFixture();
+        _ = await fixture.Service.UploadModelAsync(
+            CreateFormFile("first-model", "model.stl"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.UploadModelAsync(
+            CreateFormFile("different-model", "model.stl"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None));
+
+        Assert.Contains("different model payload", exception.Message, StringComparison.Ordinal);
+        fixture.Repository.Verify(repository => repository.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WhenConcurrentClientUploadWins_ReturnsWinningUploadAndCleansArtifacts()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid clientUploadId = Guid.NewGuid();
+        string contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("racing-model"))).ToLowerInvariant();
+        Model3D winner = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "model.stl",
+            FileName = $"{Guid.NewGuid()}.stl",
+            FilePath = "/",
+            FileHash = contentHash,
+            ClientUploadHash = contentHash,
+            FileSizeBytes = 12,
+            FileFormat = ModelFileFormat.STL,
+            UploadedAt = DateTime.UtcNow,
+            UploadedByUserId = userId,
+            ClientUploadId = clientUploadId
+        };
+        UploadFixture fixture = CreateFixture(
+            saveException: new DbUpdateException("unique index race"),
+            raceWinner: winner);
+
+        Model3DUploadResultDto result = await fixture.Service.UploadModelAsync(
+            CreateFormFile("racing-model", "model.stl"),
+            thumbnailFile: null,
+            userId,
+            clientUploadId,
+            CancellationToken.None);
+
+        Assert.Equal(winner.Id, result.Id);
+        Assert.True(result.WasExisting);
+        Assert.Empty(fixture.FileSystem.GetFiles(fixture.StoragePath, "*", SearchOption.AllDirectories));
+        fixture.Repository.Verify(repository => repository.RemoveAsync(
+            It.Is<Model3D>(model => model.Id != winner.Id),
+            CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public void Model3DUploadResultDto_WithExtendedFields_SerializesAsCamelCase()
+    {
+        Guid clientUploadId = Guid.NewGuid();
+        Model3DUploadResultDto dto = new()
+        {
+            Id = Guid.NewGuid(),
+            ThumbnailUrl = "/api/3d-models/thumbnail/1",
+            WasExisting = true,
+            ClientUploadId = clientUploadId
+        };
+
+        string json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        Assert.Equal(dto.ThumbnailUrl, document.RootElement.GetProperty("thumbnailUrl").GetString());
+        Assert.True(document.RootElement.GetProperty("wasExisting").GetBoolean());
+        Assert.Equal(clientUploadId, document.RootElement.GetProperty("clientUploadId").GetGuid());
+    }
+
     private static UploadFixture CreateFixture(
         Func<string, bool>? isSafePath = null,
         Exception? saveException = null,
         bool withThumbnailGenerator = false,
-        CancellationTokenSource? cancelDuringThumbnail = null)
+        CancellationTokenSource? cancelDuringThumbnail = null,
+        Model3D? raceWinner = null)
     {
         string storagePath = Path.Combine(Path.GetTempPath(), "pfarm-model-upload-tests", Guid.NewGuid().ToString("N"));
         TestFileSystem fileSystem = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
         Mock<IModel3DFileRepository> repository = new(MockBehavior.Strict);
         Model3D? addedModel = null;
+        int clientUploadLookupCount = 0;
 
         repository.Setup(value => value.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Model3D?)null);
+        repository.Setup(value => value.GetByClientUploadIdAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid userId, Guid clientUploadId, CancellationToken _) =>
+            {
+                clientUploadLookupCount++;
+                if (raceWinner is not null)
+                {
+                    return clientUploadLookupCount == 1 ? null : raceWinner;
+                }
+
+                return addedModel?.UploadedByUserId == userId && addedModel.ClientUploadId == clientUploadId
+                    ? addedModel
+                    : null;
+            });
         repository.Setup(value => value.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()))
             .Callback<Model3D, CancellationToken>((model, _) => addedModel = model)
+            .Returns(Task.CompletedTask);
+        repository.Setup(value => value.RemoveAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         if (saveException is null)
         {
@@ -249,6 +382,8 @@ public class ModelUploadStreamingTests
             .Returns<Guid, string>((id, _) => $"{id}_thumb.png");
         fileOperations.Setup(value => value.BuildModel3DFileUrl(It.IsAny<Guid>(), It.IsAny<ModelFileFormat>()))
             .Returns<Guid, ModelFileFormat>((id, _) => $"/api/3d-models/file/{id}");
+        fileOperations.Setup(value => value.BuildModel3DThumbnailUrl(It.IsAny<Guid>()))
+            .Returns<Guid>(id => $"/api/3d-models/thumbnail/{id}");
 
         Mock<IThumbnailGenerationService> thumbnailGenerator = new();
         thumbnailGenerator.SetupGet(value => value.ThumbnailFileExtension).Returns(".png");

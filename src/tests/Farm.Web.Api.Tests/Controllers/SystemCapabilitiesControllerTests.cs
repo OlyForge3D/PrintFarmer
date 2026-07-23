@@ -135,4 +135,46 @@ public class SystemCapabilitiesControllerTests
         flags.PrintedPartsInventoryEnabled.Should().BeTrue();
         flags.OfflineWriteReplayEnabled.Should().BeTrue();
     }
+
+    [Fact]
+    public void GetCapabilities_WhenModelFilesEnabled_AdvertisesUploadCapabilities()
+    {
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Platform:ModelFilesEnabled"] = "true"
+            })
+            .Build();
+        Mock<IOperatorFeatureGate> gate = new();
+        gate.Setup(g => g.GetEffectiveFlags()).Returns(new OperatorFeatureFlagsDto());
+        SystemCapabilitiesController controller = CreateController(gate.Object, configuration);
+
+        ActionResult<PlatformCapabilitiesDto> actionResult = controller.GetCapabilities();
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        PlatformCapabilitiesDto capabilities = Assert.IsType<PlatformCapabilitiesDto>(okResult.Value);
+        Assert.True(capabilities.ClientThumbnailUploadEnabled);
+        Assert.True(capabilities.IdempotentModelUploadEnabled);
+        Assert.True(capabilities.ModelThumbnailReplacementEnabled);
+    }
+
+    [Fact]
+    public void PlatformCapabilitiesDto_WithUploadCapabilities_SerializesAsCamelCase()
+    {
+        PlatformCapabilitiesDto capabilities = new()
+        {
+            ClientThumbnailUploadEnabled = true,
+            IdempotentModelUploadEnabled = true,
+            ModelThumbnailReplacementEnabled = true
+        };
+
+        string json = JsonSerializer.Serialize(
+            capabilities,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        Assert.True(document.RootElement.GetProperty("clientThumbnailUploadEnabled").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("idempotentModelUploadEnabled").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("modelThumbnailReplacementEnabled").GetBoolean());
+    }
 }
