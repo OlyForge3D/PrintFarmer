@@ -25,6 +25,12 @@ public class Model3D : StoredFileBase
     /// <summary>Soft reference to the user who uploaded this model (no FK constraint).</summary>
     public Guid? UploadedByUserId { get; set; }
 
+    /// <summary>Gets or sets the caller-provided upload idempotency identifier.</summary>
+    public Guid? ClientUploadId { get; set; }
+
+    /// <summary>Gets or sets the original model content hash used to validate idempotent retries.</summary>
+    public string? ClientUploadHash { get; set; }
+
     /// <summary>JSON-serialized 3MF metadata extracted during upload.</summary>
     public string? ExtractedMetadataJson { get; set; }
 
