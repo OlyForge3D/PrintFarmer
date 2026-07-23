@@ -2371,10 +2371,24 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.observerCancelInvocationCount, 0,
                        "state gate must reject late cancel: no primary cancel Task launched")
 
-        // Outcome remains stable — buffered latch is one-shot.
-        let after = await attempt.outcome()
-        XCTAssertEqual(after, .finishedBeforeProcessing,
-                       "late cancel must not reverse published outcome")
+        // Reviewer finding A (Hicks): the buffered latch is one-shot,
+        // so the outcome is readable SYNCHRONOUSLY here without any
+        // additional wait. Awaiting `attempt.outcome()` would deadlock
+        // in a specific regression scenario: if
+        // `markCompletedNaturallyIfActive()` succeeded but
+        // `attempt.resolveOutcome(.finishedBeforeProcessing)` regressed,
+        // the state gate would still be `.completedNaturally` (blocking
+        // any late cancel from launching a cancel Task via
+        // `beginCancellationIfActive`), so NO publisher would ever fire
+        // and `outcome()` would suspend forever with no rescuer. The
+        // synchronous read below returns `nil` in that regression and
+        // the equality check fails LOUDLY instead — the buffered
+        // outcome is proven synchronously readable by construction
+        // (the arrival ACK above already established the body reached
+        // hold-park, which is AFTER the state gate committed and the
+        // outcome was resolved into the latch).
+        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
+                       "late cancel must not reverse published outcome (nil indicates resolveOutcome regressed with no publisher)")
     }
 
     /// Waiter analogue of the natural-wins-over-late-cancel proof.
@@ -2428,9 +2442,14 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(snap.waiterCancelInvocationCount, 0,
                        "state gate must reject late cancel: no waiter cancel Task launched")
 
-        let after = await attempt.outcome()
-        XCTAssertEqual(after, .finishedBeforeProcessing,
-                       "waiter: late cancel must not reverse published outcome")
+        // Reviewer finding A (Hicks): synchronous buffered read — see
+        // observer variant for full rationale. Await would deadlock in
+        // the `resolveOutcome` regression scenario (state stuck at
+        // `.completedNaturally` blocks cancel-path publication, so no
+        // publisher exists to resume `outcome()`). Sync read returns
+        // `nil` on regression and the equality assertion fails loudly.
+        XCTAssertEqual(attempt.bufferedOutcomeForTest, .finishedBeforeProcessing,
+                       "waiter: late cancel must not reverse published outcome (nil indicates resolveOutcome regressed with no publisher)")
     }
 
     /// Hicks H1: opposite race — parked observer is cancelled FIRST.
