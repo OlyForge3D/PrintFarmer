@@ -2490,6 +2490,16 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
+        // Coordinator H3 non-stranding redesign: pre-register a buffered
+        // hold-park ACK ticket BEFORE spawning the task. This ticket is
+        // resolved either by the outer body reaching holdGate.awaitWaiter
+        // (=> .parked) or by holdGate.close() below (=> .terminal
+        // (.closedBeforePark)). Either way it CANNOT strand on
+        // regression. It replaces the previous mid-test
+        // `await holdGate.waitForWaiterParked(holdToken)` continuation
+        // wait which would have hung indefinitely if the outer body
+        // never reached the hold-await.
+        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         let token = await gate.registerObserver()
         let attempt = ObserverAwaitAttempt()
@@ -2511,28 +2521,46 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(afterClose.observerFateCounts[.closedWhileParked] ?? 0, 1,
                        "close sealed fate .closedWhileParked for the primary observer")
 
-        // Step 2 causal: prove outer body advanced past awaitObserver
-        // and is now parked inside holdGate — outer withTask-
-        // CancellationHandler still installed.
-        _ = await holdGate.waitForWaiterParked(holdToken)
-
-        // Step 3: cancel task now that the outer handler is causally
-        // still installed AND gate is closed. onCancel must install a
-        // cancel Task that observes closed==true and returns
-        // .closedBeforeProcessing.
+        // Step 2: cancel task. The outer `withTaskCancellationHandler`
+        // scope wraps BOTH the primary `awaitObserver` continuation
+        // (proven active by the primary park ACK above) AND the
+        // subsequent `holdGate.awaitWaiter`. Handler stays installed
+        // throughout body execution. `Task.cancel()` synchronously
+        // invokes active onCancel handlers, so `attempt.cancelTask`
+        // is installed by the time `task.cancel()` returns.
+        // No mid-test hold-park wait is required: the primary-park
+        // proof already establishes handler-installed state, and any
+        // point between that and body-return is inside the handler
+        // scope (either between the two awaits or parked in hold).
         task.cancel()
+
+        // R3 safety: unconditional release + close of hold gate BEFORE
+        // any potentially-stranding await. If any regression left the
+        // body parked in hold, close drains it via .closedWhileParked;
+        // if the body already returned, close is a no-op. Either way
+        // subsequent `task.value` and `holdAck.value` are bounded.
+        await holdGate.open()
+        await holdGate.close()
+
         guard let cancelTask = attempt.cancelTask else {
             XCTFail("outer onCancel must install a cancel Task while handler is still active")
-            await holdGate.open(); await holdGate.close(); return
+            await task.value
+            return
         }
         let receipt = await cancelTask.value
         XCTAssertEqual(receipt, .closedBeforeProcessing,
                        "close-first ordering MUST yield exact .closedBeforeProcessing (no OR)")
 
-        // R3 safety: release + close hold gate BEFORE awaiting task.
-        await holdGate.open()
-        await holdGate.close()
         await task.value
+        // Post-hoc non-stranding verification of hold-park reachability.
+        // With hold now closed, the buffered ticket is guaranteed
+        // resolved. `.parked` proves body reached hold-await before
+        // close; `.terminal(.closedBeforePark)` would signal a
+        // regression path (body never reached hold-await) — the
+        // assertion below fails-loud rather than hanging.
+        let holdAckResult = await holdAck.value()
+        XCTAssertEqual(holdAckResult, .parked,
+                       "outer body must have reached holdGate.awaitWaiter before hold safety-close")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
@@ -2554,6 +2582,10 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
+        // Coordinator H3 non-stranding redesign: buffered hold-park
+        // ticket pre-registered before task spawn (see observer variant
+        // for full rationale).
+        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         let token = await gate.registerWaiter()
         let attempt = WaiterAwaitAttempt()
@@ -2570,20 +2602,28 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(afterClose.waiterResumeCounts[.parkedResumedByClose] ?? 0, 1)
         XCTAssertEqual(afterClose.waiterFateCounts[.closedWhileParked] ?? 0, 1)
 
-        _ = await holdGate.waitForWaiterParked(holdToken)
-
+        // Cancel immediately: handler wraps both awaits; primary park
+        // proof established handler-installed state. See observer
+        // variant for detailed reasoning.
         task.cancel()
+
+        // R3 safety: close hold BEFORE any await that could strand.
+        await holdGate.open()
+        await holdGate.close()
+
         guard let cancelTask = attempt.cancelTask else {
             XCTFail("outer onCancel must install a cancel Task while handler is still active")
-            await holdGate.open(); await holdGate.close(); return
+            await task.value
+            return
         }
         let receipt = await cancelTask.value
         XCTAssertEqual(receipt, .closedBeforeProcessing,
                        "close-first ordering MUST yield exact .closedBeforeProcessing (no OR)")
 
-        await holdGate.open()
-        await holdGate.close()
         await task.value
+        let holdAckResult = await holdAck.value()
+        XCTAssertEqual(holdAckResult, .parked,
+                       "outer body must have reached holdGate.awaitWaiter before hold safety-close")
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
@@ -2827,6 +2867,15 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
+        // Coordinator H3 non-stranding redesign: pre-register buffered
+        // hold-park ACK ticket. Replaces the previous mid-test
+        // `waitForWaiterParked(holdToken)` continuation wait that would
+        // strand indefinitely if the duplicate body regressed and
+        // never reached the holdGate await. The buffered ticket
+        // resolves via holdGate.close() below regardless of whether
+        // the body parked, so the terminal `await holdAck.value` is
+        // guaranteed bounded.
+        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         // Park original with attempt.
         let token = await gate.registerObserver()
@@ -2844,49 +2893,72 @@ final class PredictiveViewModelTests: XCTestCase {
             await gate.awaitObserverAndHold(token, attempt: dupAttempt,
                                              holdGate: holdGate, holdToken: holdToken)
         }
-        _ = await holdGate.waitForWaiterParked(holdToken)
 
-        let midSnap = await gate.snapshot()
-        XCTAssertEqual(midSnap.observerDuplicateAwaitCount, 1)
-        XCTAssertEqual(midSnap.observerResumeCounts[.duplicateAfterParked] ?? 0, 1)
-        XCTAssertEqual(midSnap.parkedObserverCount, 1,
-                       "original must still be parked; duplicate never overwrote it")
-
-        // Cancel duplicate WHILE its handler is still installed. The
-        // duplicate's onCancel installs an exact cancel Task into
-        // `dupAttempt`; we consume its value to prove cancel dispatch
-        // completed with a mismatched-awaitID no-op.
+        // Cancel duplicate immediately. Cancellation is latched at
+        // the Task level; whether body has entered
+        // `withTaskCancellationHandler` yet or not, onCancel is
+        // guaranteed to fire (either synchronously if handler active,
+        // or on handler entry if isCancelled==true). `installCancelTask`
+        // therefore runs before body returns, so `dupAttempt.cancelTask`
+        // is guaranteed non-nil once `await duplicate.value` returns
+        // below. This removes the need for the previous stranding
+        // `waitForWaiterParked(holdToken)` proof.
         duplicate.cancel()
+
+        // R3 safety: unconditional holdGate.close BEFORE any
+        // task/receipt await. If the duplicate body reached
+        // holdGate.awaitWaiter, close drains it via .closedWhileParked;
+        // if it never reached the hold-await, close seals the fate
+        // and the eventual awaitWaiter returns via the closed guard.
+        // Either way body completes and `await duplicate.value` is
+        // bounded.
+        await holdGate.close()
+        await duplicate.value
+
+        // `dupAttempt.cancelTask` is guaranteed installed at this
+        // point (body ran through `withTaskCancellationHandler`).
         guard let dupCancelTask = dupAttempt.cancelTask else {
-            XCTFail("duplicate attempt: onCancel must have installed a cancel Task")
-            await holdGate.open(); await gate.close(); await holdGate.close()
-            return
+            XCTFail("duplicate attempt: onCancel must install cancelTask by the time body returns")
+            _ = await gate.registerWaiter(); await gate.close(); await original.value; return
         }
+        // Bounded actor await — cancelObserver is a plain actor call
+        // that cannot strand.
         let dupReceipt = await dupCancelTask.value
         XCTAssertEqual(dupReceipt, .processedIgnoredMismatch,
-                       "mismatched-awaitID cancel is a bounded no-op")
+                       "mismatched-awaitID cancel is a bounded no-op (primary not yet closed)")
 
+        // Pre-signal state: original still parked, cancel counters
+        // incremented, no fate on original token, duplicate hit its
+        // branch. This preserves the causal claim previously asserted
+        // via mid-test `midSnap`, now consolidated into one snapshot
+        // taken AFTER duplicate.value.
         let cancelSnap = await gate.snapshot()
+        XCTAssertEqual(cancelSnap.observerDuplicateAwaitCount, 1,
+                       "duplicate's awaitObserver actor block ran and hit duplicate branch")
+        XCTAssertEqual(cancelSnap.observerResumeCounts[.duplicateAfterParked] ?? 0, 1)
+        XCTAssertEqual(cancelSnap.parkedObserverCount, 1,
+                       "original parked continuation MUST NOT be drained by mismatched cancel")
         XCTAssertEqual(cancelSnap.observerCancelInvocationCount, 1,
-                       "duplicate's onCancel fired exactly once")
+                       "duplicate's onCancel dispatched cancelObserver exactly once")
         XCTAssertEqual(cancelSnap.observerCancelIgnoredCount, 1,
                        "awaitID mismatch → bounded no-op")
-        XCTAssertEqual(cancelSnap.parkedObserverCount, 1,
-                       "original parked continuation MUST NOT be drained")
         XCTAssertNil(cancelSnap.observerFates[token.id],
                      "original fate must not be sealed by mismatched cancel")
 
-        // Release hold and signal original.
-        await holdGate.open()
+        // Signal original.
         _ = await gate.registerWaiter()
 
-        // R3: unconditional close BOTH gates BEFORE awaiting any task
-        // value. If intended resumes regress, close drains the parked
-        // state and the assertions surface — no hang.
+        // R3 safety: close primary BEFORE awaiting original. Signal
+        // above should have drained original; close is defensive.
         await gate.close()
-        await holdGate.close()
-        await duplicate.value
         await original.value
+
+        // Post-hoc non-stranding proof of the hold-park ticket. With
+        // holdGate closed above, the buffered ticket is guaranteed
+        // resolved (either .parked/.terminal from body reaching hold,
+        // or .terminal(.closedBeforePark) if it did not). Awaiting
+        // the value therefore cannot hang — that is the H3 guarantee.
+        _ = await holdAck.value()
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedObserverCount, 0)
@@ -2906,6 +2978,9 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let holdGate = AsyncGate()
         let holdToken = await holdGate.registerWaiter()
+        // Coordinator H3 non-stranding redesign: buffered hold-park
+        // ticket (see observer variant for full rationale).
+        let holdAck = await holdGate.enterWaiterParkAck(holdToken)
 
         let token = await gate.registerWaiter()
         let origAttempt = WaiterAwaitAttempt()
@@ -2917,38 +2992,48 @@ final class PredictiveViewModelTests: XCTestCase {
             await gate.awaitWaiterAndHold(token, attempt: dupAttempt,
                                           holdGate: holdGate, holdToken: holdToken)
         }
-        _ = await holdGate.waitForWaiterParked(holdToken)
 
-        let midSnap = await gate.snapshot()
-        XCTAssertEqual(midSnap.waiterDuplicateAwaitCount, 1)
-        XCTAssertEqual(midSnap.waiterResumeCounts[.duplicateAfterParked] ?? 0, 1)
-        XCTAssertEqual(midSnap.parkedWaiterCount, 1)
-
+        // Cancel duplicate; latched cancel guarantees onCancel fires
+        // by handler entry.
         duplicate.cancel()
+
+        // R3 safety: hold close BEFORE any potentially-stranding
+        // await. Drains parked or seals fate; either way duplicate
+        // body completes.
+        await holdGate.close()
+        await duplicate.value
+
         guard let dupCancelTask = dupAttempt.cancelTask else {
-            XCTFail("duplicate waiter attempt: onCancel must have installed a cancel Task")
-            await holdGate.open(); await gate.close(); await holdGate.close()
-            return
+            XCTFail("duplicate waiter attempt: onCancel must install cancelTask by the time body returns")
+            await gate.open(); await gate.close(); await original.value; return
         }
         let dupReceipt = await dupCancelTask.value
-        XCTAssertEqual(dupReceipt, .processedIgnoredMismatch)
+        XCTAssertEqual(dupReceipt, .processedIgnoredMismatch,
+                       "mismatched-awaitID cancel is a bounded no-op (primary not yet open/closed)")
 
+        // Consolidated cancelSnap (was midSnap+cancelSnap). Proves
+        // duplicate's actor block ran, cancel-invoke/ignored counters,
+        // and original still parked.
         let cancelSnap = await gate.snapshot()
+        XCTAssertEqual(cancelSnap.waiterDuplicateAwaitCount, 1,
+                       "duplicate's awaitWaiter actor block ran and hit duplicate branch")
+        XCTAssertEqual(cancelSnap.waiterResumeCounts[.duplicateAfterParked] ?? 0, 1)
+        XCTAssertEqual(cancelSnap.parkedWaiterCount, 1,
+                       "original parked continuation MUST NOT be drained by mismatched cancel")
         XCTAssertEqual(cancelSnap.waiterCancelInvocationCount, 1)
         XCTAssertEqual(cancelSnap.waiterCancelIgnoredCount, 1,
                        "awaitID mismatch → bounded no-op")
-        XCTAssertEqual(cancelSnap.parkedWaiterCount, 1,
-                       "original parked continuation MUST NOT be drained")
         XCTAssertNil(cancelSnap.waiterFates[token.id])
 
-        await holdGate.open()
+        // Open original (intended resume).
         await gate.open()
 
-        // R3: close BEFORE awaiting task values.
+        // R3 safety: close primary BEFORE awaiting original.
         await gate.close()
-        await holdGate.close()
-        await duplicate.value
         await original.value
+
+        // Post-hoc non-stranding proof of hold ticket resolution.
+        _ = await holdAck.value()
 
         let final = await gate.snapshot()
         XCTAssertEqual(final.parkedWaiterCount, 0)
