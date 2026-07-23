@@ -1122,6 +1122,92 @@ _count_yaml_key_at() {
   '
 }
 
+# _assert_no_quoted_key_at_indents <text> <label> <indent1> [<indent2> ...]
+#
+# R15 shape invariant: return 0 iff no line in <text> starts with
+# exactly one of the given <indentN> leading-space counts followed by
+# a quote character (`"` or `'`) that opens a KEY token (i.e. the
+# quoted string is closed and followed by `:`, optionally with
+# intervening whitespace). Return 1 with a diagnostic on stderr on
+# the first line that matches at any of the requested indents.
+#
+# Motivation (R14 bypass Newt is closing):
+#   R14's `_count_yaml_key_at` counts spellings by matching the
+#   LITERAL characters between the quotes:
+#
+#     ^  "migration-drift"[[:space:]]*:
+#
+#   Under YAML, double-quoted strings support escape sequences
+#   (`\x66` -> `f`, `\x78` -> `x`, `\x2d` -> `-`, ...). A hostile
+#   rewrite that renames the shadow key using an escape-encoded
+#   spelling like
+#
+#     "matri\x78":              # decodes to `matrix`
+#     "i\x66": false            # decodes to `if`
+#     "migration\x2ddrift":     # decodes to `migration-drift`
+#
+#   is byte-for-byte NOT the string `matrix` / `if` / `migration-
+#   drift` in the source text, so R14's literal-string counters
+#   stay at 1 (the canonical unquoted line still passes) while a
+#   real YAML parser (GitHub Actions' psych, PyYAML 6.x, etc.)
+#   resolves the escaped key to the same canonical name and
+#   silently overrides the canonical entry under duplicate-key
+#   last-wins semantics.
+#
+#   Because this workflow intentionally uses ONLY canonical unquoted
+#   keys at the protected scopes (2-space job headers; 4-space job
+#   keys; 6-space strategy children; 8-space step-item keys), a
+#   zero-tolerance invariant that rejects the ENTIRE class of quoted
+#   keys — regardless of what characters or escape sequences the
+#   quoted content decodes to — closes the bypass without needing
+#   the guard to know every YAML escape form. This is deliberately
+#   conservative: if a future maintainer needs a quoted key for a
+#   legitimate reason (unusual characters, YAML 1.1 reserved word),
+#   they must update this guard AND update the reviewer-facing
+#   canonical-line assertions in `_check_drift_step_shape`.
+#
+# The pattern matches only lines whose FIRST non-space character at
+# column <ind>+1 is a quote AND the quoted string closes and is
+# followed by `:`, so quoted VALUES that appear after an unquoted
+# key on the same line (e.g. `      matrix: "${{ ... }}"`) are NOT
+# rejected — the leading token at column <ind>+1 in that case is
+# `m` (unquoted), not `"`. Only the leading token is examined.
+#
+# Bash 3.2 / POSIX awk only; no bash regex or process substitution.
+_assert_no_quoted_key_at_indents() {
+  local text="$1" label="$2"
+  shift 2
+  local ind hit
+  for ind in "$@"; do
+    local prefix
+    prefix="$(printf '%*s' "$ind" '')"
+    # Match: <indent><quote><any-non-quote>*<quote><ws>*:
+    # We forbid the same quote char re-appearing inside the string,
+    # which loses coverage of quoted keys containing escaped-quote
+    # sequences (`"a\"b":`). This is acceptable because the intent
+    # of R15 is to reject ANY quoted key at these indents, and a
+    # key containing an escaped quote is even further outside the
+    # canonical-unquoted contract than the escape-encoded aliases
+    # this guard exists to catch — the caller's `_count_yaml_key_
+    # at` singleton counters would still reject any surviving
+    # canonical key that ended up counted twice, and the R14
+    # canonical-line assertions still require the exact unquoted
+    # form. Two quote alternates are checked in a single awk pass.
+    hit="$(printf '%s\n' "$text" | awk \
+      -v pat_d="^${prefix}\"[^\"]*\"[[:space:]]*:" \
+      -v pat_s="^${prefix}'[^']*'[[:space:]]*:" '
+      { sub(/\r$/, "") }
+      $0 ~ pat_d || $0 ~ pat_s { print; exit }
+    ')"
+    if [[ -n "$hit" ]]; then
+      printf '  %s: quoted YAML key not allowed at %d-space indent (found: %s)\n' \
+        "$label" "$ind" "$hit" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 # _check_drift_step_shape <workflow>
 #
 # Composite shape gate for the `Check EF Core migration drift` step in
@@ -1195,6 +1281,7 @@ _check_drift_step_shape() {
   # unquoted spelling do not — so we normalise once, up-front.
   local workflow_body job_header_count
   workflow_body="$(awk '{ sub(/\r$/, ""); print }' "$workflow")"
+
   job_header_count="$(_count_yaml_key_at "$workflow_body" 2 migration-drift)"
   if [[ "$job_header_count" != "1" ]]; then
     printf '  expected exactly one migration-drift job header, found %s\n' \
@@ -1210,6 +1297,27 @@ _check_drift_step_shape() {
     printf '    expected line: %q\n' "  migration-drift:" >&2
     return 1
   fi
+
+  # R15: after the R14 literal-spelling counter and canonical-line
+  # assertion have run for `migration-drift`, sweep the whole workflow
+  # for ANY quoted YAML key at 2-space indent. R14's counter matches
+  # only the literal string spellings `migration-drift`,
+  # `"migration-drift"`, `'migration-drift'`, so an escape-encoded
+  # shadow like `  "migration\x2ddrift":` decodes to the same YAML
+  # key `migration-drift` under a compliant parser but is byte-for-
+  # byte NOT the string `migration-drift`, leaving R14's counter at
+  # 1 (only the canonical unquoted line counts) while duplicate-key
+  # last-wins semantics let the shadow header take over the summary
+  # gate's `needs.migration-drift.result` read. The zero-tolerance
+  # invariant rejects the entire class of quoted 2-space keys — of
+  # any name and any escape-decoded target — without needing to
+  # enumerate escape forms. All non-shadow-job workflow content
+  # lives at indents other than 2 (0 = top-level, 4+ = under a job),
+  # so no legitimate line is affected. Placed AFTER R14 so a plain
+  # literal-quoted duplicate still triggers the more informative
+  # R14 "found 2" diagnostic; this check only fires on escape-
+  # hidden shapes that survive R14 unnoticed.
+  _assert_no_quoted_key_at_indents "$workflow_body" "workflow" 2 || return 1
 
   local drift_step_count
   drift_step_count="$(grep -c '^      - name: Check EF Core migration drift' "$workflow" || true)"
@@ -1330,6 +1438,41 @@ _check_drift_step_shape() {
     printf '    expected line: %q\n' "$expected_fail_fast" >&2
     return 1
   fi
+
+  # R15: after every R14 literal-spelling counter and canonical-line
+  # assertion has run for the migration-drift job block, sweep the
+  # block for ANY quoted YAML key at the control indents:
+  #   * 4 spaces — job-level keys (`if`, `strategy`, `steps`,
+  #     `runs-on`, `needs`, `name`, `continue-on-error`). Escape-
+  #     hidden shadows like `    "i\x66": false` or
+  #     `    "continue\x2don\x2derror": true` decode to the same
+  #     canonical key under YAML but leave R14's per-key
+  #     `_count_yaml_key_at` counters unchanged (they only count
+  #     the literal spellings of the specific key they were called
+  #     with) while a compliant parser silently applies them under
+  #     duplicate-key last-wins semantics.
+  #   * 6 spaces — strategy children (`fail-fast`, `matrix`). A
+  #     step-list-item leading dash sits at 6 spaces + `-`, which
+  #     is NOT a leading quote and is therefore not affected.
+  #   * 8 spaces — step-item keys under `      - name: ...`
+  #     (`name`, `uses`, `with`, `env`, `run`, `working-directory`,
+  #     `if`, `continue-on-error`). An escaped step-level shadow
+  #     `        "continue\x2don\x2derror": true` neutralises the
+  #     drift step's fail-closed semantics; R14's step-level
+  #     canonical-block diff catches the unquoted spelling, but the
+  #     escaped-quoted variant is not part of the canonical text,
+  #     so without R15 the block diff would tolerate it.
+  # This is a zero-tolerance invariant: the canonical migration-drift
+  # job block contains NO quoted keys at any of these indents, so a
+  # match is unambiguously a bypass shape. `run: |` script bodies
+  # inside the block are indented at 10+ spaces (deeper than `run:`
+  # at 8), so shell-content lines that happen to start with a quote
+  # do not fall into any of the checked indents. Placed AFTER every
+  # R14 assertion so any duplicate/canonical-swap of a KNOWN key
+  # still triggers the more informative R14 diagnostics; R15 only
+  # fires on escape-hidden or novel-key shapes that survive R14.
+  _assert_no_quoted_key_at_indents "$job_block" "migration-drift job" 4 6 8 \
+    || return 1
 
   local actual expected
   actual="$(extract_drift_step_block "$workflow")"
@@ -2250,6 +2393,366 @@ case_drift_shape_rejects_quoted_shadow_migration_drift_job() {
     "expected exactly one migration-drift job header, found 2" || return 1
 }
 
+# =============================================================================
+# R15 (Newt): escape-encoded quoted-key mutations.
+#
+# R14 (Hudson, rejected 7fdcc1615) counted alternate yaml spellings by
+# matching the LITERAL characters between the quotes:
+#
+#   pat_d="^${prefix}\"${key}\"[[:space:]]*:"
+#
+# Under YAML, double-quoted strings support escape sequences (`\x66` ->
+# `f`, `\x78` -> `x`, `\x2d` -> `-`, and the full YAML 1.1/1.2 escape
+# alphabet). A hostile rewrite that renames the shadow key using an
+# escape-encoded spelling like
+#
+#   "matri\x78":                # decodes to `matrix`
+#   "i\x66": false              # decodes to `if`
+#   "migration\x2ddrift":       # decodes to `migration-drift`
+#   "fail\x2dfast": true        # decodes to `fail-fast`
+#   "continue\x2don\x2derror":  # decodes to `continue-on-error`
+#   "strateg\x79":              # decodes to `strategy`
+#
+# is byte-for-byte NOT the string R14 was matching, so R14's per-key
+# counters and canonical-line grep-qxF checks stay green while a
+# compliant YAML parser (verified below with PyYAML 6.0.3, matching
+# the psych parser GitHub Actions uses) silently overrides the
+# canonical entry under duplicate-key last-wins semantics — restoring
+# the exact bypass class R11-R14 were meant to close.
+#
+# R15 adds a zero-tolerance shape invariant (`_assert_no_quoted_key_
+# at_indents`) that rejects ANY quoted YAML key at the protected
+# indents regardless of what characters or escapes the quoted content
+# decodes to. Because this workflow intentionally uses ONLY canonical
+# unquoted keys at those indents, the invariant is safe and catches
+# the entire class without enumerating escape forms.
+#
+# Every mutation below KEEPS the canonical unquoted line intact and
+# ADDS an escape-encoded quoted duplicate/shadow — R14's counters
+# and canonical-line assertions stay green (they only see the
+# literal canonical line, unchanged) so the R15 quoted-key check is
+# what actually fires. This is deliberate: if a future refactor
+# weakens R15, these tests must still fail (via a different R14 or
+# canonical assertion) OR the reviewer must consciously accept the
+# regression by updating both the guard and these expectations.
+# =============================================================================
+
+# R15 sanity: prove the escape-encoded quoted keys used by the
+# mutations below actually decode to the canonical key names under a
+# real YAML parser. This is a whitebox validation of the attack
+# surface, not a runtime gate on ci.yml — the static shape guard is
+# the enforcement mechanism. If python3 or PyYAML is unavailable
+# (missing on some minimal CI images), the case logs the reason and
+# returns 0 so the suite stays green on such runners; the individual
+# mutation cases still exercise the shape guard directly.
+#
+# PyYAML duplicate-key handling (verified with 6.0.3): safe_load
+# silently accepts duplicate keys and returns a dict where the LAST
+# occurrence wins. That matches GitHub Actions' behaviour closely
+# enough that a duplicate `matrix:` + `"matri\x78":` pair would
+# silently swap the selector-driven matrix for the escaped one at
+# runtime, hiding three of four EF pairs from the drift check while
+# reporting migration-drift as passing.
+case_escape_hidden_keys_are_yaml_equivalent() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '  SKIP: python3 not available; static shape guard cases still cover the attack\n' >&2
+    return 0
+  fi
+  if ! python3 -c 'import yaml' 2>/dev/null; then
+    printf '  SKIP: PyYAML not available; static shape guard cases still cover the attack\n' >&2
+    return 0
+  fi
+
+  local snippet_file result
+  snippet_file="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$snippet_file'" RETURN
+  # Six escape-encoded quoted keys, one per canonical name the R15
+  # mutations target. Each key's value is a distinct sentinel so the
+  # decoded dict's shape unambiguously proves the escape mapping.
+  cat >"$snippet_file" <<'YAML_ESCAPE_SNIPPET'
+"matri\x78": v_matrix
+"i\x66": v_if
+"migration\x2ddrift": v_mig
+"fail\x2dfast": v_ff
+"continue\x2don\x2derror": v_coe
+"strateg\x79": v_strategy
+YAML_ESCAPE_SNIPPET
+
+  result="$(python3 - "$snippet_file" <<'PY_DECODE_CHECK'
+import sys, yaml
+with open(sys.argv[1], 'r', encoding='utf-8') as fh:
+    d = yaml.safe_load(fh)
+targets = {
+    'matrix':            'v_matrix',
+    'if':                'v_if',
+    'migration-drift':   'v_mig',
+    'fail-fast':         'v_ff',
+    'continue-on-error': 'v_coe',
+    'strategy':          'v_strategy',
+}
+for k, v in targets.items():
+    if d.get(k) != v:
+        print(f'MISMATCH: canonical key {k!r} not present or has wrong value; got {d.get(k)!r} expected {v!r}')
+        sys.exit(1)
+print('OK: all escape-encoded quoted keys decoded to canonical names')
+PY_DECODE_CHECK
+)"
+  local rc=$?
+  if (( rc != 0 )); then
+    printf '  yaml decode check failed: %s\n' "$result" >&2
+    return 1
+  fi
+  if [[ "$result" != OK:* ]]; then
+    printf '  unexpected yaml decode result: %s\n' "$result" >&2
+    return 1
+  fi
+  return 0
+}
+
+# R15 mutation: append `  "migration\x2ddrift":` shadow job header
+# using the escape-encoded double-quoted spelling. YAML decodes
+# `\x2d` to `-`, so the shadow header resolves to the same key as
+# the canonical unquoted `  migration-drift:`. R14's
+# `_count_yaml_key_at "$workflow_body" 2 migration-drift` counts
+# only the three literal spellings of the string `migration-drift`
+# (unquoted / "migration-drift" / 'migration-drift'), so this
+# spelling does not increment the counter — R14 stays at count=1
+# and the canonical grep-qxF check still finds the canonical line
+# unchanged. Under duplicate-key last-wins semantics the shadow
+# body then takes over `needs.migration-drift.result`. R15's
+# workflow-scope zero-quoted-key check at 2-space indent catches
+# the shadow header before duplicate-key semantics can take effect.
+case_drift_shape_rejects_escaped_shadow_migration_drift_job() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Append the escape-encoded shadow header + minimal inert body.
+  # The `\x2d` escape MUST reach the mutant file as a literal 4-char
+  # sequence `\`, `x`, `2`, `d`; single-quoted printf preserves the
+  # backslash and the `%s\n` format only interprets `\n`.
+  if ! {
+    cat "$mutant"
+    printf '%s\n' '  "migration\x2ddrift":' \
+      '    if: false' \
+      '    runs-on: ubuntu-latest' \
+      '    steps:' \
+      '      - run: "echo shadow"'
+  } > "${mutant}.tmp"; then
+    rm -f -- "${mutant}.tmp"
+    return 1
+  fi
+  mv -- "${mutant}.tmp" "$mutant"
+
+  _assert_shape_guard_rejects "escape-encoded shadow migration-drift header" "$mutant" \
+    "workflow: quoted YAML key not allowed at 2-space indent" || return 1
+}
+
+# R15 mutation: inject `      "matri\x78": {...}` at 6-space
+# strategy-child indent, alongside the canonical selector-driven
+# matrix line. `\x78` decodes to `x`, so the escaped key resolves
+# to `matrix`. R14's `_count_yaml_key_at "$job_block" 6 matrix`
+# counts only literal `matrix` spellings (matri x is not a
+# substring match at parse time — it's a byte-level regex), so the
+# escaped duplicate leaves R14's matrix_count at 1 and the canonical
+# grep-qxF check still finds the canonical selector-driven line.
+# Under duplicate-key last-wins the escaped hand-picked matrix would
+# then execute — skipping three of the four EF pairs while reporting
+# migration-drift as passing. R15's job-scope zero-quoted-key check
+# at 6-space indent rejects the escaped line before the parser sees
+# it as an override.
+case_drift_shape_rejects_escaped_duplicate_matrix() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Inject the escaped duplicate immediately after the canonical
+  # matrix line. `\\x78` in the awk string literal parses as `\`
+  # (from `\\`) followed by `x78` (literal), producing the 4-char
+  # sequence `\x78` in the mutant file — which is what YAML will
+  # then decode back to `x`.
+  # shellcheck disable=SC2016  # $0 is awk field ref, not shell param
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    $0 == "      matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}" && !inserted {
+      print "      \"matri\\x78\": {include: [{name: \"AppPg\", label: \"App/Pg\", project: \"migrations/Farm.Migrations.PostgreSQL\", context: \"AppDbContext\", provider: \"postgres\"}]}\r"
+      inserted = 1
+    }
+  ' || return 1
+
+  _assert_shape_guard_rejects "escape-encoded duplicate matrix" "$mutant" \
+    "migration-drift job: quoted YAML key not allowed at 6-space indent" || return 1
+}
+
+# R15 mutation: inject `    "i\x66": false` at 4-space job-level
+# indent, alongside the canonical selection `if:`. `\x66` decodes to
+# `f`, so the escaped key resolves to `if`. R14's
+# `_count_yaml_key_at "$job_block" 4 if` counts only literal `if`
+# spellings and stays at 1; the canonical if-line grep-qxF also still
+# passes. Under duplicate-key last-wins the escaped `if: false` would
+# then skip the migration-drift job unconditionally, silently
+# short-circuiting the fail-closed selector-driven gating. R15's
+# job-scope zero-quoted-key check at 4-space indent rejects.
+case_drift_shape_rejects_escaped_duplicate_if() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Inject the escaped duplicate immediately after the canonical
+  # `    if: ${{ ... }}` line.
+  # shellcheck disable=SC2016  # $0 is awk field ref, not shell param
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    $0 == "    if: ${{ needs.select.outputs.want_mig_drift == '\''true'\'' }}" && !inserted {
+      print "    \"i\\x66\": false\r"
+      inserted = 1
+    }
+  ' || return 1
+
+  _assert_shape_guard_rejects "escape-encoded duplicate if" "$mutant" \
+    "migration-drift job: quoted YAML key not allowed at 4-space indent" || return 1
+}
+
+# R15 mutation: inject `      "fail\x2dfast": true` at 6-space
+# strategy-child indent, alongside the canonical `fail-fast: false`.
+# `\x2d` decodes to `-`, so the escaped key resolves to `fail-fast`.
+# R14's `_count_yaml_key_at "$job_block" 6 fail-fast` counts only
+# the literal `fail-fast` spellings and stays at 1; the canonical
+# grep-qxF `fail-fast: false` still matches. Under duplicate-key
+# last-wins the escaped `fail-fast: true` would then cancel sibling
+# matrix legs on the first failure, hiding drift on the cancelled
+# legs. R15's job-scope zero-quoted-key check at 6-space indent
+# rejects.
+case_drift_shape_rejects_escaped_duplicate_fail_fast() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Inject the escaped duplicate immediately after the canonical
+  # `      fail-fast: false` line.
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    $0 == "      fail-fast: false" && !inserted {
+      print "      \"fail\\x2dfast\": true\r"
+      inserted = 1
+    }
+  ' || return 1
+
+  _assert_shape_guard_rejects "escape-encoded duplicate fail-fast" "$mutant" \
+    "migration-drift job: quoted YAML key not allowed at 6-space indent" || return 1
+}
+
+# R15 mutation: inject `    "continue\x2don\x2derror": true` at
+# 4-space job-level indent inside the migration-drift job. Both
+# `\x2d` escapes decode to `-`, so the escaped key resolves to
+# `continue-on-error`. R14's `_count_yaml_key_at "$job_block" 4
+# continue-on-error` counts only the literal `continue-on-error`
+# spellings and would find zero (there is no canonical
+# `continue-on-error` at job scope — the invariant is "count == 0")
+# — so R14 stays green with the escaped shadow present. Under a
+# compliant YAML parser the job-level `continue-on-error: true`
+# then makes step failures non-fatal, letting the migration-drift
+# job report success while the drift step exited non-zero. R15's
+# job-scope zero-quoted-key check at 4-space indent rejects.
+case_drift_shape_rejects_escaped_job_continue_on_error() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Insert the escaped job-level continue-on-error immediately after
+  # the migration-drift job's `name:` line at 4-space indent.
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    inside && !inserted && /^    name:/ {
+      print "    \"continue\\x2don\\x2derror\": true\r"
+      inserted = 1
+    }
+    $0 == "  migration-drift:" { inside = 1 }
+  ' || return 1
+
+  _assert_shape_guard_rejects "escape-encoded job-level continue-on-error" "$mutant" \
+    "migration-drift job: quoted YAML key not allowed at 4-space indent" || return 1
+}
+
+# R15 mutation: inject `        "continue\x2don\x2derror": true` at
+# 8-space step-item indent, inside the `Check EF Core migration drift`
+# step. `\x2d` decodes to `-`, so the escaped key resolves to
+# `continue-on-error`. R14's canonical step-block diff would catch an
+# UNQUOTED `        continue-on-error: true` addition, but the escape-
+# encoded quoted form is a different byte sequence and the diff would
+# fire with a "does not match canonical snapshot" diagnostic that
+# does not surface the security impact. R15's job-scope zero-quoted-
+# key check at 8-space indent fires FIRST (positioned before the
+# block diff in `_check_drift_step_shape`) with a specific quoted-key
+# diagnostic that makes the intent obvious. This also matters when
+# the mutation is subtler than a full step-block rewrite — a single-
+# line quoted-key insertion should reject on shape alone, not require
+# the reviewer to chase a diff.
+case_drift_shape_rejects_escaped_step_continue_on_error() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Insert the escaped step-level continue-on-error immediately after
+  # the drift step's `        working-directory: src` line inside the
+  # `Check EF Core migration drift` step. The awk state machine tracks
+  # whether we're inside the drift step so we don't accidentally
+  # mutate the earlier `Restore migration project` step (which has
+  # the same working-directory line).
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    $0 == "      - name: Check EF Core migration drift" { in_drift = 1 }
+    in_drift && !inserted && $0 == "        working-directory: src" {
+      print "        \"continue\\x2don\\x2derror\": true\r"
+      inserted = 1
+    }
+  ' || return 1
+
+  _assert_shape_guard_rejects "escape-encoded step-level continue-on-error" "$mutant" \
+    "migration-drift job: quoted YAML key not allowed at 8-space indent" || return 1
+}
+
+# R15 mutation: inject `    "strateg\x79":` at 4-space job-level
+# indent, alongside the canonical `    strategy:` block. `\x79`
+# decodes to `y`, so the escaped key resolves to `strategy`. R14's
+# `_count_yaml_key_at "$job_block" 4 strategy` counts only the
+# literal `strategy` spellings and stays at 1; the canonical
+# grep-qxF `    strategy:` still matches. Under duplicate-key
+# last-wins the escaped strategy block (whatever fail-fast/matrix
+# children it declared, or an empty block that resets both to
+# defaults) would then override the canonical strategy — silently
+# restoring fail-fast:true and dropping the selector-driven matrix.
+# R15's job-scope zero-quoted-key check at 4-space indent rejects.
+case_drift_shape_rejects_escaped_duplicate_strategy() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Inject the escaped duplicate immediately after the canonical
+  # `    strategy:` line at 4-space indent; deliberately empty (no
+  # children) so the mutation surface stays surgical — the guard
+  # must reject on the quoted-key SHAPE alone, regardless of the
+  # duplicate block's contents.
+  _mutate "$mutant" '
+    { sub(/\r$/, ""); print $0 "\r" }
+    $0 == "    strategy:" && !inserted {
+      print "    \"strateg\\x79\":\r"
+      inserted = 1
+    }
+  ' || return 1
+
+  _assert_shape_guard_rejects "escape-encoded duplicate strategy" "$mutant" \
+    "migration-drift job: quoted YAML key not allowed at 4-space indent" || return 1
+}
+
 # R14 focused test: `_mutate` must propagate awk's real exit status
 # on failure. The R13 implementation captured `$?` INSIDE the
 # `then` branch of `if ! awk …; then rc=$?; …`, at which point `$?`
@@ -2376,6 +2879,14 @@ TESTS=(
   case_drift_shape_rejects_duplicate_strategy
   case_drift_shape_rejects_quoted_strategy
   case_drift_shape_rejects_quoted_shadow_migration_drift_job
+  case_escape_hidden_keys_are_yaml_equivalent
+  case_drift_shape_rejects_escaped_shadow_migration_drift_job
+  case_drift_shape_rejects_escaped_duplicate_matrix
+  case_drift_shape_rejects_escaped_duplicate_if
+  case_drift_shape_rejects_escaped_duplicate_fail_fast
+  case_drift_shape_rejects_escaped_job_continue_on_error
+  case_drift_shape_rejects_escaped_step_continue_on_error
+  case_drift_shape_rejects_escaped_duplicate_strategy
   case_mutate_helper_propagates_awk_failure
 )
 
