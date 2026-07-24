@@ -74,6 +74,26 @@ enum OfflineQueueFixtures {
             )
         )
     }
+
+    static func taskComplete(taskID: String, key: String) -> OfflineWriteOperation {
+        .taskComplete(taskID: taskID, idempotencyKey: key)
+    }
+
+    static func toolheadBind(
+        printerID: UUID = UUID(),
+        toolheadIndex: Int = 0,
+        key: String,
+        spoolId: Int = 1,
+        expectedPriorSpoolId: Int? = nil
+    ) -> OfflineWriteOperation {
+        .toolheadBind(
+            printerID: printerID,
+            toolheadIndex: toolheadIndex,
+            idempotencyKey: key,
+            request: ToolheadSpoolBindRequest(spoolId: spoolId),
+            expectedPriorSpoolId: expectedPriorSpoolId
+        )
+    }
 }
 
 // MARK: - Coordinator tests

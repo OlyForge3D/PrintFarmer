@@ -21,6 +21,7 @@
 		AF787000000000000000000D /* OfflineWriteQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF787000000000000000000C /* OfflineWriteQueueTests.swift */; };
 		AF787000000000000000000F /* OfflineWriteQueueStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF787000000000000000000E /* OfflineWriteQueueStoreTests.swift */; };
 		AF7870000000000000000011 /* OfflineWriteAllowlistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7870000000000000000010 /* OfflineWriteAllowlistTests.swift */; };
+		AF7870000000000000000021 /* OfflineWriteAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7870000000000000000020 /* OfflineWriteAdapterTests.swift */; };
 		0165CA554584E940BBCF8A15 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534568DC689B743CE69E44A4 /* EmptyStateView.swift */; };
 		020C765E7D2D796BD28ACC51 /* DemoPredictiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8EE4961761DA7DC5DF17E6 /* DemoPredictiveService.swift */; };
 		05882F81ABFBD68C96376608 /* MockAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D49DAAAE1D5A8AC05429321 /* MockAuthService.swift */; };
@@ -513,6 +514,7 @@
 		AF787000000000000000000C /* OfflineWriteQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteQueueTests.swift; path = PrintFarmerTests/Services/OfflineWriteQueueTests.swift; sourceTree = SOURCE_ROOT; };
 		AF787000000000000000000E /* OfflineWriteQueueStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteQueueStoreTests.swift; path = PrintFarmerTests/Services/OfflineWriteQueueStoreTests.swift; sourceTree = SOURCE_ROOT; };
 		AF7870000000000000000010 /* OfflineWriteAllowlistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteAllowlistTests.swift; path = PrintFarmerTests/Services/OfflineWriteAllowlistTests.swift; sourceTree = SOURCE_ROOT; };
+		AF7870000000000000000020 /* OfflineWriteAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteAdapterTests.swift; path = PrintFarmerTests/Services/OfflineWriteAdapterTests.swift; sourceTree = SOURCE_ROOT; };
 		007F057316513D6585B3D53A /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		013F7A319FAE93072F4272D2 /* AddSpoolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSpoolView.swift; sourceTree = "<group>"; };
 		016588B049630508F9B77403 /* LoginViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModelTests.swift; sourceTree = "<group>"; };
@@ -1383,6 +1385,7 @@
 				AF787000000000000000000C /* OfflineWriteQueueTests.swift */,
 				AF787000000000000000000E /* OfflineWriteQueueStoreTests.swift */,
 				AF7870000000000000000010 /* OfflineWriteAllowlistTests.swift */,
+				AF7870000000000000000020 /* OfflineWriteAdapterTests.swift */,
 				FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */,
 				FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */,
 				FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */,
@@ -1678,6 +1681,7 @@
 				AF787000000000000000000D /* OfflineWriteQueueTests.swift in Sources */,
 				AF787000000000000000000F /* OfflineWriteQueueStoreTests.swift in Sources */,
 				AF7870000000000000000011 /* OfflineWriteAllowlistTests.swift in Sources */,
+				AF7870000000000000000021 /* OfflineWriteAdapterTests.swift in Sources */,
 				FB6B00000000000000000001 /* FarmSnapshotRemediationTests.swift in Sources */,
 				FB6B00000000000000000003 /* AuthSnapshotIdentityTests.swift in Sources */,
 				FA5A00000000000000000009 /* FarmSnapshotEnvelopeTests.swift in Sources */,

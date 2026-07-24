@@ -28,6 +28,33 @@ import Foundation
 enum OfflineWriteKind: String, Codable, Sendable, CaseIterable, Equatable {
     case partAdjustment
     case harvest
+    // F10-Q2 (#790): the two adapters this child adds to the SAME engine.
+    case taskComplete
+    case toolheadBind
+}
+
+// MARK: Toolhead-spool bind body (frozen)
+
+/// The immutable request body for a final toolhead→spool bookkeeping bind
+/// (`PUT /api/printers/{id}/toolheads/{toolheadIndex}/spool`). Matches the
+/// server `SetActiveSpoolRequest` contract shipped by #710/#711 (spoolId is the
+/// Spoolman-source-qualified spool identity; the override fields carry a guided
+/// mismatch "load anyway" decision). This is the ONLY final bookkeeping bind
+/// the queue may carry — no physical load/unload/purge/temperature command has
+/// any representation here.
+struct ToolheadSpoolBindRequest: Codable, Sendable, Equatable {
+    /// The Spoolman spool ID to bind (source-qualified spool identity).
+    let spoolId: Int
+    /// Operator override of a swap-validation mismatch, recorded for audit.
+    let overrideMismatch: Bool
+    /// Optional operator-supplied reason accompanying an override.
+    let overrideReason: String?
+
+    init(spoolId: Int, overrideMismatch: Bool = false, overrideReason: String? = nil) {
+        self.spoolId = spoolId
+        self.overrideMismatch = overrideMismatch
+        self.overrideReason = overrideReason
+    }
 }
 
 // MARK: Route identity
@@ -43,19 +70,40 @@ struct OfflineWriteRoute: Codable, Sendable, Equatable {
 // MARK: Operation (frozen typed body + allowlist)
 
 /// The frozen, typed request an offline item replays. This enum IS the
-/// allowlist: only `.partAdjustment` and `.harvest` can be constructed,
-/// encoded, and decoded. A custom `Codable` conformance rejects any unknown
-/// `kind` discriminator on read (corruption / forward-incompatible record),
-/// so a tampered or unknown-version record can never decode into a replayable
-/// operation.
+/// allowlist: only `.partAdjustment`, `.harvest`, `.taskComplete`, and
+/// `.toolheadBind` can be constructed, encoded, and decoded — EXACTLY four
+/// operation kinds (F10-Q2, #790). A custom `Codable` conformance rejects any
+/// unknown `kind` discriminator on read (corruption / forward-incompatible
+/// record), so a tampered or unknown-version record can never decode into a
+/// replayable operation. No skip/dismiss or physical printer/filament command
+/// has any representation here.
 enum OfflineWriteOperation: Sendable, Equatable {
     case partAdjustment(sku: String, request: AdjustPartInventoryRequest)
     case harvest(jobId: UUID, request: HarvestJobRequest)
+    /// A shift task completion (`POST /api/tasks/{id}/complete`). Empty body;
+    /// the idempotency key travels as a header. Skip and dismiss have NO case
+    /// here and so can never be encoded or enqueued.
+    case taskComplete(taskID: String, idempotencyKey: String)
+    /// The final toolhead→spool bookkeeping bind. Carries the printer id, the
+    /// invariant toolhead index, the header idempotency key, the frozen request
+    /// body, and `expectedPriorSpoolId` — the toolhead's binding captured at
+    /// enqueue time, used at replay to detect a newer binding (review, never a
+    /// silent overwrite). `expectedPriorSpoolId` is a precondition snapshot
+    /// only; it is NOT sent to the server.
+    case toolheadBind(
+        printerID: UUID,
+        toolheadIndex: Int,
+        idempotencyKey: String,
+        request: ToolheadSpoolBindRequest,
+        expectedPriorSpoolId: Int?
+    )
 
     var kind: OfflineWriteKind {
         switch self {
         case .partAdjustment: return .partAdjustment
         case .harvest: return .harvest
+        case .taskComplete: return .taskComplete
+        case .toolheadBind: return .toolheadBind
         }
     }
 
@@ -67,6 +115,8 @@ enum OfflineWriteOperation: Sendable, Equatable {
         switch self {
         case .partAdjustment(_, let request): return request.operationKey
         case .harvest(_, let request): return request.operationKey
+        case .taskComplete(_, let key): return key
+        case .toolheadBind(_, _, let key, _, _): return key
         }
     }
 
@@ -83,6 +133,16 @@ enum OfflineWriteOperation: Sendable, Equatable {
                 method: "POST",
                 path: "/api/job-queue/\(jobId.uuidString)/harvest"
             )
+        case .taskComplete(let taskID, _):
+            return OfflineWriteRoute(
+                method: "POST",
+                path: "/api/tasks/\(Self.encodePathSegment(taskID))/complete"
+            )
+        case .toolheadBind(let printerID, let toolheadIndex, _, _, _):
+            return OfflineWriteRoute(
+                method: "PUT",
+                path: "/api/printers/\(printerID.uuidString)/toolheads/\(toolheadIndex)/spool"
+            )
         }
     }
 
@@ -96,6 +156,10 @@ enum OfflineWriteOperation: Sendable, Equatable {
             return "sku:\(Self.normalizeIdentity(sku))"
         case .harvest(let jobId, _):
             return "job:\(jobId.uuidString)"
+        case .taskComplete(let taskID, _):
+            return "task:\(taskID)"
+        case .toolheadBind(let printerID, let toolheadIndex, _, _, _):
+            return "toolhead:\(printerID.uuidString):\(toolheadIndex)"
         }
     }
 
@@ -118,6 +182,11 @@ extension OfflineWriteOperation: Codable {
         case sku
         case jobId
         case request
+        case taskId
+        case idempotencyKey
+        case printerId
+        case toolheadIndex
+        case expectedPriorSpoolId
     }
 
     /// Thrown when a persisted record carries a `kind` outside the allowlist —
@@ -142,6 +211,23 @@ extension OfflineWriteOperation: Codable {
             let jobId = try container.decode(UUID.self, forKey: .jobId)
             let request = try container.decode(HarvestJobRequest.self, forKey: .request)
             self = .harvest(jobId: jobId, request: request)
+        case .taskComplete:
+            let taskID = try container.decode(String.self, forKey: .taskId)
+            let key = try container.decode(String.self, forKey: .idempotencyKey)
+            self = .taskComplete(taskID: taskID, idempotencyKey: key)
+        case .toolheadBind:
+            let printerID = try container.decode(UUID.self, forKey: .printerId)
+            let toolheadIndex = try container.decode(Int.self, forKey: .toolheadIndex)
+            let key = try container.decode(String.self, forKey: .idempotencyKey)
+            let request = try container.decode(ToolheadSpoolBindRequest.self, forKey: .request)
+            let expectedPriorSpoolId = try container.decodeIfPresent(Int.self, forKey: .expectedPriorSpoolId)
+            self = .toolheadBind(
+                printerID: printerID,
+                toolheadIndex: toolheadIndex,
+                idempotencyKey: key,
+                request: request,
+                expectedPriorSpoolId: expectedPriorSpoolId
+            )
         }
     }
 
@@ -155,6 +241,15 @@ extension OfflineWriteOperation: Codable {
         case .harvest(let jobId, let request):
             try container.encode(jobId, forKey: .jobId)
             try container.encode(request, forKey: .request)
+        case .taskComplete(let taskID, let key):
+            try container.encode(taskID, forKey: .taskId)
+            try container.encode(key, forKey: .idempotencyKey)
+        case .toolheadBind(let printerID, let toolheadIndex, let key, let request, let expectedPriorSpoolId):
+            try container.encode(printerID, forKey: .printerId)
+            try container.encode(toolheadIndex, forKey: .toolheadIndex)
+            try container.encode(key, forKey: .idempotencyKey)
+            try container.encode(request, forKey: .request)
+            try container.encodeIfPresent(expectedPriorSpoolId, forKey: .expectedPriorSpoolId)
         }
     }
 }
@@ -175,6 +270,13 @@ enum OfflineWriteConflictReason: String, Codable, Sendable, Equatable {
     case validation
     /// A 401/403 authorization rejection.
     case authorization
+    /// The canonical task/toolhead state changed since enqueue such that a
+    /// replay would overwrite a newer binding or complete an incompatible
+    /// terminal task — surfaced for review instead of a silent write (F10-Q2,
+    /// #790). No mutation is ever performed when this is raised.
+    case staleState
+    /// The bind/completion target no longer exists in canonical state.
+    case unavailable
     /// Any other business 409/404/405 the operator must adjudicate.
     case businessConflict
 }
@@ -241,6 +343,15 @@ struct OfflineWriteItem: Codable, Sendable, Equatable, Identifiable {
     let route: OfflineWriteRoute
     let operation: OfflineWriteOperation
     var status: OfflineWriteItemStatus
+    /// The queue id of a prerequisite domain-write item that MUST replay
+    /// (succeed and leave the queue) before this item becomes eligible (F10-Q2,
+    /// #790, dependency ordering). `nil` for standalone items. While the
+    /// prerequisite item is still present in the namespace (pending, in
+    /// conflict, expired, or paused), this item is held back — so a linked task
+    /// completion can never be applied before its required domain mutation
+    /// succeeds. Optional + absent in older records, so #787 items are
+    /// unaffected.
+    var prerequisiteItemID: UUID?
 
     var kind: OfflineWriteKind { operation.kind }
     var entityKey: String { operation.entityKey }
@@ -252,7 +363,8 @@ struct OfflineWriteItem: Codable, Sendable, Equatable, Identifiable {
         createdAt: Date,
         idempotencyKey: String,
         operation: OfflineWriteOperation,
-        status: OfflineWriteItemStatus = .pending
+        status: OfflineWriteItemStatus = .pending,
+        prerequisiteItemID: UUID? = nil
     ) {
         self.id = id
         self.serverID = serverID
@@ -262,6 +374,7 @@ struct OfflineWriteItem: Codable, Sendable, Equatable, Identifiable {
         self.route = operation.route
         self.operation = operation
         self.status = status
+        self.prerequisiteItemID = prerequisiteItemID
     }
 
     /// Whether this item may still auto-replay given a fixed evaluation instant

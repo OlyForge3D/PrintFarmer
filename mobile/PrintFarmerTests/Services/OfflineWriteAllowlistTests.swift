@@ -14,9 +14,15 @@ final class OfflineWriteAllowlistTests: XCTestCase {
 
     // MARK: Static allowlist proof
 
-    func testAllowlistIsExactlyPartAdjustmentAndHarvest() {
-        XCTAssertEqual(OfflineWriteKind.allCases, [.partAdjustment, .harvest])
-        XCTAssertEqual(OfflineWriteKind.allCases.count, 2, "widening scope requires adding a case here — a live command has no kind")
+    func testAllowlistIsExactlyFourKinds() {
+        XCTAssertEqual(
+            OfflineWriteKind.allCases,
+            [.partAdjustment, .harvest, .taskComplete, .toolheadBind]
+        )
+        XCTAssertEqual(
+            OfflineWriteKind.allCases.count, 4,
+            "After Q2 the queue encodes EXACTLY four operation kinds — part adjustment, harvest, task complete, toolhead bind. Widening scope requires adding a case here; a live printer/filament command has no kind."
+        )
     }
 
     func testAllowlistedOperationsRouteOnlyToPartWriteEndpoints() {
@@ -30,13 +36,26 @@ final class OfflineWriteAllowlistTests: XCTestCase {
         XCTAssertTrue(harvest.route.path.hasSuffix("/harvest"))
     }
 
+    func testTaskCompleteAndToolheadBindRouteToTheirCanonicalEndpoints() {
+        let complete = OfflineQueueFixtures.taskComplete(taskID: "T-1", key: "k")
+        XCTAssertEqual(complete.route.method, "POST")
+        XCTAssertEqual(complete.route.path, "/api/tasks/T-1/complete")
+
+        let printerID = UUID()
+        let bind = OfflineQueueFixtures.toolheadBind(printerID: printerID, toolheadIndex: 2, key: "k", spoolId: 9)
+        XCTAssertEqual(bind.route.method, "PUT")
+        XCTAssertEqual(bind.route.path, "/api/printers/\(printerID.uuidString)/toolheads/2/spool")
+    }
+
     // MARK: Runtime encode/decode round-trip
 
     func testBothOperationsRoundTripThroughCodable() throws {
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
         for op in [OfflineQueueFixtures.adjust(sku: "SKU-A", key: "k1", delta: -3),
-                   OfflineQueueFixtures.harvest(jobId: UUID(), key: "k2")] {
+                   OfflineQueueFixtures.harvest(jobId: UUID(), key: "k2"),
+                   OfflineQueueFixtures.taskComplete(taskID: "T-1", key: "k3"),
+                   OfflineQueueFixtures.toolheadBind(toolheadIndex: 1, key: "k4", spoolId: 7, expectedPriorSpoolId: 3)] {
             let data = try encoder.encode(op)
             let decoded = try decoder.decode(OfflineWriteOperation.self, from: data)
             XCTAssertEqual(decoded, op)
@@ -50,7 +69,9 @@ final class OfflineWriteAllowlistTests: XCTestCase {
         // NEVER be encodable/enqueueable — each is rejected on decode.
         let liveCommands = ["pausePrint", "resumePrint", "cancelPrint",
                             "setTemperature", "moveAxis", "unloadFilament",
-                            "loadFilament", "purge", "toolChange"]
+                            "loadFilament", "purge", "toolChange",
+                            "mmuSelect", "validateSwap",
+                            "taskSkip", "taskDismiss"]
         let decoder = JSONDecoder()
         for command in liveCommands {
             let json = Data("{\"kind\":\"\(command)\"}".utf8)

@@ -108,8 +108,12 @@ final class ServiceContainer: @unchecked Sendable {
     /// `(serverID, userID)` namespace via `syncOfflineWriteQueue()`.
     @ObservationIgnored private(set) lazy var offlineWriteQueue: OfflineWriteQueue = {
         let store = FileOfflineWriteQueueStore(directory: Self.offlineWriteQueueDirectory())
-        let transport = DynamicPartsInventoryReplayTransport { [weak self] in
-            self?.partsInventoryService
+        let transport = DynamicOfflineReplayTransport { [weak self] in
+            OfflineReplayServices(
+                parts: self?.partsInventoryService,
+                tasks: self?.shiftTaskService,
+                printers: self?.printerService
+            )
         }
         return OfflineWriteQueue(store: store, transport: transport)
     }()

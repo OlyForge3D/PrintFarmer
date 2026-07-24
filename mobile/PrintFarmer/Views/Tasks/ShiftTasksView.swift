@@ -244,7 +244,8 @@ struct ShiftTasksView: View {
         viewModel.configure(
             taskService: services.shiftTaskService,
             signalRService: services.signalRService,
-            shiftPlanEnabled: resolved.shiftPlanEnabled
+            shiftPlanEnabled: resolved.shiftPlanEnabled,
+            offlineQueue: services.offlineWriteQueue
         )
         _ = await viewModel.refresh()
     }

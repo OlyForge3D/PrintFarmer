@@ -231,6 +231,9 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult {
         CommandResult(success: true, message: nil)
     }
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult {
+        CommandResult(success: true, message: nil)
+    }
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool] { [] }
     func loadFilament(printerId: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func unloadFilament(printerId: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
