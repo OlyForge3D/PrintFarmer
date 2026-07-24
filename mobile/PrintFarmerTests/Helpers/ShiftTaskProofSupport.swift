@@ -269,6 +269,33 @@ final class ShiftTaskEventRecorder: @unchecked Sendable {
     }
 }
 
+/// Deterministic MainActor barrier that records refresh-waiter registrations as
+/// they happen and lets a test await a target count without sleeps or polling.
+/// Wired to `ShiftTasksViewModel.refreshWaiterRegistrationObserver`.
+@MainActor
+final class RefreshWaiterRegistrationBarrier {
+    private var registrations = 0
+    private var waiters: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    var signal: @MainActor @Sendable () -> Void {
+        { [weak self] in self?.record() }
+    }
+
+    func record() {
+        registrations += 1
+        let ready = waiters.filter { registrations >= $0.target }
+        waiters.removeAll { registrations >= $0.target }
+        ready.forEach { $0.continuation.resume() }
+    }
+
+    func waitForCount(_ target: Int) async {
+        if registrations >= target { return }
+        await withCheckedContinuation { continuation in
+            waiters.append((target, continuation))
+        }
+    }
+}
+
 func makeShiftTask(
     id: String = "78200000-0000-0000-0000-000000000001",
     title: String = "Proof task",
