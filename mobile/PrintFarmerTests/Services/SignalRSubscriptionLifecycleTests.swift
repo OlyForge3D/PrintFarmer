@@ -2709,24 +2709,34 @@ final class SignalRPreEnrollmentCancellationRaceTests: XCTestCase {
 
         let barrier = CancellableAsyncGate()
         let barrierID = UUID()
-        let driver = ZeroWaiterEnrollmentDriver()
-        let postBarrier = LifecycleSignal()
+        // #809: deterministically observe waiterB's enrollment via the
+        // production DEBUG enrollment ACK (fired AFTER the waiter is
+        // appended and the lock released), instead of a no-op fence.
+        let enrollmentRecorder = ZeroWaiterEnrollmentRecorder()
+        inv.setDebugZeroWaiterEnrollmentCallback {
+            enrollmentRecorder.record(family: $0, id: $1)
+        }
+        defer { inv.resetDebugZeroWaiterEnrollmentCallback() }
         inv.setTransportPreEnrollBarrier {
             try? await barrier.park(barrierID)
-            postBarrier.signal()
         }
 
         // Spawn waiterB on transports family; it will park because
         // active transports > 0.
         let waiterB = Task<Bool, Never> {
-            await driver.waitForTransportsZero(inv)
+            await inv.waitForTransportsZero()
             return true
         }
 
         await barrier.awaitArrival(barrierID)
         barrier.release(barrierID)
-        await postBarrier.wait()
-        await driver.fence()
+        // #809: the pre-enroll barrier only proves waiterB REACHED the
+        // enrollment point; `transportZeroWaiters.append` happens AFTER
+        // the barrier closure returns. Await the enrollment ACK so the
+        // waiter-count read is strictly ordered after the append,
+        // independent of scheduler load. (Previously an empty `fence()`
+        // no-op provided no happens-before edge and flaked under load.)
+        await enrollmentRecorder.awaitACK(family: .transport)
         XCTAssertEqual(inv.waiterCounts().transports, 1)
 
         // Spawn waiterA on a DIFFERENT family and cancel it.
@@ -3435,6 +3445,12 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
 
             await sleeper.release()
             await socket2.waitForReceiveEnrollments(count: 1)
+            // #809: the outgoing (W1) receive loop calls scheduleReconnect
+            // from its catch block and only runs `defer { exitReceiveLoop() }`
+            // afterward; gate on the receive-loop barrier so
+            // receiveLoopExitCount is strictly observed (W2 is
+            // handshake-parked and has not entered a receive loop yet).
+            await service.lifecycleInvariants.waitForReceiveLoopsZero()
             let beforeSupersede = service.lifecycleInvariants.snapshot()
             XCTAssertEqual(
                 states.snapshot(),
@@ -3546,6 +3562,15 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
             await socket3.waitForCancellations()
             await states.waitFor(state: .disconnected)
 
+            // #809: gate the final snapshot on all three family barriers
+            // so the outgoing W3 receive loop's `defer { exitReceiveLoop() }`
+            // (and transport/owner exits) are strictly observed before the
+            // terminal counts are read. This is the reproduced suite-order
+            // failure line (final.receiveLoopExitCount == 2): disconnect()
+            // cancels but does not await the receive task's defer.
+            await service.lifecycleInvariants.waitForReceiveLoopsZero()
+            await service.lifecycleInvariants.waitForTransportsZero()
+            await service.lifecycleInvariants.waitForReconnectOwnersZero()
             let final = service.lifecycleInvariants.snapshot()
             XCTAssertEqual(
                 states.snapshot(),
@@ -3624,6 +3649,16 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
             await lifecycle.awaitEvent("ownerCreated")
             if Task.isCancelled { return }
             let ownerA = lifecycle.events().first { $0.kind == "ownerCreated" }!.payload.taskID
+            // #809: `ownerCreated` is posted by scheduleReconnect while
+            // the outgoing receive body is still executing (type-7's
+            // handleMessage runs inside the receive loop's lifecycleSync);
+            // the receive task's `defer { exitReceiveLoop() }` runs
+            // AFTER, on the receive task. Gate the receiveLoopExitCount
+            // read on the family barrier so the outgoing exit is strictly
+            // observed before the snapshot, independent of scheduler load.
+            // (transportExit is synchronous in tearDownLocked; owner
+            // counts are gated by the sleeper above.)
+            await service.lifecycleInvariants.waitForReceiveLoopsZero()
             let afterType7 = service.lifecycleInvariants.snapshot()
             XCTAssertEqual(socket1.lifecycleCounts().cancels, 1)
             XCTAssertEqual(afterType7.transportEnterCount, 1)
@@ -3671,6 +3706,13 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
             await service.disconnect()
             await states.waitFor(state: .disconnected)
             await service.lifecycleInvariants.waitForReconnectOwnersZero()
+            // #809: disconnect() cancels the outgoing transport/receive
+            // tasks but does not await their `defer`-based exit counters;
+            // gate the final snapshot on all three family barriers so
+            // transportExitCount/receiveLoopExitCount are strictly
+            // observed at their terminal values under suite load.
+            await service.lifecycleInvariants.waitForReceiveLoopsZero()
+            await service.lifecycleInvariants.waitForTransportsZero()
             let final = service.lifecycleInvariants.snapshot()
             XCTAssertEqual(
                 states.snapshot(),
@@ -3957,22 +3999,6 @@ private enum ZeroWaiterFamily: String, Sendable {
         XCTAssertEqual(snapshot.reconnectOwnerEnterCount, self == .reconnectOwner ? 1 : 0, file: file, line: line)
         XCTAssertEqual(snapshot.reconnectOwnerExitCount, self == .reconnectOwner ? 1 : 0, file: file, line: line)
     }
-}
-
-private actor ZeroWaiterEnrollmentDriver {
-    func waitForTransportsZero(_ invariants: SignalRLifecycleInvariants) async {
-        await invariants.waitForTransportsZero()
-    }
-
-    func waitForReceiveLoopsZero(_ invariants: SignalRLifecycleInvariants) async {
-        await invariants.waitForReceiveLoopsZero()
-    }
-
-    func waitForReconnectOwnersZero(_ invariants: SignalRLifecycleInvariants) async {
-        await invariants.waitForReconnectOwnersZero()
-    }
-
-    func fence() {}
 }
 
 private final class LockedQuadCounter: @unchecked Sendable {
