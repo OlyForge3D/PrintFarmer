@@ -388,16 +388,18 @@ public abstract class HttpJobPollerService(
 
         _logger.LogInformation("Uploading G-code artifact from {GcodeFilePath}", gcodeFilePath);
 
-        // Upload the primary G-code file
+        // Upload the primary G-code file without buffering the full artifact in memory.
+        await using FileStream gcodeStream = OpenArtifactFileStream(gcodeFilePath);
         using MultipartFormDataContent gcodeContent = new MultipartFormDataContent();
         gcodeContent.Add(new StringContent(job.Id.ToString()), "jobId");
         gcodeContent.Add(new StringContent("gcode"), "kind");
         gcodeContent.Add(new StringContent(_workerId.ToString()), "workerId");
 
-        byte[] gcodeBytes = await File.ReadAllBytesAsync(gcodeFilePath, ct);
-        gcodeContent.Add(new ByteArrayContent(gcodeBytes), "file", Path.GetFileName(gcodeFilePath));
+        StreamContent gcodeFileContent = new StreamContent(gcodeStream);
+        gcodeFileContent.Headers.ContentLength = gcodeStream.Length;
+        gcodeContent.Add(gcodeFileContent, "file", Path.GetFileName(gcodeFilePath));
 
-        HttpResponseMessage uploadResponse = await httpClient.PostAsync("/api/artifacts", gcodeContent, ct);
+        using HttpResponseMessage uploadResponse = await httpClient.PostAsync("/api/artifacts", gcodeContent, ct);
 
         if (!uploadResponse.IsSuccessStatusCode)
         {
@@ -412,12 +414,26 @@ public abstract class HttpJobPollerService(
         }
 
         artifactIds.Add(artifactResponse.Id);
-        _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeBytes.Length);
+        _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeStream.Length);
 
         // Phase 3E: Upload additional artifacts (thumbnails, metadata) from result.Metadata
         // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
         // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
+    }
+
+    /// <summary>
+    /// Opens an artifact for asynchronous sequential upload without materializing it in memory.
+    /// </summary>
+    internal static FileStream OpenArtifactFileStream(string filePath)
+    {
+        return new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
     }
 
     /// <summary>
