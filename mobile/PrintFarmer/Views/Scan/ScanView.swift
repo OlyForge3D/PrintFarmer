@@ -20,6 +20,7 @@ struct ScanView: View {
     @State private var showPartLookup = false
     @State private var showPrinterLookup = false
     @State private var partLookupSelection: PartInventoryResponse?
+    @State private var showOfflineQueue = false
 
     var body: some View {
         @Bindable var router = router
@@ -34,6 +35,21 @@ struct ScanView: View {
                 }
             }
             .navigationTitle("Scan")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showOfflineQueue = true
+                    } label: {
+                        Label("Offline Queue", systemImage: "tray.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("scan.offlineQueue")
+                }
+            }
+            .sheet(isPresented: $showOfflineQueue) {
+                NavigationStack {
+                    OfflineQueueStatusView()
+                }
+            }
             .overlay {
                 if viewModel.isScanning {
                     ProgressView("Scanning…")

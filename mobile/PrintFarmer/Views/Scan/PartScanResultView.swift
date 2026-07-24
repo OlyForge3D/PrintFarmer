@@ -84,7 +84,7 @@ struct PartScanResultView: View {
                         // leave a race window between two fast taps).
                         guard viewModel.beginSubmit() else { return }
                         let task = Task {
-                            if let adjustment = await viewModel.submit(partsInventoryService: services.partsInventoryService) {
+                            if let adjustment = await viewModel.submit(partsInventoryService: services.partsInventoryService, offlineQueue: services.offlineWriteQueue) {
                                 onAdjusted?(adjustment)
                             }
                         }
