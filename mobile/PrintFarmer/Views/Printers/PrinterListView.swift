@@ -16,28 +16,38 @@ struct PrinterListView: View {
         @Bindable var router = router
 
         NavigationStack(path: $router.printersPath) {
-            Group {
-                if viewModel.isLoading && viewModel.printers.isEmpty {
-                    ProgressView("Loading printers…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = viewModel.errorMessage, viewModel.printers.isEmpty {
-                    ContentUnavailableView {
-                        Label("Error", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Retry") {
-                            retryTask = Task { await viewModel.loadPrinters() }
-                        }
-                    }
-                } else if viewModel.printers.isEmpty {
-                    EmptyStateView(
-                        icon: "printer",
-                        title: "No Printers",
-                        message: "No printers are registered yet."
+            VStack(spacing: 0) {
+                // #789: shared stale banner — honest, read-only cached coverage.
+                if coverageViewModel.isShowingStaleCache {
+                    ConnectionStatusBar(
+                        status: .offline,
+                        lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,
+                        hasCache: true
                     )
-                } else {
-                    printerList
+                }
+                Group {
+                    if viewModel.isLoading && viewModel.printers.isEmpty {
+                        ProgressView("Loading printers…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let error = viewModel.errorMessage, viewModel.printers.isEmpty {
+                        ContentUnavailableView {
+                            Label("Error", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text(error)
+                        } actions: {
+                            Button("Retry") {
+                                retryTask = Task { await viewModel.loadPrinters() }
+                            }
+                        }
+                    } else if viewModel.printers.isEmpty {
+                        EmptyStateView(
+                            icon: "printer",
+                            title: "No Printers",
+                            message: "No printers are registered yet."
+                        )
+                    } else {
+                        printerList
+                    }
                 }
             }
             .navigationTitle("Farm")
@@ -65,6 +75,10 @@ struct PrinterListView: View {
             viewModel.configureSignalR(services.signalRService)
             coverageViewModel.configure(coverageService: services.filamentCoverageService)
             coverageViewModel.configureSignalR(services.signalRService)
+            // #789: wire + hydrate the fleet read-cache BEFORE the canonical load
+            // so an offline launch shows honestly-stale coverage immediately.
+            coverageViewModel.configureCache(services.filamentCoverageReadCache)
+            await coverageViewModel.hydrateFromCache()
             await viewModel.loadPrinters()
             await coverageViewModel.load()
         }

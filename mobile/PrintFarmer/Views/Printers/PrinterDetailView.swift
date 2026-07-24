@@ -19,23 +19,33 @@ struct PrinterDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if let printer = viewModel.printer {
-                printerContent(printer)
-            } else if let error = viewModel.errorMessage {
-                ContentUnavailableView {
-                    Label("Error", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error)
-                } actions: {
-                    Button("Retry") {
-                        let task = Task { await viewModel.loadPrinter() }
-                        activeTasks.append(task)
+        VStack(spacing: 0) {
+            // #789: shared stale banner — honest, read-only cached coverage.
+            if coverageViewModel.isShowingStaleCache {
+                ConnectionStatusBar(
+                    status: .offline,
+                    lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,
+                    hasCache: true
+                )
+            }
+            Group {
+                if let printer = viewModel.printer {
+                    printerContent(printer)
+                } else if let error = viewModel.errorMessage {
+                    ContentUnavailableView {
+                        Label("Error", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Retry") {
+                            let task = Task { await viewModel.loadPrinter() }
+                            activeTasks.append(task)
+                        }
                     }
+                } else {
+                    ProgressView("Loading printer…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else {
-                ProgressView("Loading printer…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         // Stable, printer-scoped destination identifier so task-action routing
@@ -90,6 +100,10 @@ struct PrinterDetailView: View {
             )
             coverageViewModel.configure(coverageService: services.filamentCoverageService)
             coverageViewModel.configureSignalR(services.signalRService)
+            // #789: wire + hydrate this printer's coverage read-cache BEFORE the
+            // canonical load so an offline detail launch shows honest stale data.
+            coverageViewModel.configureCache(services.filamentCoverageReadCache)
+            await coverageViewModel.hydrateFromCache()
             await viewModel.loadPrinter()
             await coverageViewModel.load()
             viewModel.setSnapshotPollingAllowed(scenePhase == .active)
